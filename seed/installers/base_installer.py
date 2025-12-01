@@ -24,28 +24,31 @@ class BaseInstaller(ABC):
     """
     
     def __init__(
-        self, 
-        device: DeviceCapabilities, 
+        self,
+        device: DeviceCapabilities,
         ssh_manager: SSHManager,
-        service_name: str
+        service_name: str,
+        username: Optional[str] = "root"
     ):
         """
         Initialize the installer.
-        
+
         Args:
             device: Target device capabilities
             ssh_manager: SSH manager instance
             service_name: Name of the service being installed
+            username: SSH username for remote connections
         """
         self.device = device
         self.ssh_manager = ssh_manager
         self.service_name = service_name
+        self.username = username
         self.ssh_client = None
         self.logger = logging.getLogger(f"{__name__}.{service_name}")
-        
+
         # Connect to device
         self._connect()
-    
+
     def _connect(self):
         """Establish SSH connection to the device."""
         if self.device.ip_address in ["localhost", "127.0.0.1"]:
@@ -59,7 +62,7 @@ class BaseInstaller(ABC):
             # In a real flow, we might need to pass specific credentials
             self.ssh_client = self.ssh_manager.create_ssh_client(
                 self.device.ip_address,
-                username="root" # Default, might need to be configurable
+                username=self.username
             )
             if not self.ssh_client:
                 self.logger.warning(f"Failed to connect to {self.device.ip_address}")

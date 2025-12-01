@@ -175,10 +175,10 @@ class Deployer:
             logger.error(f"Failed to write env file for {node.device.hostname}: {e}")
             raise
     
-    def install_services(self, plan: DeploymentPlan) -> bool:
+    def install_services(self, plan: DeploymentPlan, credentials_map: Dict) -> bool:
         """
         Install services on all nodes according to plan.
-        
+
         Phases:
         1. Base Dependencies (FFmpeg, etc.)
         2. Core Infrastructure (PostgreSQL)
@@ -186,24 +186,27 @@ class Deployer:
         4. NoSlop Services (Backend, Frontend)
         """
         logger.info("\n🛠️  Starting Service Installation...")
-        
+
+        def get_username(device):
+            return credentials_map.get(device.ip_address, {}).get("username", "root")
+
         # Phase 1: Base Dependencies
         logger.info("\n[Phase 1] Installing Base Dependencies...")
         for node in plan.nodes:
             if NodeRole.COMPUTE in node.roles or NodeRole.ALL in node.roles:
-                installer = FFmpegInstaller(node.device, self.ssh_manager)
+                installer = FFmpegInstaller(node.device, self.ssh_manager, username=get_username(node.device))
                 if not installer.run():
                     logger.error(f"Failed to install FFmpeg on {node.device.hostname}")
                     return False
-        
+
         # Phase 2: Core Infrastructure (PostgreSQL)
         logger.info("\n[Phase 2] Installing Core Infrastructure...")
         if plan.master_node:
-            installer = PostgreSQLInstaller(plan.master_node.device, self.ssh_manager)
+            installer = PostgreSQLInstaller(plan.master_node.device, self.ssh_manager, username=get_username(plan.master_node.device))
             if not installer.run():
                 logger.error("Failed to install PostgreSQL on master node")
                 return False
-                
+
             # Register PostgreSQL
             self.registry.register_service(ServiceInstance(
                 instance_id=f"postgresql_{plan.master_node.device.ip_address}",
@@ -213,20 +216,20 @@ class Deployer:
                 is_newly_deployed=True,
                 health_status="healthy"
             ))
-        
+
         # Phase 3: AI Services
         logger.info("\n[Phase 3] Installing AI Services...")
-        
+
         # Ollama (Master + Compute)
         for node in plan.nodes:
             if "ollama" in node.services:
                 # Determine port (default 11434, but could be others if multi-instance)
                 # For now we stick to default port for primary instance
-                installer = OllamaInstaller(node.device, self.ssh_manager)
+                installer = OllamaInstaller(node.device, self.ssh_manager, username=get_username(node.device))
                 if not installer.run():
                     logger.error(f"Failed to install Ollama on {node.device.hostname}")
                     return False
-                
+
                 # Register Ollama
                 self.registry.register_service(ServiceInstance(
                     instance_id=f"ollama_{node.device.ip_address}_11434",
@@ -236,16 +239,16 @@ class Deployer:
                     is_newly_deployed=True,
                     health_status="healthy"
                 ))
-        
+
         # ComfyUI (Compute)
         for node in plan.nodes:
             if "comfyui" in node.services:
                 # Determine GPU index (default 0)
-                installer = ComfyUIInstaller(node.device, self.ssh_manager)
+                installer = ComfyUIInstaller(node.device, self.ssh_manager, username=get_username(node.device))
                 if not installer.run():
                     logger.error(f"Failed to install ComfyUI on {node.device.hostname}")
                     return False
-                
+
                 # Register ComfyUI
                 self.registry.register_service(ServiceInstance(
                     instance_id=f"comfyui_{node.device.ip_address}_8188",
@@ -255,19 +258,19 @@ class Deployer:
                     is_newly_deployed=True,
                     health_status="healthy"
                 ))
-        
+
         # Phase 4: NoSlop Services
         logger.info("\n[Phase 4] Installing NoSlop Services...")
-        
+
         # Backend (Master)
         if plan.master_node:
             # Generate config for backend
             config = self.generate_node_config(plan.master_node, plan)
-            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config)
+            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config, username=get_username(plan.master_node.device))
             if not installer.run():
                 logger.error("Failed to install Backend on master node")
                 return False
-            
+
             # Register Backend
             self.registry.register_service(ServiceInstance(
                 instance_id=f"backend_{plan.master_node.device.ip_address}",
@@ -277,19 +280,19 @@ class Deployer:
                 is_newly_deployed=True,
                 health_status="healthy"
             ))
-        
+
         # Frontend (Client/All)
         for node in plan.nodes:
             if "noslop-frontend" in node.services:
                 config = self.generate_node_config(node, plan)
-                installer = FrontendInstaller(node.device, self.ssh_manager, config)
+                installer = FrontendInstaller(node.device, self.ssh_manager, config, username=get_username(node.device))
                 if not installer.run():
                     logger.error(f"Failed to install Frontend on {node.device.hostname}")
                     return False
-        
+
         return True
 
-    def deploy(self, plan: DeploymentPlan) -> bool:
+    def deploy(self, plan: DeploymentPlan, credentials_map: Dict = None) -> bool:
         """Execute deployment plan."""
         logger.info("="*70)
         logger.info(f"Starting NoSlop Deployment (ID: {self.deployment_id})")
