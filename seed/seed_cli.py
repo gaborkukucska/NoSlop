@@ -17,7 +17,7 @@ import logging.handlers
 from seed.hardware_detector import HardwareDetector
 from seed.network_scanner import NetworkScanner
 from seed.role_assigner import RoleAssigner
-from seed.ssh_manager import SSHManager
+from seed.ssh_manager import SSHManager, PARAMIKO_AVAILABLE
 from seed.deployer import Deployer
 from seed.models import DeviceCapabilities
 
@@ -155,6 +155,14 @@ class NoSlopSeedCLI:
     def run_interactive_mode(self):
         """Interactive deployment wizard."""
         print("🧙 Interactive Deployment Wizard\n")
+
+        if not PARAMIKO_AVAILABLE:
+            logger.error("SSH library (paramiko) is not installed.")
+            print("\n❌ Critical dependency missing!")
+            print("   Multi-device deployment requires SSH support.")
+            print("\n   Please install all dependencies with:")
+            print("   pip install -r seed/requirements.txt\n")
+            return False
         
         # Step 1: Discover devices (stores credentials internally)
         devices, credentials_map = self.discover_devices()
