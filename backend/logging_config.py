@@ -113,8 +113,9 @@ def setup_logging(
     enable_file: bool = True,
     enable_json: bool = False,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
-    backup_count: int = 5
-) -> None:
+    backup_count: int = 5,
+    use_dated_files: bool = True
+) -> Optional[Path]:
     """
     Setup logging configuration for the application.
     
@@ -126,6 +127,10 @@ def setup_logging(
         enable_json: Use JSON formatting for file logs
         max_bytes: Maximum size of log file before rotation
         backup_count: Number of backup files to keep
+        use_dated_files: Use dated filenames (noslop_YYYYMMDD_HHMMSS.log)
+        
+    Returns:
+        Path to main log file if file logging is enabled, None otherwise
     """
     # Create logs directory
     log_path = Path(log_dir)
@@ -133,7 +138,7 @@ def setup_logging(
     
     # Get root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, log_level.upper()))
+    root_logger.setLevel(logging.DEBUG)  # Set to DEBUG to capture everything
     
     # Remove existing handlers
     root_logger.handlers.clear()
@@ -145,22 +150,40 @@ def setup_logging(
         console_handler.setFormatter(ColoredConsoleFormatter())
         root_logger.addHandler(console_handler)
     
-    # File handler (rotating)
+    # Determine log filenames
+    if use_dated_files:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        main_log_file = log_path / f"noslop_{timestamp}.log"
+        error_log_file = log_path / f"noslop_errors_{timestamp}.log"
+    else:
+        main_log_file = log_path / "noslop.log"
+        error_log_file = log_path / "noslop_errors.log"
+    
+    # File handler (always DEBUG to capture everything)
     if enable_file:
-        file_handler = logging.handlers.RotatingFileHandler(
-            filename=log_path / "noslop.log",
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
-        file_handler.setLevel(getattr(logging, log_level.upper()))
+        if use_dated_files:
+            # Use regular FileHandler for dated files (no rotation needed)
+            file_handler = logging.FileHandler(
+                filename=main_log_file,
+                encoding="utf-8"
+            )
+        else:
+            # Use RotatingFileHandler for non-dated files
+            file_handler = logging.handlers.RotatingFileHandler(
+                filename=main_log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+        
+        file_handler.setLevel(logging.DEBUG)  # Always capture DEBUG to file
         
         if enable_json:
             file_handler.setFormatter(StructuredFormatter())
         else:
             file_handler.setFormatter(
                 logging.Formatter(
-                    "[%(asctime)s] %(levelname)-8s - %(name)s - %(message)s",
+                    "[%(asctime)s] %(levelname)-8s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S"
                 )
             )
@@ -168,12 +191,19 @@ def setup_logging(
     
     # Error file handler (only errors and above)
     if enable_file:
-        error_handler = logging.handlers.RotatingFileHandler(
-            filename=log_path / "noslop_errors.log",
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8"
-        )
+        if use_dated_files:
+            error_handler = logging.FileHandler(
+                filename=error_log_file,
+                encoding="utf-8"
+            )
+        else:
+            error_handler = logging.handlers.RotatingFileHandler(
+                filename=error_log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8"
+            )
+        
         error_handler.setLevel(logging.ERROR)
         
         if enable_json:
@@ -181,14 +211,16 @@ def setup_logging(
         else:
             error_handler.setFormatter(
                 logging.Formatter(
-                    "[%(asctime)s] %(levelname)-8s - %(name)s - %(message)s\n%(pathname)s:%(lineno)d",
+                    "[%(asctime)s] %(levelname)-8s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s\n%(pathname)s:%(lineno)d",
                     datefmt="%Y-%m-%d %H:%M:%S"
                 )
             )
         root_logger.addHandler(error_handler)
     
     # Log initial message
-    root_logger.info("Logging system initialized", extra={"context": {"log_level": log_level}})
+    root_logger.info("Logging system initialized", extra={"context": {"log_level": log_level, "log_file": str(main_log_file) if enable_file else "console only"}})
+    
+    return main_log_file if enable_file else None
 
 
 def get_logger(name: str, context: Optional[Dict[str, Any]] = None) -> logging.Logger:

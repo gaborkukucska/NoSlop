@@ -339,6 +339,76 @@ class SSHManager:
             logger.error(f"Error executing command: {e}")
             return -1, "", str(e)
     
+    def execute_remote_command(
+        self,
+        credentials: SSHCredentials,
+        command: str,
+        timeout: int = 60
+    ) -> tuple[bool, int, str, str]:
+        """
+        Execute a command on a remote device using credentials.
+        
+        This is a convenience method that handles connection and execution
+        in one call, useful for one-off commands during device discovery.
+        
+        Args:
+            credentials: SSH credentials for the target device
+            command: Command to execute
+            timeout: Command timeout in seconds
+            
+        Returns:
+            Tuple of (success, exit_code, stdout, stderr)
+        """
+        try:
+            if not PARAMIKO_AVAILABLE:
+                logger.error("Paramiko not available for remote execution")
+                return False, -1, "", "Paramiko not installed"
+            
+            logger.debug(f"Connecting to {credentials.ip_address} to execute: {command}")
+            
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # Connect using password or key
+            if credentials.password:
+                client.connect(
+                    hostname=credentials.ip_address,
+                    port=credentials.port,
+                    username=credentials.username,
+                    password=credentials.password,
+                    timeout=10
+                )
+            elif credentials.key_path:
+                private_key = paramiko.Ed25519Key.from_private_key_file(credentials.key_path)
+                client.connect(
+                    hostname=credentials.ip_address,
+                    port=credentials.port,
+                    username=credentials.username,
+                    pkey=private_key,
+                    timeout=10
+                )
+            else:
+                logger.error("No password or key provided")
+                return False, -1, "", "No authentication method provided"
+            
+            # Execute command
+            exit_code, stdout, stderr = self.execute_command(client, command, timeout)
+            
+            # Close connection
+            client.close()
+            
+            return True, exit_code, stdout, stderr
+            
+        except paramiko.AuthenticationException:
+            logger.error(f"Authentication failed for {credentials.ip_address}")
+            return False, -1, "", "Authentication failed"
+        except paramiko.SSHException as e:
+            logger.error(f"SSH error for {credentials.ip_address}: {e}")
+            return False, -1, "", f"SSH error: {e}"
+        except Exception as e:
+            logger.error(f"Error executing remote command on {credentials.ip_address}: {e}")
+            return False, -1, "", str(e)
+    
     def transfer_file(
         self,
         client: "paramiko.SSHClient",

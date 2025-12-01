@@ -22,16 +22,20 @@ from project_manager import ProjectManager
 from worker_registry import get_registry, initialize_workers
 from task_executor import TaskExecutor
 
-# Initialize logging
-setup_logging(
+# Initialize logging with dated files
+log_file = setup_logging(
     log_level=settings.log_level,
     log_dir=settings.log_dir,
     enable_console=settings.enable_console_log,
     enable_file=settings.enable_file_log,
-    enable_json=settings.enable_json_log
+    enable_json=settings.enable_json_log,
+    use_dated_files=True  # Always use dated log files
 )
 
 logger = logging.getLogger(__name__)
+
+if log_file:
+    logger.info(f"Log file: {log_file}")
 
 app = FastAPI(
     title=settings.app_name,

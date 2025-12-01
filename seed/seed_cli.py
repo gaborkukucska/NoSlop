@@ -11,6 +11,8 @@ import logging
 import sys
 from pathlib import Path
 from typing import List, Optional
+from datetime import datetime
+import logging.handlers
 
 from seed.hardware_detector import HardwareDetector
 from seed.network_scanner import NetworkScanner
@@ -19,11 +21,61 @@ from seed.ssh_manager import SSHManager
 from seed.deployer import Deployer
 from seed.models import DeviceCapabilities
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+
+def setup_logging(log_level: str = "INFO"):
+    """
+    Configure comprehensive logging for all modules.
+    
+    Logs to both console and dated files in logs/ folder.
+    """
+    # Create logs directory
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+    
+    # Generate dated log filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = logs_dir / f"seed_installer_{timestamp}.log"
+    
+    # Convert log level string to logging constant
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    
+    # Create formatters
+    detailed_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%H:%M:%S'
+    )
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+    
+    # Remove existing handlers
+    root_logger.handlers.clear()
+    
+    # File handler (always detailed)
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)  # Always capture DEBUG to file
+    file_handler.setFormatter(detailed_formatter)
+    root_logger.addHandler(file_handler)
+    
+    # Console handler (respects user's log level)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Log the logging configuration
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized: Level={log_level}, File={log_file}")
+    
+    return log_file
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -104,8 +156,8 @@ class NoSlopSeedCLI:
         """Interactive deployment wizard."""
         print("🧙 Interactive Deployment Wizard\n")
         
-        # Step 1: Discover devices
-        devices = self.discover_devices()
+        # Step 1: Discover devices (stores credentials internally)
+        devices, credentials_map = self.discover_devices()
         
         if not devices:
             print("\n❌ No devices discovered. Exiting.")
@@ -129,20 +181,27 @@ class NoSlopSeedCLI:
             print("\n❌ Deployment cancelled.")
             return False
         
-        # Step 5: Setup SSH (if multi-device)
+        # Step 5: Setup SSH keys (if multi-device)
         if len(selected_devices) > 1:
-            if not self.setup_ssh(selected_devices):
-                print("\n❌ SSH setup failed. Deployment cancelled.")
+            if not self.setup_ssh_keys(credentials_map):
+                print("\n❌ SSH key setup failed. Deployment cancelled.")
                 return False
         
         # Step 6: Execute deployment
         return self.execute_deployment(plan)
     
-    def discover_devices(self) -> List[DeviceCapabilities]:
-        """Discover devices on the network."""
+    def discover_devices(self):
+        """Discover devices on the network. Returns (devices, credentials_map)."""
         devices = []
+        credentials_map = {}  # Store credentials for SSH key distribution
         
-        # Option 1: Scan network
+        # Always include current device first
+        print("🔍 Detecting local hardware...")
+        current_device = self.hardware_detector.detect()
+        devices.append(current_device)
+        print(f"✓ Added: {current_device.hostname} ({current_device.ip_address}) - score: {current_device.capability_score}/100\n")
+        
+        # Option 1: Scan network for remote devices
         if not self.args.skip_scan:
             print("🔍 Scanning local network for SSH-enabled devices...")
             print("   (This may take a few minutes)\n")
@@ -150,26 +209,102 @@ class NoSlopSeedCLI:
             discovered = self.network_scanner.scan_network()
             
             if discovered:
-                print(f"\n✓ Found {len(discovered)} SSH-enabled device(s)")
+                # Filter out localhost/current device
+                remote_devices = [
+                    d for d in discovered 
+                    if d.ip_address not in [current_device.ip_address, "127.0.0.1", "localhost"]
+                ]
                 
-                # Detect hardware for each discovered device
-                # For now, just add current device
-                # TODO: SSH into each device and detect hardware
-                print("\n⚠️  Remote hardware detection not yet implemented.")
-                print("   Adding current device only.\n")
-        
-        # Always include current device
-        print("🔍 Detecting local hardware...")
-        current_device = self.hardware_detector.detect()
-        devices.append(current_device)
-        print(f"✓ Added: {current_device.hostname} (score: {current_device.capability_score}/100)")
+                if remote_devices:
+                    print(f"\n✓ Found {len(remote_devices)} remote SSH-enabled device(s)\n")
+                    
+                    # Collect credentials and detect hardware for each
+                    for discovered_device in remote_devices:
+                        print(f"📡 Device: {discovered_device.ip_address}")
+                        if discovered_device.hostname:
+                            print(f"   Hostname: {discovered_device.hostname}")
+                        
+                        # Prompt for credentials
+                        username = input(f"   Username [root]: ").strip() or "root"
+                        
+                        import getpass
+                        password = getpass.getpass(f"   Password: ")
+                        
+                        if not password:
+                            print(f"   ⚠️  Skipping {discovered_device.ip_address} (no password provided)\n")
+                            continue
+                        
+                        # Create credentials
+                        from seed.ssh_manager import SSHCredentials
+                        credentials = SSHCredentials(
+                            ip_address=discovered_device.ip_address,
+                            username=username,
+                            password=password,
+                            port=discovered_device.ssh_port
+                        )
+                        
+                        # Detect remote hardware
+                        print(f"   🔍 Detecting hardware...")
+                        remote_capabilities = self.hardware_detector.detect_remote(
+                            credentials, self.ssh_manager
+                        )
+                        
+                        if remote_capabilities:
+                            devices.append(remote_capabilities)
+                            credentials_map[remote_capabilities.ip_address] = credentials
+                            print(f"   ✓ Added: {remote_capabilities.hostname} - {remote_capabilities.os_type.value} - score: {remote_capabilities.capability_score}/100\n")
+                        else:
+                            print(f"   ✗ Failed to detect hardware for {discovered_device.ip_address}\n")
+                else:
+                    print("\n✓ Network scan complete. No additional SSH-enabled devices found.")
+                    print("   (Current device is already included)\n")
         
         # Option 2: Manual IP entry
         if self.args.ips:
-            print(f"\n📝 Manual IPs provided: {self.args.ips}")
-            print("⚠️  Remote hardware detection not yet implemented.")
+            ip_list = [ip.strip() for ip in self.args.ips.split(',')]
+            print(f"\n📝 Processing {len(ip_list)} manually specified IP(s)...\n")
+            
+            for ip in ip_list:
+                # Skip if already discovered
+                if any(d.ip_address == ip for d in devices):
+                    print(f"⚠️  {ip} already discovered, skipping.\n")
+                    continue
+                
+                print(f"📡 Device: {ip}")
+                
+                # Prompt for credentials
+                username = input(f"   Username [root]: ").strip() or "root"
+                
+                import getpass
+                password = getpass.getpass(f"   Password: ")
+                
+                if not password:
+                    print(f"   ⚠️  Skipping {ip} (no password provided)\n")
+                    continue
+                
+                # Create credentials
+                from seed.ssh_manager import SSHCredentials
+                credentials = SSHCredentials(
+                    ip_address=ip,
+                    username=username,
+                    password=password,
+                    port=22
+                )
+                
+                # Detect remote hardware
+                print(f"   🔍 Detecting hardware...")
+                remote_capabilities = self.hardware_detector.detect_remote(
+                    credentials, self.ssh_manager
+                )
+                
+                if remote_capabilities:
+                    devices.append(remote_capabilities)
+                    credentials_map[remote_capabilities.ip_address] = credentials
+                    print(f"   ✓ Added: {remote_capabilities.hostname} - {remote_capabilities.os_type.value} - score: {remote_capabilities.capability_score}/100\n")
+                else:
+                    print(f"   ✗ Failed to detect hardware for {ip}\n")
         
-        return devices
+        return devices, credentials_map
     
     def select_devices(self, devices: List[DeviceCapabilities]) -> List[DeviceCapabilities]:
         """Allow user to select which devices to use."""
@@ -190,37 +325,39 @@ class NoSlopSeedCLI:
         print("Using all available devices.")
         return devices
     
-    def setup_ssh(self, devices: List[DeviceCapabilities]) -> bool:
-        """Setup SSH keys for remote devices."""
+    def setup_ssh_keys(self, credentials_map: dict) -> bool:
+        """Setup SSH keys for remote devices using stored credentials."""
+        if not credentials_map:
+            return True  # No remote devices
+        
         print("\n" + "="*70)
-        print("SSH Setup")
+        print("🔑 SSH Key Distribution")
         print("="*70)
+        print(f"\nSetting up passwordless SSH for {len(credentials_map)} remote device(s)...")
         
-        # Generate keys
+        # Generate keys if not exists
         self.ssh_manager.generate_key_pair()
-        
-        # Collect credentials
-        ip_addresses = [d.ip_address for d in devices if d.ip_address not in ["localhost", "127.0.0.1"]]
-        if not ip_addresses:
-            return True
-            
-        credentials_map = self.ssh_manager.collect_credentials(ip_addresses)
         
         # Distribute keys
         print("\nDistributing SSH keys...")
         success_count = 0
-        for ip, creds in credentials_map.items():
-            if self.ssh_manager.distribute_key(creds, interactive=False):
+        for ip, credentials in credentials_map.items():
+            print(f"  📤 {ip}...", end=" ")
+            if self.ssh_manager.distribute_key(credentials, interactive=False):
                 success_count += 1
+                print("✓")
             else:
-                print(f"❌ Failed to distribute key to {ip}")
+                print("✗")
         
-        if success_count == len(ip_addresses):
-            print("\n✓ SSH setup complete for all devices.")
+        if success_count == len(credentials_map):
+            print(f"\n✓ SSH keys distributed to all {success_count} device(s).")
+            print("   Master node can now manage remote nodes without passwords.\n")
             return True
         else:
-            print(f"\n⚠️  SSH setup failed for {len(ip_addresses) - success_count} devices.")
-            return self.confirm("Continue with partial deployment?")
+            failed_count = len(credentials_map) - success_count
+            print(f"\n⚠️  SSH key distribution failed for {failed_count} device(s).")
+            print("   You may need to enter passwords during deployment.\n")
+            return self.confirm("Continue anyway?")
     
     def execute_deployment(self, plan) -> bool:
         """Execute the deployment plan."""
@@ -340,9 +477,18 @@ Examples:
     
     args = parser.parse_args()
     
+    # Setup comprehensive logging (always captures DEBUG to file)
+    log_file = setup_logging(args.log_level)
+    
+    logger.info(f"NoSlop Seed Installer started")
+    logger.info(f"Log file: {log_file}")
+    logger.debug(f"Command line arguments: {args}")
+    
     # Create and run CLI
     cli = NoSlopSeedCLI(args)
     success = cli.run()
+    
+    logger.info(f"Installer {'completed successfully' if success else 'failed'}")
     
     sys.exit(0 if success else 1)
 
