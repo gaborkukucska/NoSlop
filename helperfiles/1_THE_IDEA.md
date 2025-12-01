@@ -17,6 +17,8 @@ The NoSlop Seed smart installer automatically deploys an AI driven media making 
 
 Users can create, edit and share media with others in a safe and private environment. NoSlop combines the power of local LLMs, local TTV and TTI solutions via ComfyUI and local automated video and image editing via FFMPEG and OpenCV. A local first mesh network where the created media is kept locally untill it is requested by other authorized users on other nodes. The system is entirelly under the controll of the user via the local Admin AI agent (ollama) that assists the user in creating any media they want.
 
+**Advanced AI Editing**: The Admin AI is not just a generator; it is a professional-grade video and photo editor. It can ingest existing user footage and photos, apply color grading, perform complex edits, and compile them into industry-standard films. Whether mixing generated content with real-world footage or polishing a vlog, the Admin AI ensures top-tier quality.
+
 Users can record videos and take photos via connected devices as well as generate media via local comfyUI API using community and LLM generated workflows.
 
 Minimum Recommended Local Resources: Multi core CPU, 6Gb GPU, 16Gb RAM, 1 Tb HDD
@@ -41,6 +43,10 @@ Minimum Recommended Local Resources: Multi core CPU, 6Gb GPU, 16Gb RAM, 1 Tb HDD
 4. Once the user is satisfied with the final media it is stored locally and based on the user's preferences it is made available to other authorized nodes.
 5. Likewise the Admin AI of the local NoSlop install will pro actively identify and download media from other authorized nodes this way creating the same high availability for the user without the need to store media on remote servers like YouTube or TikTok etc.
 6. All connected users of the NoSlop network can interact with one another and each other's media, like, share and comment on it, and all the other usual social networking features.
+    - **Ad-Free & Cost-Free**: The decentralized P2P nature of the network eliminates the need for servers, ads, or subscription fees.
+    - **Guardian LLM**: A dedicated local AI agent protects the user and the network from harmful content.
+    - **Community Moderation**: A democratic up/down voting system helps the Guardian LLM identify and filter unsafe content.
+    - **User-Controlled Feed**: The algorithm that populates the user's feed is entirely under their control. Users can adjust parameters to see exactly what they want.
 7. All media that is shared to the NoSlop Network is recorded on the NoSlop Blockchain in order to provide a tamper proof and decentralized media sharing environment.
 
 
