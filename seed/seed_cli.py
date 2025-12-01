@@ -359,18 +359,21 @@ class NoSlopSeedCLI:
             print("   You may need to enter passwords during deployment.\n")
             return self.confirm("Continue anyway?")
     
-    def execute_deployment(self, plan) -> bool:
+    def execute_deployment(self, plan, credentials_map=None) -> bool:
         """Execute the deployment plan."""
-        print("\n" + "="*70)
+        if credentials_map is None:
+            credentials_map = {}
+
+        print("\n" + "=" * 70)
         print("🚀 Executing Deployment")
-        print("="*70)
-        
+        print("=" * 70)
+
         # Create deployer
         self.deployer = Deployer(self.ssh_manager, output_dir=self.args.output_dir)
-        
+
         # Show summary
         print(self.deployer.get_deployment_summary(plan))
-        
+
         # Deploy
         print("\n📦 Starting deployment process...")
         print("   This involves:")
@@ -379,17 +382,17 @@ class NoSlopSeedCLI:
         print("   3. Service installation (PostgreSQL, Ollama, ComfyUI, etc.)")
         print("   4. Verification")
         print("\n   This may take 10-20 minutes depending on internet speed.\n")
-        
+
         if not self.confirm("Start installation?"):
             print("\n❌ Installation cancelled.")
             return False
-            
-        success = self.deployer.deploy(plan)
-        
+
+        success = self.deployer.deploy(plan, credentials_map)
+
         if success:
-            print("\n" + "="*70)
+            print("\n" + "=" * 70)
             print("✅ Deployment Complete!")
-            print("="*70)
+            print("=" * 70)
             print(f"\n📁 Deployment artifacts: {self.deployer.deployment_dir}")
             print("\nNext steps:")
             print("1. Access the dashboard at http://localhost:3000")
