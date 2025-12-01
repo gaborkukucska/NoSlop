@@ -3,4 +3,4 @@
 # Hardware detection and system utilities
 
 psutil>=5.9.0
-paramiko>=3.3.0
+paramiko>=3.0.0

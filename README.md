@@ -73,33 +73,80 @@ A peer-to-peer, decentralized social graph. Share content directly from your nod
 
 ## 🚀 Getting Started
 
-> 🚧 **Note**: NoSlop is currently in **Active Development (Phase 1)**.
+> 🚧 **Status**: NoSlop is in **Active Development (Phase 2)**. Core infrastructure and smart installer are complete!
 
-### Prerequisites
-- Linux / macOS / Windows (WSL2)
+### Quick Start (Recommended)
+
+Use the **NoSlop Seed** smart installer for automated deployment:
+
+```bash
+# Clone the repository
+git clone https://github.com/gaborkukucska/NoSlop.git
+cd NoSlop
+
+# Install dependencies
+pip3 install -r seed/requirements.txt
+
+# Deploy on current device (all-in-one mode)
+python3 seed/seed_cli.py --single-device
+
+# OR deploy across multiple devices (interactive wizard)
+python3 seed/seed_cli.py
+```
+
+The installer will:
+- 🔍 Detect your hardware capabilities
+- 🌐 Scan your network for available devices (multi-device mode)
+- 🎯 Assign optimal roles (Master, Compute, Storage, Client)
+- ⚙️ Generate configuration files
+- 📦 Prepare deployment artifacts
+
+See [`seed/README.md`](seed/README.md) for detailed usage instructions.
+
+### System Requirements
+
+**Minimum (Basic)**:
+- 2+ CPU cores
+- 4 GB RAM
+- 100 GB disk space
+- Linux, macOS, or Windows (WSL2)
+
+**Recommended (Good Performance)**:
+- 4+ CPU cores
+- 16 GB RAM
+- 8 GB VRAM (NVIDIA/AMD GPU)
+- 500 GB disk space
+
+**Optimal (Best Experience)**:
+- 8+ CPU cores
+- 32 GB RAM
+- 12+ GB VRAM (NVIDIA RTX series)
+- 1 TB SSD
+
+### Manual Installation (Advanced)
+
+If you prefer manual setup:
+
+#### Prerequisites
 - Python 3.11+
 - Node.js 18+
 - **Ollama** running locally
 
-### Installation
-1.  **Clone the repo**:
-    ```bash
-    git clone https://github.com/gaborkukucska/NoSlop.git
-    cd NoSlop
-    ```
-2.  **Setup Backend**:
-    ```bash
-    python3 -m venv backend/venv
-    source backend/venv/bin/activate
-    pip install -r backend/requirements.txt
-    python backend/main.py
-    ```
-3.  **Setup Frontend**:
-    ```bash
-    cd frontend
-    npm install
-    npm run dev
-    ```
+#### Backend Setup
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+#### Frontend Setup
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
 ---
 

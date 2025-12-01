@@ -128,16 +128,22 @@ class DeviceCapabilities:
         """
         Check if device meets minimum NoSlop requirements.
         
-        Minimum: Multi-core CPU, 6GB GPU, 16GB RAM, 1TB HDD
+        Minimum (basic functionality):
+        - Multi-core CPU (2+ cores)
+        - 4GB RAM (can run smaller models)
+        - 4GB VRAM (optional, but recommended for AI workloads)
+        - 100GB disk space (for OS, services, and some media)
+        
+        Note: These are bare minimum specs. For better performance:
+        - Recommended: 16GB RAM, 8GB+ VRAM, 500GB+ disk
         
         Returns:
-            True if requirements are met
+            True if minimum requirements are met
         """
         return (
             self.cpu_cores >= 2 and
-            self.ram_total_gb >= 16 and
-            self.vram_total_gb >= 6 and
-            self.disk_total_gb >= 1000
+            self.ram_total_gb >= 4 and
+            self.disk_total_gb >= 100
         )
     
     def to_dict(self) -> Dict:
