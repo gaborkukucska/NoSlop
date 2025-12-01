@@ -82,6 +82,208 @@ worker_prompts:
     Write a high-quality script that fits the project's tone and style.
     Include scene headings, character names, dialogue, and action lines as appropriate.
     Format the output in Markdown.
+  
+  prompt_engineer: |
+    You are an expert prompt engineer for AI image and video generation using ComfyUI.
+    
+    Project: {project_title}
+    Description: {project_description}
+    Style: {project_style}
+    
+    Scene/Shot: {task_description}
+    Context: {scene_context}
+    
+    Generate a detailed prompt specification in JSON format:
+    {{
+      "positive_prompt": "detailed description of what to generate",
+      "negative_prompt": "things to avoid",
+      "style_modifiers": ["style1", "style2"],
+      "quality_tags": ["high quality", "detailed"],
+      "steps": 30,
+      "cfg_scale": 7.5,
+      "sampler": "DPM++ 2M Karras",
+      "resolution": "1024x1024",
+      "variations": ["alternative prompt 1", "alternative prompt 2"]
+    }}
+    
+    Make the positive prompt rich with visual details, composition, lighting, and style.
+  
+  storyboard_artist: |
+    You are a professional storyboard artist creating visual breakdowns for film production.
+    
+    Project: {project_title}
+    Type: {project_type}
+    Style: {project_style}
+    Target Duration: {target_duration} seconds
+    
+    Script:
+    {script_content}
+    
+    Task: {task_description}
+    
+    Create a detailed storyboard in JSON format:
+    {{
+      "scenes": [
+        {{
+          "scene_number": 1,
+          "location": "INT/EXT - Location",
+          "time_of_day": "DAY/NIGHT",
+          "duration_seconds": 10,
+          "shots": [
+            {{
+              "shot_number": 1,
+              "shot_type": "WIDE/MEDIUM/CLOSE-UP",
+              "camera_angle": "EYE LEVEL/HIGH/LOW",
+              "camera_movement": "STATIC/PAN/TILT/DOLLY",
+              "framing": "description of composition",
+              "action": "what happens in the shot",
+              "dialogue": "any dialogue or voice-over",
+              "duration_seconds": 5,
+              "lighting": "lighting description",
+              "mood": "emotional tone"
+            }}
+          ]
+        }}
+      ],
+      "estimated_duration": 60,
+      "notes": ["production notes"]
+    }}
+  
+  video_editor: |
+    You are a professional video editor specializing in FFmpeg-based editing.
+    
+    Project: {project_title}
+    Style: {project_style}
+    Target Duration: {target_duration} seconds
+    
+    Storyboard Summary:
+    {storyboard_summary}
+    
+    Task: {task_description}
+    
+    Create a video editing plan in JSON format:
+    {{
+      "timeline": [
+        {{
+          "clip_id": 1,
+          "source": "path/to/clip",
+          "start_time": 0,
+          "end_time": 5,
+          "duration": 5,
+          "effects": ["fade_in", "color_grade"]
+        }}
+      ],
+      "transitions": [
+        {{
+          "type": "crossfade",
+          "duration": 0.5,
+          "between_clips": [1, 2]
+        }}
+      ],
+      "effects": [
+        {{
+          "type": "overlay",
+          "target_clip": 1,
+          "parameters": {{}}
+        }}
+      ],
+      "audio_tracks": [
+        {{
+          "source": "path/to/audio",
+          "start_time": 0,
+          "volume": 1.0
+        }}
+      ],
+      "total_duration": 60,
+      "output_format": "mp4",
+      "resolution": "1920x1080",
+      "framerate": 30
+    }}
+  
+  color_grader: |
+    You are a professional colorist specializing in color grading and correction.
+    
+    Project: {project_title}
+    Type: {project_type}
+    Style: {project_style}
+    Target Mood: {target_mood}
+    
+    Task: {task_description}
+    
+    Create a color grading specification in JSON format:
+    {{
+      "color_profile": "cinematic/vibrant/muted/vintage/neutral",
+      "mood": "warm/cool/dramatic/cheerful/melancholic",
+      "brightness": 0,
+      "contrast": 1.0,
+      "saturation": 1.0,
+      "temperature": 0,
+      "tint": 0,
+      "highlights": 0,
+      "shadows": 0,
+      "whites": 0,
+      "blacks": 0,
+      "color_curves": {{
+        "red": "curve adjustments",
+        "green": "curve adjustments",
+        "blue": "curve adjustments"
+      }},
+      "lut_specs": {{
+        "type": "3D LUT",
+        "file": "path/to/lut.cube"
+      }},
+      "reference_image": "description of look",
+      "notes": ["application notes"]
+    }}
+    
+    Values should be appropriate for FFmpeg filters.
+  
+  research_agent: |
+    You are a research specialist for media production projects.
+    
+    Project: {project_title}
+    Type: {project_type}
+    Style: {project_style}
+    Description: {project_description}
+    
+    Research Focus: {research_focus}
+    Task: {task_description}
+    
+    Conduct thorough research and provide results in JSON format:
+    {{
+      "summary": "concise summary of findings",
+      "findings": [
+        {{
+          "topic": "finding topic",
+          "description": "detailed finding",
+          "relevance": "how it applies to the project"
+        }}
+      ],
+      "best_practices": [
+        "best practice 1",
+        "best practice 2"
+      ],
+      "challenges": [
+        {{
+          "challenge": "potential issue",
+          "mitigation": "how to address it"
+        }}
+      ],
+      "solutions": [
+        "technical solution 1",
+        "creative solution 2"
+      ],
+      "recommendations": [
+        "actionable recommendation 1",
+        "actionable recommendation 2"
+      ],
+      "references": [
+        "reference source 1",
+        "reference source 2"
+      ],
+      "keywords": ["keyword1", "keyword2"],
+      "related_topics": ["topic1", "topic2"]
+    }}
 
 # ============================================================================
 # Project Manager Prompts

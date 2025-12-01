@@ -19,6 +19,8 @@ from config import settings
 from logging_config import setup_logging
 from database import init_db, get_db, ProjectCRUD, TaskCRUD
 from project_manager import ProjectManager
+from worker_registry import get_registry, initialize_workers
+from task_executor import TaskExecutor
 
 # Initialize logging
 setup_logging(
@@ -44,6 +46,11 @@ if settings.enable_project_manager:
     logger.info("Initializing database...")
     init_db()
     logger.info("Database initialized")
+    
+    # Initialize worker registry
+    logger.info("Initializing worker registry...")
+    initialize_workers()
+    logger.info("Worker registry initialized")
 
 # CORS middleware for frontend communication
 app.add_middleware(
@@ -417,6 +424,180 @@ async def execute_task(task_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error executing task: {str(e)}")
 
 
+# ============================================================================
+# Worker Registry Endpoints
+# ============================================================================
+
+@app.get("/api/workers")
+async def list_workers():
+    """
+    List all available worker agents with their capabilities.
+    
+    Returns:
+        List of worker metadata
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        registry = get_registry()
+        workers = registry.list_available_workers()
+        
+        return {
+            "workers": workers,
+            "total": len(workers)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing workers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error listing workers: {str(e)}")
+
+
+@app.get("/api/workers/{worker_type}/capabilities")
+async def get_worker_capabilities(worker_type: str):
+    """
+    Get capabilities for a specific worker type.
+    
+    Args:
+        worker_type: Worker agent type
+        
+    Returns:
+        Worker capabilities
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        registry = get_registry()
+        capabilities = registry.get_worker_capabilities(worker_type)
+        
+        if not capabilities:
+            raise HTTPException(status_code=404, detail=f"Worker type not found: {worker_type}")
+        
+        return capabilities
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting worker capabilities: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting worker capabilities: {str(e)}")
+
+
+@app.get("/api/workers/task-mapping")
+async def get_task_type_mapping():
+    """
+    Get mapping of task types to worker types.
+    
+    Returns:
+        Dictionary mapping task types to worker types
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        registry = get_registry()
+        mapping = registry.get_task_type_mapping()
+        
+        return {
+            "mapping": mapping
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting task mapping: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting task mapping: {str(e)}")
+
+
+# ============================================================================
+# Task Executor Endpoints
+# ============================================================================
+
+@app.post("/api/projects/{project_id}/execute")
+async def execute_project(project_id: str, db: Session = Depends(get_db)):
+    """
+    Execute all tasks for a project with dependency resolution.
+    
+    Args:
+        project_id: Project ID
+        db: Database session
+        
+    Returns:
+        Execution summary
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    logger.info(f"Project execution requested: {project_id}")
+    
+    try:
+        executor = TaskExecutor(db)
+        result = executor.execute_project(project_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error executing project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error executing project: {str(e)}")
+
+
+@app.post("/api/tasks/{task_id}/execute-with-dependencies")
+async def execute_task_with_dependencies(task_id: str, db: Session = Depends(get_db)):
+    """
+    Execute a task and all its dependencies.
+    
+    Args:
+        task_id: Task ID
+        db: Database session
+        
+    Returns:
+        Execution result
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    logger.info(f"Task execution with dependencies requested: {task_id}")
+    
+    try:
+        executor = TaskExecutor(db)
+        result = executor.execute_task_with_dependencies(task_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error executing task with dependencies: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error executing task with dependencies: {str(e)}")
+
+
+@app.get("/api/tasks/{task_id}/progress")
+async def get_task_progress(task_id: str, db: Session = Depends(get_db)):
+    """
+    Get current progress of a task.
+    
+    Args:
+        task_id: Task ID
+        db: Database session
+        
+    Returns:
+        Task progress information
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        executor = TaskExecutor(db)
+        progress = executor.monitor_task_progress(task_id)
+        
+        if not progress:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+        
+        return progress
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task progress: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting task progress: {str(e)}")
+
+
 if __name__ == "__main__":
     logger.info("="*60)
     logger.info(f"🚀 Starting {settings.app_name} v{settings.app_version}")
@@ -429,4 +610,3 @@ if __name__ == "__main__":
     logger.info("="*60)
     
     uvicorn.run(app, host=settings.host, port=settings.port)
-
