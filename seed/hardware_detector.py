@@ -13,7 +13,7 @@ import psutil
 from typing import Optional
 import socket
 
-from models import (
+from seed.models import (
     DeviceCapabilities,
     OSType,
     Architecture,

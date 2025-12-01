@@ -9,9 +9,9 @@
 
 ## 🎯 Vision
 
-**NoSlop** is a revolutionary framework designed to empower humanity to create high-quality content without the "slop" of centralized control or algorithmic manipulation. It leverages **your** consumer hardware to build a private, secure, and AI-driven media production studio and social network.
+**NoSlop** is a revolutionary framework designed to empower humanity to create high-quality content without the "slop" of low quality generated content, and the centralized control or algorithmic manipulation of the big tech companies. It leverages **your** consumer hardware to build a private, secure, and AI-driven media production studio and social network.
 
-**Own your data. Own your creativity. Share freely.** 🌍🔓
+**Own your data. Own your creativity. Share freely and securely.** 🌍🔓
 
 ---
 
@@ -35,7 +35,7 @@ Ensures media authenticity and provenance. A tamper-proof ledger that proves **y
 ### 🕸️ **NoSlop Social Network**
 *The Mesh*
 A peer-to-peer, decentralized social graph. Share content directly from your node to others without intermediate servers.
-- **Ad-Free & Cost-Free**: No corporate overlords, no subscription fees, no data mining. 🚫💰
+- **Ad-Free & Cost-Free**: No corporate overlords, no subscription fees, no data mining, and no advertisements. 🚫💰
 - **Your Feed, Your Rules**: You control the algorithm. Tweak the parameters to see exactly what you want, not what an engagement engine forces on you. 🎛️
 - **Guardian LLM**: A dedicated AI agent that protects you and the network. Combined with community up/down voting, it ensures a safe environment without censorship. 🛡️🗳️
 
@@ -73,7 +73,7 @@ A peer-to-peer, decentralized social graph. Share content directly from your nod
 
 ## 🚀 Getting Started
 
-> 🚧 **Status**: NoSlop is in **Active Development (Phase 2)**. Core infrastructure and smart installer are complete!
+> 🚧 **Status**: NoSlop is in **Active Development**. **Phase 2: Service Installers** is complete! The smart installer can now deploy the full stack.
 
 ### Quick Start (Recommended)
 
@@ -88,18 +88,23 @@ cd NoSlop
 pip3 install -r seed/requirements.txt
 
 # Deploy on current device (all-in-one mode)
-python3 seed/seed_cli.py --single-device
+python3 -m seed.seed_cli --single-device
 
 # OR deploy across multiple devices (interactive wizard)
-python3 seed/seed_cli.py
+python3 -m seed.seed_cli
 ```
 
 The installer will:
-- 🔍 Detect your hardware capabilities
-- 🌐 Scan your network for available devices (multi-device mode)
-- 🎯 Assign optimal roles (Master, Compute, Storage, Client)
-- ⚙️ Generate configuration files
-- 📦 Prepare deployment artifacts
+- 🔍 **Detect Hardware**: Analyzes CPU, RAM, GPU, and Disk to assign optimal roles.
+- 🌐 **Discover Services**: Scans your network for existing Ollama, ComfyUI, or PostgreSQL instances to reuse.
+- 📦 **Install Services**: Automatically installs and configures:
+    - **PostgreSQL** (Database)
+    - **Ollama** (LLM Inference)
+    - **ComfyUI** (Generative AI with GPU support)
+    - **FFmpeg/OpenCV** (Media Processing)
+    - **NoSlop Backend** (FastAPI)
+    - **NoSlop Frontend** (Next.js)
+- ⚙️ **Configure**: Generates `.env` files and systemd services for auto-start.
 
 See [`seed/README.md`](seed/README.md) for detailed usage instructions.
 

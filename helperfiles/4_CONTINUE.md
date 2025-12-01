@@ -1,38 +1,31 @@
-## Next Steps: Phase 2 - Service Installers
+## Next Steps: Phase 3 - Advanced Features & Integration
 
-NoSlop Seed core components (hardware detection, network scanning, role assignment, SSH management, deployment orchestration, CLI) are complete!
+**Phase 2: Service Installers is COMPLETE!** ✅
+The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQL, Ollama, ComfyUI, Backend, Frontend) across single or multiple devices.
 
 ### What's Working:
-- ✅ Dynamic role assignment based on device specs
-- ✅ Service mapping (MASTER→Ollama/Backend/DB, COMPUTE→ComfyUI/FFmpeg, CLIENT→Frontend)
-- ✅ Configuration generation (.env files for each node)
-- ✅ SSH credential collection and key distribution framework
+- ✅ **Smart Installer**: `python3 -m seed.seed_cli` handles everything.
+- ✅ **Service Discovery**: Automatically finds existing Ollama/ComfyUI instances to reuse.
+- ✅ **Service Registry**: Tracks all services and handles load balancing.
+- ✅ **Automated Installation**: Installs all dependencies and services.
+- ✅ **Configuration**: Generates `.env` and systemd services.
 
 ### What Needs Implementation:
-**Phase 2: Automated Service Installation**
+**Phase 3: Integration & Workflow**
 
-1. **Base Installer Framework** (`seed/installers/base_installer.py`)
-   - Abstract base class with methods: check_installed(), install(), configure(), start(), verify()
-   - OS-specific installation logic (Linux/macOS/Windows)
-   - Error handling and rollback support
+1. **Local Service Orchestration**:
+   - Integrate ComfyUI API bindings into Backend (to actually generate images).
+   - Integrate FFmpeg/OpenCV wrappers into Backend (for video processing).
+   - Implement the "Worker Agent" logic to use these local tools.
 
-2. **Individual Service Installers**:
-   - `ollama_installer.py` - Install Ollama on MASTER nodes, pull required models
-   - `comfyui_installer.py` - Install ComfyUI on COMPUTE nodes, configure for GPU (CUDA/ROCm/Metal)
-   - `ffmpeg_installer.py` - Install FFmpeg/OpenCV on COMPUTE nodes
-   - `postgresql_installer.py` - Install PostgreSQL on MASTER nodes, initialize database
-   - `backend_installer.py` - Deploy NoSlop backend (FastAPI) on MASTER nodes
-   - `frontend_installer.py` - Deploy NoSlop frontend (Next.js) on CLIENT nodes
+2. **Frontend & Workflow**:
+   - Connect Frontend "New Project" flow to Backend PM Agent.
+   - Implement interactive "Scene Setup" wizard.
+   - Create media preview components.
 
-3. **Remote Installation Execution**:
-   - SSH-based remote command execution
-   - File transfer to remote nodes
-   - Service startup and verification
-   - Health checks
+3. **Advanced Installer Features**:
+   - Remote hardware detection via SSH.
+   - Automated SSH key distribution.
+   - Web-based installer UI.
 
-4. **Integration**:
-   - Update `deployer.py` to call service installers
-   - Add progress tracking and logging
-   - Implement rollback on failure
-
-See `seed/README.md` for current usage. Service installation will be added in Phase 2.
+See `seed/README.md` for detailed usage instructions.

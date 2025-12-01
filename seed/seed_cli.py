@@ -12,12 +12,12 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from hardware_detector import HardwareDetector
-from network_scanner import NetworkScanner
-from role_assigner import RoleAssigner
-from ssh_manager import SSHManager
-from deployer import Deployer
-from models import DeviceCapabilities
+from seed.hardware_detector import HardwareDetector
+from seed.network_scanner import NetworkScanner
+from seed.role_assigner import RoleAssigner
+from seed.ssh_manager import SSHManager
+from seed.deployer import Deployer
+from seed.models import DeviceCapabilities
 
 # Configure logging
 logging.basicConfig(
@@ -196,16 +196,31 @@ class NoSlopSeedCLI:
         print("SSH Setup")
         print("="*70)
         
-        print("\n⚠️  SSH key distribution not yet implemented.")
-        print("   Assuming SSH is already configured.\n")
+        # Generate keys
+        self.ssh_manager.generate_key_pair()
         
-        # TODO: Implement SSH key generation and distribution
-        # self.ssh_manager.generate_key_pair()
-        # credentials = self.ssh_manager.collect_credentials(...)
-        # for device in devices:
-        #     self.ssh_manager.distribute_key(...)
+        # Collect credentials
+        ip_addresses = [d.ip_address for d in devices if d.ip_address not in ["localhost", "127.0.0.1"]]
+        if not ip_addresses:
+            return True
+            
+        credentials_map = self.ssh_manager.collect_credentials(ip_addresses)
         
-        return True
+        # Distribute keys
+        print("\nDistributing SSH keys...")
+        success_count = 0
+        for ip, creds in credentials_map.items():
+            if self.ssh_manager.distribute_key(creds, interactive=False):
+                success_count += 1
+            else:
+                print(f"❌ Failed to distribute key to {ip}")
+        
+        if success_count == len(ip_addresses):
+            print("\n✓ SSH setup complete for all devices.")
+            return True
+        else:
+            print(f"\n⚠️  SSH setup failed for {len(ip_addresses) - success_count} devices.")
+            return self.confirm("Continue with partial deployment?")
     
     def execute_deployment(self, plan) -> bool:
         """Execute the deployment plan."""
@@ -214,26 +229,39 @@ class NoSlopSeedCLI:
         print("="*70)
         
         # Create deployer
-        self.deployer = Deployer(self.ssh_manager)
+        self.deployer = Deployer(self.ssh_manager, output_dir=self.args.output_dir)
         
         # Show summary
         print(self.deployer.get_deployment_summary(plan))
         
         # Deploy
-        print("\n📦 Preparing deployment...")
+        print("\n📦 Starting deployment process...")
+        print("   This involves:")
+        print("   1. Network discovery for existing services")
+        print("   2. Configuration generation")
+        print("   3. Service installation (PostgreSQL, Ollama, ComfyUI, etc.)")
+        print("   4. Verification")
+        print("\n   This may take 10-20 minutes depending on internet speed.\n")
+        
+        if not self.confirm("Start installation?"):
+            print("\n❌ Installation cancelled.")
+            return False
+            
         success = self.deployer.deploy(plan)
         
         if success:
             print("\n" + "="*70)
-            print("✅ Deployment Preparation Complete!")
+            print("✅ Deployment Complete!")
             print("="*70)
             print(f"\n📁 Deployment artifacts: {self.deployer.deployment_dir}")
-            print(f"\n⚠️  Note: Service installation not yet implemented.")
-            print(f"   Configuration files have been generated.")
-            print(f"   Service installers will be added in the next phase.\n")
+            print("\nNext steps:")
+            print("1. Access the dashboard at http://localhost:3000")
+            print("2. Check service status with: python seed_cli.py --status")
+            print("\n")
             return True
         else:
             print("\n❌ Deployment failed!")
+            print("Check logs for details.")
             return False
     
     def confirm(self, message: str) -> bool:

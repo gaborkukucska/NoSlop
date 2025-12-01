@@ -7,7 +7,7 @@ Intelligently assigns roles to devices based on hardware capabilities.
 
 import logging
 from typing import List, Dict
-from models import (
+from seed.models import (
     DeviceCapabilities,
     NodeRole,
     NodeAssignment,

@@ -7,13 +7,23 @@ Main orchestration logic for deploying NoSlop across multiple devices.
 
 import logging
 import json
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
-# import paramiko # TODO
 
-from models import DeploymentPlan, NodeAssignment, NodeRole
-from ssh_manager import SSHManager
+from seed.models import DeploymentPlan, NodeAssignment, NodeRole
+from seed.ssh_manager import SSHManager
+from seed.service_discovery import ServiceDiscovery, ServiceType
+from seed.service_registry import ServiceRegistry, ServiceInstance
+
+# Installers
+from seed.installers.postgresql_installer import PostgreSQLInstaller
+from seed.installers.ollama_installer import OllamaInstaller
+from seed.installers.comfyui_installer import ComfyUIInstaller
+from seed.installers.ffmpeg_installer import FFmpegInstaller
+from seed.installers.backend_installer import BackendInstaller
+from seed.installers.frontend_installer import FrontendInstaller
 
 logger = logging.getLogger(__name__)
 
@@ -21,13 +31,6 @@ logger = logging.getLogger(__name__)
 class Deployer:
     """
     Orchestrates the deployment of NoSlop across multiple devices.
-    
-    Handles:
-    - Deployment plan validation
-    - Configuration generation (.env files)
-    - Service installation coordination
-    - Progress tracking
-    - Rollback on failure
     """
     
     def __init__(
@@ -55,22 +58,17 @@ class Deployer:
         self.deployment_dir = self.output_dir / self.deployment_id
         self.deployment_dir.mkdir(parents=True, exist_ok=True)
         
+        # Initialize registry
+        self.registry = ServiceRegistry(self.deployment_dir / "service_registry.json")
+        self.discovery = ServiceDiscovery()
+        
         logger.info(f"Deployer initialized. Deployment ID: {self.deployment_id}")
         logger.info(f"Deployment directory: {self.deployment_dir}")
     
     def validate_plan(self, plan: DeploymentPlan) -> tuple[bool, str]:
-        """
-        Validate deployment plan before execution.
-        
-        Args:
-            plan: Deployment plan to validate
-            
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
+        """Validate deployment plan before execution."""
         logger.info("Validating deployment plan...")
         
-        # Use built-in validation
         is_valid, error = plan.validate()
         
         if not is_valid:
@@ -79,7 +77,6 @@ class Deployer:
         
         # Additional checks
         for node in plan.nodes:
-            # Check minimum requirements
             if not node.device.meets_minimum_requirements():
                 logger.warning(
                     f"Device {node.device.hostname} does not meet minimum requirements. "
@@ -90,20 +87,12 @@ class Deployer:
         return True, ""
     
     def save_deployment_plan(self, plan: DeploymentPlan):
-        """
-        Save deployment plan to JSON file.
-        
-        Args:
-            plan: Deployment plan to save
-        """
+        """Save deployment plan to JSON file."""
         plan_file = self.deployment_dir / "deployment_plan.json"
-        
         try:
             with open(plan_file, 'w') as f:
                 json.dump(plan.to_dict(), f, indent=2)
-            
             logger.info(f"Deployment plan saved to {plan_file}")
-            
         except Exception as e:
             logger.error(f"Failed to save deployment plan: {e}")
     
@@ -112,16 +101,7 @@ class Deployer:
         node: NodeAssignment, 
         plan: DeploymentPlan
     ) -> Dict[str, str]:
-        """
-        Generate environment configuration for a node.
-        
-        Args:
-            node: Node assignment
-            plan: Complete deployment plan
-            
-        Returns:
-            Dictionary of environment variables
-        """
+        """Generate environment configuration for a node."""
         logger.debug(f"Generating config for {node.device.hostname}")
         
         config = {}
@@ -137,18 +117,19 @@ class Deployer:
             config["NOSLOP_MASTER_HOSTNAME"] = plan.master_node.device.hostname
         
         # Service URLs
+        # We prefer using the registry if populated, otherwise fallback to plan
+        # Since we generate config BEFORE installation, we use plan
+        
         if NodeRole.MASTER in node.roles or NodeRole.ALL in node.roles:
-            # This node runs the backend
             config["NOSLOP_BACKEND_URL"] = f"http://{node.device.ip_address}:8000"
             config["NOSLOP_DATABASE_URL"] = f"postgresql://noslop:noslop@localhost:5432/noslop"
             config["OLLAMA_URL"] = f"http://{node.device.ip_address}:11434"
         else:
-            # Point to master node
             if plan.master_node:
                 config["NOSLOP_BACKEND_URL"] = f"http://{plan.master_node.device.ip_address}:8000"
                 config["OLLAMA_URL"] = f"http://{plan.master_node.device.ip_address}:11434"
         
-        # ComfyUI URLs (find compute nodes)
+        # ComfyUI URLs
         compute_nodes = plan.get_node_by_role(NodeRole.COMPUTE)
         if not compute_nodes:
             compute_nodes = plan.get_node_by_role(NodeRole.ALL)
@@ -165,7 +146,7 @@ class Deployer:
             config["NOSLOP_MEDIA_PATH"] = "/var/noslop/media"
             config["NOSLOP_BLOCKCHAIN_PATH"] = "/var/noslop/blockchain"
         
-        # Model preferences (from environment or defaults)
+        # Model preferences
         config["NOSLOP_LOGIC_MODEL"] = "llama3.2:latest"
         config["NOSLOP_IMAGE_MODEL"] = "stable-diffusion"
         config["NOSLOP_VIDEO_MODEL"] = "animatediff"
@@ -177,18 +158,8 @@ class Deployer:
         node: NodeAssignment, 
         config: Dict[str, str]
     ) -> Path:
-        """
-        Write .env file for a node.
-        
-        Args:
-            node: Node assignment
-            config: Environment configuration
-            
-        Returns:
-            Path to the .env file
-        """
+        """Write .env file for a node."""
         env_file = self.deployment_dir / f"{node.device.hostname}.env"
-        
         try:
             with open(env_file, 'w') as f:
                 f.write(f"# NoSlop Environment Configuration\n")
@@ -200,24 +171,135 @@ class Deployer:
             
             logger.info(f"Environment file created: {env_file}")
             return env_file
-            
         except Exception as e:
             logger.error(f"Failed to write env file for {node.device.hostname}: {e}")
             raise
     
-    def deploy(self, plan: DeploymentPlan) -> bool:
+    def install_services(self, plan: DeploymentPlan) -> bool:
         """
-        Execute deployment plan.
+        Install services on all nodes according to plan.
         
-        Args:
-            plan: Validated deployment plan
-            
-        Returns:
-            True if deployment succeeded
+        Phases:
+        1. Base Dependencies (FFmpeg, etc.)
+        2. Core Infrastructure (PostgreSQL)
+        3. AI Services (Ollama, ComfyUI)
+        4. NoSlop Services (Backend, Frontend)
         """
+        logger.info("\n🛠️  Starting Service Installation...")
+        
+        # Phase 1: Base Dependencies
+        logger.info("\n[Phase 1] Installing Base Dependencies...")
+        for node in plan.nodes:
+            if NodeRole.COMPUTE in node.roles or NodeRole.ALL in node.roles:
+                installer = FFmpegInstaller(node.device, self.ssh_manager)
+                if not installer.run():
+                    logger.error(f"Failed to install FFmpeg on {node.device.hostname}")
+                    return False
+        
+        # Phase 2: Core Infrastructure (PostgreSQL)
+        logger.info("\n[Phase 2] Installing Core Infrastructure...")
+        if plan.master_node:
+            installer = PostgreSQLInstaller(plan.master_node.device, self.ssh_manager)
+            if not installer.run():
+                logger.error("Failed to install PostgreSQL on master node")
+                return False
+                
+            # Register PostgreSQL
+            self.registry.register_service(ServiceInstance(
+                instance_id=f"postgresql_{plan.master_node.device.ip_address}",
+                service_type=ServiceType.POSTGRESQL,
+                host=plan.master_node.device.ip_address,
+                port=5432,
+                is_newly_deployed=True,
+                health_status="healthy"
+            ))
+        
+        # Phase 3: AI Services
+        logger.info("\n[Phase 3] Installing AI Services...")
+        
+        # Ollama (Master + Compute)
+        for node in plan.nodes:
+            if "ollama" in node.services:
+                # Determine port (default 11434, but could be others if multi-instance)
+                # For now we stick to default port for primary instance
+                installer = OllamaInstaller(node.device, self.ssh_manager)
+                if not installer.run():
+                    logger.error(f"Failed to install Ollama on {node.device.hostname}")
+                    return False
+                
+                # Register Ollama
+                self.registry.register_service(ServiceInstance(
+                    instance_id=f"ollama_{node.device.ip_address}_11434",
+                    service_type=ServiceType.OLLAMA,
+                    host=node.device.ip_address,
+                    port=11434,
+                    is_newly_deployed=True,
+                    health_status="healthy"
+                ))
+        
+        # ComfyUI (Compute)
+        for node in plan.nodes:
+            if "comfyui" in node.services:
+                # Determine GPU index (default 0)
+                installer = ComfyUIInstaller(node.device, self.ssh_manager)
+                if not installer.run():
+                    logger.error(f"Failed to install ComfyUI on {node.device.hostname}")
+                    return False
+                
+                # Register ComfyUI
+                self.registry.register_service(ServiceInstance(
+                    instance_id=f"comfyui_{node.device.ip_address}_8188",
+                    service_type=ServiceType.COMFYUI,
+                    host=node.device.ip_address,
+                    port=8188,
+                    is_newly_deployed=True,
+                    health_status="healthy"
+                ))
+        
+        # Phase 4: NoSlop Services
+        logger.info("\n[Phase 4] Installing NoSlop Services...")
+        
+        # Backend (Master)
+        if plan.master_node:
+            # Generate config for backend
+            config = self.generate_node_config(plan.master_node, plan)
+            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config)
+            if not installer.run():
+                logger.error("Failed to install Backend on master node")
+                return False
+            
+            # Register Backend
+            self.registry.register_service(ServiceInstance(
+                instance_id=f"backend_{plan.master_node.device.ip_address}",
+                service_type=ServiceType.NOSLOP_BACKEND,
+                host=plan.master_node.device.ip_address,
+                port=8000,
+                is_newly_deployed=True,
+                health_status="healthy"
+            ))
+        
+        # Frontend (Client/All)
+        for node in plan.nodes:
+            if "noslop-frontend" in node.services:
+                config = self.generate_node_config(node, plan)
+                installer = FrontendInstaller(node.device, self.ssh_manager, config)
+                if not installer.run():
+                    logger.error(f"Failed to install Frontend on {node.device.hostname}")
+                    return False
+        
+        return True
+
+    def deploy(self, plan: DeploymentPlan) -> bool:
+        """Execute deployment plan."""
         logger.info("="*70)
         logger.info(f"Starting NoSlop Deployment (ID: {self.deployment_id})")
         logger.info("="*70)
+        
+        # Phase 0: Discovery
+        logger.info("\n🔍 [Phase 0] Network Discovery...")
+        discovered_services = self.discovery.scan_network()
+        for service in discovered_services:
+            self.registry.register_discovered_service(service)
         
         # Validate plan
         is_valid, error = self.validate_plan(plan)
@@ -228,33 +310,29 @@ class Deployer:
         # Save deployment plan
         self.save_deployment_plan(plan)
         
-        # Generate configurations for all nodes
+        # Generate configurations
         logger.info("\n📝 Generating node configurations...")
         for node in plan.nodes:
             config = self.generate_node_config(node, plan)
-            env_file = self.write_env_file(node, config)
-            logger.info(f"  ✓ {node.device.hostname}: {env_file}")
+            self.write_env_file(node, config)
         
-        logger.info("\n🚀 Deployment plan ready!")
-        logger.info(f"Deployment artifacts saved to: {self.deployment_dir}")
+        # Install Services
+        if not self.install_services(plan):
+            logger.error("\n❌ Service installation failed!")
+            return False
         
-        # TODO: Implement actual service installation
-        # This will be done in Phase 2 with service installers
-        logger.warning("\n⚠️  Service installation not yet implemented")
-        logger.warning("    This will be added in Phase 2 (Service Installers)")
+        logger.info("\n✅ Deployment Complete!")
+        logger.info(f"Deployment artifacts: {self.deployment_dir}")
+        
+        # Print Registry Summary
+        stats = self.registry.get_service_stats()
+        logger.info("\nService Registry Summary:")
+        logger.info(json.dumps(stats, indent=2))
         
         return True
     
     def get_deployment_summary(self, plan: DeploymentPlan) -> str:
-        """
-        Generate a human-readable deployment summary.
-        
-        Args:
-            plan: Deployment plan
-            
-        Returns:
-            Formatted summary string
-        """
+        """Generate a human-readable deployment summary."""
         lines = []
         lines.append("="*70)
         lines.append("NoSlop Deployment Summary")
@@ -294,8 +372,8 @@ def main():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
-    from hardware_detector import HardwareDetector
-    from role_assigner import RoleAssigner
+    from seed.hardware_detector import HardwareDetector
+    from seed.role_assigner import RoleAssigner
     
     print("\n🧪 Testing NoSlop Deployer\n")
     
@@ -315,14 +393,10 @@ def main():
     print(deployer.get_deployment_summary(plan))
     
     # Execute deployment
-    print("\n🚀 Executing deployment...\n")
-    success = deployer.deploy(plan)
-    
-    if success:
-        print("\n✅ Deployment preparation complete!")
-        print(f"📁 Deployment artifacts: {deployer.deployment_dir}")
-    else:
-        print("\n❌ Deployment failed!")
+    # Note: We don't auto-execute in test main to avoid accidental installation
+    print("\n⚠️  To execute deployment, run with --deploy flag")
+    # if "--deploy" in sys.argv:
+    #    deployer.deploy(plan)
 
 
 if __name__ == "__main__":

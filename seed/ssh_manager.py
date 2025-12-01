@@ -339,6 +339,121 @@ class SSHManager:
             logger.error(f"Error executing command: {e}")
             return -1, "", str(e)
     
+    def transfer_file(
+        self,
+        client: "paramiko.SSHClient",
+        local_path: str,
+        remote_path: str
+    ) -> bool:
+        """
+        Transfer a file to remote device using SFTP.
+        
+        Args:
+            client: Connected SSH client
+            local_path: Local file path
+            remote_path: Remote file path
+            
+        Returns:
+            True if transfer successful
+        """
+        try:
+            logger.info(f"Transferring {local_path} to {remote_path}...")
+            
+            sftp = client.open_sftp()
+            sftp.put(local_path, remote_path)
+            sftp.close()
+            
+            logger.info(f"✓ File transferred successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"File transfer failed: {e}")
+            return False
+    
+    def transfer_directory(
+        self,
+        client: "paramiko.SSHClient",
+        local_dir: str,
+        remote_dir: str
+    ) -> bool:
+        """
+        Transfer entire directory to remote device using SFTP.
+        
+        Args:
+            client: Connected SSH client
+            local_dir: Local directory path
+            remote_dir: Remote directory path
+            
+        Returns:
+            True if transfer successful
+        """
+        try:
+            logger.info(f"Transferring directory {local_dir} to {remote_dir}...")
+            
+            sftp = client.open_sftp()
+            local_path = Path(local_dir)
+            
+            # Create remote directory
+            try:
+                sftp.mkdir(remote_dir)
+            except IOError:
+                pass  # Directory might already exist
+            
+            # Transfer all files recursively
+            for item in local_path.rglob('*'):
+                if item.is_file():
+                    relative_path = item.relative_to(local_path)
+                    remote_file = f"{remote_dir}/{relative_path}".replace('\\', '/')
+                    
+                    # Create parent directories
+                    remote_parent = '/'.join(remote_file.split('/')[:-1])
+                    try:
+                        sftp.mkdir(remote_parent)
+                    except IOError:
+                        pass
+                    
+                    # Transfer file
+                    sftp.put(str(item), remote_file)
+                    logger.debug(f"Transferred: {relative_path}")
+            
+            sftp.close()
+            logger.info(f"✓ Directory transferred successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Directory transfer failed: {e}")
+            return False
+    
+    def create_remote_directory(
+        self,
+        client: "paramiko.SSHClient",
+        path: str
+    ) -> bool:
+        """
+        Create a directory on remote device.
+        
+        Args:
+            client: Connected SSH client
+            path: Remote directory path
+            
+        Returns:
+            True if directory created or already exists
+        """
+        try:
+            command = f"mkdir -p {path}"
+            exit_code, stdout, stderr = self.execute_command(client, command)
+            
+            if exit_code == 0:
+                logger.debug(f"Created remote directory: {path}")
+                return True
+            else:
+                logger.error(f"Failed to create directory {path}: {stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error creating remote directory: {e}")
+            return False
+    
     def collect_credentials(
         self, 
         ip_addresses: List[str],
