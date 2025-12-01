@@ -11,3 +11,9 @@
 *   Measure in predicted "generation token length" instead of any units of "time" when estimating the length of planned work, as that is more representative of how "long" a planned task will take you.
 *   Whenever available use the log files to find clues. These files might be very large so first search them for warnings, errors or other specific strings, then use the time stamps to find more detailed debug logs around those times.
 *   Maintain code consistency.
+
+## Architectural Requirements (CRITICAL)
+*   **Logging**: Implement comprehensive DEBUG and INFO logging throughout the entire framework. Use structured logging with appropriate log levels.
+*   **Configuration**: Make ALL hardcoded values configurable via environment variables. Use a centralized `.env` file.
+*   **Environment Variables**: Support env vars for service URLs (Ollama, ComfyUI), model preferences (Logic, Video, Image, Math, TTS, TTV), resource limits, and storage paths.
+*   **Prompt Management**: Extract ALL hardcoded prompt strings to a centralized `prompts.yaml` file. Support dynamic prompt injection from system, tools, history, memories, and agent-specific templates.

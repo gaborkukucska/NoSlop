@@ -20,6 +20,9 @@ The NoSlop ecosystem consists of four main modules:
 -   **AI-First**: Deep integration of LLMs (Ollama) and Generative AI (ComfyUI) for content creation.
 -   **Resource Optimization**: Utilizes available consumer hardware (CPU, GPU, RAM) efficiently.
 -   **Ease of Use**: "Admin AI" guides users through complex processes, making high-end media creation accessible.
+-   **Observability**: Comprehensive logging (DEBUG/INFO/WARN/ERROR) throughout the framework for debugging and monitoring.
+-   **Configurability**: All hardcoded values replaceable via environment variables for maximum flexibility.
+-   **Maintainability**: Centralized prompt management system for easy modification and versioning.
 
 ---
 
