@@ -3,6 +3,7 @@ import ollama
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
+import logging
 
 from models import (
     PersonalityProfile, 
@@ -13,6 +14,11 @@ from models import (
     ProjectType
 )
 from config import settings
+from prompt_manager import get_prompt_manager
+from sqlalchemy.orm import Session
+from project_manager import ProjectManager
+
+logger = logging.getLogger(__name__)
 
 
 class AdminAI:
@@ -32,6 +38,9 @@ class AdminAI:
         self.conversation_history: List[ChatMessage] = []
         self.model = settings.ollama_default_model
         self.context: Dict[str, Any] = {}
+        self.prompt_manager = get_prompt_manager()
+        
+        logger.info("Admin AI initialized", extra={"context": {"personality": self.personality.type, "model": self.model}})
         
     def load_personality(self, personality_type: str) -> None:
         """
@@ -43,51 +52,27 @@ class AdminAI:
         if personality_type in settings.personality_presets:
             preset = settings.personality_presets[personality_type]
             self.personality = PersonalityProfile(**preset)
+            logger.info(f"Personality changed to {personality_type}")
         else:
+            logger.error(f"Unknown personality type: {personality_type}")
             raise ValueError(f"Unknown personality type: {personality_type}")
     
     def _build_system_prompt(self) -> str:
         """
-        Build the system prompt based on current personality.
+        Build the system prompt based on current personality using prompt manager.
         
         Returns:
             System prompt string
         """
-        base_prompt = """You are the Admin AI for NoSlop, a self-hosted AI-driven media creation platform.
-Your role is to guide users through creating professional-grade media content using local AI tools.
-
-You help users:
-- Brainstorm creative ideas for videos, images, and audio
-- Plan and structure media projects
-- Navigate the media creation workflow
-- Make decisions about style, tone, and technical aspects
-
-You have access to powerful local tools:
-- Ollama (LLMs for creative writing and assistance)
-- ComfyUI (image and video generation)
-- FFmpeg (video editing and processing)
-- OpenCV (computer vision and analysis)
-
-You work with a Project Manager agent who handles task orchestration and specialized Worker agents who execute specific tasks.
-"""
+        # Use centralized prompt management
+        system_prompt = self.prompt_manager.get_admin_ai_system_prompt(
+            personality_type=self.personality.type,
+            formality=self.personality.formality,
+            enthusiasm=self.personality.enthusiasm
+        )
         
-        # Adjust tone based on personality
-        if self.personality.creativity > 0.7:
-            base_prompt += "\nYou are highly creative and enthusiastic, encouraging bold artistic choices and innovative ideas."
-        elif self.personality.technical_depth > 0.7:
-            base_prompt += "\nYou are technically precise and detail-oriented, focusing on specifications and best practices."
-        else:
-            base_prompt += "\nYou balance creativity with practicality, offering both artistic and technical guidance."
-        
-        if self.personality.formality < 0.4:
-            base_prompt += "\nYou communicate in a friendly, casual manner."
-        elif self.personality.formality > 0.7:
-            base_prompt += "\nYou communicate in a professional, formal manner."
-        
-        if self.personality.enthusiasm > 0.7:
-            base_prompt += "\nYou are energetic and encouraging, celebrating user ideas and progress."
-        
-        return base_prompt
+        logger.debug("Built system prompt", extra={"context": {"personality": self.personality.type}})
+        return system_prompt
     
     def _format_conversation_history(self, max_messages: int = 10) -> List[Dict[str, str]]:
         """
@@ -105,20 +90,24 @@ You work with a Project Manager agent who handles task orchestration and special
             for msg in recent_messages
         ]
     
-    def chat(self, message: str, context: Optional[Dict[str, Any]] = None) -> ChatResponse:
+    def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None) -> ChatResponse:
         """
         Main conversation interface with the Admin AI.
         
         Args:
             message: User message
             context: Additional context (current project, user preferences, etc.)
+            db: Database session for performing actions
             
         Returns:
             ChatResponse with AI message and optional suggestions
         """
+        logger.info("Chat request received", extra={"context": {"message_length": len(message)}})
+        
         # Update context
         if context:
             self.context.update(context)
+            logger.debug("Context updated", extra={"context": {"keys": list(context.keys())}})
         
         # Add user message to history
         user_msg = ChatMessage(role="user", content=message)
@@ -137,6 +126,8 @@ You work with a Project Manager agent who handles task orchestration and special
         
         try:
             # Call Ollama
+            logger.debug("Calling Ollama", extra={"context": {"model": self.model, "message_count": len(messages)}})
+            
             response = ollama.chat(
                 model=self.model,
                 messages=messages,
@@ -147,6 +138,7 @@ You work with a Project Manager agent who handles task orchestration and special
             )
             
             ai_message = response['message']['content']
+            logger.info("Ollama response received", extra={"context": {"response_length": len(ai_message)}})
             
             # Add AI response to history
             ai_msg = ChatMessage(role="assistant", content=ai_message)
@@ -156,14 +148,50 @@ You work with a Project Manager agent who handles task orchestration and special
             action = self._detect_action(message, ai_message)
             suggestions = self._generate_suggestions(message, ai_message)
             
+            metadata = {"model": self.model, "personality": self.personality.type}
+            
+            # Handle project creation if action detected and DB is available
+            if action == "create_project" and db and settings.enable_project_manager:
+                logger.info("Attempting to create project from chat")
+                project_result = self.guide_project_creation(message + "\n" + ai_message)
+                
+                if project_result.get("status") == "ready_for_creation":
+                    try:
+                        details = project_result["project_details"]
+                        project_req = ProjectRequest(
+                            title=details.get("title", "New Project"),
+                            description=details.get("description", ""),
+                            project_type=details.get("project_type", "custom"),
+                            duration=details.get("duration"),
+                            style=details.get("style")
+                        )
+                        
+                        pm = ProjectManager(db)
+                        project = pm.create_project(project_req)
+                        
+                        metadata["project_created"] = True
+                        metadata["project_id"] = project.id
+                        metadata["project"] = project.dict()
+                        
+                        # Append confirmation to AI message
+                        ai_message += f"\n\nI've created a new project for you: **{project.title}**. I've also generated a preliminary plan with {len(project.tasks)} tasks."
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to create project from chat: {e}", exc_info=True)
+                        metadata["project_creation_error"] = str(e)
+            
+            if action:
+                logger.info(f"Action detected: {action}")
+            
             return ChatResponse(
                 message=ai_message,
                 suggestions=suggestions,
                 action=action,
-                metadata={"model": self.model, "personality": self.personality.type}
+                metadata=metadata
             )
             
         except Exception as e:
+            logger.error(f"Chat error: {e}", exc_info=True)
             error_msg = f"I apologize, but I encountered an error: {str(e)}. Please try again."
             return ChatResponse(
                 message=error_msg,
@@ -231,20 +259,16 @@ You work with a Project Manager agent who handles task orchestration and special
         Returns:
             Dictionary with project details and next steps
         """
-        # Use LLM to extract project details
-        extraction_prompt = f"""Based on this user input, extract project details:
-"{user_input}"
-
-Identify:
-1. Project type (cinematic_film, corporate_video, advertisement, etc.)
-2. Title (if mentioned, otherwise suggest one)
-3. Description
-4. Duration (if mentioned)
-5. Style preferences
-
-Respond in JSON format."""
+        logger.info("Guiding project creation", extra={"context": {"input_length": len(user_input)}})
+        
+        # Use centralized prompt
+        extraction_prompt = self.prompt_manager.get_prompt(
+            "admin_ai.project_extraction",
+            {"user_input": user_input}
+        )
 
         try:
+            logger.debug("Extracting project details from user input")
             response = ollama.chat(
                 model=self.model,
                 messages=[{"role": "user", "content": extraction_prompt}],
@@ -252,6 +276,7 @@ Respond in JSON format."""
             )
             
             project_details = json.loads(response['message']['content'])
+            logger.info("Project details extracted", extra={"context": {"project_type": project_details.get("project_type")}})
             
             return {
                 "project_details": project_details,
@@ -264,6 +289,7 @@ Respond in JSON format."""
             }
             
         except Exception as e:
+            logger.error(f"Error extracting project details: {e}", exc_info=True)
             return {
                 "error": str(e),
                 "status": "needs_clarification",
@@ -280,9 +306,13 @@ Respond in JSON format."""
         Returns:
             List of creative suggestions
         """
-        prompt = f"""Suggest 5 creative ideas for a {project_type} project.
-Be specific and inspiring. Focus on unique angles and interesting concepts.
-Keep each suggestion to 1-2 sentences."""
+        logger.info(f"Generating suggestions for {project_type}")
+        
+        # Use centralized prompt
+        prompt = self.prompt_manager.get_prompt(
+            "admin_ai.suggestion_generation",
+            {"project_type": project_type}
+        )
 
         try:
             response = ollama.chat(
@@ -295,12 +325,15 @@ Keep each suggestion to 1-2 sentences."""
             suggestions_text = response['message']['content']
             suggestions = [s.strip() for s in suggestions_text.split('\n') if s.strip() and not s.strip().startswith('#')]
             
+            logger.debug(f"Generated {len(suggestions)} suggestions")
             return suggestions[:5]
             
         except Exception as e:
+            logger.error(f"Error generating suggestions: {e}", exc_info=True)
             return [f"Error generating suggestions: {str(e)}"]
     
     def clear_history(self) -> None:
         """Clear conversation history."""
+        logger.info("Clearing conversation history")
         self.conversation_history = []
         self.context = {}

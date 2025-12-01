@@ -1,17 +1,35 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
 import uvicorn
-from typing import Dict
+from typing import Dict, List
+import logging
+from sqlalchemy.orm import Session
 
 from models import (
     ChatRequest, 
     ChatResponse, 
     PersonalityProfile,
-    HealthStatus
+    HealthStatus,
+    ProjectRequest,
+    Project
 )
 from admin_ai import AdminAI
 from config import settings
+from logging_config import setup_logging
+from database import init_db, get_db, ProjectCRUD, TaskCRUD
+from project_manager import ProjectManager
+
+# Initialize logging
+setup_logging(
+    log_level=settings.log_level,
+    log_dir=settings.log_dir,
+    enable_console=settings.enable_console_log,
+    enable_file=settings.enable_file_log,
+    enable_json=settings.enable_json_log
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.app_name,
@@ -19,14 +37,24 @@ app = FastAPI(
     description="NoSlop Backend - Self-hosted AI-driven media creation platform"
 )
 
+logger.info(f"Initializing {settings.app_name} v{settings.app_version}")
+
+# Initialize database
+if settings.enable_project_manager:
+    logger.info("Initializing database...")
+    init_db()
+    logger.info("Database initialized")
+
 # CORS middleware for frontend communication
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger.info(f"CORS enabled for origins: {settings.cors_origins_list}")
 
 # Global Admin AI instance (in production, this would be per-user)
 admin_ai_instance: Dict[str, AdminAI] = {}
@@ -34,6 +62,7 @@ admin_ai_instance: Dict[str, AdminAI] = {}
 def get_admin_ai(session_id: str = "default") -> AdminAI:
     """Get or create Admin AI instance for session"""
     if session_id not in admin_ai_instance:
+        logger.info(f"Creating new Admin AI instance for session: {session_id}")
         admin_ai_instance[session_id] = AdminAI()
     return admin_ai_instance[session_id]
 
@@ -52,6 +81,7 @@ def health_check():
     """
     Checks the health of the backend and the connection to Ollama.
     """
+    logger.debug("Health check requested")
     try:
         # Attempt to list models to verify connection
         models = ollama.list()
@@ -63,6 +93,8 @@ def health_check():
             "database": True   # TODO: Implement database health check
         }
         
+        logger.debug(f"Health check passed: {len(models.get('models', []))} models available")
+        
         return HealthStatus(
             status="ok", 
             ollama="connected", 
@@ -70,6 +102,7 @@ def health_check():
             services=services
         )
     except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
         return HealthStatus(
             status="degraded", 
             ollama="disconnected", 
@@ -79,30 +112,34 @@ def health_check():
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_with_admin_ai(request: ChatRequest, session_id: str = "default"):
+async def chat_with_admin_ai(request: ChatRequest, session_id: str = "default", db: Session = Depends(get_db)):
     """
     Chat with the Admin AI.
     
     Args:
         request: Chat request with message and optional context
         session_id: Session identifier for conversation continuity
+        db: Database session
         
     Returns:
         ChatResponse with AI message and suggestions
     """
+    logger.info(f"Chat request from session {session_id}")
     try:
         admin_ai = get_admin_ai(session_id)
         
         # Update personality if provided
         if request.personality:
             admin_ai.personality = request.personality
+            logger.debug(f"Personality updated for session {session_id}")
         
         # Process chat
-        response = admin_ai.chat(request.message, request.context)
+        response = admin_ai.chat(request.message, request.context, db=db)
         
         return response
         
     except Exception as e:
+        logger.error(f"Chat endpoint error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
 
 
@@ -194,11 +231,202 @@ async def get_project_suggestions(project_type: str, session_id: str = "default"
         raise HTTPException(status_code=500, detail=f"Error generating suggestions: {str(e)}")
 
 
+# ============================================================================
+# Project Manager Endpoints
+# ============================================================================
+
+@app.post("/api/projects", response_model=Project)
+async def create_project(project_request: ProjectRequest, db: Session = Depends(get_db)):
+    """
+    Create a new media project.
+    
+    Args:
+        project_request: Project creation request
+        db: Database session
+        
+    Returns:
+        Created project with generated tasks
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    logger.info(f"Creating project: {project_request.title}")
+    
+    try:
+        pm = ProjectManager(db)
+        project = pm.create_project(project_request)
+        
+        return project
+        
+    except Exception as e:
+        logger.error(f"Error creating project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error creating project: {str(e)}")
+
+
+@app.get("/api/projects")
+async def list_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    List all projects.
+    
+    Args:
+        skip: Number of projects to skip (pagination)
+        limit: Maximum number of projects to return
+        db: Database session
+        
+    Returns:
+        List of projects
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        projects = ProjectCRUD.get_all(db, skip=skip, limit=limit)
+        return {"projects": [p.to_dict() for p in projects]}
+        
+    except Exception as e:
+        logger.error(f"Error listing projects: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error listing projects: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project(project_id: str, db: Session = Depends(get_db)):
+    """
+    Get project details and status.
+    
+    Args:
+        project_id: Project ID
+        db: Database session
+        
+    Returns:
+        Project details with tasks and progress
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        pm = ProjectManager(db)
+        status = pm.get_project_status(project_id)
+        
+        if not status:
+            raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+        
+        return status
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting project: {str(e)}")
+
+
+@app.get("/api/projects/{project_id}/tasks")
+async def get_project_tasks(project_id: str, db: Session = Depends(get_db)):
+    """
+    Get all tasks for a project.
+    
+    Args:
+        project_id: Project ID
+        db: Database session
+        
+    Returns:
+        List of tasks
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        tasks = TaskCRUD.get_by_project(db, project_id)
+        return {"tasks": [t.to_dict() for t in tasks]}
+        
+    except Exception as e:
+        logger.error(f"Error getting tasks: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting tasks: {str(e)}")
+
+
+@app.put("/api/tasks/{task_id}/status")
+async def update_task_status(
+    task_id: str,
+    status: str,
+    result: Dict = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Update task status.
+    
+    Args:
+        task_id: Task ID
+        status: New status (pending, assigned, in_progress, completed, failed)
+        result: Optional task result
+        db: Database session
+        
+    Returns:
+        Updated task
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    try:
+        pm = ProjectManager(db)
+        task = pm.update_task_status(task_id, status, result)
+        
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+        
+        return task.to_dict()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating task status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating task status: {str(e)}")
+
+
+@app.post("/api/tasks/{task_id}/execute")
+async def execute_task(task_id: str, db: Session = Depends(get_db)):
+    """
+    Manually trigger execution of a task.
+    
+    Args:
+        task_id: Task ID
+        db: Database session
+        
+    Returns:
+        Task result
+    """
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    logger.info(f"Manual execution requested for task {task_id}")
+    
+    try:
+        pm = ProjectManager(db)
+        result = pm.dispatch_task(task_id)
+        
+        if not result:
+            # Check if task exists but no worker found or other issue
+            task = TaskCRUD.get(db, task_id)
+            if not task:
+                raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
+            
+            return {"status": "no_action_taken", "message": "No suitable worker found or task execution failed"}
+            
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error executing task: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error executing task: {str(e)}")
+
+
 if __name__ == "__main__":
-    print(f"🚀 Starting {settings.app_name} v{settings.app_version}")
-    print(f"📡 Ollama endpoint: {settings.ollama_host}")
-    print(f"💾 Database: {settings.database_url}")
-    print(f"📁 Media storage: {settings.media_storage_path}")
+    logger.info("="*60)
+    logger.info(f"🚀 Starting {settings.app_name} v{settings.app_version}")
+    logger.info(f"📡 Ollama endpoint: {settings.ollama_host}")
+    logger.info(f"💾 Database: {settings.database_url}")
+    logger.info(f"📁 Media storage: {settings.media_storage_path}")
+    logger.info(f"📁 Project storage: {settings.project_storage_path}")
+    logger.info(f"📝 Log level: {settings.log_level}")
+    logger.info(f"🔧 Debug mode: {settings.debug}")
+    logger.info("="*60)
     
     uvicorn.run(app, host=settings.host, port=settings.port)
 
