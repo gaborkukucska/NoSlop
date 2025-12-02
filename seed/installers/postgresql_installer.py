@@ -15,8 +15,8 @@ class PostgreSQLInstaller(BaseInstaller):
     Installs and configures PostgreSQL.
     """
     
-    def __init__(self, device, ssh_manager):
-        super().__init__(device, ssh_manager, "postgresql")
+    def __init__(self, device, ssh_manager, username="root"):
+        super().__init__(device, ssh_manager, "postgresql", username=username)
         self.db_name = "noslop"
         self.db_user = "noslop"
         self.db_password = "noslop_password" # In production this should come from config/env
@@ -46,7 +46,7 @@ class PostgreSQLInstaller(BaseInstaller):
         pm = self.get_package_manager()
         if pm == "apt":
             # Update apt first
-            self.execute_remote("apt-get update", timeout=300)
+            self.execute_remote("sudo apt-get update", timeout=300)
             return self.install_packages(["postgresql", "postgresql-contrib"])
         elif pm == "brew":
             return self.install_packages(["postgresql@14"]) # Install specific version
@@ -93,7 +93,7 @@ class PostgreSQLInstaller(BaseInstaller):
         self.logger.info("Starting PostgreSQL...")
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote("systemctl enable postgresql && systemctl start postgresql")
+            code, _, err = self.execute_remote("sudo systemctl enable postgresql && sudo systemctl start postgresql")
             return code == 0
         elif self.device.os_type.value == "macos":
             code, _, err = self.execute_remote("brew services start postgresql@14")
@@ -122,7 +122,7 @@ class PostgreSQLInstaller(BaseInstaller):
         self.logger.info("Rolling back PostgreSQL installation...")
         # Stop service
         if self.device.os_type.value == "linux":
-            self.execute_remote("systemctl stop postgresql")
+            self.execute_remote("sudo systemctl stop postgresql")
         elif self.device.os_type.value == "macos":
             self.execute_remote("brew services stop postgresql@14")
             

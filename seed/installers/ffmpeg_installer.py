@@ -12,8 +12,8 @@ class FFmpegInstaller(BaseInstaller):
     Installs FFmpeg and OpenCV dependencies.
     """
     
-    def __init__(self, device, ssh_manager):
-        super().__init__(device, ssh_manager, "ffmpeg")
+    def __init__(self, device, ssh_manager, username="root"):
+        super().__init__(device, ssh_manager, "ffmpeg", username=username)
 
     def check_installed(self) -> bool:
         """Check if FFmpeg is installed."""

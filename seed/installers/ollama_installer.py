@@ -17,8 +17,8 @@ class OllamaInstaller(BaseInstaller):
     Installs and configures Ollama with multi-instance support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None):
-        super().__init__(device, ssh_manager, "ollama")
+    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, username: str = "root"):
+        super().__init__(device, ssh_manager, "ollama", username=username)
         self.port = port
         self.models = models or ["llama3.2:latest", "qwen2.5:latest", "llava:latest"]
         self.is_secondary = port != 11434

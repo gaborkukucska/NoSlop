@@ -16,8 +16,8 @@ class BackendInstaller(BaseInstaller):
     Installs and configures NoSlop Backend.
     """
     
-    def __init__(self, device, ssh_manager, env_config: dict = None):
-        super().__init__(device, ssh_manager, "noslop-backend")
+    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root"):
+        super().__init__(device, ssh_manager, "noslop-backend", username=username)
         self.install_dir = "/opt/noslop/backend"
         self.venv_dir = f"{self.install_dir}/venv"
         self.env_config = env_config or {}

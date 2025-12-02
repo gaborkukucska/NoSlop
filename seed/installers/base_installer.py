@@ -51,9 +51,22 @@ class BaseInstaller(ABC):
 
     def _connect(self):
         """Establish SSH connection to the device."""
-        if self.device.ip_address in ["localhost", "127.0.0.1"]:
+        # Check if this device is localhost
+        import socket
+        try:
+            # Get local IP address
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            local_ip = "127.0.0.1"
+        
+        # Check if device is local
+        if self.device.ip_address in ["localhost", "127.0.0.1", local_ip]:
             self.is_local = True
             self.ssh_client = None
+            self.logger.debug(f"Device {self.device.ip_address} is local")
         else:
             self.is_local = False
             # We assume credentials have been collected and key distributed
@@ -176,9 +189,9 @@ class BaseInstaller(ABC):
         pkg_list = " ".join(packages)
         
         if pm == "apt":
-            cmd = f"DEBIAN_FRONTEND=noninteractive apt-get install -y {pkg_list}"
+            cmd = f"DEBIAN_FRONTEND=noninteractive sudo apt-get install -y {pkg_list}"
         elif pm == "yum":
-            cmd = f"yum install -y {pkg_list}"
+            cmd = f"sudo yum install -y {pkg_list}"
         elif pm == "brew":
             cmd = f"brew install {pkg_list}"
         elif pm == "choco":

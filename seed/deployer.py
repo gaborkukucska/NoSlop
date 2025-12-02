@@ -320,7 +320,9 @@ class Deployer:
             self.write_env_file(node, config)
         
         # Install Services
-        if not self.install_services(plan):
+        if credentials_map is None:
+            credentials_map = {}
+        if not self.install_services(plan, credentials_map):
             logger.error("\n❌ Service installation failed!")
             return False
         

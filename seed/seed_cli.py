@@ -196,7 +196,7 @@ class NoSlopSeedCLI:
                 return False
         
         # Step 6: Execute deployment
-        return self.execute_deployment(plan)
+        return self.execute_deployment(plan, credentials_map)
     
     def discover_devices(self):
         """Discover devices on the network. Returns (devices, credentials_map)."""

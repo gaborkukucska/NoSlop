@@ -16,8 +16,8 @@ class FrontendInstaller(BaseInstaller):
     Installs and configures NoSlop Frontend.
     """
     
-    def __init__(self, device, ssh_manager, env_config: dict = None):
-        super().__init__(device, ssh_manager, "noslop-frontend")
+    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root"):
+        super().__init__(device, ssh_manager, "noslop-frontend", username=username)
         self.install_dir = "/opt/noslop/frontend"
         self.env_config = env_config or {}
 

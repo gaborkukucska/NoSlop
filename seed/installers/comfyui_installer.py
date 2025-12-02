@@ -18,8 +18,8 @@ class ComfyUIInstaller(BaseInstaller):
     Installs and configures ComfyUI with GPU support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0):
-        super().__init__(device, ssh_manager, "comfyui")
+    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, username: str = "root"):
+        super().__init__(device, ssh_manager, "comfyui", username=username)
         self.port = port
         self.gpu_index = gpu_index
         self.install_dir = f"/opt/ComfyUI_{port}" if port != 8188 else "/opt/ComfyUI"
@@ -44,19 +44,19 @@ class ComfyUIInstaller(BaseInstaller):
         # Install system dependencies
         self.install_packages(["git", "python3", "python3-venv", "python3-pip"])
         
-        # Create directory
-        self.execute_remote(f"mkdir -p {self.install_dir}")
+        # Create directory with sudo
+        self.execute_remote(f"sudo mkdir -p {self.install_dir}")
         
         # Clone repository
         self.logger.info("Cloning ComfyUI repository...")
-        code, _, err = self.execute_remote(f"git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
+        code, _, err = self.execute_remote(f"sudo git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
         if code != 0 and "already exists" not in err:
             self.logger.error(f"Failed to clone ComfyUI: {err}")
             return False
             
-        # Create venv
+        # Create venv (need sudo since we created the directory with sudo)
         self.logger.info("Creating virtual environment...")
-        code, _, err = self.execute_remote(f"python3 -m venv {self.venv_dir}")
+        code, _, err = self.execute_remote(f"sudo python3 -m venv {self.venv_dir}")
         if code != 0:
             self.logger.error(f"Failed to create venv: {err}")
             return False
@@ -68,7 +68,7 @@ class ComfyUIInstaller(BaseInstaller):
         """Install Python dependencies with correct PyTorch version."""
         self.logger.info("Installing Python dependencies...")
         
-        pip_cmd = f"{self.venv_dir}/bin/pip"
+        pip_cmd = f"sudo {self.venv_dir}/bin/pip"
         
         # Upgrade pip
         self.execute_remote(f"{pip_cmd} install --upgrade pip")
@@ -143,8 +143,8 @@ class ComfyUIInstaller(BaseInstaller):
                 if not self.transfer_file(tmp_path, f"/tmp/{service_name}.service"):
                     return False
                 
-                self.execute_remote(f"mv /tmp/{service_name}.service {remote_path}")
-                self.execute_remote("systemctl daemon-reload")
+                self.execute_remote(f"sudo mv /tmp/{service_name}.service {remote_path}")
+                self.execute_remote("sudo systemctl daemon-reload")
                 
             finally:
                 os.unlink(tmp_path)
@@ -158,7 +158,7 @@ class ComfyUIInstaller(BaseInstaller):
         service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote(f"systemctl enable {service_name} && systemctl start {service_name}")
+            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl start {service_name}")
             if code != 0:
                 self.logger.error(f"Failed to start {service_name}: {err}")
                 return False
@@ -186,10 +186,10 @@ class ComfyUIInstaller(BaseInstaller):
         """Rollback installation."""
         service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
         if self.device.os_type.value == "linux":
-            self.execute_remote(f"systemctl stop {service_name}")
-            self.execute_remote(f"systemctl disable {service_name}")
-            self.execute_remote(f"rm /etc/systemd/system/{service_name}.service")
-            self.execute_remote("systemctl daemon-reload")
+            self.execute_remote(f"sudo systemctl stop {service_name}")
+            self.execute_remote(f"sudo systemctl disable {service_name}")
+            self.execute_remote(f"sudo rm /etc/systemd/system/{service_name}.service")
+            self.execute_remote("sudo systemctl daemon-reload")
         
         # Remove directory
-        self.execute_remote(f"rm -rf {self.install_dir}")
+        self.execute_remote(f"sudo rm -rf {self.install_dir}")
