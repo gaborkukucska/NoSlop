@@ -43,7 +43,22 @@ class Settings(BaseSettings):
     # Model preferences by task type
     model_logic: str = "llama3.2"
     model_video: str = "llama3.2"
-    model_image: str = "llama3.2"
+    model_image: str = "llama3.2"    # Ollama Settings
+    OLLAMA_HOST: str = "127.0.0.1"
+    OLLAMA_PORT: int = 11434
+    
+    # ComfyUI Settings
+    COMFYUI_HOST: str = "127.0.0.1"
+    COMFYUI_PORT: int = 8188
+    COMFYUI_OUTPUT_DIR: str = "media/generated"
+    
+    # FFmpeg Settings
+    FFMPEG_PATH: str = "ffmpeg"
+    FFPROBE_PATH: str = "ffprobe"
+    MEDIA_OUTPUT_DIR: str = "media/output"
+    
+    # Logging
+    LOG_LEVEL: str = "INFO"
     model_math: str = "llama3.2"
     model_tts: str = "llama3.2"
     model_ttv: str = "llama3.2"

@@ -92,8 +92,8 @@ class RoleAssigner:
             "ffmpeg",
             "opencv",
             "postgresql",
-            "backend",
-            "frontend"
+            "noslop-backend",
+            "noslop-frontend"
         ]
         for service in services:
             assignment.add_service(service)
@@ -295,19 +295,19 @@ class RoleAssigner:
         Map services to nodes based on their roles.
         
         Service mapping:
-        - MASTER: backend, database, ollama
+        - MASTER: noslop-backend, database, ollama
         - COMPUTE: comfyui, ffmpeg, opencv
         - STORAGE: (no specific services, just storage)
-        - CLIENT: frontend
+        - CLIENT: noslop-frontend
         """
         for node in plan.nodes:
             if NodeRole.MASTER in node.roles:
-                node.add_service("backend")
+                node.add_service("noslop-backend")
                 node.add_service("postgresql")
                 node.add_service("ollama")
                 logger.debug(
                     f"Mapped MASTER services to {node.device.hostname}: "
-                    f"backend, postgresql, ollama"
+                    f"noslop-backend, postgresql, ollama"
                 )
             
             if NodeRole.COMPUTE in node.roles:
@@ -320,9 +320,9 @@ class RoleAssigner:
                 )
             
             if NodeRole.CLIENT in node.roles:
-                node.add_service("frontend")
+                node.add_service("noslop-frontend")
                 logger.debug(
-                    f"Mapped CLIENT services to {node.device.hostname}: frontend"
+                    f"Mapped CLIENT services to {node.device.hostname}: noslop-frontend"
                 )
     
     def _find_node_assignment(

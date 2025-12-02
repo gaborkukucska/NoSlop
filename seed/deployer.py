@@ -274,24 +274,25 @@ class Deployer:
         logger.info("\n[Phase 4] Installing NoSlop Services...")
 
         # Backend (Master)
-        if plan.master_node:
-            # Generate config for backend
-            config = self.generate_node_config(plan.master_node, plan)
-            username, password = get_credentials(plan.master_node.device)
-            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config, username=username, password=password)
-            if not installer.run():
-                logger.error("Failed to install Backend on master node")
-                return False
+        for node in plan.nodes:
+            if "noslop-backend" in node.services:
+                # Generate config for backend
+                config = self.generate_node_config(node, plan)
+                username, password = get_credentials(node.device)
+                installer = BackendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
+                if not installer.run():
+                    logger.error(f"Failed to install Backend on {node.device.hostname}")
+                    return False
 
-            # Register Backend
-            self.registry.register_service(ServiceInstance(
-                instance_id=f"backend_{plan.master_node.device.ip_address}",
-                service_type=ServiceType.NOSLOP_BACKEND,
-                host=plan.master_node.device.ip_address,
-                port=8000,
-                is_newly_deployed=True,
-                health_status="healthy"
-            ))
+                # Register Backend
+                self.registry.register_service(ServiceInstance(
+                    instance_id=f"backend_{node.device.ip_address}",
+                    service_type=ServiceType.NOSLOP_BACKEND,
+                    host=node.device.ip_address,
+                    port=8000,
+                    is_newly_deployed=True,
+                    health_status="healthy"
+                ))
 
         # Frontend (Client/All)
         for node in plan.nodes:
@@ -302,6 +303,16 @@ class Deployer:
                 if not installer.run():
                     logger.error(f"Failed to install Frontend on {node.device.hostname}")
                     return False
+
+                # Register Frontend
+                self.registry.register_service(ServiceInstance(
+                    instance_id=f"frontend_{node.device.ip_address}",
+                    service_type=ServiceType.NOSLOP_FRONTEND,
+                    host=node.device.ip_address,
+                    port=3000,
+                    is_newly_deployed=True,
+                    health_status="healthy"
+                ))
 
         return True
 
@@ -346,6 +357,26 @@ class Deployer:
         stats = self.registry.get_service_stats()
         logger.info("\nService Registry Summary:")
         logger.info(json.dumps(stats, indent=2))
+        
+        # Display access points
+        logger.info("\n" + "="*70)
+        logger.info("🌐 NoSlop Access Points")
+        logger.info("="*70)
+        
+        # Backend URL
+        backend_instances = self.registry.get_instances_by_type(ServiceType.NOSLOP_BACKEND)
+        if backend_instances:
+            backend = backend_instances[0]
+            logger.info(f"\n📡 Backend API: http://{backend.host}:{backend.port}")
+        
+        # Frontend URLs
+        frontend_instances = self.registry.get_instances_by_type(ServiceType.NOSLOP_FRONTEND)
+        if frontend_instances:
+            logger.info(f"\n🖥️  Frontend (Web UI):")
+            for i, frontend in enumerate(frontend_instances, 1):
+                logger.info(f"   {i}. http://{frontend.host}:{frontend.port}")
+        
+        logger.info("\n" + "="*70)
         
         return True
     

@@ -56,6 +56,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="User message")
     context: Optional[Dict[str, Any]] = Field(default=None, description="Additional context")
     personality: Optional[PersonalityProfile] = Field(default=None, description="Personality override")
+    user_id: Optional[str] = Field(default=None, description="User ID for personalization")
 
 
 class ChatResponse(BaseModel):
@@ -157,3 +158,22 @@ class HealthStatus(BaseModel):
     ollama: str = Field(..., description="Ollama connection status")
     model_count: int = Field(default=0, description="Number of available models")
     services: Dict[str, bool] = Field(default_factory=dict, description="Service availability")
+
+
+class UserCreate(BaseModel):
+    """Request to create a new user"""
+    username: str = Field(..., description="Unique username")
+    email: Optional[str] = Field(default=None, description="User email")
+    personality: Optional[PersonalityProfile] = Field(default=None, description="Initial personality settings")
+    preferences: Optional[Dict[str, Any]] = Field(default=None, description="User preferences")
+
+
+class User(BaseModel):
+    """User data model"""
+    id: str = Field(..., description="Unique user ID")
+    username: str
+    email: Optional[str] = None
+    personality: PersonalityProfile
+    preferences: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    last_login: Optional[datetime] = None

@@ -4,10 +4,16 @@
 import { useState, useEffect } from 'react';
 import ChatInterface from './components/ChatInterface';
 import PersonalitySelector from './components/PersonalitySelector';
+import ProjectForm from './components/ProjectForm';
+import ProjectList from './components/ProjectList';
+import ProjectDetail from './components/ProjectDetail';
 
 export default function Home() {
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [showPersonality, setShowPersonality] = useState(false);
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [refreshProjects, setRefreshProjects] = useState(0);
 
   useEffect(() => {
     checkHealth();
@@ -22,6 +28,12 @@ export default function Home() {
       console.error('Health check failed:', error);
       setHealthStatus({ status: 'error', ollama: 'disconnected' });
     }
+  };
+
+  const handleProjectCreated = (project: any) => {
+    setShowProjectForm(false);
+    setRefreshProjects(prev => prev + 1);
+    setSelectedProject(project.id);
   };
 
   return (
@@ -47,10 +59,10 @@ export default function Home() {
               <div className="flex items-center space-x-2">
                 <div
                   className={`w-2 h-2 rounded-full ${healthStatus?.status === 'ok'
-                      ? 'bg-green-500'
-                      : healthStatus?.status === 'degraded'
-                        ? 'bg-yellow-500'
-                        : 'bg-red-500'
+                    ? 'bg-green-500'
+                    : healthStatus?.status === 'degraded'
+                      ? 'bg-yellow-500'
+                      : 'bg-red-500'
                     }`}
                 />
                 <span className="text-sm text-zinc-600 dark:text-zinc-400">
@@ -77,12 +89,42 @@ export default function Home() {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Chat Interface - Takes up 2 columns on large screens */}
-          <div className="lg:col-span-2 h-[calc(100vh-200px)]">
-            <ChatInterface />
+          {/* Left Column - Chat or Project Detail */}
+          <div className="lg:col-span-2 space-y-6">
+            {selectedProject ? (
+              <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+                <ProjectDetail
+                  projectId={selectedProject}
+                  onClose={() => setSelectedProject(null)}
+                />
+              </div>
+            ) : (
+              <div className="h-[calc(100vh-200px)]">
+                <ChatInterface />
+              </div>
+            )}
+
+            {/* Projects Section */}
+            <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
+                  📁 Projects
+                </h2>
+                <button
+                  onClick={() => setShowProjectForm(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  + New Project
+                </button>
+              </div>
+              <ProjectList
+                onProjectClick={(project) => setSelectedProject(project.id)}
+                refreshTrigger={refreshProjects}
+              />
+            </div>
           </div>
 
-          {/* Sidebar */}
+          {/* Right Sidebar */}
           <div className="space-y-6">
             {/* Personality Selector */}
             {showPersonality && <PersonalitySelector />}
@@ -95,7 +137,7 @@ export default function Home() {
               <ul className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
                 <li className="flex items-start">
                   <span className="mr-2">1️⃣</span>
-                  <span>Chat with Admin AI about your project idea</span>
+                  <span>Create a new project with the "New Project" button</span>
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2">2️⃣</span>
@@ -103,7 +145,7 @@ export default function Home() {
                 </li>
                 <li className="flex items-start">
                   <span className="mr-2">3️⃣</span>
-                  <span>Create projects and let AI guide you</span>
+                  <span>Execute projects and watch AI agents work</span>
                 </li>
               </ul>
             </div>
@@ -128,7 +170,11 @@ export default function Home() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-zinc-600 dark:text-zinc-400">ComfyUI:</span>
-                  <span className="text-yellow-600">Coming Soon</span>
+                  <span className="text-green-600">Ready</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-600 dark:text-zinc-400">FFmpeg:</span>
+                  <span className="text-green-600">Ready</span>
                 </div>
               </div>
             </div>
@@ -151,6 +197,21 @@ export default function Home() {
           </div>
         </div>
       </main>
+
+      {/* Project Form Modal */}
+      {showProjectForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
+              Create New Project
+            </h2>
+            <ProjectForm
+              onSuccess={handleProjectCreated}
+              onCancel={() => setShowProjectForm(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

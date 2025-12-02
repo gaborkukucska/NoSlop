@@ -330,3 +330,88 @@ class TaskCRUD:
         
         logger.info(f"Task deleted: {task_id}")
         return True
+
+
+class UserModel(Base):
+    """Database model for users"""
+    __tablename__ = "users"
+    
+    id = Column(String, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True)
+    
+    # Admin AI Personality Settings
+    personality_type = Column(String, default="balanced")  # creative, technical, balanced
+    personality_formality = Column(Float, default=0.5)
+    personality_enthusiasm = Column(Float, default=0.5)
+    personality_verbosity = Column(Float, default=0.5)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
+    
+    # JSON fields
+    preferences = Column(JSON, default=dict)  # Additional user preferences
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "username": self.username,
+            "email": self.email,
+            "personality": {
+                "type": self.personality_type,
+                "formality": self.personality_formality,
+                "enthusiasm": self.personality_enthusiasm,
+                "verbosity": self.personality_verbosity
+            },
+            "preferences": self.preferences or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_login": self.last_login.isoformat() if self.last_login else None
+        }
+
+
+class UserCRUD:
+    """CRUD operations for users"""
+    
+    @staticmethod
+    def create(db: Session, user_data: Dict[str, Any]) -> UserModel:
+        """Create a new user"""
+        logger.info(f"Creating user: {user_data.get('username')}")
+        
+        user = UserModel(**user_data)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+        logger.info(f"User created: {user.id}")
+        return user
+    
+    @staticmethod
+    def get(db: Session, user_id: str) -> Optional[UserModel]:
+        """Get user by ID"""
+        return db.query(UserModel).filter(UserModel.id == user_id).first()
+    
+    @staticmethod
+    def get_by_username(db: Session, username: str) -> Optional[UserModel]:
+        """Get user by username"""
+        return db.query(UserModel).filter(UserModel.username == username).first()
+    
+    @staticmethod
+    def update(db: Session, user_id: str, updates: Dict[str, Any]) -> Optional[UserModel]:
+        """Update user"""
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            return None
+        
+        for key, value in updates.items():
+            if hasattr(user, key):
+                setattr(user, key, value)
+        
+        user.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(user)
+        
+        logger.info(f"User updated: {user_id}")
+        return user
+

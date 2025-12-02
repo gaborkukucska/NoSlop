@@ -4,6 +4,7 @@ import ollama
 import uvicorn
 from typing import Dict, List
 import logging
+import time
 from sqlalchemy.orm import Session
 
 from models import (
@@ -12,12 +13,14 @@ from models import (
     PersonalityProfile,
     HealthStatus,
     ProjectRequest,
-    Project
+    Project,
+    User,
+    UserCreate
 )
 from admin_ai import AdminAI
 from config import settings
 from logging_config import setup_logging
-from database import init_db, get_db, ProjectCRUD, TaskCRUD
+from database import init_db, get_db, ProjectCRUD, TaskCRUD, UserCRUD
 from project_manager import ProjectManager
 from worker_registry import get_registry, initialize_workers
 from task_executor import TaskExecutor
@@ -139,9 +142,23 @@ async def chat_with_admin_ai(request: ChatRequest, session_id: str = "default", 
     try:
         admin_ai = get_admin_ai(session_id)
         
-        # Update personality if provided
-        if request.personality:
-            admin_ai.personality = request.personality
+        # Determine personality
+        personality = request.personality
+        
+        # If no personality provided but user_id is present, try to load from user profile
+        if not personality and request.user_id:
+            user = UserCRUD.get(db, request.user_id)
+            if user and user.personality_type:
+                # Convert DB personality to PersonalityProfile
+                # Note: This is a simplification. In a real app we'd map all fields.
+                # For now we just use the type if it matches a preset, or default.
+                if user.personality_type in settings.personality_presets:
+                    personality = settings.personality_presets[user.personality_type]
+                    logger.debug(f"Loaded personality '{user.personality_type}' for user {request.user_id}")
+        
+        # Update personality if provided or loaded
+        if personality:
+            admin_ai.personality = personality
             logger.debug(f"Personality updated for session {session_id}")
         
         # Process chat
@@ -240,6 +257,85 @@ async def get_project_suggestions(project_type: str, session_id: str = "default"
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating suggestions: {str(e)}")
+
+
+# ============================================================================
+# User Management Endpoints
+# ============================================================================
+
+@app.post("/api/users", response_model=User)
+async def create_user(user_create: UserCreate, db: Session = Depends(get_db)):
+    """Create a new user"""
+    try:
+        # Check if username exists
+        if UserCRUD.get_by_username(db, user_create.username):
+            raise HTTPException(status_code=400, detail="Username already exists")
+        
+        # Prepare user data
+        user_data = {
+            "id": f"user_{int(time.time())}_{user_create.username}",  # Simple ID generation
+            "username": user_create.username,
+            "email": user_create.email,
+            "preferences": user_create.preferences or {}
+        }
+        
+        if user_create.personality:
+            user_data["personality_type"] = user_create.personality.type.value
+            user_data["personality_formality"] = user_create.personality.formality
+            user_data["personality_enthusiasm"] = user_create.personality.enthusiasm
+            user_data["personality_verbosity"] = user_create.personality.verbosity
+            
+        user = UserCRUD.create(db, user_data)
+        return user.to_dict()
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+
+
+@app.get("/api/users/{user_id}", response_model=User)
+async def get_user(user_id: str, db: Session = Depends(get_db)):
+    """Get user profile"""
+    try:
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        return user.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
+
+
+@app.put("/api/users/{user_id}/personality")
+async def update_user_personality(
+    user_id: str, 
+    personality: PersonalityProfile, 
+    db: Session = Depends(get_db)
+):
+    """Update user's Admin AI personality settings"""
+    try:
+        updates = {
+            "personality_type": personality.type.value,
+            "personality_formality": personality.formality,
+            "personality_enthusiasm": personality.enthusiasm,
+            "personality_verbosity": personality.verbosity
+        }
+        
+        user = UserCRUD.update(db, user_id, updates)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return {"status": "success", "message": "Personality updated", "user": user.to_dict()}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating personality: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating personality: {str(e)}")
 
 
 # ============================================================================

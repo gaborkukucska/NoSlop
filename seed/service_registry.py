@@ -181,6 +181,22 @@ class ServiceRegistry:
                 and service.health_status == "healthy"
             ]
     
+    def get_instances_by_type(self, service_type: ServiceType) -> List[ServiceInstance]:
+        """
+        Get all instances of a specific service type.
+        
+        Args:
+            service_type: Type of service to query
+            
+        Returns:
+            List of all instances of the specified type (regardless of health status)
+        """
+        with self.lock:
+            return [
+                service for service in self.services.values()
+                if service.service_type == service_type
+            ]
+    
     def select_instance_for_task(
         self,
         service_type: ServiceType,

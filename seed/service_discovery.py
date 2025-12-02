@@ -24,6 +24,7 @@ class ServiceType(Enum):
     COMFYUI = "comfyui"
     POSTGRESQL = "postgresql"
     NOSLOP_BACKEND = "noslop_backend"
+    NOSLOP_FRONTEND = "noslop_frontend"
 
 
 @dataclass

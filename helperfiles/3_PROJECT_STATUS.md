@@ -10,6 +10,14 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 # Project Status
 
 ## Recent Changes
+- **2025-12-03**:
+    - **Frontend Installation Fix**: Resolved service name mismatch (`noslop-frontend`) ensuring correct registration and deployment.
+    - **User Management System**: Implemented `UserModel`, `UserCRUD`, and API endpoints for user creation and personality persistence.
+    - **Deployment Summary**: Enhanced installer to display all access points (Backend/Frontend URLs) upon completion.
+    - **Verification**: Validated user flow and deployment summary with automated tests.
+    - **ComfyUI Integration**: Implemented `ComfyUIClient` and `ImageGenerationWorker` to enable local image generation.
+    - **FFmpeg Integration**: Implemented `FFmpegClient` and updated `VideoEditor` to enable local video processing.
+    - **Frontend Integration**: Connected Frontend to Backend Project API with `ProjectForm`, `ProjectList`, and `ProjectDetail` components.
 - **2025-12-01**:
     - **NoSlop Seed Smart Installer**: Implemented core components for intelligent deployment.
         - **Hardware Detection**: Created comprehensive hardware detection with CPU, RAM, GPU, disk, and OS detection
@@ -92,7 +100,8 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
   - [x] FFmpeg/OpenCV installer
   - [x] Backend installer
   - [x] Frontend installer
-- [ ] Connect to ComfyUI and FFmpeg
+- [x] Connect to ComfyUI
+- [x] Connect to FFmpeg
 - [ ] Test end-to-end project execution
 
 ### Next Steps
@@ -153,20 +162,20 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
     - [x] Build Task Executor with dependency resolution and topological sorting.
     - [x] Add worker prompt templates to prompts.yaml.
     - [x] Create API endpoints for workers and task execution.
-- **Cycle 4: Local Service Orchestration**
-    - [ ] Integrate ComfyUI API bindings.
-    - [ ] Integrate FFmpeg/OpenCV wrappers.
+- **Cycle 4: Local Service Orchestration** ✅ Complete
+    - [x] Integrate ComfyUI API bindings.
+    - [x] Integrate FFmpeg/OpenCV wrappers.
     - [ ] **Advanced Editing**: Implement non-linear editing logic and color grading pipelines.
 
-## Phase 3: Core Development - Frontend & Workflow
-- **Cycle 1: Web UI Basic Structure**
-    - [ ] Implement Dashboard layout.
-    - [ ] Create Agent Status monitor.
-- **Cycle 2: Media Creator Studio UI**
-    - [ ] Build chat interface for Admin AI.
+## Phase 3: Core Development - Frontend & Workflow (🚧 In Progress)
+- **Cycle 1: Web UI Basic Structure** ✅ Complete
+    - [x] Implement Dashboard layout.
+    - [x] Create Agent Status monitor.
+- **Cycle 2: Media Creator Studio UI** (Partial)
+    - [x] Build chat interface for Admin AI.
     - [ ] Create media preview components.
-- **Cycle 3: NoSlop Creator Workflow**
-    - [ ] Connect Frontend "New Project" flow to Backend PM Agent.
+- **Cycle 3: NoSlop Creator Workflow** (Partial)
+    - [x] Connect Frontend "New Project" flow to Backend PM Agent.
     - [ ] Implement the interactive "Scene Setup" wizard.
 
 ## Phase 4: Advanced Features - Networking & Blockchain

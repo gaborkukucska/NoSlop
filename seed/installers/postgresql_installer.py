@@ -19,7 +19,7 @@ class PostgreSQLInstaller(BaseInstaller):
         super().__init__(device, ssh_manager, "postgresql", username=username, password=password)
         self.db_name = "noslop"
         self.db_user = "noslop"
-        self.db_password = "noslop_password" # In production this should come from config/env
+        self.db_password = "noslop" # Matches deployer.py config
         self.port = 5432
 
     def check_installed(self) -> bool:
@@ -69,11 +69,18 @@ class PostgreSQLInstaller(BaseInstaller):
         time.sleep(5) # Wait for startup
         
         # Create user
-        create_user_cmd = f"sudo -u postgres psql -c \"CREATE USER {self.db_user} WITH PASSWORD '{self.db_password}';\""
+        # We use sudo -u postgres to run psql.
+        # We also need to ensure the user has LOGIN privilege.
+        create_user_cmd = f"sudo -u postgres psql -c \"CREATE USER {self.db_user} WITH PASSWORD '{self.db_password}' LOGIN;\""
         code, _, err = self.execute_remote(create_user_cmd)
         if code != 0 and "already exists" not in err:
             self.logger.error(f"Failed to create user: {err}")
             return False
+            
+        # If user exists, update password to ensure it matches
+        if "already exists" in err:
+            update_pass_cmd = f"sudo -u postgres psql -c \"ALTER USER {self.db_user} WITH PASSWORD '{self.db_password}';\""
+            self.execute_remote(update_pass_cmd)
             
         # Create database
         create_db_cmd = f"sudo -u postgres psql -c \"CREATE DATABASE {self.db_name} OWNER {self.db_user};\""

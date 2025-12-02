@@ -16,6 +16,14 @@ from sqlalchemy.orm import Session
 from worker_agent import WorkerAgent, WorkerCapabilities, ResourceRequirements
 from database import TaskTypeEnum
 
+from workers.script_writer import ScriptWriter
+from workers.prompt_engineer import PromptEngineer
+from workers.storyboard_artist import StoryboardArtist
+from workers.video_editor import VideoEditor
+from workers.color_grader import ColorGrader
+from workers.research_agent import ResearchAgent
+from workers.image_generation_worker import ImageGenerationWorker
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,11 +34,41 @@ class WorkerRegistry:
     Manages worker discovery, registration, and instantiation.
     """
     
-    def __init__(self):
+    def __init__(self, db_session: Session):
         """Initialize worker registry."""
-        self._workers: Dict[str, Type[WorkerAgent]] = {}
-        self._task_type_mapping: Dict[TaskTypeEnum, str] = {}
+        self.db = db_session
+        self.workers: Dict[str, Type[WorkerAgent]] = {}
+        self.task_type_map: Dict[TaskTypeEnum, str] = {}
         logger.info("Worker Registry initialized")
+    
+    def register_all(self):
+        """Register all available workers."""
+        worker_classes = [
+            ScriptWriter,
+            PromptEngineer,
+            StoryboardArtist,
+            VideoEditor,
+            ColorGrader,
+            ResearchAgent,
+            ImageGenerationWorker
+        ]
+        
+        for worker_class in worker_classes:
+            # Instantiate worker to get capabilities
+            # Note: In a real app we might want to do this without instantiation if possible,
+            # but for now this is consistent with how we get capabilities
+            worker = worker_class(self.db)
+            capabilities = worker.get_capabilities()
+            
+            # Register for each supported task type
+            for task_type_str in capabilities.supported_task_types:
+                try:
+                    # Convert string to Enum if needed, or use as is if your system uses strings
+                    # Assuming TaskTypeEnum has matching values
+                    task_type = TaskTypeEnum(task_type_str)
+                    self.register_worker(worker_class, [task_type])
+                except ValueError:
+                    logger.warning(f"Unknown task type: {task_type_str} for worker {worker.agent_type}")
     
     def register_worker(self, worker_class: Type[WorkerAgent], task_types: List[TaskTypeEnum]):
         """

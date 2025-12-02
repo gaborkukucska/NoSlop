@@ -55,9 +55,18 @@ class BackendInstaller(BaseInstaller):
             return False
             
         self.logger.info(f"Transferring backend files from {local_backend_dir}...")
-        self.logger.info(f"Transferring backend files from {local_backend_dir}...")
         if not self.transfer_directory(str(local_backend_dir), self.install_dir):
             return False
+            
+        # Change ownership to the user AGAIN because sudo cp (used in transfer_directory for local)
+        # makes files owned by root.
+        self.logger.info(f"Fixing ownership of {self.install_dir} to {self.username}...")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+            
+        # Remove any existing venv (especially if copied from local)
+        self.logger.info("Removing any existing venv...")
+        # Use sudo rm because it might be owned by root if copied via sudo cp
+        self.execute_remote(f"sudo rm -rf {self.venv_dir}")
             
         # Create venv
         self.logger.info("Creating virtual environment...")
@@ -66,10 +75,10 @@ class BackendInstaller(BaseInstaller):
             self.logger.error(f"Failed to create venv: {err}")
             return False
             
-        # Install requirements
+        # Installing requirements
         self.logger.info("Installing requirements...")
-        pip_cmd = f"{self.venv_dir}/bin/pip"
-        code, _, err = self.execute_remote(f"{pip_cmd} install -r {self.install_dir}/requirements.txt", timeout=600)
+        # We use --force-reinstall to ensure integrity, as we've seen corrupted installs
+        code, _, err = self.execute_remote(f"{self.venv_dir}/bin/pip install --force-reinstall -r {self.install_dir}/requirements.txt", timeout=600)
         if code != 0:
             self.logger.error(f"Failed to install requirements: {err}")
             return False

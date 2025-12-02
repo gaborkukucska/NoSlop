@@ -9,18 +9,21 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 - ✅ **Service Registry**: Tracks all services and handles load balancing.
 - ✅ **Automated Installation**: Installs all dependencies and services.
 - ✅ **Configuration**: Generates `.env` and systemd services.
+- ✅ **User Management**: Backend supports user creation and personality persistence.
+- ✅ **Deployment Summary**: Clearly lists all access points (Backend/Frontend URLs).
+- ✅ **ComfyUI Integration**: Backend can now trigger local image generation via `ImageGenerationWorker`.
+- ✅ **FFmpeg Integration**: Backend can now process videos (slideshows, concatenation) via `VideoEditor` worker.
+- ✅ **Frontend Integration**: UI can now create projects, view project lists, and trigger execution via Backend API.
 
 ### What Needs Implementation:
 **Phase 3: Integration & Workflow**
 
 1. **Local Service Orchestration**:
-   - Integrate ComfyUI API bindings into Backend (to actually generate images).
-   - Integrate FFmpeg/OpenCV wrappers into Backend (for video processing).
-   - Implement the "Worker Agent" logic to use these local tools.
+   - Implement the "Worker Agent" logic to use these local tools (Refine and Expand).
 
 2. **Frontend & Workflow**:
-   - Connect Frontend "New Project" flow to Backend PM Agent.
-   - Implement interactive "Scene Setup" wizard.
+   - Implement Scene Setup Wizard (multi-step project creation).
+   - Add real-time task progress updates (websocket or polling).
    - Create media preview components.
 
 3. **Advanced Installer Features**:
