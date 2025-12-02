@@ -17,10 +17,10 @@ class OllamaInstaller(BaseInstaller):
     Installs and configures Ollama with multi-instance support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, username: str = "root"):
-        super().__init__(device, ssh_manager, "ollama", username=username)
+    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, username: str = "root", password: str = None):
+        super().__init__(device, ssh_manager, "ollama", username=username, password=password)
         self.port = port
-        self.models = models or ["llama3.2:latest", "qwen2.5:latest", "llava:latest"]
+        self.models = models or ["gemma3:4b-it-q4_K_M", "qwen3-vl:4b-instruct-q8_0", "llava:latest"]
         self.is_secondary = port != 11434
 
     def check_installed(self) -> bool:
@@ -62,6 +62,10 @@ class OllamaInstaller(BaseInstaller):
         self.logger.info(f"Configuring Ollama on port {self.port}...")
         
         if self.device.os_type.value == "linux":
+            # Increase system-wide limits first
+            self.logger.info("Increasing system-wide file limits...")
+            self.execute_remote("echo 'fs.inotify.max_user_watches=524288' | sudo tee -a /etc/sysctl.conf && sudo sysctl -p")
+            
             # Create systemd service
             service_name = "ollama" if not self.is_secondary else f"ollama-{self.port}"
             
@@ -79,6 +83,10 @@ class OllamaInstaller(BaseInstaller):
             env_vars = f"OLLAMA_HOST=0.0.0.0:{self.port}"
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
             
+            # Add LimitNOFILE to Service section
+            # We inject it before Environment
+            service_content = service_content.replace("Environment=", "LimitNOFILE=65536\nEnvironment=")
+            
             # Write service file
             remote_path = f"/etc/systemd/system/{service_name}.service"
             
@@ -95,8 +103,9 @@ class OllamaInstaller(BaseInstaller):
                     return False
                 
                 # Move to correct location (requires sudo)
-                self.execute_remote(f"mv /tmp/{service_name}.service {remote_path}")
-                self.execute_remote("systemctl daemon-reload")
+                # Increased timeout for mv command as it was timing out
+                self.execute_remote(f"sudo mv /tmp/{service_name}.service {remote_path}", timeout=60)
+                self.execute_remote("sudo systemctl daemon-reload")
                 
             finally:
                 os.unlink(tmp_path)
@@ -110,7 +119,7 @@ class OllamaInstaller(BaseInstaller):
         service_name = "ollama" if not self.is_secondary else f"ollama-{self.port}"
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote(f"systemctl enable {service_name} && systemctl start {service_name}")
+            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl start {service_name}")
             if code != 0:
                 self.logger.error(f"Failed to start {service_name}: {err}")
                 return False
@@ -152,7 +161,7 @@ class OllamaInstaller(BaseInstaller):
         """Rollback installation."""
         service_name = "ollama" if not self.is_secondary else f"ollama-{self.port}"
         if self.device.os_type.value == "linux":
-            self.execute_remote(f"systemctl stop {service_name}")
-            self.execute_remote(f"systemctl disable {service_name}")
-            self.execute_remote(f"rm /etc/systemd/system/{service_name}.service")
-            self.execute_remote("systemctl daemon-reload")
+            self.execute_remote(f"sudo systemctl stop {service_name}")
+            self.execute_remote(f"sudo systemctl disable {service_name}")
+            self.execute_remote(f"sudo rm /etc/systemd/system/{service_name}.service")
+            self.execute_remote("sudo systemctl daemon-reload")

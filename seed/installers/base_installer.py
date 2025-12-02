@@ -28,7 +28,8 @@ class BaseInstaller(ABC):
         device: DeviceCapabilities,
         ssh_manager: SSHManager,
         service_name: str,
-        username: Optional[str] = "root"
+        username: Optional[str] = "root",
+        password: Optional[str] = None
     ):
         """
         Initialize the installer.
@@ -38,11 +39,13 @@ class BaseInstaller(ABC):
             ssh_manager: SSH manager instance
             service_name: Name of the service being installed
             username: SSH username for remote connections
+            password: Password for sudo/SSH (optional)
         """
         self.device = device
         self.ssh_manager = ssh_manager
         self.service_name = service_name
         self.username = username
+        self.password = password
         self.ssh_client = None
         self.logger = logging.getLogger(f"{__name__}.{service_name}")
 
@@ -95,13 +98,35 @@ class BaseInstaller(ABC):
             import subprocess
             try:
                 self.logger.debug(f"Executing local: {command}")
-                result = subprocess.run(
-                    command, 
-                    shell=True, 
-                    capture_output=True, 
-                    text=True, 
-                    timeout=timeout
-                )
+                
+                # Handle sudo with password if needed
+                if command.strip().startswith("sudo") and self.password:
+                    # Use sudo -S to read password from stdin
+                    cmd_parts = command.split(" ", 1)
+                    if len(cmd_parts) > 1:
+                        # Replace 'sudo' with 'sudo -S'
+                        # We need to be careful not to replace inner sudos if any, but usually it's the start
+                        final_command = f"sudo -S {cmd_parts[1]}"
+                    else:
+                        final_command = "sudo -S" # Just sudo?
+                        
+                    self.logger.debug("Using sudo -S with provided password")
+                    result = subprocess.run(
+                        final_command, 
+                        shell=True, 
+                        input=f"{self.password}\n",
+                        capture_output=True, 
+                        text=True, 
+                        timeout=timeout
+                    )
+                else:
+                    result = subprocess.run(
+                        command, 
+                        shell=True, 
+                        capture_output=True, 
+                        text=True, 
+                        timeout=timeout
+                    )
                 return result.returncode, result.stdout.strip(), result.stderr.strip()
             except Exception as e:
                 self.logger.error(f"Local execution failed: {e}")
@@ -123,10 +148,17 @@ class BaseInstaller(ABC):
             True if successful
         """
         if self.is_local:
-            import shutil
             try:
-                Path(remote_path).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(local_path, remote_path)
+                # Use sudo cp via execute_remote to handle permissions
+                # First ensure directory exists
+                parent_dir = str(Path(remote_path).parent)
+                self.create_directory(parent_dir)
+                
+                cmd = f"sudo cp {local_path} {remote_path}"
+                code, _, err = self.execute_remote(cmd)
+                if code != 0:
+                    self.logger.error(f"Local file copy failed: {err}")
+                    return False
                 return True
             except Exception as e:
                 self.logger.error(f"Local file copy failed: {e}")
@@ -136,11 +168,54 @@ class BaseInstaller(ABC):
                 return False
             return self.ssh_manager.transfer_file(self.ssh_client, local_path, remote_path)
 
+    def transfer_directory(self, local_dir: str, remote_dir: str) -> bool:
+        """
+        Transfer directory to target device.
+        
+        Args:
+            local_dir: Path to local directory
+            remote_dir: Destination path on target
+            
+        Returns:
+            True if successful
+        """
+        if self.is_local:
+            try:
+                # Use sudo cp -r via execute_remote to handle permissions
+                # Ensure parent of destination exists
+                parent_dir = str(Path(remote_dir).parent)
+                self.create_directory(parent_dir)
+                
+                # If remote_dir exists, cp -r source remote_dir will put source INSIDE remote_dir
+                # We want the contents of source to be IN remote_dir
+                # So we use cp -r source/. remote_dir/
+                
+                # First ensure remote_dir exists
+                self.create_directory(remote_dir)
+                
+                cmd = f"sudo cp -r {local_dir}/. {remote_dir}/"
+                code, _, err = self.execute_remote(cmd)
+                if code != 0:
+                    self.logger.error(f"Local directory copy failed: {err}")
+                    return False
+                return True
+            except Exception as e:
+                self.logger.error(f"Local directory copy failed: {e}")
+                return False
+        else:
+            if not self.ssh_client:
+                return False
+            return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir)
+
     def create_directory(self, path: str) -> bool:
         """Create directory on target device."""
         if self.is_local:
             try:
-                Path(path).mkdir(parents=True, exist_ok=True)
+                cmd = f"sudo mkdir -p {path}"
+                code, _, err = self.execute_remote(cmd)
+                if code != 0:
+                    self.logger.error(f"Failed to create local directory {path}: {err}")
+                    return False
                 return True
             except Exception as e:
                 self.logger.error(f"Failed to create local directory {path}: {e}")

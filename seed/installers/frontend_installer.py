@@ -16,8 +16,8 @@ class FrontendInstaller(BaseInstaller):
     Installs and configures NoSlop Frontend.
     """
     
-    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root"):
-        super().__init__(device, ssh_manager, "noslop-frontend", username=username)
+    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root", password: str = None):
+        super().__init__(device, ssh_manager, "noslop-frontend", username=username, password=password)
         self.install_dir = "/opt/noslop/frontend"
         self.env_config = env_config or {}
 
@@ -51,6 +51,10 @@ class FrontendInstaller(BaseInstaller):
         # Create directory
         self.execute_remote(f"mkdir -p {self.install_dir}")
         
+        # Change ownership to the user
+        self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        
         # Transfer frontend files
         local_frontend_dir = Path("frontend").absolute()
         if not local_frontend_dir.exists():
@@ -64,7 +68,8 @@ class FrontendInstaller(BaseInstaller):
         # For now, let's assume the user hasn't built locally or we transfer everything.
         # A better approach for production would be to build locally and transfer artifacts,
         # but for now we transfer source and build on target.
-        if not self.ssh_manager.transfer_directory(self.ssh_client, str(local_frontend_dir), self.install_dir):
+        # but for now we transfer source and build on target.
+        if not self.transfer_directory(str(local_frontend_dir), self.install_dir):
             return False
             
         # Install dependencies
@@ -118,8 +123,8 @@ class FrontendInstaller(BaseInstaller):
                 if not self.transfer_file(tmp_path, f"/tmp/noslop-frontend.service"):
                     return False
                 
-                self.execute_remote(f"mv /tmp/noslop-frontend.service {remote_path}")
-                self.execute_remote("systemctl daemon-reload")
+                self.execute_remote(f"sudo mv /tmp/noslop-frontend.service {remote_path}")
+                self.execute_remote("sudo systemctl daemon-reload")
             finally:
                 os.unlink(tmp_path)
                 
@@ -130,7 +135,7 @@ class FrontendInstaller(BaseInstaller):
         self.logger.info("Starting NoSlop Frontend...")
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote("systemctl enable noslop-frontend && systemctl start noslop-frontend")
+            code, _, err = self.execute_remote("sudo systemctl enable noslop-frontend && sudo systemctl start noslop-frontend")
             if code != 0:
                 self.logger.error(f"Failed to start frontend: {err}")
                 return False
@@ -155,9 +160,9 @@ class FrontendInstaller(BaseInstaller):
     def rollback(self):
         """Rollback installation."""
         if self.device.os_type.value == "linux":
-            self.execute_remote("systemctl stop noslop-frontend")
-            self.execute_remote("systemctl disable noslop-frontend")
-            self.execute_remote("rm /etc/systemd/system/noslop-frontend.service")
-            self.execute_remote("systemctl daemon-reload")
+            self.execute_remote("sudo systemctl stop noslop-frontend")
+            self.execute_remote("sudo systemctl disable noslop-frontend")
+            self.execute_remote("sudo rm /etc/systemd/system/noslop-frontend.service")
+            self.execute_remote("sudo systemctl daemon-reload")
             
         self.execute_remote(f"rm -rf {self.install_dir}")

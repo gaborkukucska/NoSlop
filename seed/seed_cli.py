@@ -209,6 +209,28 @@ class NoSlopSeedCLI:
         devices.append(current_device)
         print(f"✓ Added: {current_device.hostname} ({current_device.ip_address}) - score: {current_device.capability_score}/100\n")
         
+        # Collect local credentials for sudo operations
+        print("🔐 Local Sudo Access")
+        print("   To install services locally, we need sudo access.")
+        import getpass
+        import os
+        local_user = os.getenv("USER", "root")
+        local_pass = getpass.getpass(f"   Enter sudo password for {local_user}: ")
+        
+        if local_pass:
+            from seed.ssh_manager import SSHCredentials
+            # We store credentials for the local IP so deployer can find them
+            creds = SSHCredentials(
+                ip_address=current_device.ip_address,
+                username=local_user,
+                password=local_pass,
+                port=22
+            )
+            credentials_map[current_device.ip_address] = creds
+            print("   ✓ Local credentials stored\n")
+        else:
+            print("   ⚠️  No password provided. Local installation might fail if sudo requires password.\n")
+        
         # Option 1: Scan network for remote devices
         if not self.args.skip_scan:
             print("🔍 Scanning local network for SSH-enabled devices...")

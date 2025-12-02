@@ -15,8 +15,8 @@ class PostgreSQLInstaller(BaseInstaller):
     Installs and configures PostgreSQL.
     """
     
-    def __init__(self, device, ssh_manager, username="root"):
-        super().__init__(device, ssh_manager, "postgresql", username=username)
+    def __init__(self, device, ssh_manager, username="root", password=None):
+        super().__init__(device, ssh_manager, "postgresql", username=username, password=password)
         self.db_name = "noslop"
         self.db_user = "noslop"
         self.db_password = "noslop_password" # In production this should come from config/env

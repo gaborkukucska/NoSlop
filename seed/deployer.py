@@ -122,12 +122,12 @@ class Deployer:
         
         if NodeRole.MASTER in node.roles or NodeRole.ALL in node.roles:
             config["NOSLOP_BACKEND_URL"] = f"http://{node.device.ip_address}:8000"
-            config["NOSLOP_DATABASE_URL"] = f"postgresql://noslop:noslop@localhost:5432/noslop"
-            config["OLLAMA_URL"] = f"http://{node.device.ip_address}:11434"
+            config["DATABASE_URL"] = f"postgresql://noslop:noslop@localhost:5432/noslop"
+            config["OLLAMA_HOST"] = f"http://{node.device.ip_address}:11434"
         else:
             if plan.master_node:
                 config["NOSLOP_BACKEND_URL"] = f"http://{plan.master_node.device.ip_address}:8000"
-                config["OLLAMA_URL"] = f"http://{plan.master_node.device.ip_address}:11434"
+                config["OLLAMA_HOST"] = f"http://{plan.master_node.device.ip_address}:11434"
         
         # ComfyUI URLs
         compute_nodes = plan.get_node_by_role(NodeRole.COMPUTE)
@@ -135,21 +135,23 @@ class Deployer:
             compute_nodes = plan.get_node_by_role(NodeRole.ALL)
         
         if compute_nodes:
-            comfyui_urls = [
-                f"http://{n.device.ip_address}:8188" 
-                for n in compute_nodes
-            ]
-            config["COMFYUI_URLS"] = ",".join(comfyui_urls)
+            # Backend expects a single string for now, or we need to handle list.
+            # Config says comfyui_host: str. So we pick the first one.
+            # If we want multiple, we need to update backend config.
+            # For now, let's just pick the first one.
+            comfyui_url = f"http://{compute_nodes[0].device.ip_address}:8188"
+            config["COMFYUI_HOST"] = comfyui_url
+            config["COMFYUI_ENABLED"] = "true"
         
         # Storage paths
         if NodeRole.STORAGE in node.roles or NodeRole.ALL in node.roles:
-            config["NOSLOP_MEDIA_PATH"] = "/var/noslop/media"
-            config["NOSLOP_BLOCKCHAIN_PATH"] = "/var/noslop/blockchain"
+            config["MEDIA_STORAGE_PATH"] = "/var/noslop/media"
+            # config["NOSLOP_BLOCKCHAIN_PATH"] = "/var/noslop/blockchain" # Not used in backend config yet
         
         # Model preferences
-        config["NOSLOP_LOGIC_MODEL"] = "llama3.2:latest"
-        config["NOSLOP_IMAGE_MODEL"] = "stable-diffusion"
-        config["NOSLOP_VIDEO_MODEL"] = "animatediff"
+        config["MODEL_LOGIC"] = "llama3.2:latest"
+        config["MODEL_IMAGE"] = "stable-diffusion"
+        config["MODEL_VIDEO"] = "animatediff"
         
         return config
     
@@ -187,14 +189,20 @@ class Deployer:
         """
         logger.info("\n🛠️  Starting Service Installation...")
 
-        def get_username(device):
-            return credentials_map.get(device.ip_address, {}).get("username", "root")
+        def get_credentials(device):
+            """Helper to get username and password for a device."""
+            creds = credentials_map.get(device.ip_address)
+            if creds:
+                # It's an SSHCredentials object
+                return creds.username, creds.password
+            return "root", None
 
         # Phase 1: Base Dependencies
         logger.info("\n[Phase 1] Installing Base Dependencies...")
         for node in plan.nodes:
             if NodeRole.COMPUTE in node.roles or NodeRole.ALL in node.roles:
-                installer = FFmpegInstaller(node.device, self.ssh_manager, username=get_username(node.device))
+                username, password = get_credentials(node.device)
+                installer = FFmpegInstaller(node.device, self.ssh_manager, username=username, password=password)
                 if not installer.run():
                     logger.error(f"Failed to install FFmpeg on {node.device.hostname}")
                     return False
@@ -202,7 +210,8 @@ class Deployer:
         # Phase 2: Core Infrastructure (PostgreSQL)
         logger.info("\n[Phase 2] Installing Core Infrastructure...")
         if plan.master_node:
-            installer = PostgreSQLInstaller(plan.master_node.device, self.ssh_manager, username=get_username(plan.master_node.device))
+            username, password = get_credentials(plan.master_node.device)
+            installer = PostgreSQLInstaller(plan.master_node.device, self.ssh_manager, username=username, password=password)
             if not installer.run():
                 logger.error("Failed to install PostgreSQL on master node")
                 return False
@@ -225,7 +234,8 @@ class Deployer:
             if "ollama" in node.services:
                 # Determine port (default 11434, but could be others if multi-instance)
                 # For now we stick to default port for primary instance
-                installer = OllamaInstaller(node.device, self.ssh_manager, username=get_username(node.device))
+                username, password = get_credentials(node.device)
+                installer = OllamaInstaller(node.device, self.ssh_manager, username=username, password=password)
                 if not installer.run():
                     logger.error(f"Failed to install Ollama on {node.device.hostname}")
                     return False
@@ -244,7 +254,8 @@ class Deployer:
         for node in plan.nodes:
             if "comfyui" in node.services:
                 # Determine GPU index (default 0)
-                installer = ComfyUIInstaller(node.device, self.ssh_manager, username=get_username(node.device))
+                username, password = get_credentials(node.device)
+                installer = ComfyUIInstaller(node.device, self.ssh_manager, username=username, password=password)
                 if not installer.run():
                     logger.error(f"Failed to install ComfyUI on {node.device.hostname}")
                     return False
@@ -266,7 +277,8 @@ class Deployer:
         if plan.master_node:
             # Generate config for backend
             config = self.generate_node_config(plan.master_node, plan)
-            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config, username=get_username(plan.master_node.device))
+            username, password = get_credentials(plan.master_node.device)
+            installer = BackendInstaller(plan.master_node.device, self.ssh_manager, config, username=username, password=password)
             if not installer.run():
                 logger.error("Failed to install Backend on master node")
                 return False
@@ -285,7 +297,8 @@ class Deployer:
         for node in plan.nodes:
             if "noslop-frontend" in node.services:
                 config = self.generate_node_config(node, plan)
-                installer = FrontendInstaller(node.device, self.ssh_manager, config, username=get_username(node.device))
+                username, password = get_credentials(node.device)
+                installer = FrontendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
                 if not installer.run():
                     logger.error(f"Failed to install Frontend on {node.device.hostname}")
                     return False

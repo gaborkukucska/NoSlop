@@ -18,8 +18,8 @@ class ComfyUIInstaller(BaseInstaller):
     Installs and configures ComfyUI with GPU support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, username: str = "root"):
-        super().__init__(device, ssh_manager, "comfyui", username=username)
+    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, username: str = "root", password: str = None):
+        super().__init__(device, ssh_manager, "comfyui", username=username, password=password)
         self.port = port
         self.gpu_index = gpu_index
         self.install_dir = f"/opt/ComfyUI_{port}" if port != 8188 else "/opt/ComfyUI"
@@ -47,16 +47,22 @@ class ComfyUIInstaller(BaseInstaller):
         # Create directory with sudo
         self.execute_remote(f"sudo mkdir -p {self.install_dir}")
         
-        # Clone repository
+        # Change ownership to the user so we can clone without sudo
+        # We use the username provided in __init__
+        self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        
+        # Clone repository (as user)
         self.logger.info("Cloning ComfyUI repository...")
-        code, _, err = self.execute_remote(f"sudo git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
+        # Note: We don't use sudo here
+        code, _, err = self.execute_remote(f"git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
         if code != 0 and "already exists" not in err:
             self.logger.error(f"Failed to clone ComfyUI: {err}")
             return False
             
-        # Create venv (need sudo since we created the directory with sudo)
+        # Create venv (as user)
         self.logger.info("Creating virtual environment...")
-        code, _, err = self.execute_remote(f"sudo python3 -m venv {self.venv_dir}")
+        code, _, err = self.execute_remote(f"python3 -m venv {self.venv_dir}")
         if code != 0:
             self.logger.error(f"Failed to create venv: {err}")
             return False
@@ -68,7 +74,8 @@ class ComfyUIInstaller(BaseInstaller):
         """Install Python dependencies with correct PyTorch version."""
         self.logger.info("Installing Python dependencies...")
         
-        pip_cmd = f"sudo {self.venv_dir}/bin/pip"
+        # We don't use sudo for pip inside venv if we own the venv
+        pip_cmd = f"{self.venv_dir}/bin/pip"
         
         # Upgrade pip
         self.execute_remote(f"{pip_cmd} install --upgrade pip")
@@ -125,7 +132,7 @@ class ComfyUIInstaller(BaseInstaller):
             
             # Fill template
             service_content = template.replace("{{SERVICE_NAME}}", service_name)
-            service_content = service_content.replace("{{USER}}", "root") # Should be specific user
+            service_content = service_content.replace("{{USER}}", self.username) # Run as the user
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
             service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)

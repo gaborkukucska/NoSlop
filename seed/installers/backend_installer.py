@@ -16,8 +16,8 @@ class BackendInstaller(BaseInstaller):
     Installs and configures NoSlop Backend.
     """
     
-    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root"):
-        super().__init__(device, ssh_manager, "noslop-backend", username=username)
+    def __init__(self, device, ssh_manager, env_config: dict = None, username: str = "root", password: str = None):
+        super().__init__(device, ssh_manager, "noslop-backend", username=username, password=password)
         self.install_dir = "/opt/noslop/backend"
         self.venv_dir = f"{self.install_dir}/venv"
         self.env_config = env_config or {}
@@ -43,6 +43,10 @@ class BackendInstaller(BaseInstaller):
         # Create directory
         self.execute_remote(f"mkdir -p {self.install_dir}")
         
+        # Change ownership to the user
+        self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        
         # Transfer backend files
         # We assume we are running from repo root
         local_backend_dir = Path("backend").absolute()
@@ -51,7 +55,8 @@ class BackendInstaller(BaseInstaller):
             return False
             
         self.logger.info(f"Transferring backend files from {local_backend_dir}...")
-        if not self.ssh_manager.transfer_directory(self.ssh_client, str(local_backend_dir), self.install_dir):
+        self.logger.info(f"Transferring backend files from {local_backend_dir}...")
+        if not self.transfer_directory(str(local_backend_dir), self.install_dir):
             return False
             
         # Create venv
@@ -118,8 +123,8 @@ class BackendInstaller(BaseInstaller):
                 if not self.transfer_file(tmp_path, f"/tmp/noslop-backend.service"):
                     return False
                 
-                self.execute_remote(f"mv /tmp/noslop-backend.service {remote_path}")
-                self.execute_remote("systemctl daemon-reload")
+                self.execute_remote(f"sudo mv /tmp/noslop-backend.service {remote_path}")
+                self.execute_remote("sudo systemctl daemon-reload")
             finally:
                 os.unlink(tmp_path)
                 
@@ -130,7 +135,7 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Starting NoSlop Backend...")
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote("systemctl enable noslop-backend && systemctl start noslop-backend")
+            code, _, err = self.execute_remote("sudo systemctl enable noslop-backend && sudo systemctl start noslop-backend")
             if code != 0:
                 self.logger.error(f"Failed to start backend: {err}")
                 return False
@@ -155,9 +160,9 @@ class BackendInstaller(BaseInstaller):
     def rollback(self):
         """Rollback installation."""
         if self.device.os_type.value == "linux":
-            self.execute_remote("systemctl stop noslop-backend")
-            self.execute_remote("systemctl disable noslop-backend")
-            self.execute_remote("rm /etc/systemd/system/noslop-backend.service")
-            self.execute_remote("systemctl daemon-reload")
+            self.execute_remote("sudo systemctl stop noslop-backend")
+            self.execute_remote("sudo systemctl disable noslop-backend")
+            self.execute_remote("sudo rm /etc/systemd/system/noslop-backend.service")
+            self.execute_remote("sudo systemctl daemon-reload")
             
         self.execute_remote(f"rm -rf {self.install_dir}")
