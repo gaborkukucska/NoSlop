@@ -444,7 +444,8 @@ class SSHManager:
         self,
         client: "paramiko.SSHClient",
         local_dir: str,
-        remote_dir: str
+        remote_dir: str,
+        excludes: List[str] = None
     ) -> bool:
         """
         Transfer entire directory to remote device using SFTP.
@@ -453,38 +454,88 @@ class SSHManager:
             client: Connected SSH client
             local_dir: Local directory path
             remote_dir: Remote directory path
+            excludes: List of glob patterns to exclude (e.g. ["node_modules", "*.pyc"])
             
         Returns:
             True if transfer successful
         """
+        import fnmatch
+        
         try:
             logger.info(f"Transferring directory {local_dir} to {remote_dir}...")
+            if excludes:
+                logger.info(f"Excluding patterns: {excludes}")
             
             sftp = client.open_sftp()
             local_path = Path(local_dir)
             
-            # Create remote directory
-            try:
-                sftp.mkdir(remote_dir)
-            except IOError:
-                pass  # Directory might already exist
+            # Collect all unique parent directories we'll need
+            parent_dirs = set()
+            parent_dirs.add(remote_dir)
             
-            # Transfer all files recursively
+            files_to_transfer = []
+            
             for item in local_path.rglob('*'):
+                # Check excludes
+                if excludes:
+                    # Check if any part of the relative path matches any exclude pattern
+                    rel_path = item.relative_to(local_path)
+                    parts = rel_path.parts
+                    should_exclude = False
+                    
+                    # Check each part of the path against excludes
+                    # This handles directory exclusion correctly (e.g. excluding "node_modules" excludes "node_modules/foo")
+                    for part in parts:
+                        for pattern in excludes:
+                            if fnmatch.fnmatch(part, pattern):
+                                should_exclude = True
+                                break
+                        if should_exclude:
+                            break
+                    
+                    if should_exclude:
+                        continue
+
                 if item.is_file():
                     relative_path = item.relative_to(local_path)
                     remote_file = f"{remote_dir}/{relative_path}".replace('\\', '/')
-                    
-                    # Create parent directories
                     remote_parent = '/'.join(remote_file.split('/')[:-1])
-                    try:
-                        sftp.mkdir(remote_parent)
-                    except IOError:
-                        pass
                     
-                    # Transfer file
-                    sftp.put(str(item), remote_file)
-                    logger.debug(f"Transferred: {relative_path}")
+                    files_to_transfer.append((item, remote_file))
+                    
+                    # Add all parent directories in the path
+                    parts = remote_parent.split('/')
+                    for i in range(len(parts)):
+                        if i > 0:  # Skip empty string from leading /
+                            parent_dirs.add('/'.join(parts[:i+1]))
+            
+            # Create all parent directories via SSH command (not SFTP)
+            # This ensures proper permissions and recursive creation
+            sorted_dirs = sorted(parent_dirs, key=lambda x: len(x.split('/')))
+            for dir_path in sorted_dirs:
+                # Use stat to check if directory exists, create if not
+                check_cmd = f"test -d {dir_path}"
+                exit_code, _, _ = self.execute_command(client, check_cmd)
+                if exit_code != 0:
+                    # Directory doesn't exist, create it with sudo
+                    # This is required because we're creating directories under /opt
+                    create_cmd = f"sudo mkdir -p {dir_path}"
+                    exit_code, _, err = self.execute_command(client, create_cmd)
+                    if exit_code != 0:
+                        logger.warning(f"Failed to create directory {dir_path}: {err}")
+            
+            # Transfer all files
+            total_files = len(files_to_transfer)
+            logger.info(f"Transferring {total_files} files...")
+            
+            for i, (local_item, remote_file) in enumerate(files_to_transfer, 1):
+                # Transfer file
+                try:
+                    sftp.put(str(local_item), remote_file)
+                    if i % 10 == 0 or i == total_files:
+                        logger.debug(f"Transferred {i}/{total_files}: {local_item.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to transfer {local_item}: {e}")
             
             sftp.close()
             logger.info(f"✓ Directory transferred successfully")

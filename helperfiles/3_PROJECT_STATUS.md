@@ -11,6 +11,32 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 
 ## Recent Changes
 - **2025-12-03**:
+    - **Installer Bug Fix**: Fixed critical issue preventing frontend deployment:
+      - **Root Cause**: Transferring `node_modules` directory causing thousands of `test -d` commands via SSH, spamming logs and slowing deployment
+      - **Solution**: Implemented file exclusion support in directory transfer operations
+      - **Files Modified**: 
+        - `seed/ssh_manager.py`: Added `excludes` parameter to `transfer_directory()` with fnmatch pattern matching
+        - `seed/installers/base_installer.py`: Added `excludes` parameter and rsync support for local transfers
+        - `seed/installers/frontend_installer.py`: Excludes `node_modules`, `.next`, `.git`, `.idea`, `.vscode`
+        - `seed/installers/backend_installer.py`: Excludes `venv`, `__pycache__`, `.git`, `.pytest_cache`, `*.pyc`, `.idea`, `.vscode`
+      - **Impact**: Significantly faster deployments, cleaner logs, no more hanging on file transfers
+    - **ComfyUI Permission Fixes**: Fixed three permission issues in ComfyUI installer:
+      1. Git clone: Added `sudo -u {username}` to ensure correct ownership
+      2. Venv creation: Added `sudo -u {username}` to ensure correct ownership  
+      3. Pip install: Prefixed pip commands with `sudo -u {username}` to prevent permission errors
+      - **Files Modified**: `seed/installers/comfyui_installer.py`
+    - **Management Scripts**: Added service management commands to NoSlop Seed:
+      - Created `seed/manager.py` with `ServiceManager` class for controlling deployed services
+      - Added CLI commands: `--start`, `--stop`, `--restart`, `--status`, `--uninstall`
+      - Supports single and multi-device deployments
+      - Uninstall includes confirmation prompt for safety
+      - **Files Modified**: `seed/seed_cli.py`, **Files Created**: `seed/manager.py`
+    - **SFTP Permission Fix**: Fixed critical permission issue in frontend installer that was preventing deployment:
+      - **Root Cause**: Frontend installer was creating `/opt/noslop/frontend` directory with sudo (root ownership) before attempting SFTP transfer as non-root user
+      - **Issue**: SFTP transfer failed with "[Errno 13] Permission denied" when trying to write to root-owned directory
+      - **Solution**: Removed premature directory creation from `frontend_installer.py`, allowing the base class `transfer_directory()` method to handle directory creation and ownership setup before SFTP transfer
+      - **Additional Fix**: Updated rollback method to use `sudo rm -rf` instead of `rm -rf` to properly clean up root-owned directories
+      - **Files Modified**: `seed/installers/frontend_installer.py`
     - **Frontend Deployment Fix**: Fixed five critical issues in frontend installation:
       1. npm permission errors - ensured npm commands run as the correct user (`sudo -u tom`)
       2. Node.js version detection - source nvm environment to use v22.18.0 instead of system v18.19.1

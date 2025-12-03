@@ -10,7 +10,9 @@
 *   Do NOT remove functional code even if it is yet incomplete, but rather complete what is missing.
 *   Measure in predicted "generation token length" instead of any units of "time" when estimating the length of planned work, as that is more representative of how "long" a planned task will take you.
 *   Whenever available use the log files to find clues. These files might be very large so first search them for warnings, errors or other specific strings, then use the time stamps to find more detailed debug logs around those times.
-*   Maintain code consistency.
+*   Maintain code naming and structure consistency.
+*   If an existing feature could be done better, then do not hesitate to ALWAYS opt for making things better, even if it means some refactoring.
+*   Make sure to use the same logging format and style throughout the entire framework.
 
 ## Architectural Requirements (CRITICAL)
 *   **Logging**: Implement comprehensive DEBUG and INFO logging throughout the entire framework. Use structured logging with appropriate log levels.

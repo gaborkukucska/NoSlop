@@ -47,11 +47,10 @@ class FrontendInstaller(BaseInstaller):
         else:
             self.logger.error("Node.js installation failed")
             return False
-            
-        # Create directory
-        self.execute_remote(f"sudo mkdir -p {self.install_dir}")
         
         # Transfer frontend files
+        # Note: The base class transfer_directory method will handle directory creation
+        # and permission setup for remote transfers
         local_frontend_dir = Path("frontend").absolute()
         if not local_frontend_dir.exists():
             self.logger.error(f"Local frontend directory not found at {local_frontend_dir}")
@@ -64,7 +63,8 @@ class FrontendInstaller(BaseInstaller):
         # For now, let's assume the user hasn't built locally or we transfer everything.
         # A better approach for production would be to build locally and transfer artifacts,
         # but for now we transfer source and build on target.
-        if not self.transfer_directory(str(local_frontend_dir), self.install_dir):
+        excludes = ["node_modules", ".next", ".git", ".idea", ".vscode"]
+        if not self.transfer_directory(str(local_frontend_dir), self.install_dir, excludes=excludes):
             return False
         
         # Change ownership to the user AFTER file transfer
@@ -220,4 +220,4 @@ class FrontendInstaller(BaseInstaller):
             self.execute_remote("sudo rm /etc/systemd/system/noslop-frontend.service")
             self.execute_remote("sudo systemctl daemon-reload")
             
-        self.execute_remote(f"rm -rf {self.install_dir}")
+        self.execute_remote(f"sudo rm -rf {self.install_dir}")

@@ -77,7 +77,7 @@ A peer-to-peer, decentralized social graph. Share content directly from your nod
 
 ### Quick Start (Recommended)
 
-Use the **NoSlop Seed** smart installer for automated deployment:
+Use the **NoSlop Seed** smart installer for automated deployment even across multiple devices:
 
 ```bash
 # Clone the repository
@@ -108,6 +108,30 @@ The installer will:
 
 See [`seed/README.md`](seed/README.md) for detailed usage instructions.
 
+### Managing Your Deployment
+
+After deployment, you can manage your NoSlop services using these commands:
+
+```bash
+# Check status of all services
+python3 -m seed.seed_cli --status
+
+# Stop all services
+python3 -m seed.seed_cli --stop
+
+# Start all services
+python3 -m seed.seed_cli --start
+
+# Restart all services
+python3 -m seed.seed_cli --restart
+
+# Uninstall NoSlop completely (requires confirmation)
+python3 -m seed.seed_cli --uninstall
+
+# Manage a specific deployment (by ID)
+python3 -m seed.seed_cli --status --deployment-id 20251203_121141
+```
+
 ### System Requirements
 
 **Minimum (Basic)**:
@@ -127,31 +151,6 @@ See [`seed/README.md`](seed/README.md) for detailed usage instructions.
 - 32 GB RAM
 - 12+ GB VRAM (NVIDIA RTX series)
 - 1 TB SSD
-
-### Manual Installation (Advanced)
-
-If you prefer manual setup:
-
-#### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- **Ollama** running locally
-
-#### Backend Setup
-```bash
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python main.py
-```
-
-#### Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
 
 ---
 

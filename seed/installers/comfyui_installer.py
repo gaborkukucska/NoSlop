@@ -54,15 +54,16 @@ class ComfyUIInstaller(BaseInstaller):
         
         # Clone repository (as user)
         self.logger.info("Cloning ComfyUI repository...")
-        # Note: We don't use sudo here
-        code, _, err = self.execute_remote(f"git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
+        # Explicitly run as user to ensure ownership
+        code, _, err = self.execute_remote(f"sudo -u {self.username} git clone https://github.com/comfyanonymous/ComfyUI.git {self.install_dir}")
         if code != 0 and "already exists" not in err:
             self.logger.error(f"Failed to clone ComfyUI: {err}")
             return False
             
         # Create venv (as user)
         self.logger.info("Creating virtual environment...")
-        code, _, err = self.execute_remote(f"python3 -m venv {self.venv_dir}")
+        # Explicitly run as user to ensure ownership
+        code, _, err = self.execute_remote(f"sudo -u {self.username} python3 -m venv {self.venv_dir}")
         if code != 0:
             self.logger.error(f"Failed to create venv: {err}")
             return False
@@ -75,7 +76,8 @@ class ComfyUIInstaller(BaseInstaller):
         self.logger.info("Installing Python dependencies...")
         
         # We don't use sudo for pip inside venv if we own the venv
-        pip_cmd = f"{self.venv_dir}/bin/pip"
+        # But to be consistent and ensure correct permissions/environment, we use sudo -u
+        pip_cmd = f"sudo -u {self.username} {self.venv_dir}/bin/pip"
         
         # Upgrade pip
         self.execute_remote(f"{pip_cmd} install --upgrade pip")

@@ -168,13 +168,14 @@ class BaseInstaller(ABC):
                 return False
             return self.ssh_manager.transfer_file(self.ssh_client, local_path, remote_path)
 
-    def transfer_directory(self, local_dir: str, remote_dir: str) -> bool:
+    def transfer_directory(self, local_dir: str, remote_dir: str, excludes: List[str] = None) -> bool:
         """
         Transfer directory to target device.
         
         Args:
             local_dir: Path to local directory
             remote_dir: Destination path on target
+            excludes: List of glob patterns to exclude
             
         Returns:
             True if successful
@@ -193,12 +194,34 @@ class BaseInstaller(ABC):
                 # First ensure remote_dir exists
                 self.create_directory(remote_dir)
                 
-                cmd = f"sudo cp -r {local_dir}/. {remote_dir}/"
-                code, _, err = self.execute_remote(cmd)
-                if code != 0:
-                    self.logger.error(f"Local directory copy failed: {err}")
-                    return False
-                return True
+                # For local copy, we need to handle excludes manually or use rsync
+                # Since we don't want to depend on rsync, we'll use a simpler approach for now:
+                # Copy everything then delete excluded items. This is not ideal but works for local.
+                # OR better: use tar with exclude patterns if available.
+                
+                # Let's try rsync if available, fallback to cp
+                code, _, _ = self.execute_remote("which rsync")
+                if code == 0:
+                    exclude_args = ""
+                    if excludes:
+                        for pattern in excludes:
+                            exclude_args += f" --exclude='{pattern}'"
+                    
+                    cmd = f"sudo rsync -av {exclude_args} {local_dir}/ {remote_dir}/"
+                    code, _, err = self.execute_remote(cmd)
+                    if code != 0:
+                        self.logger.error(f"Local directory sync failed: {err}")
+                        return False
+                    return True
+                else:
+                    # Fallback to cp (no excludes support easily)
+                    self.logger.warning("rsync not found, falling back to cp (excludes ignored)")
+                    cmd = f"sudo cp -r {local_dir}/. {remote_dir}/"
+                    code, _, err = self.execute_remote(cmd)
+                    if code != 0:
+                        self.logger.error(f"Local directory copy failed: {err}")
+                        return False
+                    return True
             except Exception as e:
                 self.logger.error(f"Local directory copy failed: {e}")
                 return False
@@ -217,7 +240,7 @@ class BaseInstaller(ABC):
             if code != 0:
                 self.logger.warning(f"Failed to set ownership on {remote_dir}: {err}")
             
-            return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir)
+            return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir, excludes=excludes)
 
     def create_directory(self, path: str) -> bool:
         """Create directory on target device."""

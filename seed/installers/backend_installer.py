@@ -55,7 +55,8 @@ class BackendInstaller(BaseInstaller):
             return False
             
         self.logger.info(f"Transferring backend files from {local_backend_dir}...")
-        if not self.transfer_directory(str(local_backend_dir), self.install_dir):
+        excludes = ["venv", "__pycache__", ".git", ".pytest_cache", "*.pyc", ".idea", ".vscode"]
+        if not self.transfer_directory(str(local_backend_dir), self.install_dir, excludes=excludes):
             return False
             
         # Change ownership to the user AGAIN because sudo cp (used in transfer_directory for local)

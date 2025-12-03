@@ -508,6 +508,43 @@ Examples:
         help='Directory for deployment artifacts'
     )
     
+    # Management commands
+    parser.add_argument(
+        '--start',
+        action='store_true',
+        help='Start all services on all nodes'
+    )
+    
+    parser.add_argument(
+        '--stop',
+        action='store_true',
+        help='Stop all services on all nodes'
+    )
+    
+    parser.add_argument(
+        '--restart',
+        action='store_true',
+        help='Restart all services on all nodes'
+    )
+    
+    parser.add_argument(
+        '--status',
+        action='store_true',
+        help='Show status of all services on all nodes'
+    )
+    
+    parser.add_argument(
+        '--uninstall',
+        action='store_true',
+        help='Uninstall NoSlop from all nodes (requires confirmation)'
+    )
+    
+    parser.add_argument(
+        '--deployment-id',
+        type=str,
+        help='Deployment ID to manage (defaults to latest)'
+    )
+    
     args = parser.parse_args()
     
     # Setup comprehensive logging (always captures DEBUG to file)
@@ -516,6 +553,64 @@ Examples:
     logger.info(f"NoSlop Seed Installer started")
     logger.info(f"Log file: {log_file}")
     logger.debug(f"Command line arguments: {args}")
+    
+    # Check if this is a management command
+    if args.start or args.stop or args.restart or args.status or args.uninstall:
+        from seed.manager import ServiceManager
+        
+        # Find deployment directory
+        deployments_dir = Path.home() / ".noslop" / "deployments"
+        if not deployments_dir.exists():
+            logger.error("No deployments found. Please deploy NoSlop first.")
+            sys.exit(1)
+        
+        # Get deployment ID
+        if args.deployment_id:
+            deployment_dir = deployments_dir / args.deployment_id
+            if not deployment_dir.exists():
+                logger.error(f"Deployment not found: {args.deployment_id}")
+                sys.exit(1)
+        else:
+            # Use latest deployment
+            deployments = sorted(deployments_dir.iterdir(), key=lambda x: x.name, reverse=True)
+            if not deployments:
+                logger.error("No deployments found. Please deploy NoSlop first.")
+                sys.exit(1)
+            deployment_dir = deployments[0]
+            logger.info(f"Using latest deployment: {deployment_dir.name}")
+        
+        # Create service manager
+        ssh_manager = SSHManager()
+        manager = ServiceManager(deployment_dir, ssh_manager)
+        
+        # Execute management command
+        success = True
+        if args.status:
+            status = manager.status_all()
+            print("\n" + "="*70)
+            print("NoSlop Service Status")
+            print("="*70)
+            print(f"\nDeployment ID: {status['deployment_id']}\n")
+            
+            for node in status['nodes']:
+                print(f"📡 {node['hostname']} ({node['ip_address']})")
+                print(f"   Roles: {', '.join(node['roles'])}")
+                print(f"   Services:")
+                for svc in node['services']:
+                    status_icon = "✓" if svc['active'] else "✗"
+                    status_text = svc['status']
+                    print(f"     {status_icon} {svc['name']}: {status_text}")
+                print()
+        elif args.start:
+            success = manager.start_all()
+        elif args.stop:
+            success = manager.stop_all()
+        elif args.restart:
+            success = manager.restart_all()
+        elif args.uninstall:
+            success = manager.uninstall_all()
+        
+        sys.exit(0 if success else 1)
     
     # Create and run CLI
     cli = NoSlopSeedCLI(args)
