@@ -11,6 +11,14 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 
 ## Recent Changes
 - **2025-12-03**:
+    - **Frontend Deployment Fix**: Fixed five critical issues in frontend installation:
+      1. npm permission errors - ensured npm commands run as the correct user (`sudo -u tom`)
+      2. Node.js version detection - source nvm environment to use v22.18.0 instead of system v18.19.1
+      3. systemd service configuration - run service as user `tom` with nvm environment in ExecStart
+      4. Remote SFTP transfer permissions - create directory with sudo and set ownership before SFTP transfer
+      5. Frontend environment configuration - create `.env.local` with `NEXT_PUBLIC_API_URL` for backend connection
+      Moved ownership change to after file transfer and added cleanup of existing node_modules.
+      **BigBOY deployment successful!**
     - **Frontend Installation Fix**: Resolved service name mismatch (`noslop-frontend`) ensuring correct registration and deployment.
     - **User Management System**: Implemented `UserModel`, `UserCRUD`, and API endpoints for user creation and personality persistence.
     - **Deployment Summary**: Enhanced installer to display all access points (Backend/Frontend URLs) upon completion.

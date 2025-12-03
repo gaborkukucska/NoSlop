@@ -205,6 +205,18 @@ class BaseInstaller(ABC):
         else:
             if not self.ssh_client:
                 return False
+            
+            # For remote transfers, create directory with sudo first and set ownership
+            # This allows SFTP to write files without permission issues
+            parent_dir = str(Path(remote_dir).parent)
+            self.create_directory(parent_dir)
+            self.create_directory(remote_dir)
+            
+            # Set ownership to the user so SFTP can write
+            code, _, err = self.execute_remote(f"sudo chown -R {self.username}:{self.username} {remote_dir}")
+            if code != 0:
+                self.logger.warning(f"Failed to set ownership on {remote_dir}: {err}")
+            
             return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir)
 
     def create_directory(self, path: str) -> bool:

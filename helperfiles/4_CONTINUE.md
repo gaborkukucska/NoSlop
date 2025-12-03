@@ -30,5 +30,3 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
    - Remote hardware detection via SSH.
    - Automated SSH key distribution.
    - Web-based installer UI.
-
-See `seed/README.md` for detailed usage instructions.

@@ -49,11 +49,7 @@ class FrontendInstaller(BaseInstaller):
             return False
             
         # Create directory
-        self.execute_remote(f"mkdir -p {self.install_dir}")
-        
-        # Change ownership to the user
-        self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
-        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        self.execute_remote(f"sudo mkdir -p {self.install_dir}")
         
         # Transfer frontend files
         local_frontend_dir = Path("frontend").absolute()
@@ -68,25 +64,77 @@ class FrontendInstaller(BaseInstaller):
         # For now, let's assume the user hasn't built locally or we transfer everything.
         # A better approach for production would be to build locally and transfer artifacts,
         # but for now we transfer source and build on target.
-        # but for now we transfer source and build on target.
         if not self.transfer_directory(str(local_frontend_dir), self.install_dir):
             return False
+        
+        # Change ownership to the user AFTER file transfer
+        self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
+        code, _, err = self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        if code != 0:
+            self.logger.error(f"Failed to change ownership: {err}")
+            return False
+        
+        # Verify ownership was set correctly
+        code, out, _ = self.execute_remote(f"stat -c '%U' {self.install_dir}")
+        if code == 0:
+            self.logger.debug(f"Directory owner: {out.strip()}")
+        
+        # Clean up any existing node_modules to avoid permission issues
+        self.logger.info("Cleaning up existing node_modules if present...")
+        self.execute_remote(f"sudo rm -rf {self.install_dir}/node_modules {self.install_dir}/.next")
             
-        # Install dependencies
-        self.logger.info("Installing npm dependencies...")
-        code, _, err = self.execute_remote(f"cd {self.install_dir} && npm install", timeout=600)
+        # Install dependencies as the user (not root)
+        # Source nvm if available to use the correct Node.js version
+        self.logger.info(f"Installing npm dependencies as user {self.username}...")
+        nvm_setup = "export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && "
+        code, _, err = self.execute_remote(
+            f"sudo -u {self.username} bash -c '{nvm_setup}cd {self.install_dir} && npm install'", 
+            timeout=600
+        )
         if code != 0:
             self.logger.error(f"Failed to install npm dependencies: {err}")
             return False
             
-        # Build
-        self.logger.info("Building Next.js application...")
+        # Build as the user (not root)
+        # Source nvm if available to use the correct Node.js version
+        self.logger.info(f"Building Next.js application as user {self.username}...")
         # We need to set env vars for build if needed
         env_vars = " ".join([f"{k}={v}" for k, v in self.env_config.items()])
-        code, _, err = self.execute_remote(f"cd {self.install_dir} && {env_vars} npm run build", timeout=900)
+        build_cmd = f"cd {self.install_dir} && {env_vars} npm run build" if env_vars else f"cd {self.install_dir} && npm run build"
+        code, _, err = self.execute_remote(
+            f"sudo -u {self.username} bash -c '{nvm_setup}{build_cmd}'", 
+            timeout=900
+        )
         if code != 0:
             self.logger.error(f"Failed to build application: {err}")
             return False
+        
+        # Create .env.local file with frontend-specific environment variables
+        self.logger.info("Creating .env.local file for frontend...")
+        env_local_content = ""
+        
+        # Add NEXT_PUBLIC_API_URL from NOSLOP_BACKEND_URL
+        if "NOSLOP_BACKEND_URL" in self.env_config:
+            env_local_content += f"NEXT_PUBLIC_API_URL={self.env_config['NOSLOP_BACKEND_URL']}\n"
+        else:
+            # Fallback to localhost
+            env_local_content += "NEXT_PUBLIC_API_URL=http://localhost:8000\n"
+        
+        # Write .env.local file
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env') as tmp:
+            tmp.write(env_local_content)
+            tmp_env_path = tmp.name
+        
+        try:
+            if not self.transfer_file(tmp_env_path, f"{self.install_dir}/.env.local"):
+                self.logger.warning("Failed to transfer .env.local file")
+            else:
+                # Set ownership
+                self.execute_remote(f"sudo chown {self.username}:{self.username} {self.install_dir}/.env.local")
+        finally:
+            import os
+            os.unlink(tmp_env_path)
             
         return True
 
@@ -101,13 +149,20 @@ class FrontendInstaller(BaseInstaller):
             
             exec_cmd = "/usr/bin/npm start"
             
-            # Environment variables
-            env_vars = " ".join([f"{k}={v}" for k, v in self.env_config.items()])
+            # Environment variables - add nvm setup
+            nvm_env = f"NVM_DIR={self.install_dir.replace('/opt/noslop/frontend', '/home/' + self.username + '/.nvm')}"
+            env_vars_list = [nvm_env]
+            if self.env_config:
+                env_vars_list.extend([f"{k}={v}" for k, v in self.env_config.items()])
+            env_vars = " ".join(env_vars_list)
+            
+            # Create ExecStart command that sources nvm
+            exec_start = f"/bin/bash -c 'export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && npm start'"
             
             service_content = template.replace("{{SERVICE_NAME}}", "noslop-frontend")
-            service_content = service_content.replace("{{USER}}", "root") # Should be specific user
+            service_content = service_content.replace("{{USER}}", self.username)  # Use the actual user, not root
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
-            service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
+            service_content = service_content.replace("{{EXEC_START}}", exec_start)
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
             
             # Write service file
