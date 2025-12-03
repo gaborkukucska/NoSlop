@@ -84,13 +84,11 @@ Use the **NoSlop Seed** smart installer for automated deployment even across mul
 git clone https://github.com/gaborkukucska/NoSlop.git
 cd NoSlop
 
-# Install dependencies
-pip3 install -r seed/requirements.txt
-
+# Run the installer (dependencies auto-install on first run)
 # Deploy on current device (all-in-one mode)
 python3 -m seed.seed_cli --single-device
 
-# OR deploy across multiple devices (interactive wizard)
+# OR deploy across multiple devices (requires ssh access to other devices on the local network)
 python3 -m seed.seed_cli
 ```
 

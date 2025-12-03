@@ -9,10 +9,55 @@ Interactive deployment wizard for NoSlop across local network devices.
 import argparse
 import logging
 import sys
+import subprocess
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 import logging.handlers
+
+
+def ensure_dependencies():
+    """
+    Ensure all seed dependencies are installed.
+    Auto-installs missing dependencies if needed.
+    """
+    try:
+        import paramiko
+        import psutil
+        import requests
+        return True
+    except ImportError:
+        print("📦 Installing NoSlop Seed dependencies...")
+        print("   This only needs to happen once.\n")
+        
+        # Get the seed requirements file
+        seed_dir = Path(__file__).parent
+        requirements_file = seed_dir / "requirements.txt"
+        
+        if not requirements_file.exists():
+            print("❌ Error: requirements.txt not found")
+            return False
+        
+        try:
+            # Install dependencies with --break-system-packages for PEP 668 systems
+            # This is safe for deployment tools that manage their own dependencies
+            subprocess.check_call([
+                sys.executable, "-m", "pip", "install", "-q", 
+                "--break-system-packages",
+                "-r", str(requirements_file)
+            ])
+            print("✅ Dependencies installed successfully!\n")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to install dependencies: {e}")
+            print(f"\nPlease install manually with:")
+            print(f"   pip install --break-system-packages -r {requirements_file}")
+            return False
+
+
+# Ensure dependencies before importing seed modules
+if not ensure_dependencies():
+    sys.exit(1)
 
 from seed.hardware_detector import HardwareDetector
 from seed.network_scanner import NetworkScanner

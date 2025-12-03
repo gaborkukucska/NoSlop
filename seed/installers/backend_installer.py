@@ -41,7 +41,7 @@ class BackendInstaller(BaseInstaller):
         self.install_packages(["python3", "python3-venv", "python3-pip", "git"])
         
         # Create directory
-        self.execute_remote(f"mkdir -p {self.install_dir}")
+        self.execute_remote(f"sudo mkdir -p {self.install_dir}")
         
         # Change ownership to the user
         self.logger.info(f"Changing ownership of {self.install_dir} to {self.username}...")
@@ -175,4 +175,4 @@ class BackendInstaller(BaseInstaller):
             self.execute_remote("sudo rm /etc/systemd/system/noslop-backend.service")
             self.execute_remote("sudo systemctl daemon-reload")
             
-        self.execute_remote(f"rm -rf {self.install_dir}")
+        self.execute_remote(f"sudo rm -rf {self.install_dir}")

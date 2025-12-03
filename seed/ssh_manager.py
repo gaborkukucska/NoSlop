@@ -561,7 +561,8 @@ class SSHManager:
             True if directory created or already exists
         """
         try:
-            command = f"mkdir -p {path}"
+            # Use sudo for directory creation to handle /opt and other system directories
+            command = f"sudo mkdir -p {path}"
             exit_code, stdout, stderr = self.execute_command(client, command)
             
             if exit_code == 0:

@@ -11,6 +11,25 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 
 ## Recent Changes
 - **2025-12-03**:
+    - **Frontend Installer Complete Fix**: Fixed multiple critical issues preventing deployment:
+      - **Issue 1 - NVM Path Resolution**: 
+        - Root Cause: NVM path resolution failing in `sudo -u` context - `$HOME` expanded to wrong user's home directory
+        - Solution: Removed NVM dependency, now using NodeSource repository for Node.js
+      - **Issue 2 - Node.js Version Requirement**:
+        - Root Cause: System Node.js v18.19.1 too old for Next.js (requires >=20.9.0)
+        - Solution: Install Node.js 20.x from NodeSource repository with version verification
+      - **Issue 3 - File Transfer Permissions**:
+        - Root Cause: SFTP attempting to write to root-owned directory before ownership change
+        - Solution: Create directory with proper ownership BEFORE file transfer, verify after
+      - **Changes Made**:
+        - Added NodeSource repository installation: `curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -`
+        - Added Node.js version verification (ensures >= v20)
+        - Pre-create install directory with correct ownership before SFTP transfer
+        - Simplified npm commands: `cd /opt/noslop/frontend && sudo -u {username} npm install/build`
+        - Removed NVM sourcing from systemd service ExecStart
+        - Added stdout logging for better error diagnosis
+      - **Impact**: Installer now works reliably across all devices with proper Node.js version and permissions
+      - **Files Modified**: `seed/installers/frontend_installer.py`
     - **Installer Bug Fix**: Fixed critical issue preventing frontend deployment:
       - **Root Cause**: Transferring `node_modules` directory causing thousands of `test -d` commands via SSH, spamming logs and slowing deployment
       - **Solution**: Implemented file exclusion support in directory transfer operations
