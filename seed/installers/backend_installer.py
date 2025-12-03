@@ -24,14 +24,8 @@ class BackendInstaller(BaseInstaller):
 
     def check_installed(self) -> bool:
         """Check if Backend is installed."""
-        # Check directory
-        code, _, _ = self.execute_remote(f"test -d {self.install_dir}")
-        if code != 0:
-            return False
-            
-        # Check service
-        code, _, _ = self.execute_remote("systemctl is-active noslop-backend")
-        return code == 0
+        # Always return False to force update of files
+        return False
 
     def install(self) -> bool:
         """Install Backend."""
@@ -64,17 +58,19 @@ class BackendInstaller(BaseInstaller):
         self.logger.info(f"Fixing ownership of {self.install_dir} to {self.username}...")
         self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
             
-        # Remove any existing venv (especially if copied from local)
-        self.logger.info("Removing any existing venv...")
-        # Use sudo rm because it might be owned by root if copied via sudo cp
-        self.execute_remote(f"sudo rm -rf {self.venv_dir}")
-            
-        # Create venv
-        self.logger.info("Creating virtual environment...")
-        code, _, err = self.execute_remote(f"python3 -m venv {self.venv_dir}")
-        if code != 0:
-            self.logger.error(f"Failed to create venv: {err}")
-            return False
+        # Check if venv exists
+        code, _, _ = self.execute_remote(f"test -d {self.venv_dir}")
+        venv_exists = (code == 0)
+        
+        if not venv_exists:
+            # Create venv
+            self.logger.info("Creating virtual environment...")
+            code, _, err = self.execute_remote(f"python3 -m venv {self.venv_dir}")
+            if code != 0:
+                self.logger.error(f"Failed to create venv: {err}")
+                return False
+        else:
+            self.logger.info("Virtual environment already exists, skipping creation.")
             
         # Installing requirements
         self.logger.info("Installing requirements...")
@@ -117,11 +113,31 @@ class BackendInstaller(BaseInstaller):
             
             exec_cmd = f"{self.venv_dir}/bin/python main.py"
             
+            # Determine logs directory in user's home
+            # We want logs to go to /home/<user>/NoSlop/logs
+            # Since we are installing on a remote device, we construct the path
+            # assuming standard home directory structure
+            if self.username == "root":
+                home_dir = "/root"
+            else:
+                home_dir = f"/home/{self.username}"
+                
+            logs_dir = f"{home_dir}/NoSlop/logs"
+            
+            # Ensure logs directory exists with correct permissions
+            self.execute_remote(f"mkdir -p {logs_dir}")
+            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            
             service_content = template.replace("{{SERVICE_NAME}}", "noslop-backend")
-            service_content = service_content.replace("{{USER}}", "root") # Should be specific user
+            service_content = service_content.replace("{{USER}}", self.username) # Use the actual user
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
             service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
-            service_content = service_content.replace("{{ENVIRONMENT_VARS}}", "") # Env vars are in .env file
+            
+            # Add LOG_DIR to environment variables
+            # Systemd Environment directive takes space-separated assignments
+            # We also include any other env vars from config
+            env_vars = f"LOG_DIR={logs_dir}"
+            service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
             
             # Write service file
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:

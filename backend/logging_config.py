@@ -114,7 +114,8 @@ def setup_logging(
     enable_json: bool = False,
     max_bytes: int = 10 * 1024 * 1024,  # 10MB
     backup_count: int = 5,
-    use_dated_files: bool = True
+    use_dated_files: bool = True,
+    module_name: str = "backend"
 ) -> Optional[Path]:
     """
     Setup logging configuration for the application.
@@ -127,7 +128,8 @@ def setup_logging(
         enable_json: Use JSON formatting for file logs
         max_bytes: Maximum size of log file before rotation
         backup_count: Number of backup files to keep
-        use_dated_files: Use dated filenames (noslop_YYYYMMDD_HHMMSS.log)
+        use_dated_files: Use dated filenames (module_name_YYYYMMDD_HHMMSS.log)
+        module_name: Name of the module for log file naming
         
     Returns:
         Path to main log file if file logging is enabled, None otherwise
@@ -153,11 +155,12 @@ def setup_logging(
     # Determine log filenames
     if use_dated_files:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        main_log_file = log_path / f"noslop_{timestamp}.log"
-        error_log_file = log_path / f"noslop_errors_{timestamp}.log"
+        main_log_file = log_path / f"{module_name}_{timestamp}.log"
+        error_log_file = log_path / f"{module_name}_errors_{timestamp}.log"
     else:
-        main_log_file = log_path / "noslop.log"
-        error_log_file = log_path / "noslop_errors.log"
+        main_log_file = log_path / f"{module_name}.log"
+        error_log_file = log_path / f"{module_name}_errors.log"
+
     
     # File handler (always DEBUG to capture everything)
     if enable_file:

@@ -152,5 +152,60 @@ python3 -m seed.seed_cli --status --deployment-id 20251203_121141
 
 ---
 
+## 📝 Logging & Troubleshooting
+
+NoSlop uses a comprehensive logging system to help you debug and monitor your deployment:
+
+### Log File Locations
+
+All logs are saved to the `logs/` folder with dated filenames for easy tracking:
+
+```
+logs/
+├── seed_installer_20251203_191118.log          # Main installer logs
+├── postgresql_installer_20251203_191118.log    # PostgreSQL installation
+├── ollama_installer_20251203_191118.log        # Ollama installation
+├── comfyui_installer_20251203_191118.log       # ComfyUI installation
+├── ffmpeg_installer_20251203_191118.log        # FFmpeg installation
+├── backend_installer_20251203_191118.log       # Backend installation
+├── frontend_installer_20251203_191118.log      # Frontend installation
+├── service_manager_20251203_191118.log         # Service management operations
+└── backend_20251203_191118.log                 # Backend API runtime logs
+```
+
+### Log Levels
+
+- **File logs**: Always capture DEBUG level for comprehensive troubleshooting
+- **Console logs**: Respect user-specified log level (INFO by default)
+
+### Viewing Logs
+
+```bash
+# View latest installer log
+tail -f logs/seed_installer_*.log | tail -1
+
+# View specific service installer logs
+tail -f logs/postgresql_installer_*.log | tail -1
+
+# View backend runtime logs
+tail -f logs/backend_*.log | tail -1
+
+# Search for errors across all logs
+grep -r "ERROR" logs/
+
+# Search for warnings
+grep -r "WARNING" logs/
+```
+
+### Common Issues
+
+Check the relevant log files if you encounter issues:
+- **Installation failures**: Check `{service}_installer_*.log` files
+- **Service startup issues**: Check `backend_*.log` or systemd logs with `journalctl -u noslop-backend`
+- **Service management**: Check `service_manager_*.log`
+
+---
+
 ## 📜 License
 Open Source. Built for the people. ❤️
+

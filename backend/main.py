@@ -32,7 +32,8 @@ log_file = setup_logging(
     enable_console=settings.enable_console_log,
     enable_file=settings.enable_file_log,
     enable_json=settings.enable_json_log,
-    use_dated_files=True  # Always use dated log files
+    use_dated_files=False,  # Use non-dated files for runtime services
+    module_name="backend"
 )
 
 logger = logging.getLogger(__name__)

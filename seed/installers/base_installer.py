@@ -8,6 +8,7 @@ common functionality for OS detection, package management, and remote execution.
 
 import logging
 import time
+import sys
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, List, Dict
 from pathlib import Path
@@ -16,6 +17,7 @@ from seed.models import DeviceCapabilities, OSType
 from seed.ssh_manager import SSHManager
 
 logger = logging.getLogger(__name__)
+
 
 
 class BaseInstaller(ABC):
@@ -51,6 +53,7 @@ class BaseInstaller(ABC):
 
         # Connect to device
         self._connect()
+
 
     def _connect(self):
         """Establish SSH connection to the device."""

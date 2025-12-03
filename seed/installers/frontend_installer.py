@@ -23,14 +23,8 @@ class FrontendInstaller(BaseInstaller):
 
     def check_installed(self) -> bool:
         """Check if Frontend is installed."""
-        # Check directory
-        code, _, _ = self.execute_remote(f"test -d {self.install_dir}")
-        if code != 0:
-            return False
-            
-        # Check service
-        code, _, _ = self.execute_remote("systemctl is-active noslop-frontend")
-        return code == 0
+        # Always return False to force update of files
+        return False
 
     def install(self) -> bool:
         """Install Frontend."""
@@ -103,9 +97,9 @@ class FrontendInstaller(BaseInstaller):
         if code == 0:
             self.logger.debug(f"Directory owner: {out.strip()}")
         
-        # Clean up any existing node_modules to avoid permission issues
-        self.logger.info("Cleaning up existing node_modules if present...")
-        self.execute_remote(f"sudo rm -rf {self.install_dir}/node_modules {self.install_dir}/.next")
+        # Clean up existing node_modules ONLY if we suspect corruption, otherwise keep for speed
+        # self.logger.info("Cleaning up existing node_modules if present...")
+        # self.execute_remote(f"sudo rm -rf {self.install_dir}/node_modules {self.install_dir}/.next")
             
         # Install dependencies as the user (not root)
         self.logger.info(f"Installing npm dependencies as user {self.username}...")
@@ -181,10 +175,32 @@ class FrontendInstaller(BaseInstaller):
             # Use system npm directly
             exec_start = "/usr/bin/npm start"
             
+            # Determine logs directory
+            if self.username == "root":
+                home_dir = "/root"
+            else:
+                home_dir = f"/home/{self.username}"
+            logs_dir = f"{home_dir}/NoSlop/logs"
+            log_file = f"{logs_dir}/frontend.log"
+            
+            # Ensure logs directory exists
+            self.execute_remote(f"mkdir -p {logs_dir}")
+            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            
+            # Redirect stdout/stderr to log file
+            # Note: Systemd ExecStart doesn't support shell redirection directly unless we wrap in /bin/bash -c
+            # But simpler is to use StandardOutput/StandardError directives if we were writing a full unit file.
+            # Since we are using a template that puts everything in ExecStart, let's wrap it.
+            # Actually, let's modify the template usage to append redirection if possible, 
+            # OR better, since we can't easily change the template structure (it expects simple command),
+            # let's wrap the command in a shell script or use /bin/sh -c
+            
+            wrapped_exec = f'/bin/sh -c "{exec_start} >> {log_file} 2>&1"'
+            
             service_content = template.replace("{{SERVICE_NAME}}", "noslop-frontend")
             service_content = service_content.replace("{{USER}}", self.username)  # Use the actual user, not root
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
-            service_content = service_content.replace("{{EXEC_START}}", exec_start)
+            service_content = service_content.replace("{{EXEC_START}}", wrapped_exec)
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
             
             # Write service file

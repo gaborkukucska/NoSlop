@@ -66,59 +66,83 @@ from seed.ssh_manager import SSHManager, PARAMIKO_AVAILABLE
 from seed.deployer import Deployer
 from seed.models import DeviceCapabilities
 
+# Import shared logging utilities
+try:
+    from shared.logging_utils import setup_module_logging
+    SHARED_LOGGING_AVAILABLE = True
+except ImportError:
+    SHARED_LOGGING_AVAILABLE = False
+    # Fallback to custom logging setup
+
 
 def setup_logging(log_level: str = "INFO"):
     """
     Configure comprehensive logging for all modules.
     
     Logs to both console and dated files in logs/ folder.
+    Uses shared logging utilities if available, otherwise falls back to custom setup.
     """
-    # Create logs directory
-    logs_dir = Path("logs")
-    logs_dir.mkdir(exist_ok=True)
-    
-    # Generate dated log filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = logs_dir / f"seed_installer_{timestamp}.log"
-    
-    # Convert log level string to logging constant
-    level = getattr(logging, log_level.upper(), logging.INFO)
-    
-    # Create formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    console_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
-    )
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(level)
-    
-    # Remove existing handlers
-    root_logger.handlers.clear()
-    
-    # File handler (always detailed)
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)  # Always capture DEBUG to file
-    file_handler.setFormatter(detailed_formatter)
-    root_logger.addHandler(file_handler)
-    
-    # Console handler (respects user's log level)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(console_formatter)
-    root_logger.addHandler(console_handler)
-    
-    # Log the logging configuration
-    logger = logging.getLogger(__name__)
-    logger.info(f"Logging initialized: Level={log_level}, File={log_file}")
-    
-    return log_file
+    if SHARED_LOGGING_AVAILABLE:
+        # Use shared logging utilities
+        log_file = setup_module_logging(
+            module_name="seed_installer",
+            log_level=log_level,
+            log_dir="logs",
+            enable_console=True,
+            enable_file=True
+        )
+        logger = logging.getLogger(__name__)
+        logger.info(f"Using shared logging utilities")
+        return log_file
+    else:
+        # Fallback to custom logging setup
+        # Create logs directory
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+        
+        # Generate dated log filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = logs_dir / f"seed_installer_{timestamp}.log"
+        
+        # Convert log level string to logging constant
+        level = getattr(logging, log_level.upper(), logging.INFO)
+        
+        # Create formatters
+        detailed_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        
+        console_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%H:%M:%S'
+        )
+        
+        # Configure root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(level)
+        
+        # Remove existing handlers
+        root_logger.handlers.clear()
+        
+        # File handler (always detailed)
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)  # Always capture DEBUG to file
+        file_handler.setFormatter(detailed_formatter)
+        root_logger.addHandler(file_handler)
+        
+        # Console handler (respects user's log level)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(console_formatter)
+        root_logger.addHandler(console_handler)
+        
+        # Log the logging configuration
+        logger = logging.getLogger(__name__)
+        logger.info(f"Logging initialized: Level={log_level}, File={log_file}")
+        
+        return log_file
+
 
 
 logger = logging.getLogger(__name__)

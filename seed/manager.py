@@ -19,6 +19,7 @@ from seed.service_registry import ServiceRegistry, ServiceType
 logger = logging.getLogger(__name__)
 
 
+
 class ServiceManager:
     """
     Manages NoSlop services across deployed nodes.
@@ -127,6 +128,7 @@ class ServiceManager:
         self.registry = ServiceRegistry(registry_file)
         
         logger.info(f"Service manager initialized for deployment: {deployment_dir.name}")
+
     
     def _execute_on_node(self, node: NodeAssignment, command: str, timeout: int = 60) -> tuple[int, str, str]:
         """

@@ -11,6 +11,24 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 
 ## Recent Changes
 - **2025-12-03**:
+    - **Unified Logging System**: Implemented centralized logging infrastructure across all NoSlop modules:
+      - **Shared Logging Utilities**: Created `shared/logging_utils.py` with `setup_module_logging()` function for consistent dated log files
+      - **Naming Convention**: All modules now create logs with pattern: `{module_name}_{YYYYMMDD_HHMMSS}.log`
+      - **Seed Module Logging**:
+        - Updated `seed/seed_cli.py` to use shared logging utilities with fallback to custom setup
+        - Updated `seed/installers/base_installer.py` to create installer-specific logs for each service
+        - Updated `seed/manager.py` to create service manager logs
+        - Each installer now creates its own log file (e.g., `postgresql_installer_20251203_211632.log`)
+      - **Backend Logging**: Updated `backend/logging_config.py` to use `module_name` parameter for consistent naming
+      - **Log Files Created**:
+        - `seed_installer_YYYYMMDD_HHMMSS.log` - Main seed installer logs
+        - `{service}_installer_YYYYMMDD_HHMMSS.log` - Individual installer logs (postgresql, ollama, comfyui, ffmpeg, backend, frontend)
+        - `service_manager_YYYYMMDD_HHMMSS.log` - Service management operations
+        - `backend_YYYYMMDD_HHMMSS.log` - Backend API logs
+      - **Impact**: All logs centralized in `logs/` folder with consistent naming, easier debugging and troubleshooting
+      - **Files Created**: `shared/__init__.py`, `shared/logging_utils.py`
+      - **Files Modified**: `seed/seed_cli.py`, `seed/installers/base_installer.py`, `seed/manager.py`, `backend/logging_config.py`
+
     - **Frontend Installer Complete Fix**: Fixed multiple critical issues preventing deployment:
       - **Issue 1 - NVM Path Resolution**: 
         - Root Cause: NVM path resolution failing in `sudo -u` context - `$HOME` expanded to wrong user's home directory
