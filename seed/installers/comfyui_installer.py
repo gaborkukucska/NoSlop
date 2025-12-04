@@ -125,7 +125,25 @@ class ComfyUIInstaller(BaseInstaller):
             
             # Command to run ComfyUI
             # We need to pass port and GPU args
+            # Determine logs directory
+            if self.username == "root":
+                home_dir = "/root"
+            else:
+                home_dir = f"/home/{self.username}"
+            logs_dir = f"{home_dir}/NoSlop/logs"
+            
+            # Command to run ComfyUI
             exec_cmd = f"{self.venv_dir}/bin/python main.py --port {self.port} --listen"
+            
+            # Ensure logs directory exists
+            self.execute_remote(f"mkdir -p {logs_dir}")
+            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            
+            # Create timestamped log file path
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            service_name_log = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
+            log_file = f"{logs_dir}/{service_name_log}_{timestamp}.log"
             
             # Environment variables
             env_vars = ""
@@ -138,6 +156,12 @@ class ComfyUIInstaller(BaseInstaller):
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
             service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
+            
+            # Add StandardOutput and StandardError directives for logging
+            service_content = service_content.replace(
+                "[Service]",
+                f"[Service]\nStandardOutput=append:{log_file}\nStandardError=append:{log_file}"
+            )
             
             # Write service file
             import tempfile

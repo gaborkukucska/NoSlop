@@ -75,7 +75,7 @@ except ImportError:
     # Fallback to custom logging setup
 
 
-def setup_logging(log_level: str = "INFO"):
+def setup_logging(log_level: str = "INFO", module_name: str = "seed_installer"):
     """
     Configure comprehensive logging for all modules.
     
@@ -85,7 +85,7 @@ def setup_logging(log_level: str = "INFO"):
     if SHARED_LOGGING_AVAILABLE:
         # Use shared logging utilities
         log_file = setup_module_logging(
-            module_name="seed_installer",
+            module_name=module_name,
             log_level=log_level,
             log_dir="logs",
             enable_console=True,
@@ -102,7 +102,7 @@ def setup_logging(log_level: str = "INFO"):
         
         # Generate dated log filename
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_file = logs_dir / f"seed_installer_{timestamp}.log"
+        log_file = logs_dir / f"{module_name}_{timestamp}.log"
         
         # Convert log level string to logging constant
         level = getattr(logging, log_level.upper(), logging.INFO)
@@ -616,8 +616,12 @@ Examples:
     
     args = parser.parse_args()
     
+    # Determine module name based on command
+    is_management = args.start or args.stop or args.restart or args.status or args.uninstall
+    module_name = "service_manager" if is_management else "seed_installer"
+    
     # Setup comprehensive logging (always captures DEBUG to file)
-    log_file = setup_logging(args.log_level)
+    log_file = setup_logging(args.log_level, module_name)
     
     logger.info(f"NoSlop Seed Installer started")
     logger.info(f"Log file: {log_file}")

@@ -77,11 +77,32 @@ class OllamaInstaller(BaseInstaller):
             service_content = template.replace("{{SERVICE_NAME}}", service_name)
             service_content = service_content.replace("{{USER}}", "root") # Or specific user
             service_content = service_content.replace("{{WORKING_DIR}}", "/root")
-            service_content = service_content.replace("{{EXEC_START}}", "/usr/local/bin/ollama serve")
+            
+            # Determine logs directory
+            logs_dir = "/root/NoSlop/logs"
+            
+            # Ensure logs directory exists
+            self.execute_remote(f"mkdir -p {logs_dir}")
+            
+            # Create timestamped log file path
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            service_name_log = "ollama" if not self.is_secondary else f"ollama-{self.port}"
+            log_file = f"{logs_dir}/{service_name_log}_{timestamp}.log"
+            
+            # Set exec command
+            exec_cmd = "/usr/local/bin/ollama serve"
+            service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
             
             # Environment variables
             env_vars = f"OLLAMA_HOST=0.0.0.0:{self.port}"
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
+            
+            # Add StandardOutput and StandardError directives for logging
+            service_content = service_content.replace(
+                "[Service]",
+                f"[Service]\nStandardOutput=append:{log_file}\nStandardError=append:{log_file}"
+            )
             
             # Add LimitNOFILE to Service section
             # We inject it before Environment

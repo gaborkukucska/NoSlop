@@ -85,11 +85,11 @@ class WorkerRegistry:
         agent_type = temp_instance.agent_type
         
         # Register worker
-        self._workers[agent_type] = worker_class
+        self.workers[agent_type] = worker_class
         
         # Map task types to this worker
         for task_type in task_types:
-            self._task_type_mapping[task_type] = agent_type
+            self.task_type_map[task_type] = agent_type
         
         logger.info(f"Registered worker: {agent_type} for task types: {[t.value for t in task_types]}")
     
@@ -104,13 +104,13 @@ class WorkerRegistry:
         Returns:
             Worker agent instance or None if no suitable worker found
         """
-        agent_type = self._task_type_mapping.get(task_type)
+        agent_type = self.task_type_map.get(task_type)
         
         if not agent_type:
             logger.warning(f"No worker found for task type: {task_type.value}")
             return None
         
-        worker_class = self._workers.get(agent_type)
+        worker_class = self.workers.get(agent_type)
         if not worker_class:
             logger.error(f"Worker class not found: {agent_type}")
             return None
@@ -135,7 +135,7 @@ class WorkerRegistry:
         Returns:
             Worker agent instance or None if not found
         """
-        worker_class = self._workers.get(agent_type)
+        worker_class = self.workers.get(agent_type)
         
         if not worker_class:
             logger.warning(f"Worker not found: {agent_type}")
@@ -158,7 +158,7 @@ class WorkerRegistry:
         """
         workers = []
         
-        for agent_type, worker_class in self._workers.items():
+        for agent_type, worker_class in self.workers.items():
             try:
                 # Create temporary instance to get capabilities
                 temp_worker = worker_class.__new__(worker_class)
@@ -174,7 +174,7 @@ class WorkerRegistry:
                         "agent_type": agent_type,
                         "supported_task_types": [
                             task_type.value 
-                            for task_type, mapped_agent in self._task_type_mapping.items() 
+                            for task_type, mapped_agent in self.task_type_map.items() 
                             if mapped_agent == agent_type
                         ],
                         "description": f"{agent_type} worker agent",
@@ -200,7 +200,7 @@ class WorkerRegistry:
         Returns:
             Capabilities dictionary or None if worker not found
         """
-        worker_class = self._workers.get(agent_type)
+        worker_class = self.workers.get(agent_type)
         
         if not worker_class:
             logger.warning(f"Worker not found: {agent_type}")
@@ -214,7 +214,7 @@ class WorkerRegistry:
             # Fallback: get from task type mapping
             supported_types = [
                 task_type.value 
-                for task_type, mapped_agent in self._task_type_mapping.items() 
+                for task_type, mapped_agent in self.task_type_map.items() 
                 if mapped_agent == agent_type
             ]
             
@@ -238,21 +238,29 @@ class WorkerRegistry:
         """
         return {
             task_type.value: agent_type 
-            for task_type, agent_type in self._task_type_mapping.items()
+            for task_type, agent_type in self.task_type_map.items()
         }
 
 
-# Global registry instance
-_registry = WorkerRegistry()
+# Global registry instance (lazy-initialized)
+_registry: Optional[WorkerRegistry] = None
 
 
-def get_registry() -> WorkerRegistry:
+def get_registry(db_session: Optional[Session] = None) -> WorkerRegistry:
     """
     Get the global worker registry instance.
+    
+    Args:
+        db_session: Database session (required for first initialization)
     
     Returns:
         WorkerRegistry instance
     """
+    global _registry
+    if _registry is None:
+        if db_session is None:
+            raise RuntimeError("WorkerRegistry not initialized. Call get_registry with a db_session first.")
+        _registry = WorkerRegistry(db_session)
     return _registry
 
 
@@ -318,4 +326,4 @@ def initialize_workers():
     except ImportError as e:
         logger.warning(f"Could not import ResearchAgent: {e}")
     
-    logger.info(f"Worker registry initialized with {len(_registry._workers)} workers")
+    logger.info(f"Worker registry initialized with {len(_registry.workers)} workers")

@@ -10,6 +10,12 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 # Project Status
 
 ## Recent Changes
+- **2025-12-04**:
+    - **Unified Logging Complete**: Ensured all modules and services log to timestamped files.
+      - **Backend**: Switched to dated log files (`backend_YYYYMMDD_HHMMSS.log`).
+      - **Service Manager**: Seed CLI now uses `service_manager` log name for management commands.
+      - **Services**: Frontend, ComfyUI, and Ollama systemd services now redirect stdout/stderr to timestamped log files.
+      - **Files Modified**: `backend/main.py`, `seed/seed_cli.py`, `seed/installers/frontend_installer.py`, `seed/installers/comfyui_installer.py`, `seed/installers/ollama_installer.py`.
 - **2025-12-03**:
     - **Unified Logging System**: Implemented centralized logging infrastructure across all NoSlop modules:
       - **Shared Logging Utilities**: Created `shared/logging_utils.py` with `setup_module_logging()` function for consistent dated log files

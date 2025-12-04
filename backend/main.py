@@ -20,7 +20,7 @@ from models import (
 from admin_ai import AdminAI
 from config import settings
 from logging_config import setup_logging
-from database import init_db, get_db, ProjectCRUD, TaskCRUD, UserCRUD
+from database import init_db, get_db, SessionLocal, ProjectCRUD, TaskCRUD, UserCRUD
 from project_manager import ProjectManager
 from worker_registry import get_registry, initialize_workers
 from task_executor import TaskExecutor
@@ -32,7 +32,7 @@ log_file = setup_logging(
     enable_console=settings.enable_console_log,
     enable_file=settings.enable_file_log,
     enable_json=settings.enable_json_log,
-    use_dated_files=False,  # Use non-dated files for runtime services
+    use_dated_files=True,  # Use dated files for runtime services
     module_name="backend"
 )
 
@@ -55,10 +55,16 @@ if settings.enable_project_manager:
     init_db()
     logger.info("Database initialized")
     
-    # Initialize worker registry
+    # Initialize worker registry with database session
     logger.info("Initializing worker registry...")
-    initialize_workers()
-    logger.info("Worker registry initialized")
+    db = SessionLocal()
+    try:
+        from worker_registry import get_registry
+        registry = get_registry(db)
+        initialize_workers()
+        logger.info("Worker registry initialized")
+    finally:
+        db.close()
 
 # CORS middleware for frontend communication
 app.add_middleware(

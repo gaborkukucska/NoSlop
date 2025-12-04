@@ -335,6 +335,13 @@ class Deployer:
             return False
         
         # Save deployment plan
+        # First, update nodes with credentials used
+        if credentials_map:
+            for node in plan.nodes:
+                creds = credentials_map.get(node.device.ip_address)
+                if creds:
+                    node.device.ssh_username = creds.username
+                    
         self.save_deployment_plan(plan)
         
         # Generate configurations

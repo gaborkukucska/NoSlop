@@ -94,6 +94,9 @@ class ServiceManager:
             else:
                 arch = Architecture.X86_64
             
+            # Determine SSH info
+            ssh_data = device_data.get('ssh', {})
+            
             device = DeviceCapabilities(
                 hostname=device_data['hostname'],
                 ip_address=device_data['ip_address'],
@@ -111,7 +114,10 @@ class ServiceManager:
                 gpu_count=gpu_data.get('count', 0),
                 os_type=os_type,
                 os_version=os_data.get('version'),
-                capability_score=device_data.get('capability_score', 0.0)
+                capability_score=device_data.get('capability_score', 0.0),
+                ssh_available=ssh_data.get('available', False),
+                ssh_port=ssh_data.get('port', 22),
+                ssh_username=ssh_data.get('username', 'root')
             )
             
             # Reconstruct node assignment
@@ -170,7 +176,11 @@ class ServiceManager:
                 return -1, "", str(e)
         else:
             # Remote execution
-            client = self.ssh_manager.create_ssh_client(node.device.ip_address)
+            client = self.ssh_manager.create_ssh_client(
+                node.device.ip_address,
+                username=node.device.ssh_username,
+                port=node.device.ssh_port
+            )
             if not client:
                 return -1, "", "Failed to connect to remote node"
             

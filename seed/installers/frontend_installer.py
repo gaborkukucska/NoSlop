@@ -181,27 +181,28 @@ class FrontendInstaller(BaseInstaller):
             else:
                 home_dir = f"/home/{self.username}"
             logs_dir = f"{home_dir}/NoSlop/logs"
-            log_file = f"{logs_dir}/frontend.log"
             
             # Ensure logs directory exists
             self.execute_remote(f"mkdir -p {logs_dir}")
             self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
-            
-            # Redirect stdout/stderr to log file
-            # Note: Systemd ExecStart doesn't support shell redirection directly unless we wrap in /bin/bash -c
-            # But simpler is to use StandardOutput/StandardError directives if we were writing a full unit file.
-            # Since we are using a template that puts everything in ExecStart, let's wrap it.
-            # Actually, let's modify the template usage to append redirection if possible, 
-            # OR better, since we can't easily change the template structure (it expects simple command),
-            # let's wrap the command in a shell script or use /bin/sh -c
-            
-            wrapped_exec = f'/bin/sh -c "{exec_start} >> {log_file} 2>&1"'
+
+            # Create timestamped log file path
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = f"{logs_dir}/frontend_{timestamp}.log"
             
             service_content = template.replace("{{SERVICE_NAME}}", "noslop-frontend")
             service_content = service_content.replace("{{USER}}", self.username)  # Use the actual user, not root
             service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
-            service_content = service_content.replace("{{EXEC_START}}", wrapped_exec)
+            service_content = service_content.replace("{{EXEC_START}}", exec_start)
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
+            
+            # Add StandardOutput and StandardError directives for logging
+            # Insert after [Service] section
+            service_content = service_content.replace(
+                "[Service]",
+                f"[Service]\nStandardOutput=append:{log_file}\nStandardError=append:{log_file}"
+            )
             
             # Write service file
             import tempfile
