@@ -14,8 +14,11 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 - ✅ **ComfyUI Integration**: Backend can now trigger local image generation via `ImageGenerationWorker`.
 - ✅ **FFmpeg Integration**: Backend can now process videos (slideshows, concatenation) via `VideoEditor` worker.
 - ✅ **Frontend Integration**: UI can now create projects, view project lists, and trigger execution via Backend API.
-- ✅ **Service Management**: Start/stop/restart/status/uninstall deployed services via CLI commands.
+- ✅ **Service Management**: Start/stop/restart/status/uninstall deployed services via CLI commands with proper SSH authentication.
 - ✅ **File Transfer Optimization**: Excludes `node_modules` and `venv` during deployment for faster transfers.
+- ✅ **Comprehensive Logging**: All services log to timestamped files in `~/NoSlop/logs/`.
+- ✅ **Service Connectivity**: All services (Backend, Ollama, ComfyUI, FFmpeg) properly connected and reporting healthy status.
+- ✅ **SSH Credential Persistence**: Deployment plan saves SSH usernames for reliable service management.
 
 ### What Needs Implementation:
 **Phase 3: Integration & Workflow**

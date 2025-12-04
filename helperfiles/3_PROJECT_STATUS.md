@@ -10,7 +10,45 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 # Project Status
 
 ## Recent Changes
-- **2025-12-04**:
+- **2025-12-04** (Session 2):
+    - **Critical Bug Fixes and Service Improvements**:
+      - **Backend Startup Issues Fixed**:
+        - Added missing `websocket-client` dependency to `backend/requirements.txt` (required by ComfyUI client)
+        - Fixed `WorkerRegistry` initialization error by implementing lazy initialization pattern
+        - Fixed attribute naming inconsistency (`_workers` vs `workers`, `_task_type_mapping` vs `task_type_map`)
+        - Added `SessionLocal` import and proper registry initialization at application startup
+        - **Files Modified**: `backend/requirements.txt`, `backend/worker_registry.py`, `backend/main.py`
+      
+      - **SSH Authentication Fixed**:
+        - Added `ssh_username` field to `DeviceCapabilities` model to persist SSH credentials
+        - Updated `Deployer` to save SSH username in deployment plan during installation
+        - Updated `ServiceManager` to use saved SSH username for service management operations
+        - Fixes "Authentication (publickey) failed" errors when running `--restart`, `--status` commands
+        - **Files Modified**: `seed/models.py`, `seed/deployer.py`, `seed/manager.py`
+      
+      - **ComfyUI Connectivity Fixed**:
+        - Added `COMFYUI_ENABLED=true` to backend environment configuration in deployer
+        - Backend now properly connects to ComfyUI service
+        - Frontend status page now shows "ComfyUI: Ready" instead of "Unknown"
+        - **Files Modified**: `seed/deployer.py`
+      
+      - **Service Logging Standardized**:
+        - Replaced shell redirection approach (which didn't work in systemd) with systemd `StandardOutput`/`StandardError` directives
+        - Fixed systemd service file syntax errors (double-escaped newlines)
+        - All services now log to timestamped files in `~/NoSlop/logs/`:
+          - Frontend: `frontend_YYYYMMDD_HHMMSS.log`
+          - ComfyUI: `comfyui_YYYYMMDD_HHMMSS.log`
+          - Ollama: `ollama_YYYYMMDD_HHMMSS.log`
+        - **Files Modified**: `seed/installers/frontend_installer.py`, `seed/installers/comfyui_installer.py`, `seed/installers/ollama_installer.py`
+      
+      - **Impact**: 
+        - Backend now starts successfully without crashes
+        - Service management commands work correctly with proper SSH authentication
+        - All services properly connected and reporting healthy status
+        - Comprehensive timestamped logging across all services
+        - Frontend UI shows all services as "Ready"
+
+- **2025-12-04** (Session 1):
     - **Unified Logging Complete**: Ensured all modules and services log to timestamped files.
       - **Backend**: Switched to dated log files (`backend_YYYYMMDD_HHMMSS.log`).
       - **Service Manager**: Seed CLI now uses `service_manager` log name for management commands.
