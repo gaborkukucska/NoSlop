@@ -2,26 +2,46 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from './context/AuthContext';
 import ChatInterface from './components/ChatInterface';
 import PersonalitySelector from './components/PersonalitySelector';
 import ProjectForm from './components/ProjectForm';
 import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
+import LoadingScreen from './components/LoadingScreen';
 
 export default function Home() {
+  const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const router = useRouter();
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [showPersonality, setShowPersonality] = useState(false);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [refreshProjects, setRefreshProjects] = useState(0);
 
+  // Redirect to login if not authenticated
   useEffect(() => {
-    checkHealth();
-  }, []);
+    if (!isLoading && !isAuthenticated) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, isLoading, router]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      checkHealth();
+    }
+  }, [isAuthenticated]);
 
   const checkHealth = async () => {
     try {
-      const response = await fetch('http://localhost:8000/health');
+      // Dynamically determine backend URL based on current hostname
+      const hostname = window.location.hostname;
+      const backendUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
+        ? `http://${hostname}:8000`
+        : 'http://localhost:8000';
+
+      const response = await fetch(`${backendUrl}/health`);
       const data = await response.json();
       setHealthStatus(data);
     } catch (error) {
@@ -35,6 +55,16 @@ export default function Home() {
     setRefreshProjects(prev => prev + 1);
     setSelectedProject(project.id);
   };
+
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return <LoadingScreen />;
+  }
+
+  // Don't render anything if not authenticated (will redirect)
+  if (!isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-900 dark:to-black">
@@ -75,11 +105,23 @@ export default function Home() {
                 )}
               </div>
 
+              {/* User Info */}
+              <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                👤 {user?.username}
+              </span>
+
               <button
                 onClick={() => setShowPersonality(!showPersonality)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
               >
                 {showPersonality ? 'Hide' : 'Personality'}
+              </button>
+
+              <button
+                onClick={logout}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+              >
+                Logout
               </button>
             </div>
           </div>

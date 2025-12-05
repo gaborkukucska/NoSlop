@@ -339,6 +339,7 @@ class UserModel(Base):
     id = Column(String, primary_key=True)
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=True)
+    hashed_password = Column(String, nullable=False)
     
     # Admin AI Personality Settings
     personality_type = Column(String, default="balanced")  # creative, technical, balanced

@@ -2,7 +2,7 @@
 project_name: "NoSlop"
 version: "0.03"
 status: "In Development"
-last_updated: "2025-12-01"
+last_updated: "2025-12-04"
 current_phase: "Phase 2: Core Development"
 current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 ---
@@ -10,6 +10,72 @@ current_cycle: "Cycle 0 Complete, Starting Cycle 2"
 # Project Status
 
 ## Recent Changes
+- **2025-12-04** (Session 3):
+    - **Frontend Installer SFTP Permission Fix**:
+      - **Root Cause**: During frontend deployment, directories were created with root ownership (`sudo mkdir -p`) but SFTP attempted to write files as non-root user, causing "Permission denied" errors
+      - **Issue**: Authentication files (`app/context/AuthContext.tsx`, `app/login/page.tsx`, `app/register/page.tsx`) failed to transfer, breaking Next.js build
+      - **Solution**: Updated `transfer_directory` method in `seed/ssh_manager.py` to set proper ownership immediately after directory creation
+      - **Implementation**: 
+        - Get username from SSH client connection: `client.get_transport().get_username()`
+        - Execute `sudo chown -R {username}:{username} {dir_path}` after each `sudo mkdir -p`
+        - This ensures SFTP can write files to newly created directories
+      - **Files Modified**: `seed/ssh_manager.py`
+      - **Impact**: Frontend deployment now works correctly on multi-device setups, all files transfer successfully without permission errors
+    
+    - **Authentication Flow Implementation**:
+      - **Issue**: Frontend had authentication infrastructure (login/register pages, AuthContext, JWT) but main dashboard didn't enforce authentication
+      - **Solution**: Added authentication checks to main page with redirect logic for unauthenticated users
+      - **Implementation**:
+        - Created `LoadingScreen` component for auth check loading state
+        - Added `useAuth` hook to main page with redirect to `/login` if not authenticated
+        - Added logout button and username display in header
+        - Protected dashboard route - only accessible when authenticated
+      - **Files Modified**: `frontend/app/page.tsx`
+      - **Files Created**: `frontend/app/components/LoadingScreen.tsx`
+      - **Impact**: Complete authentication flow now working - users must register/login to access dashboard, can logout, token persisted in localStorage
+    
+    - **API Connection Fix**:
+      - **Issue**: Frontend trying to connect to `localhost:8000` from browser, but backend at network IP
+      - **Solution**: Updated API client to dynamically detect backend URL based on current hostname
+      - **Implementation**: If accessing via IP (e.g., `10.0.0.3:3000`), connects to same IP with port 8000
+      - **Files Modified**: `frontend/utils/api.ts`
+      - **Impact**: Frontend can connect to backend from any access point
+    
+    - **CORS Configuration Fix**:
+      - **Issue**: Browser blocked API requests with CORS error - backend only allowed `localhost:3000` but users accessed from multiple IPs
+      - **Solution**: Updated CORS configuration to allow all origins in development mode
+      - **Implementation**:
+        - Set `cors_origins = "*"` in `backend/config.py`
+        - Updated CORS middleware to use `allow_origin_regex=".*"` for wildcard support
+      - **Files Modified**: `backend/config.py`, `backend/main.py`
+      - **Impact**: API requests work from any frontend URL (localhost, 10.0.0.3, 10.0.0.20, 10.0.0.11)
+      - **Security Note**: CORS set to allow all origins for development only, should be restricted in production
+    
+    - **Database Schema Fix**:
+      - **Issue**: PostgreSQL `users` table missing `hashed_password` column, causing registration failures
+      - **Root Cause**: Table created before authentication was added, schema not migrated
+      - **Solution**: Dropped and recreated database to initialize with correct schema
+      - **Implementation**:
+        - Stopped backend service
+        - Dropped database: `DROP DATABASE noslop;`
+        - Recreated database: `CREATE DATABASE noslop OWNER noslop;`
+        - Restarted backend to initialize tables with correct schema
+      - **Impact**: Users table now has all required columns, registration and login working correctly
+      - **Note**: All existing data was lost (acceptable for development)
+    
+    - **Health Check URL Fix**:
+      - **Issue**: Health check hardcoded to `localhost:8000`, failed when accessing from network IP
+      - **Solution**: Updated health check to use dynamic URL detection
+      - **Files Modified**: `frontend/app/page.tsx`
+      - **Impact**: Health check works from any frontend URL
+    
+    - **Project List API Response Fix**:
+      - **Issue**: Frontend crashed with "i.map is not a function" after login
+      - **Root Cause**: Backend returns `{projects: [...]}` but frontend expected array directly
+      - **Solution**: Updated `listProjects` method to extract projects array from response object
+      - **Files Modified**: `frontend/utils/api.ts`
+      - **Impact**: Project list renders correctly without errors
+
 - **2025-12-04** (Session 2):
     - **Critical Bug Fixes and Service Improvements**:
       - **Backend Startup Issues Fixed**:

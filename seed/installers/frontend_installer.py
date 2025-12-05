@@ -54,13 +54,36 @@ class FrontendInstaller(BaseInstaller):
             self.logger.info(f"Node.js version: {out}")
             # Verify version is >= 20
             version = out.strip().lstrip('v')
-            major_version = int(version.split('.')[0])
-            if major_version < 20:
-                self.logger.error(f"Node.js version {out} is too old. Next.js requires >= 20.9.0")
-                return False
+            try:
+                major_version = int(version.split('.')[0])
+                if major_version < 20:
+                    self.logger.warning(f"Node.js version {out} is too old. Attempting to upgrade to 20.x...")
+                    # Remove old version
+                    self.execute_remote("sudo apt-get remove -y nodejs npm libnode*")
+                    self.execute_remote("sudo apt-get autoremove -y")
+                    
+                    # Re-add repo and install
+                    self.execute_remote("curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -")
+                    self.install_packages(["nodejs", "build-essential"])
+                    
+                    # Check again
+                    code, out, _ = self.execute_remote("node -v")
+                    if code == 0:
+                        new_version = out.strip().lstrip('v')
+                        if int(new_version.split('.')[0]) < 20:
+                            self.logger.error(f"Failed to upgrade Node.js. Still version {out}")
+                            return False
+                        self.logger.info(f"Upgraded to Node.js {out}")
+                    else:
+                        self.logger.error("Failed to verify Node.js after upgrade")
+                        return False
+            except ValueError:
+                self.logger.warning(f"Could not parse Node.js version: {out}")
         else:
-            self.logger.error("Node.js installation failed")
-            return False
+            self.logger.warning("Node.js not found or error checking version. Proceeding with installation...")
+            # Re-add repo and install
+            self.execute_remote("curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -")
+            self.install_packages(["nodejs", "build-essential"])
         
         # Create the install directory with proper ownership BEFORE transferring files
         self.logger.info(f"Creating install directory {self.install_dir} with ownership {self.username}...")

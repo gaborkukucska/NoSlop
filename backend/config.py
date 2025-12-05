@@ -110,7 +110,9 @@ class Settings(BaseSettings):
     # Security Settings
     # ========================================================================
     secret_key: Optional[str] = None
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    # Allow all origins for development (frontend can be accessed from multiple IPs)
+    # In production, this should be restricted to specific domains
+    cors_origins: str = "*"
     
     # ========================================================================
     # Feature Flags

@@ -163,6 +163,7 @@ class HealthStatus(BaseModel):
 class UserCreate(BaseModel):
     """Request to create a new user"""
     username: str = Field(..., description="Unique username")
+    password: str = Field(..., description="User password")
     email: Optional[str] = Field(default=None, description="User email")
     personality: Optional[PersonalityProfile] = Field(default=None, description="Initial personality settings")
     preferences: Optional[Dict[str, Any]] = Field(default=None, description="User preferences")
@@ -177,3 +178,19 @@ class User(BaseModel):
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     last_login: Optional[datetime] = None
+
+
+class UserInDB(User):
+    """User data with hashed password for DB storage"""
+    hashed_password: str
+
+
+class Token(BaseModel):
+    """JWT Token response"""
+    access_token: str
+    token_type: str
+
+
+class TokenData(BaseModel):
+    """Data embedded in JWT token"""
+    username: Optional[str] = None

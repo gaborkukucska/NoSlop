@@ -2,9 +2,10 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
 import uvicorn
-from typing import Dict, List
-import logging
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
 import time
+import logging
 from sqlalchemy.orm import Session
 
 from models import (
@@ -23,7 +24,17 @@ from logging_config import setup_logging
 from database import init_db, get_db, SessionLocal, ProjectCRUD, TaskCRUD, UserCRUD
 from project_manager import ProjectManager
 from worker_registry import get_registry, initialize_workers
+from worker_registry import get_registry, initialize_workers
 from task_executor import TaskExecutor
+from fastapi.security import OAuth2PasswordRequestForm
+from auth import (
+    create_access_token, 
+    get_current_user, 
+    get_password_hash, 
+    verify_password,
+    ACCESS_TOKEN_EXPIRE_MINUTES
+)
+from models import Token
 
 # Initialize logging with dated files
 log_file = setup_logging(
@@ -67,15 +78,25 @@ if settings.enable_project_manager:
         db.close()
 
 # CORS middleware for frontend communication
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-logger.info(f"CORS enabled for origins: {settings.cors_origins_list}")
+# Allow all origins for development (frontend accessible from multiple IPs)
+if settings.cors_origins == "*":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=".*",  # Allow all origins
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info("CORS enabled for all origins (development mode)")
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logger.info(f"CORS enabled for origins: {settings.cors_origins_list}")
 
 # Global Admin AI instance (in production, this would be per-user)
 admin_ai_instance: Dict[str, AdminAI] = {}
@@ -133,7 +154,12 @@ def health_check():
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat_with_admin_ai(request: ChatRequest, session_id: str = "default", db: Session = Depends(get_db)):
+async def chat_with_admin_ai(
+    request: ChatRequest, 
+    session_id: str = "default", 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Chat with the Admin AI.
     
@@ -196,7 +222,11 @@ async def get_personality(personality_type: str):
 
 
 @app.post("/api/personality")
-async def set_personality(personality: PersonalityProfile, session_id: str = "default"):
+async def set_personality(
+    personality: PersonalityProfile, 
+    session_id: str = "default",
+    current_user: User = Depends(get_current_user)
+):
     """
     Set custom personality for Admin AI.
     
@@ -222,7 +252,10 @@ async def set_personality(personality: PersonalityProfile, session_id: str = "de
 
 
 @app.post("/api/chat/clear")
-async def clear_chat_history(session_id: str = "default"):
+async def clear_chat_history(
+    session_id: str = "default",
+    current_user: User = Depends(get_current_user)
+):
     """
     Clear conversation history for a session.
     
@@ -242,7 +275,11 @@ async def clear_chat_history(session_id: str = "default"):
 
 
 @app.get("/api/suggestions/{project_type}")
-async def get_project_suggestions(project_type: str, session_id: str = "default"):
+async def get_project_suggestions(
+    project_type: str, 
+    session_id: str = "default",
+    current_user: User = Depends(get_current_user)
+):
     """
     Get creative suggestions for a project type.
     
@@ -264,6 +301,57 @@ async def get_project_suggestions(project_type: str, session_id: str = "default"
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating suggestions: {str(e)}")
+
+
+# ============================================================================
+# Authentication Endpoints
+# ============================================================================
+
+@app.post("/auth/register", response_model=User)
+async def register(user_create: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user"""
+    if UserCRUD.get_by_username(db, user_create.username):
+        raise HTTPException(status_code=400, detail="Username already registered")
+    
+    try:
+        # Prepare user data
+        user_data = {
+            "id": f"user_{int(time.time())}_{user_create.username}",  # Simple ID generation
+            "username": user_create.username,
+            "email": user_create.email,
+            "hashed_password": get_password_hash(user_create.password),
+            "preferences": user_create.preferences or {}
+        }
+        
+        if user_create.personality:
+            user_data["personality_type"] = user_create.personality.type.value
+            user_data["personality_formality"] = user_create.personality.formality
+            user_data["personality_enthusiasm"] = user_create.personality.enthusiasm
+            user_data["personality_verbosity"] = user_create.personality.verbosity
+            
+        user = UserCRUD.create(db, user_data)
+        return user.to_dict()
+        
+    except Exception as e:
+        logger.error(f"Error creating user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
+
+@app.post("/auth/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Login to get access token"""
+    user = UserCRUD.get_by_username(db, form_data.username)
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 
 # ============================================================================
@@ -321,7 +409,8 @@ async def get_user(user_id: str, db: Session = Depends(get_db)):
 async def update_user_personality(
     user_id: str, 
     personality: PersonalityProfile, 
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """Update user's Admin AI personality settings"""
     try:
@@ -350,7 +439,11 @@ async def update_user_personality(
 # ============================================================================
 
 @app.post("/api/projects", response_model=Project)
-async def create_project(project_request: ProjectRequest, db: Session = Depends(get_db)):
+async def create_project(
+    project_request: ProjectRequest, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Create a new media project.
     
@@ -378,7 +471,12 @@ async def create_project(project_request: ProjectRequest, db: Session = Depends(
 
 
 @app.get("/api/projects")
-async def list_projects(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+async def list_projects(
+    skip: int = 0, 
+    limit: int = 100, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     List all projects.
     
@@ -403,7 +501,11 @@ async def list_projects(skip: int = 0, limit: int = 100, db: Session = Depends(g
 
 
 @app.get("/api/projects/{project_id}")
-async def get_project(project_id: str, db: Session = Depends(get_db)):
+async def get_project(
+    project_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Get project details and status.
     
@@ -434,7 +536,11 @@ async def get_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/api/projects/{project_id}/tasks")
-async def get_project_tasks(project_id: str, db: Session = Depends(get_db)):
+async def get_project_tasks(
+    project_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Get all tasks for a project.
     
@@ -462,7 +568,8 @@ async def update_task_status(
     task_id: str,
     status: str,
     result: Dict = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
     Update task status.
@@ -496,7 +603,11 @@ async def update_task_status(
 
 
 @app.post("/api/tasks/{task_id}/execute")
-async def execute_task(task_id: str, db: Session = Depends(get_db)):
+async def execute_task(
+    task_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Manually trigger execution of a task.
     
@@ -536,7 +647,7 @@ async def execute_task(task_id: str, db: Session = Depends(get_db)):
 # ============================================================================
 
 @app.get("/api/workers")
-async def list_workers():
+async def list_workers(current_user: User = Depends(get_current_user)):
     """
     List all available worker agents with their capabilities.
     
@@ -561,7 +672,10 @@ async def list_workers():
 
 
 @app.get("/api/workers/{worker_type}/capabilities")
-async def get_worker_capabilities(worker_type: str):
+async def get_worker_capabilities(
+    worker_type: str,
+    current_user: User = Depends(get_current_user)
+):
     """
     Get capabilities for a specific worker type.
     
@@ -591,7 +705,7 @@ async def get_worker_capabilities(worker_type: str):
 
 
 @app.get("/api/workers/task-mapping")
-async def get_task_type_mapping():
+async def get_task_type_mapping(current_user: User = Depends(get_current_user)):
     """
     Get mapping of task types to worker types.
     
@@ -619,7 +733,11 @@ async def get_task_type_mapping():
 # ============================================================================
 
 @app.post("/api/projects/{project_id}/execute")
-async def execute_project(project_id: str, db: Session = Depends(get_db)):
+async def execute_project(
+    project_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Execute all tasks for a project with dependency resolution.
     
@@ -647,7 +765,11 @@ async def execute_project(project_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/api/tasks/{task_id}/execute-with-dependencies")
-async def execute_task_with_dependencies(task_id: str, db: Session = Depends(get_db)):
+async def execute_task_with_dependencies(
+    task_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Execute a task and all its dependencies.
     
@@ -675,7 +797,11 @@ async def execute_task_with_dependencies(task_id: str, db: Session = Depends(get
 
 
 @app.get("/api/tasks/{task_id}/progress")
-async def get_task_progress(task_id: str, db: Session = Depends(get_db)):
+async def get_task_progress(
+    task_id: str, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     """
     Get current progress of a task.
     

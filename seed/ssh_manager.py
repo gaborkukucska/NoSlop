@@ -512,6 +512,10 @@ class SSHManager:
             # Create all parent directories via SSH command (not SFTP)
             # This ensures proper permissions and recursive creation
             sorted_dirs = sorted(parent_dirs, key=lambda x: len(x.split('/')))
+            
+            # Get the username from the SSH client connection for ownership
+            username = client.get_transport().get_username()
+            
             for dir_path in sorted_dirs:
                 # Use stat to check if directory exists, create if not
                 check_cmd = f"test -d {dir_path}"
@@ -523,6 +527,13 @@ class SSHManager:
                     exit_code, _, err = self.execute_command(client, create_cmd)
                     if exit_code != 0:
                         logger.warning(f"Failed to create directory {dir_path}: {err}")
+                    else:
+                        # Set ownership to the connecting user for SFTP access
+                        # This prevents "Permission denied" errors when SFTP tries to write files
+                        chown_cmd = f"sudo chown -R {username}:{username} {dir_path}"
+                        exit_code, _, err = self.execute_command(client, chown_cmd)
+                        if exit_code != 0:
+                            logger.warning(f"Failed to set ownership for {dir_path}: {err}")
             
             # Transfer all files
             total_files = len(files_to_transfer)
