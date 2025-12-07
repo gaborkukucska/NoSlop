@@ -139,9 +139,6 @@ class ProjectModel(Base):
         }
 
 
-        }
-
-
 class ChatSessionModel(Base):
     """Database model for chat sessions"""
     __tablename__ = "chat_sessions"
