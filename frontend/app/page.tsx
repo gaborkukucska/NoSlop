@@ -146,30 +146,26 @@ export default function Home() {
               </div>
             )}
 
-            {/* Projects Section */}
-            <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
-                  📁 Projects
-                </h2>
-                <button
-                  onClick={() => setShowProjectForm(true)}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                >
-                  + New Project
-                </button>
-              </div>
-              <ProjectList
-                onProjectClick={(project) => setSelectedProject(project.id)}
-                refreshTrigger={refreshProjects}
-              />
-            </div>
+            {/* Projects Section - MOVED TO SIDEBAR */}
           </div>
 
           {/* Right Sidebar */}
           <div className="space-y-6">
-            {/* Personality Selector */}
-            {showPersonality && <PersonalitySelector />}
+            {/* About */}
+            <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 rounded-lg shadow-lg p-6">
+              <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
+                ✨ About NoSlop
+              </h3>
+              <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                Self-hosted, decentralized media creation platform. Own your data, own your creativity.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🦙 Ollama</span>
+                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🎨 ComfyUI</span>
+                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🎥 FFmpeg</span>
+                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">👁️ OpenCV</span>
+              </div>
+            </div>
 
             {/* Quick Info */}
             <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
@@ -221,20 +217,23 @@ export default function Home() {
               </div>
             </div>
 
-            {/* About */}
-            <div className="bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-950 dark:to-purple-950 rounded-lg shadow-lg p-6">
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
-                ✨ About NoSlop
-              </h3>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">
-                Self-hosted, decentralized media creation platform. Own your data, own your creativity.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🦙 Ollama</span>
-                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🎨 ComfyUI</span>
-                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">🎥 FFmpeg</span>
-                <span className="px-2 py-1 bg-white dark:bg-zinc-800 rounded text-xs">👁️ OpenCV</span>
+            {/* Projects Section */}
+            <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-zinc-100">
+                  📁 Projects
+                </h2>
+                <button
+                  onClick={() => setShowProjectForm(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  + New
+                </button>
               </div>
+              <ProjectList
+                onProjectClick={(project) => setSelectedProject(project.id)}
+                refreshTrigger={refreshProjects}
+              />
             </div>
           </div>
         </div>
@@ -251,6 +250,22 @@ export default function Home() {
               onSuccess={handleProjectCreated}
               onCancel={() => setShowProjectForm(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Personality Modal */}
+      {showPersonality && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="relative w-full max-w-2xl bg-white dark:bg-zinc-900 rounded-lg shadow-xl overflow-hidden">
+
+            <PersonalitySelector />
+            <button
+              onClick={() => setShowPersonality(false)}
+              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
