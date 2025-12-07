@@ -21,6 +21,8 @@ from project_manager import ProjectManager
 logger = logging.getLogger(__name__)
 
 
+from database import ChatMessageModel
+
 class AdminAI:
     """
     Admin AI - The primary interface for user interaction.
@@ -35,7 +37,7 @@ class AdminAI:
             personality: Personality configuration. Defaults to balanced.
         """
         self.personality = personality or PersonalityProfile(type=PersonalityType.BALANCED)
-        self.conversation_history: List[ChatMessage] = []
+        # self.conversation_history is now managed via database
         self.model = settings.ollama_default_model
         self.context: Dict[str, Any] = {}
         self.prompt_manager = get_prompt_manager()
@@ -74,23 +76,56 @@ class AdminAI:
         logger.debug("Built system prompt", extra={"context": {"personality": self.personality.type}})
         return system_prompt
     
-    def _format_conversation_history(self, max_messages: int = 10) -> List[Dict[str, str]]:
+    def _format_conversation_history(self, db: Session, session_id: str = "default", max_messages: int = 10) -> List[Dict[str, str]]:
         """
         Format conversation history for Ollama API.
         
         Args:
+            db: Database session
+            session_id: Session ID
             max_messages: Maximum number of recent messages to include
             
         Returns:
             List of message dictionaries
         """
-        recent_messages = self.conversation_history[-max_messages:]
+        if not db:
+            return []
+            
+        # Fetch recent messages from DB
+        recent_messages = db.query(ChatMessageModel).filter(
+            ChatMessageModel.session_id == session_id
+        ).order_by(ChatMessageModel.timestamp.desc()).limit(max_messages).all()
+        
+        # Reverse to chronological order
+        recent_messages.reverse()
+        
         return [
             {"role": msg.role, "content": msg.content}
             for msg in recent_messages
         ]
     
-    def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None) -> ChatResponse:
+    def get_history(self, db: Session, session_id: str = "default", limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Get conversation history for frontend.
+        
+        Args:
+            db: Database session
+            session_id: Session ID
+            limit: Max messages
+            
+        Returns:
+            List of message dictionaries
+        """
+        if not db:
+            return []
+            
+        messages = db.query(ChatMessageModel).filter(
+            ChatMessageModel.session_id == session_id
+        ).order_by(ChatMessageModel.timestamp.asc()).limit(limit).all()
+        
+        return [msg.to_dict() for msg in messages]
+
+    def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None, session_id: str = "default") -> ChatResponse:
         """
         Main conversation interface with the Admin AI.
         
@@ -98,26 +133,36 @@ class AdminAI:
             message: User message
             context: Additional context (current project, user preferences, etc.)
             db: Database session for performing actions
+            session_id: Session identifier
             
         Returns:
             ChatResponse with AI message and optional suggestions
         """
         logger.info("Chat request received", extra={"context": {"message_length": len(message)}})
         
+        if not db:
+            raise ValueError("Database session is required for chat")
+
         # Update context
         if context:
             self.context.update(context)
             logger.debug("Context updated", extra={"context": {"keys": list(context.keys())}})
         
-        # Add user message to history
-        user_msg = ChatMessage(role="user", content=message)
-        self.conversation_history.append(user_msg)
+        # Save user message to DB
+        user_msg_db = ChatMessageModel(
+            session_id=session_id,
+            role="user",
+            content=message,
+            timestamp=datetime.utcnow()
+        )
+        db.add(user_msg_db)
+        db.commit()
         
         # Build messages for Ollama
         messages = [
             {"role": "system", "content": self._build_system_prompt()}
         ]
-        messages.extend(self._format_conversation_history())
+        messages.extend(self._format_conversation_history(db, session_id))
         
         # Add context if available
         if self.context:
@@ -140,13 +185,19 @@ class AdminAI:
             ai_message = response['message']['content']
             logger.info("Ollama response received", extra={"context": {"response_length": len(ai_message)}})
             
-            # Add AI response to history
-            ai_msg = ChatMessage(role="assistant", content=ai_message)
-            self.conversation_history.append(ai_msg)
+            # Save AI response to DB
+            ai_msg_db = ChatMessageModel(
+                session_id=session_id,
+                role="assistant",
+                content=ai_message,
+                timestamp=datetime.utcnow()
+            )
+            db.add(ai_msg_db)
+            db.commit()
             
             # Detect if user wants to create a project
             action = self._detect_action(message, ai_message)
-            suggestions = self._generate_suggestions(message, ai_message)
+            suggestions = self._generate_suggestions(message, ai_message, db, session_id)
             
             metadata = {"model": self.model, "personality": self.personality.type}
             
@@ -175,6 +226,10 @@ class AdminAI:
                         
                         # Append confirmation to AI message
                         ai_message += f"\n\nI've created a new project for you: **{project.title}**. I've also generated a preliminary plan with {len(project.tasks)} tasks."
+                        
+                        # Update AI message in DB with confirmation
+                        ai_msg_db.content = ai_message
+                        db.commit()
                         
                     except Exception as e:
                         logger.error(f"Failed to create project from chat: {e}", exc_info=True)
@@ -220,13 +275,15 @@ class AdminAI:
         
         return None
     
-    def _generate_suggestions(self, user_message: str, ai_response: str) -> List[str]:
+    def _generate_suggestions(self, user_message: str, ai_response: str, db: Session, session_id: str) -> List[str]:
         """
         Generate follow-up suggestions based on conversation.
         
         Args:
             user_message: User's message
             ai_response: AI's response
+            db: Database session
+            session_id: Session ID
             
         Returns:
             List of suggestion strings
@@ -240,12 +297,15 @@ class AdminAI:
                 "Do you have any reference media?",
                 "What's the target duration?"
             ])
-        elif not self.conversation_history or len(self.conversation_history) < 3:
-            suggestions.extend([
-                "I want to create a video",
-                "Help me brainstorm ideas",
-                "What can you help me with?"
-            ])
+        else:
+            # Check history length
+            history_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
+            if history_count < 3:
+                suggestions.extend([
+                    "I want to create a video",
+                    "Help me brainstorm ideas",
+                    "What can you help me with?"
+                ])
         
         return suggestions[:3]  # Limit to 3 suggestions
     
@@ -332,8 +392,10 @@ class AdminAI:
             logger.error(f"Error generating suggestions: {e}", exc_info=True)
             return [f"Error generating suggestions: {str(e)}"]
     
-    def clear_history(self) -> None:
+    def clear_history(self, db: Session, session_id: str = "default") -> None:
         """Clear conversation history."""
-        logger.info("Clearing conversation history")
-        self.conversation_history = []
+        logger.info(f"Clearing conversation history for session {session_id}")
+        if db:
+            db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).delete()
+            db.commit()
         self.context = {}

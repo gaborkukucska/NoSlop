@@ -15,6 +15,7 @@ from datetime import datetime
 from seed.models import DeploymentPlan, NodeAssignment
 from seed.ssh_manager import SSHManager
 from seed.service_registry import ServiceRegistry, ServiceType
+from seed.device_rediscovery import DeviceRediscovery
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,9 @@ class ServiceManager:
                 capability_score=device_data.get('capability_score', 0.0),
                 ssh_available=ssh_data.get('available', False),
                 ssh_port=ssh_data.get('port', 22),
-                ssh_username=ssh_data.get('username', 'root')
+                ssh_username=ssh_data.get('username', 'root'),
+                mac_address=ssh_data.get('mac_address'),
+                mac_addresses=ssh_data.get('mac_addresses', [])
             )
             
             # Reconstruct node assignment
@@ -133,17 +136,103 @@ class ServiceManager:
         registry_file = deployment_dir / "service_registry.json"
         self.registry = ServiceRegistry(registry_file)
         
+        # Initialize device re-discovery
+        self.rediscovery = DeviceRediscovery()
+        
         logger.info(f"Service manager initialized for deployment: {deployment_dir.name}")
 
     
-    def _execute_on_node(self, node: NodeAssignment, command: str, timeout: int = 60) -> tuple[int, str, str]:
+    def _reconnect_to_node(self, node: NodeAssignment) -> Optional[str]:
         """
-        Execute command on a node (local or remote).
+        Attempt to reconnect to node using re-discovery.
+        
+        Steps:
+        1. Try original IP (fast path)
+        2. Try MAC-based discovery
+        3. Try hostname-based discovery
+        4. Update deployment plan if found
+        
+        Args:
+            node: Node to reconnect to
+            
+        Returns:
+            New IP address or None if not found
+        """
+        logger.warning(f"Connection to {node.device.hostname} ({node.device.ip_address}) failed")
+        logger.info("Attempting device re-discovery...")
+        
+        new_ip = None
+        
+        # Strategy 1: Try MAC-based discovery
+        if node.device.mac_address:
+            logger.info(f"Searching for device by MAC: {node.device.mac_address}")
+            new_ip = self.rediscovery.find_device_by_mac(node.device.mac_address)
+        
+        # Strategy 2: Try hostname resolution if MAC failed
+        if not new_ip and node.device.hostname:
+            logger.info(f"Searching for device by hostname: {node.device.hostname}")
+            new_ip = self.rediscovery.find_device_by_hostname(node.device.hostname)
+        
+        # Strategy 3: Try all MAC addresses if primary failed
+        if not new_ip and node.device.mac_addresses:
+            for mac in node.device.mac_addresses:
+                if mac != node.device.mac_address:  # Skip primary, already tried
+                    logger.info(f"Trying alternate MAC: {mac}")
+                    new_ip = self.rediscovery.find_device_by_mac(mac)
+                    if new_ip:
+                        break
+        
+        if not new_ip:
+            logger.error(f"Could not find device {node.device.hostname}")
+            return None
+        
+        # Verify device identity
+        logger.info(f"Found potential device at {new_ip}, verifying identity...")
+        if not self.rediscovery.verify_device_identity(
+            new_ip,
+            expected_hostname=node.device.hostname,
+            expected_mac=node.device.mac_address
+        ):
+            logger.error(f"Device identity verification failed for {new_ip}")
+            return None
+        
+        # Update deployment plan
+        logger.info(f"✓ Device found at new IP: {new_ip}")
+        logger.info(f"Updating deployment plan: {node.device.ip_address} → {new_ip}")
+        
+        if self.rediscovery.update_deployment_plan(
+            self.deployment_dir,
+            node.device.ip_address,
+            new_ip,
+            backup=True
+        ):
+            # Update in-memory node
+            old_ip = node.device.ip_address
+            node.device.ip_address = new_ip
+            logger.info(f"✓ Deployment plan updated successfully")
+            logger.info(f"✓ Reconnected to {node.device.hostname}: {old_ip} → {new_ip}")
+            return new_ip
+        else:
+            logger.error("Failed to update deployment plan")
+            return None
+
+
+    
+    def _execute_on_node(self, node: NodeAssignment, command: str, timeout: int = 60, retry: bool = True) -> tuple[int, str, str]:
+        """
+        Execute command on a node (local or remote) with automatic re-discovery.
+        
+        If connection fails and retry=True:
+        1. Attempt device re-discovery
+        2. Update node IP address
+        3. Retry connection
+        4. Update deployment plan if successful
         
         Args:
             node: Node to execute on
             command: Command to execute
             timeout: Command timeout in seconds
+            retry: Whether to attempt re-discovery on connection failure
             
         Returns:
             Tuple of (exit_code, stdout, stderr)
@@ -182,6 +271,14 @@ class ServiceManager:
                 port=node.device.ssh_port
             )
             if not client:
+                # Connection failed - try re-discovery if enabled
+                if retry:
+                    new_ip = self._reconnect_to_node(node)
+                    if new_ip:
+                        # Retry connection with new IP
+                        logger.info(f"Retrying connection to {node.device.hostname} at {new_ip}...")
+                        return self._execute_on_node(node, command, timeout, retry=False)
+                
                 return -1, "", "Failed to connect to remote node"
             
             exit_code, stdout, stderr = self.ssh_manager.execute_command(client, command, timeout)

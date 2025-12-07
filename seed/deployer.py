@@ -24,6 +24,7 @@ from seed.installers.comfyui_installer import ComfyUIInstaller
 from seed.installers.ffmpeg_installer import FFmpegInstaller
 from seed.installers.backend_installer import BackendInstaller
 from seed.installers.frontend_installer import FrontendInstaller
+from seed.storage_manager import StorageManager, StorageConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,10 @@ class Deployer:
         # Initialize registry
         self.registry = ServiceRegistry(self.deployment_dir / "service_registry.json")
         self.discovery = ServiceDiscovery()
+        
+        # Initialize storage manager
+        self.storage_manager = StorageManager(ssh_manager)
+        self.storage_config = None  # Will be set during deployment
         
         logger.info(f"Deployer initialized. Deployment ID: {self.deployment_id}")
         logger.info(f"Deployment directory: {self.deployment_dir}")
@@ -235,7 +240,14 @@ class Deployer:
                 # Determine port (default 11434, but could be others if multi-instance)
                 # For now we stick to default port for primary instance
                 username, password = get_credentials(node.device)
-                installer = OllamaInstaller(node.device, self.ssh_manager, username=username, password=password)
+                
+                # Pass shared models directory if configured
+                models_dir = self.storage_config.ollama_models_dir if self.storage_config else None
+                installer = OllamaInstaller(
+                    node.device, self.ssh_manager, 
+                    username=username, password=password,
+                    models_dir=models_dir
+                )
                 if not installer.run():
                     logger.error(f"Failed to install Ollama on {node.device.hostname}")
                     return False
@@ -255,7 +267,17 @@ class Deployer:
             if "comfyui" in node.services:
                 # Determine GPU index (default 0)
                 username, password = get_credentials(node.device)
-                installer = ComfyUIInstaller(node.device, self.ssh_manager, username=username, password=password)
+                
+                # Pass shared storage directories if configured
+                models_dir = self.storage_config.comfyui_models_dir if self.storage_config else None
+                custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir if self.storage_config else None
+                
+                installer = ComfyUIInstaller(
+                    node.device, self.ssh_manager, 
+                    username=username, password=password,
+                    models_dir=models_dir,
+                    custom_nodes_dir=custom_nodes_dir
+                )
                 if not installer.run():
                     logger.error(f"Failed to install ComfyUI on {node.device.hostname}")
                     return False
@@ -343,6 +365,56 @@ class Deployer:
                     node.device.ssh_username = creds.username
                     
         self.save_deployment_plan(plan)
+        
+        # Configure Shared Storage (if multi-device)
+        if len(plan.nodes) > 1:
+            logger.info("\n🗄️  Configuring Shared Storage...")
+            print("\n" + "="*70)
+            print("Shared Storage Configuration")
+            print("="*70)
+            
+            # Prompt for storage configuration
+            self.storage_config = self.storage_manager.prompt_storage_config()
+            
+            # Helper to get credentials
+            def get_credentials(device):
+                """Helper to get username and password for a device."""
+                creds = credentials_map.get(device.ip_address)
+                if creds:
+                    return creds.username, creds.password
+                return "root", None
+            
+            # Setup NFS server on master node
+            if plan.master_node:
+                print(f"\n📡 Setting up NFS server on {plan.master_node.device.hostname}...")
+                username, password = get_credentials(plan.master_node.device)
+                if not self.storage_manager.setup_nfs_server(plan.master_node.device, username, password):
+                    logger.error("Failed to setup NFS server")
+                    print("\n⚠️  Warning: Shared storage setup failed.")
+                    print("   Services will use local storage instead.")
+                    self.storage_config = None  # Disable shared storage
+                else:
+                    # Mount NFS shares on worker nodes
+                    master_ip = plan.master_node.device.ip_address
+                    for node in plan.nodes:
+                        if node != plan.master_node:
+                            print(f"📥 Mounting shared storage on {node.device.hostname}...")
+                            username, password = get_credentials(node.device)
+                            if not self.storage_manager.mount_nfs_shares(node.device, master_ip, username, password):
+                                logger.warning(f"Failed to mount NFS on {node.device.hostname}")
+                            else:
+                                # Verify shared storage
+                                if self.storage_manager.verify_shared_storage(node.device, username, password):
+                                    print(f"   ✓ Shared storage verified on {node.device.hostname}")
+                    
+                    # Save storage configuration to deployment
+                    storage_env = self.storage_manager.generate_storage_env()
+                    storage_file = self.deployment_dir / "shared_storage.env"
+                    with open(storage_file, 'w') as f:
+                        f.write(storage_env)
+                    logger.info(f"Storage configuration saved to {storage_file}")
+        else:
+            logger.info("\n🗄️  Single device deployment - using local storage")
         
         # Generate configurations
         logger.info("\n📝 Generating node configurations...")

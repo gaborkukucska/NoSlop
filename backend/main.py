@@ -194,14 +194,142 @@ async def chat_with_admin_ai(
             admin_ai.personality = personality
             logger.debug(f"Personality updated for session {session_id}")
         
+        # Ensure session exists
+        from database import ChatSessionModel
+        session_record = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+        
+        if not session_record:
+            # Auto-create session if it doesn't exist (e.g. from default)
+            session_record = ChatSessionModel(
+                id=session_id,
+                user_id=current_user.id if current_user else None,
+                title="New Chat"
+            )
+            db.add(session_record)
+            db.commit()
+            
+        # Update session timestamp
+        session_record.updated_at = datetime.utcnow()
+        
+        # Auto-title if it's "New Chat" and we have a message
+        if session_record.title == "New Chat" and len(request.message) > 0:
+            # Simple title generation: first 30 chars
+            new_title = request.message[:30] + "..." if len(request.message) > 30 else request.message
+            session_record.title = new_title
+            
+        db.commit()
+        
         # Process chat
-        response = admin_ai.chat(request.message, request.context, db=db)
+        response = admin_ai.chat(request.message, request.context, db=db, session_id=session_id)
         
         return response
         
     except Exception as e:
         logger.error(f"Chat endpoint error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Chat error: {str(e)}")
+
+
+@app.get("/api/chat/history")
+async def get_chat_history(
+    session_id: str = "default",
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get chat history for a session.
+    
+    Args:
+        session_id: Session identifier
+        limit: Max messages to return
+        db: Database session
+        
+    Returns:
+        List of chat messages
+    """
+    try:
+        admin_ai = get_admin_ai(session_id)
+        history = admin_ai.get_history(db, session_id, limit)
+        return {"history": history}
+    except Exception as e:
+        logger.error(f"Error getting chat history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting chat history: {str(e)}")
+
+
+@app.get("/api/chat/sessions")
+async def get_chat_sessions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all chat sessions for the current user."""
+    from database import ChatSessionModel
+    sessions = db.query(ChatSessionModel).order_by(ChatSessionModel.updated_at.desc()).all()
+    return {"sessions": [s.to_dict() for s in sessions]}
+
+
+@app.post("/api/chat/sessions")
+async def create_chat_session(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new chat session."""
+    from database import ChatSessionModel
+    import uuid
+    
+    session_id = str(uuid.uuid4())
+    new_session = ChatSessionModel(
+        id=session_id,
+        user_id=current_user.id if current_user else None,
+        title="New Chat"
+    )
+    db.add(new_session)
+    db.commit()
+    
+    return new_session.to_dict()
+
+
+@app.put("/api/chat/sessions/{session_id}")
+async def update_chat_session(
+    session_id: str,
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a chat session (e.g. title)."""
+    from database import ChatSessionModel
+    
+    session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    if "title" in data:
+        session.title = data["title"]
+        
+    session.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return session.to_dict()
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a chat session."""
+    from database import ChatSessionModel, ChatMessageModel
+    
+    session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    # Delete messages first
+    db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).delete()
+    db.delete(session)
+    db.commit()
+    
+    return {"status": "success", "message": "Session deleted"}
 
 
 @app.get("/api/personality/{personality_type}")
@@ -254,6 +382,7 @@ async def set_personality(
 @app.post("/api/chat/clear")
 async def clear_chat_history(
     session_id: str = "default",
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -266,7 +395,7 @@ async def clear_chat_history(
         Success message
     """
     admin_ai = get_admin_ai(session_id)
-    admin_ai.clear_history()
+    admin_ai.clear_history(db, session_id)
     
     return {
         "status": "success",

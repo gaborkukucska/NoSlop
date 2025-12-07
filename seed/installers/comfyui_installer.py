@@ -18,13 +18,17 @@ class ComfyUIInstaller(BaseInstaller):
     Installs and configures ComfyUI with GPU support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, username: str = "root", password: str = None):
+    def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, 
+                 username: str = "root", password: str = None, 
+                 models_dir: Optional[str] = None, custom_nodes_dir: Optional[str] = None):
         super().__init__(device, ssh_manager, "comfyui", username=username, password=password)
         self.port = port
         self.gpu_index = gpu_index
         self.install_dir = f"/opt/ComfyUI_{port}" if port != 8188 else "/opt/ComfyUI"
         self.venv_dir = f"{self.install_dir}/venv"
         self.is_secondary = port != 8188
+        self.models_dir = models_dir  # Shared models directory (optional)
+        self.custom_nodes_dir = custom_nodes_dir  # Shared custom nodes directory (optional)
 
     def check_installed(self) -> bool:
         """Check if ComfyUI is installed and running on the specific port."""
@@ -116,6 +120,48 @@ class ComfyUIInstaller(BaseInstaller):
         """Configure ComfyUI service."""
         self.logger.info(f"Configuring ComfyUI on port {self.port}...")
         
+        # Setup shared storage if specified
+        if self.models_dir or self.custom_nodes_dir:
+            self.logger.info("Setting up shared storage...")
+            
+            if self.models_dir:
+                self.logger.info(f"Linking models directory to {self.models_dir}")
+                # Ensure shared directory exists
+                self.execute_remote(f"sudo mkdir -p {self.models_dir}")
+                self.execute_remote(f"sudo chmod 777 {self.models_dir}")
+                
+                # Create subdirectories for different model types
+                for subdir in ["checkpoints", "vae", "loras", "embeddings", "controlnet", "upscale_models"]:
+                    self.execute_remote(f"sudo mkdir -p {self.models_dir}/{subdir}")
+                
+                # Remove local models directory if it exists
+                self.execute_remote(f"rm -rf {self.install_dir}/models")
+                
+                # Create symlink to shared models
+                code, _, err = self.execute_remote(f"ln -s {self.models_dir} {self.install_dir}/models")
+                if code != 0:
+                    self.logger.error(f"Failed to create models symlink: {err}")
+                    return False
+                
+                self.logger.info("✓ Models directory linked to shared storage")
+            
+            if self.custom_nodes_dir:
+                self.logger.info(f"Linking custom_nodes directory to {self.custom_nodes_dir}")
+                # Ensure shared directory exists
+                self.execute_remote(f"sudo mkdir -p {self.custom_nodes_dir}")
+                self.execute_remote(f"sudo chmod 777 {self.custom_nodes_dir}")
+                
+                # Remove local custom_nodes directory if it exists
+                self.execute_remote(f"rm -rf {self.install_dir}/custom_nodes")
+                
+                # Create symlink to shared custom_nodes
+                code, _, err = self.execute_remote(f"ln -s {self.custom_nodes_dir} {self.install_dir}/custom_nodes")
+                if code != 0:
+                    self.logger.error(f"Failed to create custom_nodes symlink: {err}")
+                    return False
+                
+                self.logger.info("✓ Custom nodes directory linked to shared storage")
+        
         if self.device.os_type.value == "linux":
             service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
             
@@ -191,7 +237,7 @@ class ComfyUIInstaller(BaseInstaller):
         service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl start {service_name}")
+            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl restart {service_name}")
             if code != 0:
                 self.logger.error(f"Failed to start {service_name}: {err}")
                 return False

@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     log_storage_path: str = "./logs"
     
     # ========================================================================
+    # Shared Storage Configuration
+    # ========================================================================
+    shared_storage_enabled: bool = False
+    ollama_models_dir: str = "/mnt/noslop/ollama/models"
+    comfyui_models_dir: str = "/mnt/noslop/comfyui/models"
+    comfyui_custom_nodes_dir: str = "/mnt/noslop/comfyui/custom_nodes"
+    project_storage_dir: str = "/mnt/noslop/projects"
+    media_cache_dir: str = "/mnt/noslop/media_cache"
+    
+    # ========================================================================
     # Resource Limits
     # ========================================================================
     max_concurrent_tasks: int = 5

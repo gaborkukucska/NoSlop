@@ -17,11 +17,13 @@ class OllamaInstaller(BaseInstaller):
     Installs and configures Ollama with multi-instance support.
     """
     
-    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, username: str = "root", password: str = None):
+    def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, 
+                 username: str = "root", password: str = None, models_dir: Optional[str] = None):
         super().__init__(device, ssh_manager, "ollama", username=username, password=password)
         self.port = port
         self.models = models or ["gemma3:4b-it-q4_K_M", "qwen3-vl:4b-instruct-q8_0", "llava:latest"]
         self.is_secondary = port != 11434
+        self.models_dir = models_dir  # Shared models directory (optional)
 
     def check_installed(self) -> bool:
         """Check if Ollama is installed and running on the specific port."""
@@ -96,6 +98,15 @@ class OllamaInstaller(BaseInstaller):
             
             # Environment variables
             env_vars = f"OLLAMA_HOST=0.0.0.0:{self.port}"
+            
+            # Add shared models directory if specified
+            if self.models_dir:
+                self.logger.info(f"Using shared models directory: {self.models_dir}")
+                env_vars += f"\nOLLAMA_MODELS={self.models_dir}"
+                # Ensure directory exists
+                self.execute_remote(f"sudo mkdir -p {self.models_dir}")
+                self.execute_remote(f"sudo chmod 777 {self.models_dir}")
+            
             service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
             
             # Add StandardOutput and StandardError directives for logging
@@ -140,7 +151,7 @@ class OllamaInstaller(BaseInstaller):
         service_name = "ollama" if not self.is_secondary else f"ollama-{self.port}"
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl start {service_name}")
+            code, _, err = self.execute_remote(f"sudo systemctl enable {service_name} && sudo systemctl restart {service_name}")
             if code != 0:
                 self.logger.error(f"Failed to start {service_name}: {err}")
                 return False

@@ -9,10 +9,14 @@
 const getApiBaseUrl = () => {
     if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
-        // If accessing via IP address (not localhost), use same IP for backend
-        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-            return `http://${hostname}:8000`;
+
+        // If on localhost, ALWAYS use localhost:8000
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return 'http://localhost:8000';
         }
+
+        // If accessing via network IP (e.g., 192.168.x.x), use same IP for backend
+        return `http://${hostname}:8000`;
     }
     // Fall back to environment variable or localhost
     return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -120,6 +124,26 @@ class ApiClient {
         }
 
         return response.json();
+    }
+
+    async getChatHistory(sessionId: string = 'default'): Promise<{ history: any[] }> {
+        return this.request<{ history: any[] }>(`/api/chat/history?session_id=${sessionId}`);
+    }
+
+    async getSessions(): Promise<{ sessions: any[] }> {
+        return this.request<{ sessions: any[] }>('/api/chat/sessions');
+    }
+
+    async createSession(): Promise<any> {
+        return this.request('/api/chat/sessions', { method: 'POST' });
+    }
+
+    async deleteSession(sessionId: string): Promise<any> {
+        return this.request(`/api/chat/sessions/${sessionId}`, { method: 'DELETE' });
+    }
+
+    async clearChatHistory(sessionId: string): Promise<any> {
+        return this.request(`/api/chat/clear?session_id=${sessionId}`, { method: 'POST' });
     }
 
     async register(data: any): Promise<any> {

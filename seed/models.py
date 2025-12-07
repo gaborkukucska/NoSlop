@@ -83,6 +83,9 @@ class DeviceCapabilities:
     ssh_available: bool = False
     ssh_port: int = 22
     ssh_username: str = "root"
+    mac_address: Optional[str] = None  # Primary network interface MAC address
+    mac_addresses: List[str] = field(default_factory=list)  # All interface MACs
+
     
     # Computed score (for role assignment)
     capability_score: float = 0.0
@@ -179,7 +182,9 @@ class DeviceCapabilities:
             "ssh": {
                 "available": self.ssh_available,
                 "port": self.ssh_port,
-                "username": self.ssh_username
+                "username": self.ssh_username,
+                "mac_address": self.mac_address,
+                "mac_addresses": self.mac_addresses
             },
             "capability_score": self.capability_score,
             "meets_requirements": self.meets_minimum_requirements()

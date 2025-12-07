@@ -252,7 +252,7 @@ class FrontendInstaller(BaseInstaller):
         self.logger.info("Starting NoSlop Frontend...")
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote("sudo systemctl enable noslop-frontend && sudo systemctl start noslop-frontend")
+            code, _, err = self.execute_remote("sudo systemctl enable noslop-frontend && sudo systemctl restart noslop-frontend")
             if code != 0:
                 self.logger.error(f"Failed to start frontend: {err}")
                 return False

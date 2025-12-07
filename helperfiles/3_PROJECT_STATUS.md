@@ -1,15 +1,61 @@
 ---
 project_name: "NoSlop"
-version: "0.03"
+version: "0.04"
 status: "In Development"
-last_updated: "2025-12-04"
-current_phase: "Phase 2: Core Development"
-current_cycle: "Cycle 0 Complete, Starting Cycle 2"
+last_updated: "2025-12-05"
+current_phase: "Phase 3: Advanced Features & Integration"
+current_cycle: "Testing & Validation"
 ---
 
 # Project Status
 
 ## Recent Changes
+- **2025-12-05** (Session 5):
+    - **Phase 0: Shared Storage & Project Organization - COMPLETE**:
+      - **Objective**: Implement foundational infrastructure for network-wide model sharing and project-based file organization
+      - **Implementation**:
+        - Created `seed/storage_manager.py` (404 lines) - NFS/SMB configuration and setup automation
+        - Created `backend/project_storage.py` (394 lines) - Project folder structure and file organization
+        - Updated `backend/config.py` - Added shared storage configuration settings
+        - Enhanced `backend/database.py` - Added storage tracking fields to ProjectModel (folder_path, workflows_count, media_count, storage_size_mb)
+        - Updated `seed/installers/ollama_installer.py` - Added shared models directory support via OLLAMA_MODELS env var
+        - Updated `seed/installers/comfyui_installer.py` - Added shared models and custom_nodes via symlinks
+        - Enhanced `seed/deployer.py` - Integrated storage configuration into deployment flow
+      - **Features**:
+        - User-configurable storage paths during deployment
+        - Automatic NFS server setup on master node
+        - Automatic NFS client mounting on worker nodes
+        - Storage validation and verification
+        - Project folder structure: workflows/, prompts/, generated/, intermediate/, final/
+        - Comprehensive metadata tracking for all files
+        - Storage statistics per project
+      - **Architecture**:
+        - Single-device deployments use local storage (no changes)
+        - Multi-device deployments prompt for shared storage paths
+        - Ollama models shared across all instances (eliminates redundancy)
+        - ComfyUI models and custom nodes shared across all instances
+        - All project files organized in consistent folder structure
+        - Metadata preserved with all generated content
+      - **Files Created**: 2 (798 lines)
+      - **Files Modified**: 5 (164 lines)
+      - **Total**: 962 lines of production code
+      - **Status**: ✅ **Phase 0 Complete** - Ready for testing
+      - **Next**: Phase 1 - Admin AI Workflow Orchestration
+
+- **2025-12-05** (Session 4):
+    - **Admin AI Chat Integration Fix**:
+      - **Issue**: Chat interface showed error "Sorry, I encountered an error. Please make sure the backend is running." when sending messages from network IPs
+      - **Root Cause**: `ChatInterface.tsx` component had hardcoded `localhost:8000` URLs instead of dynamic backend URL detection
+      - **Solution**: Implemented dynamic URL detection using the same pattern as `api.ts` and `page.tsx`
+      - **Implementation**:
+        - Added `getBackendUrl()` function to detect current hostname
+        - Updated chat API calls to use `${getBackendUrl()}/api/chat`
+        - Updated clear history API call to use dynamic URL
+        - Restarted all frontend services to apply changes
+      - **Files Modified**: `frontend/app/components/ChatInterface.tsx`
+      - **Impact**: Admin AI chat now works from any frontend instance (localhost, 10.0.0.3, 10.0.0.20, 10.0.0.11)
+      - **Verification**: All 7 services running successfully across 3 devices
+
 - **2025-12-04** (Session 3):
     - **Frontend Installer SFTP Permission Fix**:
       - **Root Cause**: During frontend deployment, directories were created with root ownership (`sudo mkdir -p`) but SFTP attempted to write files as non-root user, causing "Permission denied" errors

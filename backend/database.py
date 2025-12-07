@@ -105,6 +105,12 @@ class ProjectModel(Base):
     duration = Column(Integer, nullable=True)  # Target duration in seconds
     style = Column(String, nullable=True)
     
+    # Storage tracking
+    folder_path = Column(String, nullable=True)  # Path to project folder
+    workflows_count = Column(Integer, default=0)  # Number of workflows
+    media_count = Column(Integer, default=0)  # Number of generated media files
+    storage_size_mb = Column(Float, default=0.0)  # Total storage used
+    
     # JSON fields for flexibility
     reference_media = Column(JSON, default=list)  # List of reference media paths
     meta_data = Column(JSON, default=dict)  # Additional metadata
@@ -124,7 +130,63 @@ class ProjectModel(Base):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "duration": self.duration,
             "style": self.style,
+            "folder_path": self.folder_path,
+            "workflows_count": self.workflows_count,
+            "media_count": self.media_count,
+            "storage_size_mb": self.storage_size_mb,
             "reference_media": self.reference_media or [],
+            "metadata": self.meta_data or {}
+        }
+
+
+        }
+
+
+class ChatSessionModel(Base):
+    """Database model for chat sessions"""
+    __tablename__ = "chat_sessions"
+    
+    id = Column(String, primary_key=True)  # UUID
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    title = Column(String, nullable=False, default="New Chat")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Optional metadata
+    meta_data = Column(JSON, default=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "title": self.title,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "metadata": self.meta_data or {}
+        }
+
+
+class ChatMessageModel(Base):
+    """Database model for chat messages"""
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, index=True, default="default")  # Links to ChatSessionModel.id
+    user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    role = Column(String, nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    # Optional metadata
+    meta_data = Column(JSON, default=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "session_id": self.session_id,
+            "role": self.role,
+            "content": self.content,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "metadata": self.meta_data or {}
         }
 
@@ -272,6 +334,33 @@ class ProjectCRUD:
         
         logger.info(f"Project deleted: {project_id}")
         return True
+    
+    @staticmethod
+    def get_folder_path(db: Session, project_id: str) -> Optional[str]:
+        """Get project folder path"""
+        project = ProjectCRUD.get(db, project_id)
+        return project.folder_path if project else None
+    
+    @staticmethod
+    def update_storage_stats(db: Session, project_id: str, stats: Dict[str, Any]) -> Optional[ProjectModel]:
+        """Update project storage statistics"""
+        project = ProjectCRUD.get(db, project_id)
+        if not project:
+            return None
+        
+        if "workflows_count" in stats:
+            project.workflows_count = stats["workflows_count"]
+        if "media_count" in stats:
+            project.media_count = stats["media_count"]
+        if "storage_size_mb" in stats:
+            project.storage_size_mb = stats["storage_size_mb"]
+        
+        project.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(project)
+        
+        logger.debug(f"Storage stats updated for project: {project_id}")
+        return project
 
 
 class TaskCRUD:

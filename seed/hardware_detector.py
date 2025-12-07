@@ -65,7 +65,9 @@ class HardwareDetector:
             os_type=self._detect_os_type(),
             os_version=self._detect_os_version(),
             ssh_available=self._check_ssh_available(),
-            ssh_port=22
+            ssh_port=22,
+            mac_address=self._get_local_mac_address(),
+            mac_addresses=self._get_all_mac_addresses()
         )
         
         logger.info(f"Hardware detection complete. Score: {capabilities.capability_score}")
@@ -424,6 +426,209 @@ class HardwareDetector:
             logger.debug(f"Error checking SSH availability: {e}")
             return False
     
+    def _get_local_mac_address(self) -> Optional[str]:
+        """Get MAC address of primary network interface."""
+        try:
+            # Get all network interfaces
+            import netifaces
+            
+            # Get default gateway interface
+            gateways = netifaces.gateways()
+            if 'default' in gateways and netifaces.AF_INET in gateways['default']:
+                default_iface = gateways['default'][netifaces.AF_INET][1]
+                addrs = netifaces.ifaddresses(default_iface)
+                if netifaces.AF_LINK in addrs:
+                    mac = addrs[netifaces.AF_LINK][0]['addr']
+                    logger.debug(f"Detected primary MAC address: {mac}")
+                    return mac
+        except ImportError:
+            logger.debug("netifaces not available, using fallback method")
+        except Exception as e:
+            logger.debug(f"Error getting MAC via netifaces: {e}")
+        
+        # Fallback to platform-specific methods
+        try:
+            if platform.system() == "Linux":
+                # Get MAC of interface with default route
+                result = subprocess.run(
+                    ["ip", "route", "show", "default"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    # Extract interface name
+                    for line in result.stdout.split('\n'):
+                        if 'dev' in line:
+                            parts = line.split()
+                            dev_idx = parts.index('dev') + 1
+                            if dev_idx < len(parts):
+                                iface = parts[dev_idx]
+                                # Get MAC address
+                                mac_result = subprocess.run(
+                                    ["cat", f"/sys/class/net/{iface}/address"],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5
+                                )
+                                if mac_result.returncode == 0:
+                                    mac = mac_result.stdout.strip()
+                                    logger.debug(f"Detected MAC address (Linux): {mac}")
+                                    return mac
+            
+            elif platform.system() == "Darwin":
+                # macOS: use networksetup or ifconfig
+                result = subprocess.run(
+                    ["route", "-n", "get", "default"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if 'interface:' in line:
+                            iface = line.split(':')[1].strip()
+                            mac_result = subprocess.run(
+                                ["ifconfig", iface],
+                                capture_output=True,
+                                text=True,
+                                timeout=5
+                            )
+                            if mac_result.returncode == 0:
+                                for mac_line in mac_result.stdout.split('\n'):
+                                    if 'ether' in mac_line:
+                                        mac = mac_line.split()[1]
+                                        logger.debug(f"Detected MAC address (macOS): {mac}")
+                                        return mac
+            
+            elif platform.system() == "Windows":
+                # Windows: use getmac
+                result = subprocess.run(
+                    ["getmac", "/fo", "csv", "/nh"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if lines:
+                        # First line usually has primary adapter
+                        mac = lines[0].split(',')[0].strip('"')
+                        logger.debug(f"Detected MAC address (Windows): {mac}")
+                        return mac
+        
+        except Exception as e:
+            logger.debug(f"Error detecting MAC address: {e}")
+        
+        return None
+    
+    def _get_all_mac_addresses(self) -> list:
+        """Get MAC addresses of all network interfaces."""
+        mac_addresses = []
+        
+        try:
+            import netifaces
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface)
+                if netifaces.AF_LINK in addrs:
+                    for addr in addrs[netifaces.AF_LINK]:
+                        if 'addr' in addr:
+                            mac = addr['addr']
+                            # Filter out loopback and invalid MACs
+                            if mac and mac != '00:00:00:00:00:00' and not mac.startswith('00:00:00'):
+                                mac_addresses.append(mac)
+            logger.debug(f"Detected {len(mac_addresses)} MAC addresses")
+            return mac_addresses
+        except ImportError:
+            logger.debug("netifaces not available for all MACs detection")
+        except Exception as e:
+            logger.debug(f"Error getting all MAC addresses: {e}")
+        
+        # Fallback: at least try to get primary MAC
+        primary_mac = self._get_local_mac_address()
+        if primary_mac:
+            mac_addresses.append(primary_mac)
+        
+        return mac_addresses
+    
+    def _get_remote_mac_address(
+        self,
+        credentials: SSHCredentials,
+        ssh_manager: SSHManager
+    ) -> tuple[Optional[str], list]:
+        """
+        Get MAC address(es) of remote device.
+        
+        Returns:
+            Tuple of (primary_mac, all_macs)
+        """
+        primary_mac = None
+        all_macs = []
+        
+        try:
+            # Try Linux method first
+            success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
+                credentials, "ip route show default", timeout=10
+            )
+            if success and exit_code == 0 and 'dev' in stdout:
+                # Extract interface name
+                parts = stdout.split()
+                dev_idx = parts.index('dev') + 1
+                if dev_idx < len(parts):
+                    iface = parts[dev_idx]
+                    # Get MAC address
+                    success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
+                        credentials, f"cat /sys/class/net/{iface}/address", timeout=10
+                    )
+                    if success and exit_code == 0:
+                        primary_mac = mac_out.strip()
+                        logger.debug(f"Remote MAC (Linux): {primary_mac}")
+            
+            # Try macOS method if Linux failed
+            if not primary_mac:
+                success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
+                    credentials, "route -n get default", timeout=10
+                )
+                if success and exit_code == 0:
+                    for line in stdout.split('\n'):
+                        if 'interface:' in line:
+                            iface = line.split(':')[1].strip()
+                            success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
+                                credentials, f"ifconfig {iface} | grep ether", timeout=10
+                            )
+                            if success and exit_code == 0 and 'ether' in mac_out:
+                                primary_mac = mac_out.split()[1]
+                                logger.debug(f"Remote MAC (macOS): {primary_mac}")
+                                break
+            
+            # Try to get all MACs (Linux)
+            success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
+                credentials, "ls /sys/class/net/", timeout=10
+            )
+            if success and exit_code == 0:
+                interfaces = stdout.strip().split()
+                for iface in interfaces:
+                    if iface not in ['lo', 'bonding_masters']:
+                        success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
+                            credentials, f"cat /sys/class/net/{iface}/address 2>/dev/null", timeout=10
+                        )
+                        if success and exit_code == 0:
+                            mac = mac_out.strip()
+                            if mac and mac != '00:00:00:00:00:00':
+                                all_macs.append(mac)
+            
+            # If we got primary but not all, at least include primary
+            if primary_mac and primary_mac not in all_macs:
+                all_macs.insert(0, primary_mac)
+            
+            logger.debug(f"Remote device MACs: primary={primary_mac}, all={all_macs}")
+            
+        except Exception as e:
+            logger.debug(f"Error getting remote MAC address: {e}")
+        
+        return primary_mac, all_macs
+
+    
     def detect_remote(
         self,
         credentials: SSHCredentials,
@@ -617,6 +822,9 @@ class HardwareDetector:
             )
             os_version = os_version.strip() if os_version.strip() else "Linux"
             
+            # MAC addresses
+            mac_address, mac_addresses = self._get_remote_mac_address(credentials, ssh_manager)
+            
             capabilities = DeviceCapabilities(
                 hostname=hostname,
                 ip_address=credentials.ip_address,
@@ -635,7 +843,10 @@ class HardwareDetector:
                 os_type=OSType.LINUX,
                 os_version=os_version,
                 ssh_available=True,
-                ssh_port=credentials.port
+                ssh_port=credentials.port,
+                ssh_username=credentials.username,
+                mac_address=mac_address,
+                mac_addresses=mac_addresses
             )
             
             logger.info(f"Remote Linux detection complete. Score: {capabilities.capability_score}")
@@ -725,6 +936,9 @@ class HardwareDetector:
             )
             os_version = f"macOS {os_version.strip()}" if os_version.strip() else "macOS"
             
+            # MAC addresses
+            mac_address, mac_addresses = self._get_remote_mac_address(credentials, ssh_manager)
+            
             capabilities = DeviceCapabilities(
                 hostname=hostname,
                 ip_address=credentials.ip_address,
@@ -743,7 +957,10 @@ class HardwareDetector:
                 os_type=OSType.MACOS,
                 os_version=os_version,
                 ssh_available=True,
-                ssh_port=credentials.port
+                ssh_port=credentials.port,
+                ssh_username=credentials.username,
+                mac_address=mac_address,
+                mac_addresses=mac_addresses
             )
             
             logger.info(f"Remote macOS detection complete. Score: {capabilities.capability_score}")

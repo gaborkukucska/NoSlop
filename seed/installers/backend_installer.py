@@ -161,7 +161,7 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Starting NoSlop Backend...")
         
         if self.device.os_type.value == "linux":
-            code, _, err = self.execute_remote("sudo systemctl enable noslop-backend && sudo systemctl start noslop-backend")
+            code, _, err = self.execute_remote("sudo systemctl enable noslop-backend && sudo systemctl restart noslop-backend")
             if code != 0:
                 self.logger.error(f"Failed to start backend: {err}")
                 return False
