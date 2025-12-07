@@ -32,7 +32,7 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Installing NoSlop Backend...")
         
         # Install system dependencies
-        self.install_packages(["python3", "python3-venv", "python3-pip", "git"])
+        self.install_packages(["python3", "python3-venv", "python3-pip", "git", "curl"])
         
         # Create directory
         self.execute_remote(f"sudo mkdir -p {self.install_dir}")
@@ -173,15 +173,26 @@ class BackendInstaller(BaseInstaller):
         """Verify Backend is running."""
         self.logger.info("Verifying NoSlop Backend...")
         
-        cmd = "curl -s http://localhost:8000/health"
-        code, out, err = self.execute_remote(cmd)
+        # Retry loop for health check
+        max_retries = 10
+        retry_interval = 2
         
-        if code != 0:
-            self.logger.error(f"Backend health check failed: {err}")
-            return False
+        for i in range(max_retries):
+            cmd = "curl -s http://localhost:8000/health"
+            code, out, err = self.execute_remote(cmd)
             
-        self.logger.info("✓ Backend API is accessible")
-        return True
+            if code == 0:
+                self.logger.info("✓ Backend API is accessible")
+                return True
+                
+            self.logger.info(f"Health check attempt {i+1}/{max_retries} failed. Retrying in {retry_interval}s...")
+            time.sleep(retry_interval)
+            
+        self.logger.error(f"Backend health check failed after {max_retries} attempts.")
+        # Try to get logs to help debugging
+        self.logger.info("Fetching recent logs...")
+        self.execute_remote("sudo journalctl -u noslop-backend -n 20 --no-pager")
+        return False
 
     def rollback(self):
         """Rollback installation."""
