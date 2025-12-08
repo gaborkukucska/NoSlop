@@ -5,7 +5,7 @@ All settings are loaded from environment variables with sensible defaults.
 """
 
 from pydantic_settings import BaseSettings
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import os
 
 
@@ -35,34 +35,24 @@ class Settings(BaseSettings):
     enable_json_log: bool = False
     
     # ========================================================================
+    # Database Configuration
+    # ========================================================================
+    database_url: str = "sqlite:///./noslop.db"
+
+    # ========================================================================
     # Ollama Configuration
     # ========================================================================
     ollama_host: str = "http://localhost:11434"
     ollama_timeout: int = 120
     
     # Model preferences by task type
+    ollama_default_model: str = "llama3.2"
     model_logic: str = "llama3.2"
     model_video: str = "llama3.2"
-    model_image: str = "llama3.2"    # Ollama Settings
-    OLLAMA_HOST: str = "127.0.0.1"
-    OLLAMA_PORT: int = 11434
-    
-    # ComfyUI Settings
-    COMFYUI_HOST: str = "127.0.0.1"
-    COMFYUI_PORT: int = 8188
-    COMFYUI_OUTPUT_DIR: str = "media/generated"
-    
-    # FFmpeg Settings
-    FFMPEG_PATH: str = "ffmpeg"
-    FFPROBE_PATH: str = "ffprobe"
-    MEDIA_OUTPUT_DIR: str = "media/output"
-    
-    # Logging
-    LOG_LEVEL: str = "INFO"
+    model_image: str = "llama3.2"
     model_math: str = "llama3.2"
     model_tts: str = "llama3.2"
     model_ttv: str = "llama3.2"
-    ollama_default_model: str = "llama3.2"
     
     # ========================================================================
     # ComfyUI Configuration
@@ -70,22 +60,23 @@ class Settings(BaseSettings):
     comfyui_enabled: bool = False
     comfyui_host: str = "http://localhost:8188"
     comfyui_timeout: int = 300
+    comfyui_output_dir: str = "media/generated"
     
     # ========================================================================
-    # Database Configuration
+    # FFmpeg Configuration
     # ========================================================================
-    database_url: str = "sqlite:///./noslop.db"
+    ffmpeg_path: str = "ffmpeg"
+    ffprobe_path: str = "ffprobe"
+    media_output_dir: str = "media/output"
     
     # ========================================================================
-    # Storage Configuration
+    # Storage Configuration (Local & Shared)
     # ========================================================================
     media_storage_path: str = "./media"
     project_storage_path: str = "./projects"
     log_storage_path: str = "./logs"
     
-    # ========================================================================
-    # Shared Storage Configuration
-    # ========================================================================
+    # Shared Storage
     shared_storage_enabled: bool = False
     ollama_models_dir: str = "/mnt/noslop/ollama/models"
     comfyui_models_dir: str = "/mnt/noslop/comfyui/models"
@@ -101,12 +92,6 @@ class Settings(BaseSettings):
     max_workers_per_project: int = 10
     
     # ========================================================================
-    # FFmpeg Configuration
-    # ========================================================================
-    ffmpeg_path: str = "ffmpeg"
-    ffprobe_path: str = "ffprobe"
-    
-    # ========================================================================
     # Admin AI Personality Defaults
     # ========================================================================
     default_personality: str = "balanced"
@@ -120,8 +105,6 @@ class Settings(BaseSettings):
     # Security Settings
     # ========================================================================
     secret_key: Optional[str] = None
-    # Allow all origins for development (frontend can be accessed from multiple IPs)
-    # In production, this should be restricted to specific domains
     cors_origins: str = "*"
     
     # ========================================================================
@@ -166,7 +149,7 @@ class Settings(BaseSettings):
         }
     
     @property
-    def cors_origins_list(self) -> list:
+    def cors_origins_list(self) -> List[str]:
         """Get CORS origins as a list."""
         return [origin.strip() for origin in self.cors_origins.split(",")]
     

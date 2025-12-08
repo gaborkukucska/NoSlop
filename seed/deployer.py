@@ -28,6 +28,13 @@ from seed.storage_manager import StorageManager, StorageConfig
 
 logger = logging.getLogger(__name__)
 
+# Default Database Configuration
+DEFAULT_DB_NAME = "noslop"
+DEFAULT_DB_USER = "noslop"
+DEFAULT_DB_PASS = "noslop"
+DEFAULT_DB_PORT = 5432
+
+
 
 class Deployer:
     """
@@ -127,11 +134,16 @@ class Deployer:
         
         if NodeRole.MASTER in node.roles or NodeRole.ALL in node.roles:
             config["NOSLOP_BACKEND_URL"] = f"http://{node.device.ip_address}:8000"
-            config["DATABASE_URL"] = f"postgresql://noslop:noslop@localhost:5432/noslop"
+            # Default to local postgresql connection for master
+            config["DATABASE_URL"] = f"postgresql://{DEFAULT_DB_USER}:{DEFAULT_DB_PASS}@localhost:{DEFAULT_DB_PORT}/{DEFAULT_DB_NAME}"
             config["OLLAMA_HOST"] = f"http://{node.device.ip_address}:11434"
+            # Setting permissive CORS for development; user should restrict this in production
+            config["CORS_ORIGINS"] = "*"
         else:
             if plan.master_node:
                 config["NOSLOP_BACKEND_URL"] = f"http://{plan.master_node.device.ip_address}:8000"
+                # Remote workers connect to master's postgresql (future TODO: configure properly)
+                # Currently workers don't need direct DB access, only backend does.
                 config["OLLAMA_HOST"] = f"http://{plan.master_node.device.ip_address}:11434"
         
         # ComfyUI URLs
@@ -154,9 +166,9 @@ class Deployer:
             # config["NOSLOP_BLOCKCHAIN_PATH"] = "/var/noslop/blockchain" # Not used in backend config yet
         
         # Model preferences
-        config["MODEL_LOGIC"] = "llama3.2:latest"
-        config["MODEL_IMAGE"] = "stable-diffusion"
-        config["MODEL_VIDEO"] = "animatediff"
+        config["MODEL_LOGIC"] = "llama3.2"
+        config["MODEL_IMAGE"] = "llama3.2" # Placeholder, user should update for SD
+        config["MODEL_VIDEO"] = "llama3.2" # Placeholder, user should update for AnimateDiff
         
         return config
     
