@@ -23,15 +23,19 @@ class PromptManager:
     Supports template variables and hot-reload in development mode.
     """
     
-    def __init__(self, prompts_file: str = "backend/prompts.yaml", enable_hot_reload: bool = True):
+    def __init__(self, prompts_file: str = None, enable_hot_reload: bool = True):
         """
         Initialize the prompt manager.
         
         Args:
-            prompts_file: Path to prompts YAML file
+            prompts_file: Path to prompts YAML file. If None, it defaults to
+                          `prompts.yaml` in the same directory as this script.
             enable_hot_reload: Enable hot-reload in development mode
         """
-        self.prompts_file = Path(prompts_file)
+        if prompts_file is None:
+            self.prompts_file = Path(__file__).parent.resolve() / "prompts.yaml"
+        else:
+            self.prompts_file = Path(prompts_file)
         self.enable_hot_reload = enable_hot_reload
         self._prompts: Dict[str, Any] = {}
         self._last_modified: float = 0
@@ -227,14 +231,15 @@ _prompt_manager: Optional[PromptManager] = None
 
 
 def get_prompt_manager(
-    prompts_file: str = "backend/prompts.yaml",
+    prompts_file: str = None,
     enable_hot_reload: bool = True
 ) -> PromptManager:
     """
     Get the global prompt manager instance (singleton pattern).
     
     Args:
-        prompts_file: Path to prompts YAML file
+        prompts_file: Path to prompts YAML file. If None, it defaults to
+                      `prompts.yaml` in the same directory as this script.
         enable_hot_reload: Enable hot-reload in development mode
         
     Returns:
@@ -243,6 +248,6 @@ def get_prompt_manager(
     global _prompt_manager
     
     if _prompt_manager is None:
-        _prompt_manager = PromptManager(prompts_file, enable_hot_reload)
+        _prompt_manager = PromptManager(prompts_file=prompts_file, enable_hot_reload=enable_hot_reload)
     
     return _prompt_manager
