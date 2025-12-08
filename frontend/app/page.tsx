@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from './context/AuthContext';
 import ChatInterface from './components/ChatInterface';
 import PersonalitySelector from './components/PersonalitySelector';
-import ProjectForm from './components/ProjectForm';
+import SceneWizard from './components/wizard/SceneWizard';
 import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import LoadingScreen from './components/LoadingScreen';
@@ -241,12 +241,9 @@ export default function Home() {
 
       {/* Project Form Modal */}
       {showProjectForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mb-6">
-              Create New Project
-            </h2>
-            <ProjectForm
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl">
+            <SceneWizard
               onSuccess={handleProjectCreated}
               onCancel={() => setShowProjectForm(false)}
             />

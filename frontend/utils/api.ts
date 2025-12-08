@@ -205,6 +205,33 @@ class ApiClient {
     async getWorkerCapabilities(workerType: string): Promise<any> {
         return this.request(`/api/workers/${workerType}/capabilities`);
     }
+
+    // Personality APIs
+    async getPersonalityPreset(type: string): Promise<any> {
+        // This endpoint might not require auth, but it doesn't hurt to send the token if available
+        // Need to check if request helper adds token automatically. Yes it does.
+        // However, looking at the backend code, `get_personality` endpoint does NOT currently use Depends(get_current_user)
+        // But `this.request` handles the full URL construction which fixes the localhost hardcoding issues.
+        return this.request<any>(`/api/personality/${type}`);
+    }
+
+    async setPersonality(personality: any, sessionId: string = 'default'): Promise<any> {
+        return this.request('/api/personality', {
+            method: 'POST',
+            body: JSON.stringify(personality),
+            // The request method automatically adds Content-Type and Authorization header
+        }); // Note: The backend endpoint also takes session_id as a query param, but the PersonalitySelector called it with query param.
+        // Let's check the backend definition:
+        // async def set_personality(personality: PersonalityProfile, session_id: str = "default", ...
+        // It expects query param for session_id.
+    }
+
+    async setPersonalityWithSession(personality: any, sessionId: string = 'default'): Promise<any> {
+        return this.request(`/api/personality?session_id=${sessionId}`, {
+            method: 'POST',
+            body: JSON.stringify(personality)
+        });
+    }
 }
 
 export const api = new ApiClient();

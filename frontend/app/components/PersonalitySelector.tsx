@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import api from '../../utils/api';
 
 interface PersonalityProfile {
     type: string;
@@ -46,13 +47,10 @@ export default function PersonalitySelector({
 
     const loadPreset = async (presetType: string) => {
         try {
-            const response = await fetch(`http://localhost:8000/api/personality/${presetType}`);
-            if (response.ok) {
-                const data = await response.json();
-                setPersonality(data);
-                setSelectedPreset(presetType);
-                setCustomMode(false);
-            }
+            const data = await api.getPersonalityPreset(presetType);
+            setPersonality(data);
+            setSelectedPreset(presetType);
+            setCustomMode(false);
         } catch (error) {
             console.error('Error loading preset:', error);
         }
@@ -60,18 +58,9 @@ export default function PersonalitySelector({
 
     const applyPersonality = async () => {
         try {
-            const response = await fetch(`http://localhost:8000/api/personality?session_id=${sessionId}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(personality),
-            });
-
-            if (response.ok) {
-                onPersonalityChange?.(personality);
-                alert('Personality updated successfully!');
-            }
+            await api.setPersonalityWithSession(personality, sessionId);
+            onPersonalityChange?.(personality);
+            alert('Personality updated successfully!');
         } catch (error) {
             console.error('Error applying personality:', error);
             alert('Failed to update personality');
@@ -104,8 +93,8 @@ export default function PersonalitySelector({
                             key={preset}
                             onClick={() => loadPreset(preset)}
                             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${selectedPreset === preset && !customMode
-                                    ? 'bg-blue-600 text-white'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
                                 }`}
                         >
                             {preset.charAt(0).toUpperCase() + preset.slice(1)}
