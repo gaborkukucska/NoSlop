@@ -115,7 +115,7 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
                 <div>
                     <span className="text-sm text-zinc-600 dark:text-zinc-400">Type:</span>
                     <span className="ml-2 text-sm text-zinc-900 dark:text-zinc-100">
-                        {project.project_type.replace('_', ' ')}
+                        {(project.project_type || '').replace('_', ' ')}
                     </span>
                 </div>
                 {project.duration && (
@@ -165,7 +165,7 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
                                     <div className="flex-1">
                                         <div className="flex items-center space-x-2">
                                             <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                                                {task.task_type.replace('_', ' ')}
+                                                {(task.task_type || '').replace('_', ' ')}
                                             </span>
                                             <span className={`px-2 py-0.5 rounded text-xs font-medium ${getStatusColor(task.status)}`}>
                                                 {task.status}

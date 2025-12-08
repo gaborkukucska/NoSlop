@@ -218,8 +218,29 @@ class NoSlopSeedCLI:
         print("\n📋 Creating deployment plan...")
         plan = self.role_assigner.create_deployment_plan([device])
         
+        # Collect local credentials to ensure correct user ownership
+        import os
+        import getpass
+        from seed.ssh_manager import SSHCredentials
+        
+        print("\n🔐 Local Sudo Access")
+        local_user = os.getenv("USER", "root")
+        print(f"   Installing services as user: {local_user}")
+        local_pass = getpass.getpass(f"   Enter sudo password for {local_user}: ")
+        
+        credentials_map = {}
+        if local_pass:
+            creds = SSHCredentials(
+                ip_address=device.ip_address,
+                username=local_user,
+                password=local_pass,
+                port=22
+            )
+            credentials_map[device.ip_address] = creds
+            print("   ✓ Credentials stored\n")
+        
         # Deploy
-        return self.execute_deployment(plan)
+        return self.execute_deployment(plan, credentials_map)
     
     def run_interactive_mode(self):
         """Interactive deployment wizard."""

@@ -1,12 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { ProjectRequest } from '../../utils/api';
+import api, { ProjectRequest } from '../../../utils/api';
 import BasicInfo from './steps/BasicInfo';
 import StyleGateway from './steps/StyleGateway';
 import Characters from './steps/Characters';
 import Review from './steps/Review';
-import api from '../../utils/api';
 
 interface SceneWizardProps {
     onSuccess: (project: any) => void;
