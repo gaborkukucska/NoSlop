@@ -56,7 +56,7 @@ class ColoredConsoleFormatter(logging.Formatter):
     Colored console formatter for development.
     Makes logs easier to read in terminal.
     """
-    
+
     # ANSI color codes
     COLORS = {
         "DEBUG": "\033[36m",      # Cyan
@@ -66,23 +66,26 @@ class ColoredConsoleFormatter(logging.Formatter):
         "CRITICAL": "\033[35m",   # Magenta
     }
     RESET = "\033[0m"
-    
+
     def format(self, record: logging.LogRecord) -> str:
         """Format log record with colors."""
         color = self.COLORS.get(record.levelname, self.RESET)
-        
-        # Format: [TIMESTAMP] LEVEL - logger - message
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        formatted = f"{color}[{timestamp}] {record.levelname:<8}{self.RESET} - {record.name} - {record.getMessage()}"
-        
+
+        # Format: [TIMESTAMP] LEVEL - logger [filename:lineno] - message
+        timestamp = datetime.utcfromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S")
+        log_message = f"[{timestamp}] {record.levelname:<8} - {record.name} [{record.filename}:{record.lineno}] - {record.getMessage()}"
+        formatted = f"{color}{log_message}{self.RESET}"
+
         # Add context if available
         if hasattr(record, "context"):
+            # Don't color context to keep it readable
             formatted += f"\n  Context: {json.dumps(record.context, indent=2)}"
-        
+
         # Add exception if present
         if record.exc_info:
-            formatted += f"\n{self.formatException(record.exc_info)}"
-        
+            # Color exception as well
+            formatted += f"\n{color}{self.formatException(record.exc_info)}{self.RESET}"
+
         return formatted
 
 
