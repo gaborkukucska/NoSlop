@@ -1,11 +1,13 @@
 //! START OF FILE frontend/app/components/ProjectForm.tsx
 'use client';
 
-import { useState } from 'react';
-import api, { ProjectRequest } from '../../utils/api';
+import { useState, useEffect } from 'react';
+import api, { Project, ProjectRequest } from '../../utils/api';
 
 interface ProjectFormProps {
-    onSuccess?: (project: any) => void;
+    initialData?: Project | null;
+    onSubmit: (data: ProjectRequest) => void;
+    isSubmitting: boolean;
     onCancel?: () => void;
 }
 
@@ -22,7 +24,7 @@ const PROJECT_TYPES = [
     { value: 'custom', label: '✨ Custom' },
 ];
 
-export default function ProjectForm({ onSuccess, onCancel }: ProjectFormProps) {
+export default function ProjectForm({ initialData, onSubmit, isSubmitting, onCancel }: ProjectFormProps) {
     const [formData, setFormData] = useState<ProjectRequest>({
         title: '',
         project_type: 'cinematic_film',
@@ -30,22 +32,24 @@ export default function ProjectForm({ onSuccess, onCancel }: ProjectFormProps) {
         duration: 60,
         style: '',
     });
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (initialData) {
+            setFormData({
+                title: initialData.title,
+                project_type: initialData.project_type,
+                description: initialData.description,
+                duration: initialData.duration,
+                style: initialData.style,
+            });
+        }
+    }, [initialData]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
         setError(null);
-
-        try {
-            const project = await api.createProject(formData);
-            onSuccess?.(project);
-        } catch (err: any) {
-            setError(err.message || 'Failed to create project');
-        } finally {
-            setLoading(false);
-        }
+        onSubmit(formData);
     };
 
     const handleChange = (
@@ -158,10 +162,10 @@ export default function ProjectForm({ onSuccess, onCancel }: ProjectFormProps) {
                 )}
                 <button
                     type="submit"
-                    disabled={loading}
+                    disabled={isSubmitting}
                     className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {loading ? 'Creating...' : 'Create Project'}
+                    {isSubmitting ? (initialData ? 'Updating...' : 'Creating...') : (initialData ? 'Update Project' : 'Create Project')}
                 </button>
             </div>
         </form>
