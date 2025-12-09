@@ -179,6 +179,37 @@ class ApiClient {
         });
     }
 
+    async startProject(id: string): Promise<any> {
+        return this.request(`/api/projects/${id}/start`, {
+            method: 'POST',
+        });
+    }
+
+    async pauseProject(id: string): Promise<any> {
+        return this.request(`/api/projects/${id}/pause`, {
+            method: 'POST',
+        });
+    }
+
+    async stopProject(id: string): Promise<any> {
+        return this.request(`/api/projects/${id}/stop`, {
+            method: 'POST',
+        });
+    }
+
+    async updateProject(id: string, data: Partial<ProjectRequest>): Promise<Project> {
+        return this.request<Project>(`/api/projects/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    async deleteProject(id: string): Promise<any> {
+        return this.request(`/api/projects/${id}`, {
+            method: 'DELETE',
+        });
+    }
+
     // Task APIs
     async getProjectTasks(projectId: string): Promise<Task[]> {
         const response = await this.request<Task[] | { tasks: Task[] }>(`/api/projects/${projectId}/tasks`);

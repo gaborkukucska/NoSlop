@@ -394,3 +394,28 @@ class ProjectManager:
     def _model_to_pydantic(self, project_model: ProjectModel) -> Project:
         """Convert database model to Pydantic model"""
         return Project(**project_model.to_dict())
+
+    def start_project(self, project_id: str) -> Optional[ProjectModel]:
+        """Start a project."""
+        logger.info(f"Starting project {project_id}")
+        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.IN_PROGRESS})
+
+    def pause_project(self, project_id: str) -> Optional[ProjectModel]:
+        """Pause a project."""
+        logger.info(f"Pausing project {project_id}")
+        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.PAUSED})
+
+    def stop_project(self, project_id: str) -> Optional[ProjectModel]:
+        """Stop a project."""
+        logger.info(f"Stopping project {project_id}")
+        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.STOPPED})
+
+    def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectModel]:
+        """Update a project."""
+        logger.info(f"Updating project {project_id} with {updates}")
+        return ProjectCRUD.update(self.db, project_id, updates)
+
+    def delete_project(self, project_id: str):
+        """Delete a project."""
+        logger.info(f"Deleting project {project_id}")
+        ProjectCRUD.delete(self.db, project_id)
