@@ -166,7 +166,10 @@ class ApiClient {
     }
 
     async listProjects(skip: number = 0, limit: number = 100): Promise<Project[]> {
-        const response = await this.request<{ projects: Project[] }>(`/api/projects?skip=${skip}&limit=${limit}`);
+        const response = await this.request<Project[] | { projects: Project[] }>(`/api/projects?skip=${skip}&limit=${limit}`);
+        if (Array.isArray(response)) {
+            return response;
+        }
         return response.projects;
     }
 
