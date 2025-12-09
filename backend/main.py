@@ -678,7 +678,7 @@ async def get_project(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        pm = ProjectManager(db)
+        pm = ProjectManager(db, manager)
         status = pm.get_project_status(project_id)
         
         if not status:
