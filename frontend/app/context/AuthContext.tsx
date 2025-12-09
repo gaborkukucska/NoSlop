@@ -83,7 +83,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             router.push('/login');
         } catch (error) {
             console.error("Registration failed", error);
-            throw error;
+            // It's better to show the error to the user
+            if (error instanceof Error) {
+                throw new Error(error.message || 'Registration failed');
+            }
+            throw new Error('An unknown error occurred during registration.');
         }
     };
 

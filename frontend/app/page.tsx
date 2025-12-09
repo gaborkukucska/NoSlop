@@ -10,6 +10,7 @@ import SceneWizard from './components/wizard/SceneWizard';
 import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import LoadingScreen from './components/LoadingScreen';
+import AgentActivityTerminal from './components/AgentActivityTerminal';
 
 export default function Home() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -138,6 +139,7 @@ export default function Home() {
                 <ProjectDetail
                   projectId={selectedProject}
                   onClose={() => setSelectedProject(null)}
+                  onProjectUpdate={() => setRefreshProjects(prev => prev + 1)}
                 />
               </div>
             ) : (
@@ -266,6 +268,11 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* Agent Activity Terminal */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 z-20">
+          <AgentActivityTerminal />
+      </div>
     </div>
   );
 }

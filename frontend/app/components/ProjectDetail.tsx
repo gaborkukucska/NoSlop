@@ -2,19 +2,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import api, { Project, Task } from '../../utils/api';
+import api, { Project, Task, ProjectRequest } from '../../utils/api';
+import ProjectForm from './ProjectForm'; // Assuming ProjectForm is in the same directory
 
 interface ProjectDetailProps {
     projectId: string;
     onClose?: () => void;
+    onProjectUpdate: () => void;
 }
 
-export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps) {
+export default function ProjectDetail({ projectId, onClose, onProjectUpdate }: ProjectDetailProps) {
     const [project, setProject] = useState<Project | null>(null);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
-    const [executing, setExecuting] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
     useEffect(() => {
         loadProjectDetails();
@@ -23,10 +26,8 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
     const loadProjectDetails = async () => {
         try {
             setLoading(true);
-            const [projectData, tasksData] = await Promise.all([
-                api.getProject(projectId),
-                api.getProjectTasks(projectId),
-            ]);
+            const projectData = await api.getProject(projectId);
+            const tasksData = await api.getProjectTasks(projectId);
             setProject(projectData);
             setTasks(tasksData);
             setError(null);
@@ -37,16 +38,72 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
         }
     };
 
-    const handleExecute = async () => {
+    const handleStart = async () => {
+        setIsSubmitting(true);
         try {
-            setExecuting(true);
-            await api.executeProject(projectId);
-            // Reload to get updated status
+            await api.startProject(projectId);
             await loadProjectDetails();
         } catch (err: any) {
-            setError(err.message || 'Failed to execute project');
+            setError(err.message || 'Failed to start project');
         } finally {
-            setExecuting(false);
+            setIsSubmitting(false);
+        }
+    };
+
+    const handlePause = async () => {
+        setIsSubmitting(true);
+        try {
+            await api.pauseProject(projectId);
+            await loadProjectDetails();
+        } catch (err: any) {
+            setError(err.message || 'Failed to pause project');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleStop = async () => {
+        setIsSubmitting(true);
+        try {
+            await api.stopProject(projectId);
+            await loadProjectDetails();
+        } catch (err: any) {
+            setError(err.message || 'Failed to stop project');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleEdit = () => {
+        setIsEditModalOpen(true);
+    };
+
+    const handleDelete = async () => {
+        if (window.confirm('Are you sure you want to delete this project?')) {
+            setIsSubmitting(true);
+            try {
+                await api.deleteProject(projectId);
+                onProjectUpdate(); // Refresh project list
+                if (onClose) onClose();
+            } catch (err: any) {
+                setError(err.message || 'Failed to delete project');
+            } finally {
+                setIsSubmitting(false);
+            }
+        }
+    };
+
+    const handleUpdateProject = async (updatedData: ProjectRequest) => {
+        setIsSubmitting(true);
+        try {
+            await api.updateProject(projectId, updatedData);
+            setIsEditModalOpen(false);
+            await loadProjectDetails();
+            onProjectUpdate(); // Refresh project list
+        } catch (err: any) {
+            setError(err.message || 'Failed to update project');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -143,40 +200,59 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
             {/* Project Controls */}
             <div className="flex space-x-2">
                 <button
-                    onClick={() => console.log("Start project")}
+                    onClick={handleStart}
                     disabled={project.status === 'in_progress' || project.status === 'completed'}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Start
                 </button>
                 <button
-                    onClick={() => console.log("Pause project")}
+                    onClick={handlePause}
                     disabled={project.status !== 'in_progress'}
                     className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Pause
                 </button>
                 <button
-                    onClick={() => console.log("Stop project")}
+                    onClick={handleStop}
                     disabled={project.status !== 'in_progress' && project.status !== 'paused'}
                     className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Stop
                 </button>
                 <button
-                    onClick={() => console.log("Edit project")}
+                    onClick={handleEdit}
                     disabled={project.status === 'in_progress'}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     Edit
                 </button>
                 <button
-                    onClick={() => console.log("Delete project")}
+                    onClick={handleDelete}
                     className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
                 >
                     Delete
                 </button>
             </div>
+
+            {isEditModalOpen && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-zinc-800 p-8 rounded-lg shadow-xl w-full max-w-2xl">
+                        <h2 className="text-2xl font-bold mb-4">Edit Project</h2>
+                        <ProjectForm
+                            initialData={project}
+                            onSubmit={handleUpdateProject}
+                            isSubmitting={isSubmitting}
+                        />
+                        <button
+                            onClick={() => setIsEditModalOpen(false)}
+                            className="mt-4 text-sm text-zinc-600 dark:text-zinc-400 hover:underline"
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Tasks */}
             <div>

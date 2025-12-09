@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
 import uvicorn
@@ -109,6 +109,24 @@ def get_admin_ai(session_id: str = "default") -> AdminAI:
     return admin_ai_instance[session_id]
 
 
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+
 @app.get("/")
 def read_root():
     return {
@@ -151,6 +169,17 @@ def health_check():
             model_count=0,
             services={"ollama": False}
         )
+
+
+@app.websocket("/ws/activity")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep the connection open to receive messages if needed in the future
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -589,8 +618,8 @@ async def create_project(
     logger.info(f"Creating project: {project_request.title}")
     
     try:
-        pm = ProjectManager(db)
-        project = pm.create_project(project_request)
+        pm = ProjectManager(db, manager)
+        project = await pm.create_project(project_request)
         
         return project
         
@@ -716,8 +745,8 @@ async def update_task_status(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        pm = ProjectManager(db)
-        task = pm.update_task_status(task_id, status, result)
+        pm = ProjectManager(db, manager)
+        task = await pm.update_task_status(task_id, status, result)
         
         if not task:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
@@ -902,8 +931,8 @@ async def start_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project start requested: {project_id}")
-    pm = ProjectManager(db)
-    project = pm.start_project(project_id)
+    pm = ProjectManager(db, manager)
+    project = await pm.start_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -918,8 +947,8 @@ async def pause_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project pause requested: {project_id}")
-    pm = ProjectManager(db)
-    project = pm.pause_project(project_id)
+    pm = ProjectManager(db, manager)
+    project = await pm.pause_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -934,8 +963,8 @@ async def stop_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project stop requested: {project_id}")
-    pm = ProjectManager(db)
-    project = pm.stop_project(project_id)
+    pm = ProjectManager(db, manager)
+    project = await pm.stop_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -951,8 +980,8 @@ async def update_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project update requested: {project_id}")
-    pm = ProjectManager(db)
-    project = pm.update_project(project_id, project_update.dict())
+    pm = ProjectManager(db, manager)
+    project = await pm.update_project(project_id, project_update.dict())
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
@@ -967,8 +996,8 @@ async def delete_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project delete requested: {project_id}")
-    pm = ProjectManager(db)
-    pm.delete_project(project_id)
+    pm = ProjectManager(db, manager)
+    await pm.delete_project(project_id)
     return {"status": "deleted", "project_id": project_id}
 
 
