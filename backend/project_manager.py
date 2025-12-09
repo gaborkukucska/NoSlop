@@ -38,7 +38,7 @@ class ProjectManager:
     - Adapt plans based on worker feedback
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, manager):
         """
         Initialize Project Manager.
         
@@ -48,10 +48,11 @@ class ProjectManager:
         self.db = db
         self.model = settings.model_logic  # Use logic model for planning
         self.prompt_manager = get_prompt_manager()
+        self.manager = manager
         
         logger.info("Project Manager initialized", extra={"context": {"model": self.model}})
     
-    def create_project(self, project_request: ProjectRequest) -> Project:
+    async def create_project(self, project_request: ProjectRequest) -> Project:
         """
         Create a new project from user request.
         
@@ -83,12 +84,14 @@ class ProjectManager:
         
         project_model = ProjectCRUD.create(self.db, project_data)
         
+        await self.manager.broadcast({
+            "type": "project_created",
+            "data": project_model.to_dict()
+        })
+
         # Generate project plan
         logger.info(f"Generating plan for project {project_id}")
         tasks = self.generate_plan(project_model)
-        
-        # Update project status
-        ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.IN_PROGRESS})
         
         # Convert to Pydantic model
         project = self._model_to_pydantic(project_model)
@@ -333,7 +336,7 @@ class ProjectManager:
         
         return task
     
-    def update_task_status(self, task_id: str, status: str, result: Optional[Dict] = None) -> Optional[TaskModel]:
+    async def update_task_status(self, task_id: str, status: str, result: Optional[Dict] = None) -> Optional[TaskModel]:
         """
         Update task status and result.
         
@@ -358,6 +361,12 @@ class ProjectManager:
             updates["result"] = result
         
         task = TaskCRUD.update(self.db, task_id, updates)
+
+        await self.manager.broadcast({
+            "type": "task_status_updated",
+            "data": task.to_dict()
+        })
+
         return task
     
     def dispatch_task(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -395,27 +404,55 @@ class ProjectManager:
         """Convert database model to Pydantic model"""
         return Project(**project_model.to_dict())
 
-    def start_project(self, project_id: str) -> Optional[ProjectModel]:
+    async def start_project(self, project_id: str) -> Optional[ProjectModel]:
         """Start a project."""
         logger.info(f"Starting project {project_id}")
-        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.IN_PROGRESS})
+        project = ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.IN_PROGRESS})
+        if project:
+            await self.manager.broadcast({
+                "type": "project_status_updated",
+                "data": project.to_dict()
+            })
+        return project
 
-    def pause_project(self, project_id: str) -> Optional[ProjectModel]:
+    async def pause_project(self, project_id: str) -> Optional[ProjectModel]:
         """Pause a project."""
         logger.info(f"Pausing project {project_id}")
-        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.PAUSED})
+        project = ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.PAUSED})
+        if project:
+            await self.manager.broadcast({
+                "type": "project_status_updated",
+                "data": project.to_dict()
+            })
+        return project
 
-    def stop_project(self, project_id: str) -> Optional[ProjectModel]:
+    async def stop_project(self, project_id: str) -> Optional[ProjectModel]:
         """Stop a project."""
         logger.info(f"Stopping project {project_id}")
-        return ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.STOPPED})
+        project = ProjectCRUD.update(self.db, project_id, {"status": ProjectStatusEnum.STOPPED})
+        if project:
+            await self.manager.broadcast({
+                "type": "project_status_updated",
+                "data": project.to_dict()
+            })
+        return project
 
-    def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectModel]:
+    async def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectModel]:
         """Update a project."""
         logger.info(f"Updating project {project_id} with {updates}")
-        return ProjectCRUD.update(self.db, project_id, updates)
+        project = ProjectCRUD.update(self.db, project_id, updates)
+        if project:
+            await self.manager.broadcast({
+                "type": "project_updated",
+                "data": project.to_dict()
+            })
+        return project
 
-    def delete_project(self, project_id: str):
+    async def delete_project(self, project_id: str):
         """Delete a project."""
         logger.info(f"Deleting project {project_id}")
         ProjectCRUD.delete(self.db, project_id)
+        await self.manager.broadcast({
+            "type": "project_deleted",
+            "data": {"id": project_id}
+        })
