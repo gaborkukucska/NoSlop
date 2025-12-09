@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import api, { Project, Task, ProjectRequest } from '../../utils/api';
-import ProjectForm from './ProjectForm'; // Assuming ProjectForm is in the same directory
+import SceneWizard from './wizard/SceneWizard';
 
 interface ProjectDetailProps {
     projectId: string;
@@ -239,10 +239,13 @@ export default function ProjectDetail({ projectId, onClose, onProjectUpdate }: P
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                     <div className="bg-white dark:bg-zinc-800 p-8 rounded-lg shadow-xl w-full max-w-2xl">
                         <h2 className="text-2xl font-bold mb-4">Edit Project</h2>
-                        <ProjectForm
+                        <SceneWizard
                             initialData={project}
-                            onSubmit={handleUpdateProject}
-                            isSubmitting={isSubmitting}
+                            onSuccess={(updatedProject) => {
+                                handleUpdateProject(updatedProject);
+                                setIsEditModalOpen(false);
+                            }}
+                            onCancel={() => setIsEditModalOpen(false)}
                         />
                         <button
                             onClick={() => setIsEditModalOpen(false)}

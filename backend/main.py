@@ -782,7 +782,7 @@ async def execute_task(
     logger.info(f"Manual execution requested for task {task_id}")
     
     try:
-        pm = ProjectManager(db)
+        pm = ProjectManager(db, manager)
         result = pm.dispatch_task(task_id)
         
         if not result:
@@ -912,11 +912,11 @@ async def execute_project(
     logger.info(f"Project execution requested: {project_id}")
     
     try:
-        executor = TaskExecutor(db)
+        executor = TaskExecutor(db, manager)
         result = executor.execute_project(project_id)
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Error executing project: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error executing project: {str(e)}")
@@ -1023,11 +1023,11 @@ async def execute_task_with_dependencies(
     logger.info(f"Task execution with dependencies requested: {task_id}")
     
     try:
-        executor = TaskExecutor(db)
+        executor = TaskExecutor(db, manager)
         result = executor.execute_task_with_dependencies(task_id)
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Error executing task with dependencies: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error executing task with dependencies: {str(e)}")
@@ -1053,9 +1053,9 @@ async def get_task_progress(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        executor = TaskExecutor(db)
+        executor = TaskExecutor(db, manager)
         progress = executor.monitor_task_progress(task_id)
-        
+
         if not progress:
             raise HTTPException(status_code=404, detail=f"Task not found: {task_id}")
         
