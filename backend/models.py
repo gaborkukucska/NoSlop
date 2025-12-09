@@ -88,6 +88,7 @@ class ProjectStatus(str, Enum):
     REVIEW = "review"
     COMPLETED = "completed"
     PAUSED = "paused"
+    STOPPED = "stopped"
     CANCELLED = "cancelled"
 
 

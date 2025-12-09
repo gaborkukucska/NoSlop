@@ -893,6 +893,85 @@ async def execute_project(
         raise HTTPException(status_code=500, detail=f"Error executing project: {str(e)}")
 
 
+@app.post("/api/projects/{project_id}/start", response_model=Project)
+async def start_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    logger.info(f"Project start requested: {project_id}")
+    pm = ProjectManager(db)
+    project = pm.start_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.post("/api/projects/{project_id}/pause", response_model=Project)
+async def pause_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    logger.info(f"Project pause requested: {project_id}")
+    pm = ProjectManager(db)
+    project = pm.pause_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.post("/api/projects/{project_id}/stop", response_model=Project)
+async def stop_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    logger.info(f"Project stop requested: {project_id}")
+    pm = ProjectManager(db)
+    project = pm.stop_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.put("/api/projects/{project_id}", response_model=Project)
+async def update_project(
+    project_id: str,
+    project_update: ProjectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    logger.info(f"Project update requested: {project_id}")
+    pm = ProjectManager(db)
+    project = pm.update_project(project_id, project_update.dict())
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    logger.info(f"Project delete requested: {project_id}")
+    pm = ProjectManager(db)
+    pm.delete_project(project_id)
+    return {"status": "deleted", "project_id": project_id}
+
+
 @app.post("/api/tasks/{task_id}/execute-with-dependencies")
 async def execute_task_with_dependencies(
     task_id: str, 

@@ -61,6 +61,10 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
                 return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
             case 'failed':
                 return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
+            case 'paused':
+                return 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400';
+            case 'stopped':
+                return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
             default:
                 return 'bg-zinc-100 text-zinc-800 dark:bg-zinc-900/20 dark:text-zinc-400';
         }
@@ -136,14 +140,41 @@ export default function ProjectDetail({ projectId, onClose }: ProjectDetailProps
                 )}
             </div>
 
-            {/* Execute Button */}
-            <div>
+            {/* Project Controls */}
+            <div className="flex space-x-2">
                 <button
-                    onClick={handleExecute}
-                    disabled={executing || project.status === 'in_progress'}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => console.log("Start project")}
+                    disabled={project.status === 'in_progress' || project.status === 'completed'}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                    {executing ? 'Executing...' : 'Execute Project'}
+                    Start
+                </button>
+                <button
+                    onClick={() => console.log("Pause project")}
+                    disabled={project.status !== 'in_progress'}
+                    className="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Pause
+                </button>
+                <button
+                    onClick={() => console.log("Stop project")}
+                    disabled={project.status !== 'in_progress' && project.status !== 'paused'}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Stop
+                </button>
+                <button
+                    onClick={() => console.log("Edit project")}
+                    disabled={project.status === 'in_progress'}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    Edit
+                </button>
+                <button
+                    onClick={() => console.log("Delete project")}
+                    className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+                >
+                    Delete
                 </button>
             </div>
 
