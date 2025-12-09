@@ -143,12 +143,15 @@ export default function Home() {
                 />
               </div>
             ) : (
-              <div className="h-[calc(100vh-200px)]">
-                <ChatInterface />
+              <div className="h-[calc(100vh-200px)] flex flex-col">
+                <div className="h-2/3">
+                  <ChatInterface />
+                </div>
+                <div className="h-1/3 pt-4">
+                  <AgentActivityTerminal />
+                </div>
               </div>
             )}
-
-            {/* Projects Section - MOVED TO SIDEBAR */}
           </div>
 
           {/* Right Sidebar */}
@@ -269,10 +272,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Agent Activity Terminal */}
-      <div className="fixed bottom-0 left-0 right-0 p-4 z-20">
-          <AgentActivityTerminal />
-      </div>
     </div>
   );
 }

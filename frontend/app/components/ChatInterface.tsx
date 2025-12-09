@@ -279,7 +279,7 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
     };
 
     return (
-        <div className="flex h-[calc(100vh-64px)] bg-gray-900 text-white overflow-hidden">
+        <div className="flex h-full bg-gray-900 text-white overflow-hidden rounded-lg">
             {/* Sidebar */}
             <div
                 className={`${isSidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 bg-gray-800 border-r border-gray-700 flex flex-col overflow-hidden`}
