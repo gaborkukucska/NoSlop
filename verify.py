@@ -17,9 +17,11 @@ def run(playwright):
     page.get_by_label("Password").fill("password")
     page.get_by_role("button", name="Register").click()
 
-    # Wait for navigation to the login page
-    page.wait_for_url("http://localhost:3000/login", timeout=10000)
-    time.sleep(1) # Add a small delay to ensure the page is fully loaded
+    # Go to the login page
+    page.goto("http://localhost:3000/login")
+
+    # Wait for the login form to be visible to ensure the page has loaded
+    expect(page.get_by_label("Username")).to_be_visible(timeout=10000)
 
     # Log in
     page.get_by_label("Username").fill("testuser")
