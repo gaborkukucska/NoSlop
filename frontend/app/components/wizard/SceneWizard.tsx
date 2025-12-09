@@ -48,7 +48,7 @@ export default function SceneWizard({ onSuccess, onCancel, existingProject = nul
                 description: existingProject.description,
                 duration: existingProject.duration || 60,
                 style: existingProject.style || '',
-                characters: existingProject.meta_data?.characters || [],
+                characters: existingProject.metadata?.characters || [],
                 reference_media: existingProject.reference_media || []
             });
         }
