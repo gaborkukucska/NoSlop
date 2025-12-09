@@ -240,7 +240,7 @@ export default function ProjectDetail({ projectId, onClose, onProjectUpdate }: P
                     <div className="bg-white dark:bg-zinc-800 p-8 rounded-lg shadow-xl w-full max-w-2xl">
                         <h2 className="text-2xl font-bold mb-4">Edit Project</h2>
                         <SceneWizard
-                            initialData={project}
+                            existingProject={project}
                             onSuccess={(updatedProject) => {
                                 handleUpdateProject(updatedProject);
                                 setIsEditModalOpen(false);

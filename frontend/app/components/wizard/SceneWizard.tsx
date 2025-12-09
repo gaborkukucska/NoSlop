@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import api, { ProjectRequest } from '../../../utils/api';
+import { useState, useEffect } from 'react';
+import api, { ProjectRequest, Project } from '../../../utils/api';
 import BasicInfo from './steps/BasicInfo';
 import StyleGateway from './steps/StyleGateway';
 import Characters from './steps/Characters';
@@ -10,6 +10,7 @@ import Review from './steps/Review';
 interface SceneWizardProps {
     onSuccess: (project: any) => void;
     onCancel: () => void;
+    existingProject?: Project | null;
 }
 
 export type WizardData = {
@@ -18,7 +19,7 @@ export type WizardData = {
     description: string;
     duration: number;
     style: string;
-    characters: any[]; // Define more specifically later if needed
+    characters: any[];
     reference_media: string[];
 };
 
@@ -32,11 +33,26 @@ const INITIAL_DATA: WizardData = {
     reference_media: []
 };
 
-export default function SceneWizard({ onSuccess, onCancel }: SceneWizardProps) {
+export default function SceneWizard({ onSuccess, onCancel, existingProject = null }: SceneWizardProps) {
     const [step, setStep] = useState(1);
     const [data, setData] = useState<WizardData>(INITIAL_DATA);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const isEditMode = existingProject !== null;
+
+    useEffect(() => {
+        if (isEditMode && existingProject) {
+            setData({
+                title: existingProject.title,
+                project_type: existingProject.project_type,
+                description: existingProject.description,
+                duration: existingProject.duration || 60,
+                style: existingProject.style || '',
+                characters: existingProject.meta_data?.characters || [],
+                reference_media: existingProject.reference_media || []
+            });
+        }
+    }, [isEditMode, existingProject]);
 
     const updateData = (updates: Partial<WizardData>) => {
         setData(prev => ({ ...prev, ...updates }));
@@ -49,7 +65,6 @@ export default function SceneWizard({ onSuccess, onCancel }: SceneWizardProps) {
         setLoading(true);
         setError(null);
         try {
-            // Transform WizardData to ProjectRequest
             const projectRequest: ProjectRequest = {
                 title: data.title,
                 project_type: data.project_type,
@@ -57,20 +72,18 @@ export default function SceneWizard({ onSuccess, onCancel }: SceneWizardProps) {
                 duration: data.duration,
                 style: data.style,
                 reference_media: data.reference_media,
-                // Characters might need to be added to metadata or description since ProjectRequest doesn't strict typed it yet?
-                // Checking api.ts ProjectRequest interface:
-                // export interface ProjectRequest { title: string; project_type: string; description: string; duration?: number; style?: string; reference_media?: string[]; }
-                // We'll append characters to description or handle them separately if the backend supports it.
-                // For now, let's append to description for context if simpler, 
-                // OR ideally, we should update the backend model to support characters.
-                // Given the plan says "Connect to Backend ProjectManager", let's assume standard fields first.
-                // effectively, we can pass it as metadata via a custom hack or just append to description.
             };
 
-            const project = await api.createProject(projectRequest);
-            onSuccess(project);
+            if (isEditMode && existingProject) {
+                // We are editing, so we just pass the updated data to the onSuccess handler
+                onSuccess({ ...existingProject, ...projectRequest });
+            } else {
+                // We are creating, so we call the API
+                const project = await api.createProject(projectRequest);
+                onSuccess(project);
+            }
         } catch (err: any) {
-            setError(err.message || 'Failed to create project');
+            setError(err.message || (isEditMode ? 'Failed to update project' : 'Failed to create project'));
         } finally {
             setLoading(false);
         }
@@ -82,7 +95,7 @@ export default function SceneWizard({ onSuccess, onCancel }: SceneWizardProps) {
             <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
                 <div>
                     <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-                        New Project Setup
+                        {isEditMode ? 'Edit Project' : 'New Project Setup'}
                     </h2>
                     <p className="text-sm text-zinc-500 dark:text-zinc-400">
                         Step {step} of 4
@@ -152,7 +165,9 @@ export default function SceneWizard({ onSuccess, onCancel }: SceneWizardProps) {
                         disabled={loading}
                         className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50"
                     >
-                        {loading ? 'Creating Project...' : 'Create Project'}
+                        {loading
+                            ? isEditMode ? 'Updating Project...' : 'Creating Project...'
+                            : isEditMode ? 'Update Project' : 'Create Project'}
                     </button>
                 )}
             </div>
