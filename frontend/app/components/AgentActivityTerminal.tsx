@@ -15,7 +15,11 @@ export default function AgentActivityTerminal() {
     const terminalRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        const ws = new WebSocket('ws://localhost:8000/ws/activity');
+        const hostname = window.location.hostname;
+        const wsUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
+            ? `ws://${hostname}:8000/ws/activity`
+            : 'ws://localhost:8000/ws/activity';
+        const ws = new WebSocket(wsUrl);
 
         ws.onmessage = (event) => {
             const message = JSON.parse(event.data);

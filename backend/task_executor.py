@@ -32,15 +32,17 @@ class TaskExecutor:
     supports parallel execution of independent tasks.
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, manager):
         """
         Initialize task executor.
         
         Args:
             db: Database session
+            manager: WebSocket connection manager
         """
         self.db = db
         self.registry = get_registry()
+        self.manager = manager
         self.running = False
         self.task_queue = Queue()
         logger.info("Task Executor initialized")
