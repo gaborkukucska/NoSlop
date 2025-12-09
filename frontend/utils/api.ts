@@ -181,7 +181,11 @@ class ApiClient {
 
     // Task APIs
     async getProjectTasks(projectId: string): Promise<Task[]> {
-        return this.request<Task[]>(`/api/projects/${projectId}/tasks`);
+        const response = await this.request<Task[] | { tasks: Task[] }>(`/api/projects/${projectId}/tasks`);
+        if (Array.isArray(response)) {
+            return response;
+        }
+        return response.tasks;
     }
 
     async getTaskProgress(taskId: string): Promise<TaskProgress> {
