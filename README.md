@@ -73,7 +73,7 @@ A peer-to-peer, decentralized social graph. Share content directly from your nod
 
 ## 🚀 Getting Started
 
-> 🚧 **Status**: NoSlop is in **Active Development**. **Phase 2: Service Installers** is complete! The smart installer can now deploy the full stack.
+> ✅ **Status**: NoSlop deployment is **operational**! **Phase 0: Shared Storage** and **Deployment Stabilization** are complete. The smart installer successfully deploys across heterogeneous multi-device networks.
 
 ### Quick Start (Recommended)
 

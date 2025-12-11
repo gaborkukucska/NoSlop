@@ -84,7 +84,7 @@ class BaseInstaller(ABC):
                 username=self.username
             )
             if not self.ssh_client:
-                self.logger.warning(f"Failed to connect to {self.device.ip_address}")
+                raise ConnectionError(f"Failed to connect to {self.device.ip_address}")
 
     def execute_remote(self, command: str, timeout: int = 300) -> Tuple[int, str, str]:
         """
@@ -137,7 +137,12 @@ class BaseInstaller(ABC):
         else:
             if not self.ssh_client:
                 return -1, "", "SSH client not connected"
-            return self.ssh_manager.execute_command(self.ssh_client, command, timeout)
+            return self.ssh_manager.execute_command(
+                self.ssh_client, 
+                command, 
+                timeout, 
+                sudo_password=self.password
+            )
 
     def transfer_file(self, local_path: str, remote_path: str) -> bool:
         """
@@ -243,7 +248,7 @@ class BaseInstaller(ABC):
             if code != 0:
                 self.logger.warning(f"Failed to set ownership on {remote_dir}: {err}")
             
-            return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir, excludes=excludes)
+            return self.ssh_manager.transfer_directory(self.ssh_client, local_dir, remote_dir, excludes=excludes, sudo_password=self.password)
 
     def create_directory(self, path: str) -> bool:
         """Create directory on target device."""
@@ -261,7 +266,7 @@ class BaseInstaller(ABC):
         else:
             if not self.ssh_client:
                 return False
-            return self.ssh_manager.create_remote_directory(self.ssh_client, path)
+            return self.ssh_manager.create_remote_directory(self.ssh_client, path, sudo_password=self.password)
 
     def get_package_manager(self) -> str:
         """
@@ -320,6 +325,106 @@ class BaseInstaller(ABC):
             self.logger.error(f"Package installation failed: {err}")
             return False
         return True
+    
+    def wait_for_apt_lock(self, max_wait_seconds: int = 300) -> bool:
+        """
+        Wait for apt/dpkg lock to be released.
+        
+        Checks for lock files and waits with exponential backoff if they exist.
+        
+        Args:
+            max_wait_seconds: Maximum time to wait (default 5 minutes)
+            
+        Returns:
+            True if lock is free, False if timeout
+        """
+        lock_files = [
+            "/var/lib/dpkg/lock",
+            "/var/lib/dpkg/lock-frontend",
+            "/var/cache/apt/archives/lock"
+        ]
+        
+        wait_intervals = [5, 10, 20, 40, 60]  # Exponential backoff in seconds
+        total_waited = 0
+        attempt = 0
+        
+        while total_waited < max_wait_seconds:
+            # Check if any lock files exist and are held by a process
+            locks_held = []
+            for lock_file in lock_files:
+                code, out, _ = self.execute_remote(
+                    f"sudo lsof {lock_file} 2\u003e/dev/null | grep -v COMMAND"
+                )
+                if code == 0 and out.strip():
+                    # Lock is held
+                    locks_held.append(lock_file)
+            
+            if not locks_held:
+                # No locks held, we're good
+                self.logger.debug("✓ No apt locks detected")
+                return True
+            
+            # Locks are held, wait
+            wait_time = wait_intervals[min(attempt, len(wait_intervals) - 1)]
+            self.logger.info(
+                f"⏳ apt/dpkg locks detected: {', '.join(locks_held)}"
+            )
+            self.logger.info(
+                f"   Waiting {wait_time}s for locks to release... "
+                f"({total_waited}/{max_wait_seconds}s elapsed)"
+            )
+            
+            time.sleep(wait_time)
+            total_waited += wait_time
+            attempt += 1
+        
+        # Timeout reached
+        self.logger.error(f"❌ Timeout waiting for apt locks after {max_wait_seconds}s")
+        return False
+    
+    def install_packages_with_retry(self, packages: List[str], max_retries: int = 3) -> bool:
+        """
+        Install system packages with retry logic for lock conflicts.
+        
+        Args:
+            packages: List of package names
+            max_retries: Maximum number of retries
+            
+        Returns:
+            True if successful
+        """
+        pm = self.get_package_manager()
+        
+        # Only use lock detection for apt-based systems
+        if pm != "apt":
+            return self.install_packages(packages)
+        
+        for attempt in range(max_retries):
+            # Wait for any existing locks to clear
+            if not self.wait_for_apt_lock():
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Lock timeout, retrying... (attempt {attempt + 1}/{max_retries})")
+                    continue
+                else:
+                    self.logger.error("Failed to acquire apt lock after all retries")
+                    return False
+            
+            # Try installation
+            success = self.install_packages(packages)
+            
+            if success:
+                return True
+            
+            # Check if failure was due to lock
+            # If we reach here, install_packages failed - check if it's a lock error
+            if attempt < max_retries - 1:
+                self.logger.warning(f"Package installation failed, retrying... (attempt {attempt + 1}/{max_retries})")
+                time.sleep(5)  # Brief pause before retry
+            else:
+                self.logger.error("Package installation failed after all retries")
+                return False
+        
+        return False
 
     @abstractmethod
     def check_installed(self) -> bool:

@@ -84,7 +84,7 @@ class PromptEngineer(WorkerAgent):
         logger.debug("PromptEngineer result validation passed")
         return True
     
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         """
         Generate optimized prompts based on task requirements.
         
@@ -127,7 +127,7 @@ class PromptEngineer(WorkerAgent):
             self.report_progress(task.id, 50, "Generating optimized prompts")
             
             logger.debug("Calling LLM for prompt generation")
-            response_content = self.call_llm(
+            response_content = await self.call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8,
                 format="json"

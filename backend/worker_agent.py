@@ -101,9 +101,39 @@ class WorkerAgent(abc.ABC):
         self.max_retries = 3
         self.retry_delay = 2  # seconds
         self.progress_callback: Optional[Callable] = None
+        self.connection_manager = None
+
+    def set_connection_manager(self, manager):
+        """Set the connection manager for broadcasting updates."""
+        self.connection_manager = manager
+
+    async def broadcast_activity(self, activity_type: str, message: str, data: Optional[Dict] = None):
+        """
+        Broadcast agent activity to frontend.
+        
+        Args:
+            activity_type: Type of activity (e.g., 'llm_call', 'tool_usage', 'log')
+            message: Human readable message
+            data: Optional data payload
+        """
+        if self.connection_manager:
+            payload = {
+                "type": "agent_activity",
+                "data": {
+                    "agent_type": self.agent_type,
+                    "activity_type": activity_type,
+                    "message": message,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "details": data or {}
+                }
+            }
+            try:
+                await self.connection_manager.broadcast(payload)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast activity: {e}")
         
     @abc.abstractmethod
-    def process_task(self, task: Task) -> Dict[str, Any]:
+    async def process_task(self, task: Task) -> Dict[str, Any]:
         """
         Process an assigned task.
         
@@ -219,7 +249,7 @@ class WorkerAgent(abc.ABC):
         
         return "Assistance request logged. PM will be notified."
     
-    def execute_with_retry(self, task: Task) -> Dict[str, Any]:
+    async def execute_with_retry(self, task: Task) -> Dict[str, Any]:
         """
         Execute task with automatic retry on failure.
         
@@ -238,8 +268,15 @@ class WorkerAgent(abc.ABC):
             try:
                 logger.info(f"Executing task {task.id}, attempt {attempt + 1}/{self.max_retries}")
                 
+                 # Broadcast start
+                await self.broadcast_activity(
+                    "task_start", 
+                    f"Starting task: {task.title}", 
+                    {"task_id": task.id, "attempt": attempt + 1}
+                )
+
                 # Process the task
-                result = self.process_task(task)
+                result = await self.process_task(task)
                 
                 # Validate result
                 if not self.validate_result(result):
@@ -289,7 +326,7 @@ class WorkerAgent(abc.ABC):
         TaskCRUD.update(self.db, task_id, updates)
         logger.info(f"Task {task_id} updated to {status.value}")
 
-    def call_llm(
+    async def call_llm(
         self,
         messages: list,
         temperature: float = 0.7,
@@ -319,16 +356,39 @@ class WorkerAgent(abc.ABC):
             
             logger.debug(f"Calling LLM {self.model} with temperature {temperature}")
             
-            response = ollama.chat(
+            await self.broadcast_activity(
+                "llm_call",
+                f"Calling LLM ({self.model})...",
+                {"messages_count": len(messages), "temperature": temperature}
+            )
+
+            # We assume ollama.chat is synchronous (it is in the python lib usually, but maybe we wrap it? 
+            # actually ollama library is sync. Blocking sync in async is bad. 
+            # We should run it in an executor if we want true async, or just live with it for shorter calls.
+            # For now we will run it directly but since we are in async def we can at least await other things.)
+            # Better to run in thread pool to not block loop.
+            import asyncio
+            from functools import partial
+            
+            loop = asyncio.get_event_loop()
+            func = partial(
+                ollama.chat,
                 model=self.model,
                 messages=messages,
                 format=format,
                 options=options
             )
+            response = await loop.run_in_executor(None, func)
             
             content = response['message']['content']
             logger.debug(f"LLM response received: {len(content)} characters")
             
+            await self.broadcast_activity(
+                "llm_response",
+                "LLM response received",
+                {"length": len(content)}
+            )
+
             return content
             
         except Exception as e:

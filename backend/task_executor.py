@@ -108,7 +108,7 @@ class TaskExecutor:
         logger.info(f"Topological sort complete: {len(levels)} execution levels")
         return levels
     
-    def execute_project(self, project_id: str) -> Dict:
+    async def execute_project(self, project_id: str) -> Dict:
         """
         Execute all tasks for a project in correct order.
         
@@ -167,7 +167,7 @@ class TaskExecutor:
                         continue
                     
                     # Dispatch task to appropriate worker
-                    result = self.dispatch_task(task)
+                    result = await self.dispatch_task(task)
                     
                     if result:
                         results["completed"] += 1
@@ -190,7 +190,7 @@ class TaskExecutor:
         logger.info(f"Project execution complete: {results}")
         return results
     
-    def dispatch_task(self, task: TaskModel) -> Optional[Dict]:
+    async def dispatch_task(self, task: TaskModel) -> Optional[Dict]:
         """
         Dispatch task to appropriate worker.
         
@@ -218,8 +218,12 @@ class TaskExecutor:
             return None
         
         try:
+            # Inject manager
+            if hasattr(worker, 'set_connection_manager'):
+                worker.set_connection_manager(self.manager)
+            
             # Execute with retry logic
-            result = worker.execute_with_retry(task)
+            result = await worker.execute_with_retry(task)
             logger.info(f"Task {task.id} completed by {worker.agent_type}")
             return result
             
@@ -228,7 +232,7 @@ class TaskExecutor:
             # Error already logged by worker
             return None
     
-    def execute_task_with_dependencies(self, task_id: str) -> Dict:
+    async def execute_task_with_dependencies(self, task_id: str) -> Dict:
         """
         Execute a single task and its dependencies.
         
@@ -270,7 +274,7 @@ class TaskExecutor:
             for tid in level_tasks:
                 t = TaskCRUD.get(self.db, tid)
                 if t and t.status in [TaskStatusEnum.PENDING, TaskStatusEnum.ASSIGNED]:
-                    result = self.dispatch_task(t)
+                    result = await self.dispatch_task(t)
                     if result:
                         completed += 1
                     else:

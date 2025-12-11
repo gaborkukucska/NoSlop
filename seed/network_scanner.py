@@ -225,6 +225,83 @@ class NetworkScanner:
         logger.info(f"Found {len(devices)} SSH-enabled device(s) from list")
         return devices
     
+    def scan_known_devices(self, ip_list: List[str], port: int = 22, quick_timeout: bool = True) -> Tuple[List[DiscoveredDevice], List[str]]:
+        """
+        Quickly scan known devices from credential store.
+        
+        Uses shorter timeout for faster scanning of devices that should respond quickly.
+        
+        Args:
+            ip_list: List of known IP addresses
+            port: SSH port
+            quick_timeout: Use quick timeout (1s instead of normal timeout)
+            
+        Returns:
+            Tuple of (discovered_devices, unreachable_ips)
+        """
+        logger.info(f"Quick scan of {len(ip_list)} known device(s)...")
+        
+        # Temporarily reduce timeout for quick scan
+        original_timeout = self.timeout
+        if quick_timeout:
+            self.timeout = 1
+        
+        try:
+            devices = []
+            unreachable = []
+            
+            for ip in ip_list:
+                try:
+                    device = self.scan_device(ip, port)
+                    if device:
+                        devices.append(device)
+                        logger.info(f"✓ Known device online: {ip}")
+                    else:
+                        unreachable.append(ip)
+                        logger.warning(f"✗ Known device unreachable: {ip}")
+                except Exception as e:
+                    unreachable.append(ip)
+                    logger.warning(f"Error scanning known device {ip}: {e}")
+            
+            logger.info(f"Quick scan complete: {len(devices)} online, {len(unreachable)} unreachable")
+            return devices, unreachable
+            
+        finally:
+            # Restore original timeout
+            self.timeout = original_timeout
+    
+    def should_do_full_scan(self, known_devices_found: int, known_devices_total: int, min_threshold: float = 0.8) -> bool:
+        """
+        Determine if a full network scan is needed based on known device availability.
+        
+        Args:
+            known_devices_found: Number of known devices that responded
+            known_devices_total: Total number of known devices
+            min_threshold: Minimum fraction of devices that must be found (default 80%)
+            
+        Returns:
+            True if full scan should be performed
+        """
+        if known_devices_total == 0:
+            # No known devices, must do full scan
+            logger.info("No known devices in credential store - full scan required")
+            return True
+        
+        found_ratio = known_devices_found / known_devices_total
+        
+        if found_ratio >= min_threshold:
+            logger.info(
+                f"✓ {known_devices_found}/{known_devices_total} known devices found "
+                f"({found_ratio*100:.0f}%) - skipping full scan"
+            )
+            return False
+        else:
+            logger.warning(
+                f"Only {known_devices_found}/{known_devices_total} known devices found "
+                f"({found_ratio*100:.0f}%) - full scan recommended"
+            )
+            return True
+    
     def validate_ip(self, ip: str) -> bool:
         """
         Validate IP address format.

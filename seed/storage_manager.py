@@ -179,6 +179,7 @@ class StorageManager:
 {username} ALL=(ALL) NOPASSWD: /usr/bin/systemctl*
 {username} ALL=(ALL) NOPASSWD: /usr/bin/mount*
 {username} ALL=(ALL) NOPASSWD: /usr/bin/df*
+{username} ALL=(ALL) NOPASSWD: /usr/bin/sed*
 """
         
         # Write sudoers file using echo with password
@@ -293,18 +294,65 @@ class StorageManager:
             logger.debug(f"✓ Created {path}")
         logger.info("✓ All storage directories created")
         
-        # Configure NFS exports
+        # Configure NFS exports with robust deduplication
         logger.info("Configuring NFS exports...")
-        exports_content = f"""# NoSlop Shared Storage Exports
-{self.config.base_path} *(rw,sync,no_subtree_check,no_root_squash)
-"""
-        logger.debug(f"Export config: {exports_content.strip()}")
+        logger.debug("Reading existing /etc/exports...")
         
-        # Write exports file
-        logger.debug("Writing to /etc/exports...")
+        # 1. Read existing exports file
+        code, existing_exports, err = self.ssh_manager.execute_command(
+            client,
+            "sudo cat /etc/exports 2\u003e/dev/null || true"
+        )
+        
+        if code != 0:
+            logger.debug("No existing /etc/exports file, will create new one")
+            existing_exports = ""
+        else:
+            logger.debug(f"Found existing exports file with {len(existing_exports.splitlines())} lines")
+        
+        # 2. Filter out all NoSlop-related entries
+        # Remove lines with NoSlop comments AND lines matching our base path
+        clean_lines = []
+        skip_next = False
+        for line in existing_exports.splitlines():
+            # Skip NoSlop comment headers
+            if "NoSlop" in line and line.strip().startswith("#"):
+                skip_next = True
+                continue
+            # Skip the export line that follows NoSlop comment
+            if skip_next and line.strip() and not line.strip().startswith("#"):
+                skip_next = False
+                continue
+            # Skip any line that starts with our base path (handles duplicates without comments)
+            if line.strip().startswith(self.config.base_path):
+                continue
+            # Keep all other lines
+            if line.strip():  # Don't keep empty lines
+                clean_lines.append(line)
+        
+        # 3. Build new exports content
+        new_exports_lines = clean_lines + [
+            "# NoSlop Shared Storage Exports",
+            f"{self.config.base_path} *(rw,sync,no_subtree_check,no_root_squash)"
+        ]
+        new_exports_content = "\n".join(new_exports_lines) + "\n"
+        
+        logger.debug(f"New exports will have {len(new_exports_lines)} lines (removed duplicates)")
+        
+        # 4. Create backup of original exports file
+        logger.debug("Creating backup of /etc/exports...")
+        code, _, _ = self.ssh_manager.execute_command(
+            client,
+            "sudo cp /etc/exports /etc/exports.bak.noslop 2\u003e/dev/null || true"
+        )
+        
+        # 5. Write the clean deduplicated exports file
+        # We use 'tee' (not 'tee -a') to overwrite, not append
+        logger.debug("Writing deduplicated exports to /etc/exports...")
         code, out, err = self.ssh_manager.execute_command(
             client,
-            f"echo '{exports_content}' | sudo tee -a /etc/exports"
+            f"echo '{new_exports_content}' | sudo tee /etc/exports \u003e /dev/null",
+            sudo_password=password
         )
         
         if code != 0:
@@ -313,14 +361,18 @@ class StorageManager:
             print(f"\n❌ ERROR: Failed to write NFS exports configuration")
             print(f"   Error: {err[:200]}")
             return False
+            
         logger.info("✓ NFS exports configured")
         
         # Restart NFS server
         logger.info("Restarting NFS server...")
+        # We use exportfs -r (re-export) instead of -ra to be specific? 
+        # Actually -ra is standard. Now that duplicates are gone, it should exit 0.
         logger.debug("Executing: sudo exportfs -ra && sudo systemctl restart nfs-kernel-server")
         code, out, err = self.ssh_manager.execute_command(
             client,
-            "sudo exportfs -ra && sudo systemctl restart nfs-kernel-server"
+            "sudo exportfs -ra && sudo systemctl restart nfs-kernel-server",
+            sudo_password=password
         )
         
         if code != 0:
@@ -374,41 +426,67 @@ class StorageManager:
         code, _, err = self.ssh_manager.execute_command(
             client,
             "sudo apt-get update && sudo apt-get install -y nfs-common",
-            timeout=300
+            timeout=300,
+            sudo_password=password
         )
         
         if code != 0:
             logger.error(f"Failed to install NFS client: {err}")
             return False
         
+        # IMPORTANT: Workers mount at /mnt/noslop, NOT at master's storage path
+        # The master's path (e.g. /media/tom/Data/NoSlop/) may:
+        # - Not exist on worker nodes
+        # - Be on device-specific mounts
+        # - Trigger automount/hang issues
+        worker_mount_point = "/mnt/noslop"
+        
         # Create mount point
-        logger.info(f"Creating mount point {self.config.base_path}...")
-        code, _, _ = self.ssh_manager.execute_command(
-            client,
-            f"sudo mkdir -p {self.config.base_path}"
-        )
-        
-        if code != 0:
-            logger.error("Failed to create mount point")
-            return False
-        
-        # Mount NFS share
-        logger.info(f"Mounting {master_ip}:{self.config.base_path}...")
+        logger.info(f"Creating mount point {worker_mount_point}...")
         code, _, err = self.ssh_manager.execute_command(
             client,
-            f"sudo mount -t nfs {master_ip}:{self.config.base_path} {self.config.base_path}"
+            f"sudo mkdir -p {worker_mount_point}",
+            timeout=30,  # 30 second timeout for mkdir
+            sudo_password=password
         )
         
         if code != 0:
-            logger.error(f"Failed to mount NFS share: {err}")
+            logger.error(f"Failed to create mount point: {err}")
             return False
+        
+        # Mount NFS share with timeout and retry
+        logger.info(f"Mounting {master_ip}:{self.config.base_path}...")
+        
+        # Try mount with short timeout first (30s), retry once if it fails
+        max_retries = 2
+        mount_timeout = 60  # 60 second timeout for mount operation
+        
+        for attempt in range(max_retries):
+            code, out, err = self.ssh_manager.execute_command(
+                client,
+                f"sudo mount -t nfs -o soft,timeo=100,retrans=2 {master_ip}:{self.config.base_path} {worker_mount_point}",
+                timeout=mount_timeout,
+                sudo_password=password
+            )
+            
+            if code == 0:
+                break
+            
+            if attempt < max_retries - 1:
+                logger.warning(f"Mount attempt {attempt + 1} failed, retrying... ({err[:100]})")
+                import time
+                time.sleep(5)
+            else:
+                logger.error(f"Failed to mount NFS share after {max_retries} attempts: {err}")
+                return False
         
         # Add to fstab for persistence
         logger.info("Adding to /etc/fstab for automatic mounting...")
-        fstab_entry = f"{master_ip}:{self.config.base_path} {self.config.base_path} nfs defaults 0 0"
+        fstab_entry = f"{master_ip}:{self.config.base_path} {worker_mount_point} nfs defaults 0 0"
         code, _, _ = self.ssh_manager.execute_command(
             client,
-            f"echo '{fstab_entry}' | sudo tee -a /etc/fstab"
+            f"echo '{fstab_entry}' | sudo tee -a /etc/fstab",
+            sudo_password=password
         )
         
         logger.info("✓ NFS shares mounted successfully")
@@ -428,13 +506,16 @@ class StorageManager:
             True if accessible, False otherwise
         """
         logger.info(f"Verifying shared storage on {device.ip_address}...")
-        logger.debug(f"Test path: {self.config.base_path}")
+        
+        # Workers mount at /mnt/noslop, not at master's storage path
+        test_path = "/mnt/noslop"
+        logger.debug(f"Test path: {test_path}")
         
         if not self.ssh_manager:
             logger.warning("No SSH manager available, skipping verification")
             return True
         
-        test_file = f"{self.config.base_path}/test_{device.ip_address.replace('.', '_')}.txt"
+        test_file = f"{test_path}/test_{device.ip_address.replace('.', '_')}.txt"
         test_content = f"NoSlop storage test from {device.ip_address}"
         
         # Create SSH client
@@ -443,20 +524,22 @@ class StorageManager:
             logger.warning("Failed to create SSH connection for verification")
             return True  # Don't fail deployment on verification
         
-        # Write test file
+        # Write test file with timeout
         code, _, err = self.ssh_manager.execute_command(
             client,
-            f"echo '{test_content}' > {test_file}"
+            f"echo '{test_content}' > {test_file}",
+            timeout=10
         )
         
         if code != 0:
             logger.error(f"Failed to write test file: {err}")
             return False
         
-        # Read test file
+        # Read test file with timeout
         code, out, err = self.ssh_manager.execute_command(
             client,
-            f"cat {test_file}"
+            f"cat {test_file}",
+            timeout=10
         )
         
         if code != 0 or test_content not in out:
@@ -466,7 +549,8 @@ class StorageManager:
         # Clean up test file
         self.ssh_manager.execute_command(
             client,
-            f"rm {test_file}"
+            f"rm {test_file}",
+            timeout=10
         )
         
         logger.info("✓ Shared storage verified")

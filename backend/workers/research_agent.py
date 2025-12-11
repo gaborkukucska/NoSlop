@@ -86,7 +86,7 @@ class ResearchAgent(WorkerAgent):
         logger.debug("ResearchAgent result validation passed")
         return True
     
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         """
         Conduct research based on task requirements.
         
@@ -133,7 +133,7 @@ class ResearchAgent(WorkerAgent):
             self.report_progress(task.id, 50, "Conducting research")
             
             logger.debug("Calling LLM for research")
-            response_content = self.call_llm(
+            response_content = await self.call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 format="json"

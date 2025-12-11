@@ -131,7 +131,7 @@ class ImageGenerationWorker(WorkerAgent):
             }
         }
 
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         logger.info(f"ImageGenerationWorker starting task: {task.id}")
         
         try:

@@ -369,7 +369,7 @@ class ProjectManager:
 
         return task
     
-    def dispatch_task(self, task_id: str) -> Optional[Dict[str, Any]]:
+    async def dispatch_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         Dispatch a task to the appropriate worker agent.
         
@@ -395,7 +395,12 @@ class ProjectManager:
         if worker:
             logger.info(f"Assigning task {task_id} to {worker.agent_type}")
             self.assign_task(task_id, worker.agent_type)
-            return worker.process_task(task)
+            
+            # Inject manager
+            if hasattr(worker, 'set_connection_manager'):
+                worker.set_connection_manager(self.manager)
+                
+            return await worker.execute_with_retry(task)
         else:
             logger.warning(f"No suitable worker found for task type: {task.task_type}")
             return None

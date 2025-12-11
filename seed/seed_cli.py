@@ -62,9 +62,10 @@ if not ensure_dependencies():
 from seed.hardware_detector import HardwareDetector
 from seed.network_scanner import NetworkScanner
 from seed.role_assigner import RoleAssigner
-from seed.ssh_manager import SSHManager, PARAMIKO_AVAILABLE
+from seed.ssh_manager import SSHManager, PARAMIKO_AVAILABLE, SSHCredentials
 from seed.deployer import Deployer
 from seed.models import DeviceCapabilities
+from seed.credential_store import CredentialStore
 
 # Import shared logging utilities
 try:
@@ -168,6 +169,7 @@ class NoSlopSeedCLI:
         self.network_scanner = NetworkScanner(timeout=2)
         self.role_assigner = RoleAssigner()
         self.ssh_manager = SSHManager()
+        self.credential_store = CredentialStore()
         self.deployer = None  # Created later with SSH manager
     
     def print_banner(self):
@@ -317,6 +319,9 @@ class NoSlopSeedCLI:
                 port=22
             )
             credentials_map[current_device.ip_address] = creds
+            self.credential_store.save_credential(
+                current_device.ip_address, local_user, local_pass, 22
+            )
             print("   ✓ Local credentials stored\n")
         else:
             print("   ⚠️  No password provided. Local installation might fail if sudo requires password.\n")
@@ -372,6 +377,9 @@ class NoSlopSeedCLI:
                         if remote_capabilities:
                             devices.append(remote_capabilities)
                             credentials_map[remote_capabilities.ip_address] = credentials
+                            self.credential_store.save_credential(
+                                remote_capabilities.ip_address, username, password, discovered_device.ssh_port
+                            )
                             print(f"   ✓ Added: {remote_capabilities.hostname} - {remote_capabilities.os_type.value} - score: {remote_capabilities.capability_score}/100\n")
                         else:
                             print(f"   ✗ Failed to detect hardware for {discovered_device.ip_address}\n")
@@ -420,6 +428,9 @@ class NoSlopSeedCLI:
                 if remote_capabilities:
                     devices.append(remote_capabilities)
                     credentials_map[remote_capabilities.ip_address] = credentials
+                    self.credential_store.save_credential(
+                        remote_capabilities.ip_address, username, password, 22
+                    )
                     print(f"   ✓ Added: {remote_capabilities.hostname} - {remote_capabilities.os_type.value} - score: {remote_capabilities.capability_score}/100\n")
                 else:
                     print(f"   ✗ Failed to detect hardware for {ip}\n")
@@ -675,7 +686,17 @@ Examples:
         
         # Create service manager
         ssh_manager = SSHManager()
-        manager = ServiceManager(deployment_dir, ssh_manager)
+        
+        # Prompt for sudo password for remote management
+        import getpass
+        print(f"\n🔐 Sudo Access Required")
+        print("   To manage services (start/stop/etc), sudo privileges are required.")
+        sudo_password = getpass.getpass("   Enter sudo password (leave empty if passwordless): ")
+        if not sudo_password:
+             sudo_password = None
+             print("   ⚠️  No signature provided. Operations may fail if password is required.")
+        
+        manager = ServiceManager(deployment_dir, ssh_manager, sudo_password=sudo_password)
         
         # Execute management command
         success = True

@@ -73,7 +73,7 @@ class VideoEditor(WorkerAgent):
             
         return True
     
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         """
         Generate video editing plan and optionally execute it.
         """

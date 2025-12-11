@@ -81,7 +81,7 @@ class ColorGrader(WorkerAgent):
         logger.debug("ColorGrader result validation passed")
         return True
     
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         """
         Generate color grading specifications.
         
@@ -125,7 +125,7 @@ class ColorGrader(WorkerAgent):
             self.report_progress(task.id, 50, "Generating color grading plan")
             
             logger.debug("Calling LLM for color grading generation")
-            response_content = self.call_llm(
+            response_content = await self.call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.6,
                 format="json"

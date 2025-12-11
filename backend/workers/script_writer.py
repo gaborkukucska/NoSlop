@@ -22,7 +22,7 @@ class ScriptWriter(WorkerAgent):
         super().__init__(db_session)
         self.agent_type = "script_writer"
         
-    def process_task(self, task: Task) -> Dict[str, Any]:
+    async def process_task(self, task: Task) -> Dict[str, Any]:
         """
         Generate a script based on the task description and project context.
         """
@@ -48,7 +48,7 @@ class ScriptWriter(WorkerAgent):
             
             # Call LLM
             logger.debug("Generating script content...")
-            script_content = self.call_llm(
+            script_content = await self.call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.8
             )

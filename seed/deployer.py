@@ -313,40 +313,52 @@ class Deployer:
                 # Generate config for backend
                 config = self.generate_node_config(node, plan)
                 username, password = get_credentials(node.device)
-                installer = BackendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
-                if not installer.run():
-                    logger.error(f"Failed to install Backend on {node.device.hostname}")
-                    return False
+                try:
+                    installer = BackendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
+                    if not installer.run():
+                        logger.error(f"Failed to install Backend on {node.device.hostname}")
+                        return False
 
-                # Register Backend
-                self.registry.register_service(ServiceInstance(
-                    instance_id=f"backend_{node.device.ip_address}",
-                    service_type=ServiceType.NOSLOP_BACKEND,
-                    host=node.device.ip_address,
-                    port=8000,
-                    is_newly_deployed=True,
-                    health_status="healthy"
-                ))
+                    # Register Backend
+                    self.registry.register_service(ServiceInstance(
+                        instance_id=f"backend_{node.device.ip_address}",
+                        service_type=ServiceType.NOSLOP_BACKEND,
+                        host=node.device.ip_address,
+                        port=8000,
+                        is_newly_deployed=True,
+                        health_status="healthy"
+                    ))
+                except ConnectionError as e:
+                    logger.error(f"⚠️  Skipping Backend on {node.device.hostname}: {e}")
+                except Exception as e:
+                    logger.error(f"❌ Unexpected error installing Backend on {node.device.hostname}: {e}")
+                    return False
 
         # Frontend (Client/All)
         for node in plan.nodes:
             if "noslop-frontend" in node.services:
-                config = self.generate_node_config(node, plan)
-                username, password = get_credentials(node.device)
-                installer = FrontendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
-                if not installer.run():
-                    logger.error(f"Failed to install Frontend on {node.device.hostname}")
-                    return False
+                try:
+                    config = self.generate_node_config(node, plan)
+                    username, password = get_credentials(node.device)
+                    installer = FrontendInstaller(node.device, self.ssh_manager, config, username=username, password=password)
+                    if not installer.run():
+                        logger.error(f"Failed to install Frontend on {node.device.hostname}")
+                        return False
 
-                # Register Frontend
-                self.registry.register_service(ServiceInstance(
-                    instance_id=f"frontend_{node.device.ip_address}",
-                    service_type=ServiceType.NOSLOP_FRONTEND,
-                    host=node.device.ip_address,
-                    port=3000,
-                    is_newly_deployed=True,
-                    health_status="healthy"
-                ))
+                    # Register Frontend
+                    self.registry.register_service(ServiceInstance(
+                        instance_id=f"frontend_{node.device.ip_address}",
+                        service_type=ServiceType.NOSLOP_FRONTEND,
+                        host=node.device.ip_address,
+                        port=3000,
+                        is_newly_deployed=True,
+                        health_status="healthy"
+                    ))
+                except ConnectionError as e:
+                    logger.error(f"⚠️  Skipping Frontend on {node.device.hostname}: {e}")
+                except Exception as e:
+                    logger.error(f"❌ Unexpected error installing Frontend on {node.device.hostname}: {e}")
+                    return False
 
         return True
 

@@ -152,7 +152,20 @@ class DeviceRediscovery:
         if expected_hostname:
             try:
                 actual_hostname = socket.gethostbyaddr(ip_address)[0]
-                if actual_hostname.lower() != expected_hostname.lower():
+                
+                # Normalize
+                actual = actual_hostname.lower()
+                expected = expected_hostname.lower()
+                
+                # Check for exact match or domain suffix
+                # This handles 'host.lan' vs 'host' and vice versa
+                is_match = (
+                    actual == expected or 
+                    actual.startswith(f"{expected}.") or 
+                    expected.startswith(f"{actual}.")
+                )
+                
+                if not is_match:
                     logger.warning(f"Hostname mismatch: expected {expected_hostname}, got {actual_hostname}")
                     return False
                 logger.debug(f"Hostname verified: {actual_hostname}")

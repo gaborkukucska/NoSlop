@@ -553,7 +553,7 @@ class HardwareDetector:
     
     def _get_remote_mac_address(
         self,
-        credentials: SSHCredentials,
+        client: "paramiko.SSHClient",
         ssh_manager: SSHManager
     ) -> tuple[Optional[str], list]:
         """
@@ -567,53 +567,53 @@ class HardwareDetector:
         
         try:
             # Try Linux method first
-            success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
-                credentials, "ip route show default", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "ip route show default", timeout=10
             )
-            if success and exit_code == 0 and 'dev' in stdout:
+            if exit_code == 0 and 'dev' in stdout:
                 # Extract interface name
                 parts = stdout.split()
                 dev_idx = parts.index('dev') + 1
                 if dev_idx < len(parts):
                     iface = parts[dev_idx]
                     # Get MAC address
-                    success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
-                        credentials, f"cat /sys/class/net/{iface}/address", timeout=10
+                    exit_code, stdout, stderr = ssh_manager.execute_command(
+                        client, f"cat /sys/class/net/{iface}/address", timeout=10
                     )
-                    if success and exit_code == 0:
-                        primary_mac = mac_out.strip()
+                    if exit_code == 0:
+                        primary_mac = stdout.strip()
                         logger.debug(f"Remote MAC (Linux): {primary_mac}")
             
             # Try macOS method if Linux failed
             if not primary_mac:
-                success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
-                    credentials, "route -n get default", timeout=10
+                exit_code, stdout, stderr = ssh_manager.execute_command(
+                    client, "route -n get default", timeout=10
                 )
-                if success and exit_code == 0:
+                if exit_code == 0:
                     for line in stdout.split('\n'):
                         if 'interface:' in line:
                             iface = line.split(':')[1].strip()
-                            success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
-                                credentials, f"ifconfig {iface} | grep ether", timeout=10
+                            exit_code, stdout, stderr = ssh_manager.execute_command(
+                                client, f"ifconfig {iface} | grep ether", timeout=10
                             )
-                            if success and exit_code == 0 and 'ether' in mac_out:
-                                primary_mac = mac_out.split()[1]
+                            if exit_code == 0 and 'ether' in stdout:
+                                primary_mac = stdout.split()[1]
                                 logger.debug(f"Remote MAC (macOS): {primary_mac}")
                                 break
             
             # Try to get all MACs (Linux)
-            success, exit_code, stdout, _ = ssh_manager.execute_remote_command(
-                credentials, "ls /sys/class/net/", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "ls /sys/class/net/", timeout=10
             )
-            if success and exit_code == 0:
+            if exit_code == 0:
                 interfaces = stdout.strip().split()
                 for iface in interfaces:
                     if iface not in ['lo', 'bonding_masters']:
-                        success, exit_code, mac_out, _ = ssh_manager.execute_remote_command(
-                            credentials, f"cat /sys/class/net/{iface}/address 2>/dev/null", timeout=10
+                        exit_code, stdout, stderr = ssh_manager.execute_command(
+                            client, f"cat /sys/class/net/{iface}/address 2>/dev/null", timeout=10
                         )
-                        if success and exit_code == 0:
-                            mac = mac_out.strip()
+                        if exit_code == 0:
+                            mac = stdout.strip()
                             if mac and mac != '00:00:00:00:00:00':
                                 all_macs.append(mac)
             
@@ -646,9 +646,19 @@ class HardwareDetector:
         """
         logger.info(f"Starting remote hardware detection for {credentials.ip_address}...")
         
+        # Create persistent connection
+        client = ssh_manager.create_ssh_client(
+            credentials.ip_address,
+            username=credentials.username,
+            port=credentials.port
+        )
+        
+        if not client:
+            return None
+            
         try:
             # First, detect the OS type
-            os_type = self._detect_remote_os_type(credentials, ssh_manager)
+            os_type = self._detect_remote_os_type(client, ssh_manager)
             
             if os_type == OSType.UNKNOWN:
                 logger.error(f"Could not detect OS type for {credentials.ip_address}")
@@ -658,11 +668,11 @@ class HardwareDetector:
             
             # Route to OS-specific detection
             if os_type == OSType.LINUX:
-                return self._detect_remote_linux(credentials, ssh_manager)
+                return self._detect_remote_linux(client, ssh_manager, credentials)
             elif os_type == OSType.MACOS:
-                return self._detect_remote_macos(credentials, ssh_manager)
+                return self._detect_remote_macos(client, ssh_manager, credentials)
             elif os_type == OSType.WINDOWS:
-                return self._detect_remote_windows(credentials, ssh_manager)
+                return self._detect_remote_windows(client, ssh_manager, credentials)
             else:
                 logger.error(f"Unsupported OS type: {os_type.value}")
                 return None
@@ -670,20 +680,23 @@ class HardwareDetector:
         except Exception as e:
             logger.error(f"Remote hardware detection failed for {credentials.ip_address}: {e}")
             return None
+        finally:
+            if client:
+                client.close()
     
     def _detect_remote_os_type(
         self,
-        credentials: SSHCredentials,
+        client: "paramiko.SSHClient",
         ssh_manager: SSHManager
     ) -> OSType:
         """Detect OS type of remote device."""
         try:
             # Try uname first (works on Linux/macOS/Android)
-            success, exit_code, stdout, stderr = ssh_manager.execute_remote_command(
-                credentials, "uname -s", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "uname -s", timeout=10
             )
             
-            if success and exit_code == 0:
+            if exit_code == 0:
                 os_name = stdout.strip().lower()
                 logger.debug(f"Remote uname output: {os_name}")
                 
@@ -693,19 +706,19 @@ class HardwareDetector:
                     return OSType.MACOS
             
             # Try Windows detection
-            success, exit_code, stdout, stderr = ssh_manager.execute_remote_command(
-                credentials, "ver", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "ver", timeout=10
             )
             
-            if success and exit_code == 0 and "Windows" in stdout:
+            if exit_code == 0 and "Windows" in stdout:
                 return OSType.WINDOWS
             
             # Try PowerShell method for Windows
-            success, exit_code, stdout, stderr = ssh_manager.execute_remote_command(
-                credentials, "echo %OS%", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "echo %OS%", timeout=10
             )
             
-            if success and exit_code == 0 and "Windows" in stdout:
+            if exit_code == 0 and "Windows" in stdout:
                 return OSType.WINDOWS
             
             logger.warning("Could not determine remote OS type")
@@ -717,36 +730,37 @@ class HardwareDetector:
     
     def _detect_remote_linux(
         self,
-        credentials: SSHCredentials,
-        ssh_manager: SSHManager
+        client: "paramiko.SSHClient",
+        ssh_manager: SSHManager,
+        credentials: SSHCredentials
     ) -> Optional[DeviceCapabilities]:
         """Detect hardware capabilities of a remote Linux device."""
         logger.info("Detecting Linux hardware...")
         
         try:
             # Get hostname
-            _, _, hostname, _ = ssh_manager.execute_remote_command(
-                credentials, "hostname", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "hostname", timeout=10
             )
-            hostname = hostname.strip() or credentials.ip_address
+            hostname = stdout.strip() or credentials.ip_address
             
             # CPU cores
-            _, _, cpu_cores_str, _ = ssh_manager.execute_remote_command(
-                credentials, "nproc", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "nproc", timeout=10
             )
-            cpu_cores = int(cpu_cores_str.strip()) if cpu_cores_str.strip() else 1
+            cpu_cores = int(stdout.strip()) if stdout.strip() else 1
             
             # CPU speed (from /proc/cpuinfo)
-            _, _, cpuinfo, _ = ssh_manager.execute_remote_command(
-                credentials, "grep 'cpu MHz' /proc/cpuinfo | head -1 | awk '{print $4}'", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "grep 'cpu MHz' /proc/cpuinfo | head -1 | awk '{print $4}'", timeout=10
             )
-            cpu_speed = round(float(cpuinfo.strip()) / 1000, 2) if cpuinfo.strip() else 2.0
+            cpu_speed = round(float(stdout.strip()) / 1000, 2) if stdout.strip() else 2.0
             
             # Architecture
-            _, _, arch_str, _ = ssh_manager.execute_remote_command(
-                credentials, "uname -m", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "uname -m", timeout=10
             )
-            arch_str = arch_str.strip().lower()
+            arch_str = stdout.strip().lower()
             if "x86_64" in arch_str or "amd64" in arch_str:
                 architecture = Architecture.X86_64
             elif "arm64" in arch_str:
@@ -757,15 +771,15 @@ class HardwareDetector:
                 architecture = Architecture.UNKNOWN
             
             # RAM (in KB from /proc/meminfo)
-            _, _, meminfo, _ = ssh_manager.execute_remote_command(
-                credentials, "grep MemTotal /proc/meminfo | awk '{print $2}'", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "grep MemTotal /proc/meminfo | awk '{print $2}'", timeout=10
             )
-            ram_total_gb = round(int(meminfo.strip()) / (1024**2), 2) if meminfo.strip() else 0.0
+            ram_total_gb = round(int(stdout.strip()) / (1024**2), 2) if stdout.strip() else 0.0
             
-            _, _, memavail, _ = ssh_manager.execute_remote_command(
-                credentials, "grep MemAvailable /proc/meminfo | awk '{print $2}'", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "grep MemAvailable /proc/meminfo | awk '{print $2}'", timeout=10
             )
-            ram_available_gb = round(int(memavail.strip()) / (1024**2), 2) if memavail.strip() else 0.0
+            ram_available_gb = round(int(stdout.strip()) / (1024**2), 2) if stdout.strip() else 0.0
             
             # GPU detection - NVIDIA
             gpu_vendor = GPUVendor.NONE
@@ -774,56 +788,56 @@ class HardwareDetector:
             vram_available_gb = 0.0
             gpu_count = 0
             
-            success, exit_code, nvidia_check, _ = ssh_manager.execute_remote_command(
-                credentials, "which nvidia-smi", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "which nvidia-smi", timeout=10
             )
-            if success and exit_code == 0 and nvidia_check.strip():
+            if exit_code == 0 and stdout.strip():
                 gpu_vendor = GPUVendor.NVIDIA
-                _, _, gpu_name_out, _ = ssh_manager.execute_remote_command(
-                    credentials, "nvidia-smi --query-gpu=name --format=csv,noheader | head -1", timeout=10
+                _, gpu_name_out, _ = ssh_manager.execute_command(
+                    client, "nvidia-smi --query-gpu=name --format=csv,noheader | head -1", timeout=10
                 )
                 gpu_name = gpu_name_out.strip() if gpu_name_out.strip() else None
                 
-                _, _, vram_out, _ = ssh_manager.execute_remote_command(
-                    credentials, "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1", timeout=10
+                _, vram_out, _ = ssh_manager.execute_command(
+                    client, "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1", timeout=10
                 )
                 if vram_out.strip():
                     vram_total_gb = round(float(vram_out.strip()) / 1024, 2)
                     vram_available_gb = vram_total_gb
                 
-                _, _, gpu_count_out, _ = ssh_manager.execute_remote_command(
-                    credentials, "nvidia-smi --list-gpus | wc -l", timeout=10
+                _, gpu_count_out, _ = ssh_manager.execute_command(
+                    client, "nvidia-smi --list-gpus | wc -l", timeout=10
                 )
                 gpu_count = int(gpu_count_out.strip()) if gpu_count_out.strip() else 1
             
             # Check for AMD GPU
             if gpu_vendor == GPUVendor.NONE:
-                success, exit_code, amd_check, _ = ssh_manager.execute_remote_command(
-                    credentials, "which rocm-smi", timeout=10
+                exit_code, stdout, stderr = ssh_manager.execute_command(
+                    client, "which rocm-smi", timeout=10
                 )
-                if success and exit_code == 0 and amd_check.strip():
+                if exit_code == 0 and stdout.strip():
                     gpu_vendor = GPUVendor.AMD
                     gpu_count = 1
             
             # Disk space
-            _, _, disk_out, _ = ssh_manager.execute_remote_command(
-                credentials, "df -BG / | tail -1 | awk '{print $2}' | sed 's/G//'", timeout=10
+            _, stdout, _ = ssh_manager.execute_command(
+                client, "df -BG / | tail -1 | awk '{print $2}' | sed 's/G//'", timeout=10
             )
-            disk_total_gb = float(disk_out.strip()) if disk_out.strip() else 0.0
+            disk_total_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
-            _, _, disk_avail_out, _ = ssh_manager.execute_remote_command(
-                credentials, "df -BG / | tail -1 | awk '{print $4}' | sed 's/G//'", timeout=10
+            _, stdout, _ = ssh_manager.execute_command(
+                client, "df -BG / | tail -1 | awk '{print $4}' | sed 's/G//'", timeout=10
             )
-            disk_available_gb = float(disk_avail_out.strip()) if disk_avail_out.strip() else 0.0
+            disk_available_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
             # OS version
-            _, _, os_version, _ = ssh_manager.execute_remote_command(
-                credentials, "cat /etc/os-release | grep PRETTY_NAME | cut -d '=' -f2 | tr -d '\"'", timeout=10
+            _, stdout, _ = ssh_manager.execute_command(
+                client, "cat /etc/os-release | grep PRETTY_NAME | cut -d '=' -f2 | tr -d '\"'", timeout=10
             )
-            os_version = os_version.strip() if os_version.strip() else "Linux"
+            os_version = stdout.strip() if stdout.strip() else "Linux"
             
             # MAC addresses
-            mac_address, mac_addresses = self._get_remote_mac_address(credentials, ssh_manager)
+            mac_address, mac_addresses = self._get_remote_mac_address(client, ssh_manager)
             
             capabilities = DeviceCapabilities(
                 hostname=hostname,
@@ -858,36 +872,37 @@ class HardwareDetector:
     
     def _detect_remote_macos(
         self,
-        credentials: SSHCredentials,
-        ssh_manager: SSHManager
+        client: "paramiko.SSHClient",
+        ssh_manager: SSHManager,
+        credentials: SSHCredentials
     ) -> Optional[DeviceCapabilities]:
         """Detect hardware capabilities of a remote macOS device."""
         logger.info("Detecting macOS hardware...")
         
         try:
             # Get hostname
-            _, _, hostname, _ = ssh_manager.execute_remote_command(
-                credentials, "hostname", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "hostname", timeout=10
             )
-            hostname = hostname.strip() or credentials.ip_address
+            hostname = stdout.strip() or credentials.ip_address
             
             # CPU cores
-            _, _, cpu_cores_str, _ = ssh_manager.execute_remote_command(
-                credentials, "sysctl -n hw.physicalcpu", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "sysctl -n hw.physicalcpu", timeout=10
             )
-            cpu_cores = int(cpu_cores_str.strip()) if cpu_cores_str.strip() else 1
+            cpu_cores = int(stdout.strip()) if stdout.strip() else 1
             
             # CPU speed
-            _, _, cpu_speed_str, _ = ssh_manager.execute_remote_command(
-                credentials, "sysctl -n hw.cpufrequency", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "sysctl -n hw.cpufrequency", timeout=10
             )
-            cpu_speed = round(int(cpu_speed_str.strip()) / 1e9, 2) if cpu_speed_str.strip() else 2.0
+            cpu_speed = round(int(stdout.strip()) / 1e9, 2) if stdout.strip() else 2.0
             
             # Architecture
-            _, _, arch_str, _ = ssh_manager.execute_remote_command(
-                credentials, "uname -m", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "uname -m", timeout=10
             )
-            arch_str = arch_str.strip().lower()
+            arch_str = stdout.strip().lower()
             if "arm64" in arch_str:
                 architecture = Architecture.ARM64
             elif "x86_64" in arch_str:
@@ -896,10 +911,10 @@ class HardwareDetector:
                 architecture = Architecture.UNKNOWN
             
             # RAM
-            _, _, ram_str, _ = ssh_manager.execute_remote_command(
-                credentials, "sysctl -n hw.memsize", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "sysctl -n hw.memsize", timeout=10
             )
-            ram_total_gb = round(int(ram_str.strip()) / (1024**3), 2) if ram_str.strip() else 0.0
+            ram_total_gb = round(int(stdout.strip()) / (1024**3), 2) if stdout.strip() else 0.0
             ram_available_gb = ram_total_gb * 0.5  # Estimate
             
             # GPU detection (Apple Silicon or discrete)
@@ -911,33 +926,33 @@ class HardwareDetector:
             if architecture == Architecture.ARM64:
                 # Apple Silicon
                 gpu_vendor = GPUVendor.APPLE
-                _, _, chip_name, _ = ssh_manager.execute_remote_command(
-                    credentials, "sysctl -n machdep.cpu.brand_string", timeout=10
+                exit_code, stdout, stderr = ssh_manager.execute_command(
+                    client, "sysctl -n machdep.cpu.brand_string", timeout=10
                 )
-                gpu_name = chip_name.strip() if chip_name.strip() else "Apple Silicon"
+                gpu_name = stdout.strip() if stdout.strip() else "Apple Silicon"
                 vram_total_gb = ram_total_gb * 0.5  # Unified memory estimate
                 vram_available_gb = vram_total_gb
                 gpu_count = 1
             
             # Disk space
-            _, _, disk_out, _ = ssh_manager.execute_remote_command(
-                credentials, "df -g / | tail -1 | awk '{print $2}'", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "df -g / | tail -1 | awk '{print $2}'", timeout=10
             )
-            disk_total_gb = float(disk_out.strip()) if disk_out.strip() else 0.0
+            disk_total_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
-            _, _, disk_avail_out, _ = ssh_manager.execute_remote_command(
-                credentials, "df -g / | tail -1 | awk '{print $4}'", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "df -g / | tail -1 | awk '{print $4}'", timeout=10
             )
-            disk_available_gb = float(disk_avail_out.strip()) if disk_avail_out.strip() else 0.0
+            disk_available_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
             # OS version
-            _, _, os_version, _ = ssh_manager.execute_remote_command(
-                credentials, "sw_vers -productVersion", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "sw_vers -productVersion", timeout=10
             )
-            os_version = f"macOS {os_version.strip()}" if os_version.strip() else "macOS"
+            os_version = f"macOS {stdout.strip()}" if stdout.strip() else "macOS"
             
             # MAC addresses
-            mac_address, mac_addresses = self._get_remote_mac_address(credentials, ssh_manager)
+            mac_address, mac_addresses = self._get_remote_mac_address(client, ssh_manager)
             
             capabilities = DeviceCapabilities(
                 hostname=hostname,
@@ -972,35 +987,36 @@ class HardwareDetector:
     
     def _detect_remote_windows(
         self,
-        credentials: SSHCredentials,
-        ssh_manager: SSHManager
+        client: "paramiko.SSHClient",
+        ssh_manager: SSHManager,
+        credentials: SSHCredentials
     ) -> Optional[DeviceCapabilities]:
         """Detect hardware capabilities of a remote Windows device."""
         logger.info("Detecting Windows hardware...")
         
         try:
             # Get hostname
-            _, _, hostname, _ = ssh_manager.execute_remote_command(
-                credentials, "hostname", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "hostname", timeout=10
             )
-            hostname = hostname.strip() or credentials.ip_address
+            hostname = stdout.strip() or credentials.ip_address
             
             # Use PowerShell for Windows detection
             # CPU cores
-            _, _, cpu_cores_str, _ = ssh_manager.execute_remote_command(
-                credentials, 
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, 
                 "powershell -Command \"(Get-WmiObject -Class Win32_Processor).NumberOfCores\"",
                 timeout=10
             )
-            cpu_cores = int(cpu_cores_str.strip()) if cpu_cores_str.strip() else 1
+            cpu_cores = int(stdout.strip()) if stdout.strip() else 1
             
             # RAM (in bytes)
-            _, _, ram_str, _ = ssh_manager.execute_remote_command(
-                credentials,
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client,
                 "powershell -Command \"(Get-WmiObject -Class Win32_ComputerSystem).TotalPhysicalMemory\"",
                 timeout=10
             )
-            ram_total_gb = round(int(ram_str.strip()) / (1024**3), 2) if ram_str.strip() else 0.0
+            ram_total_gb = round(int(stdout.strip()) / (1024**3), 2) if stdout.strip() else 0.0
             ram_available_gb = ram_total_gb * 0.5  # Estimate
             
             # Simple GPU check for NVIDIA
@@ -1009,40 +1025,40 @@ class HardwareDetector:
             vram_total_gb = 0.0
             gpu_count = 0
             
-            success, exit_code, nvidia_check, _ = ssh_manager.execute_remote_command(
-                credentials, "where nvidia-smi", timeout=10
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client, "where nvidia-smi", timeout=10
             )
-            if success and exit_code == 0:
+            if exit_code == 0:
                 gpu_vendor = GPUVendor.NVIDIA
                 gpu_count = 1
                 # Try to get GPU name
-                _, _, gpu_name_out, _ = ssh_manager.execute_remote_command(
-                    credentials, "nvidia-smi --query-gpu=name --format=csv,noheader", timeout=10
+                _, gpu_name_out, _ = ssh_manager.execute_command(
+                    client, "nvidia-smi --query-gpu=name --format=csv,noheader", timeout=10
                 )
                 gpu_name = gpu_name_out.strip() if gpu_name_out.strip() else "NVIDIA GPU"
             
             # Disk space
-            _, _, disk_out, _ = ssh_manager.execute_remote_command(
-                credentials,
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client,
                 "powershell -Command \"[math]::Round((Get-PSDrive C).Free / 1GB + (Get-PSDrive C).Used / 1GB)\"",
                 timeout=10
             )
-            disk_total_gb = float(disk_out.strip()) if disk_out.strip() else 0.0
+            disk_total_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
-            _, _, disk_avail_out, _ = ssh_manager.execute_remote_command(
-                credentials,
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client,
                 "powershell -Command \"[math]::Round((Get-PSDrive C).Free / 1GB)\"",
                 timeout=10
             )
-            disk_available_gb = float(disk_avail_out.strip()) if disk_avail_out.strip() else 0.0
+            disk_available_gb = float(stdout.strip()) if stdout.strip() else 0.0
             
             # OS version
-            _, _, os_version, _ = ssh_manager.execute_remote_command(
-                credentials,
+            exit_code, stdout, stderr = ssh_manager.execute_command(
+                client,
                 "powershell -Command \"(Get-WmiObject -Class Win32_OperatingSystem).Caption\"",
                 timeout=10
             )
-            os_version = os_version.strip() if os_version.strip() else "Windows"
+            os_version = stdout.strip() if stdout.strip() else "Windows"
             
             capabilities = DeviceCapabilities(
                 hostname=hostname,

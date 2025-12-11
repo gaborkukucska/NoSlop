@@ -325,5 +325,12 @@ def initialize_workers():
         logger.info("Registered ResearchAgent")
     except ImportError as e:
         logger.warning(f"Could not import ResearchAgent: {e}")
+
+    try:
+        from workers.image_generation_worker import ImageGenerationWorker
+        register_worker(ImageGenerationWorker, [TaskTypeEnum.IMAGE_GENERATION])
+        logger.info("Registered ImageGenerationWorker")
+    except ImportError as e:
+        logger.warning(f"Could not import ImageGenerationWorker: {e}")
     
     logger.info(f"Worker registry initialized with {len(_registry.workers)} workers")

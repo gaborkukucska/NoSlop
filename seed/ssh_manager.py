@@ -6,7 +6,9 @@ Handles SSH key generation, distribution, and connection management.
 """
 
 import os
+import socket
 import logging
+logging.getLogger("paramiko").setLevel(logging.WARNING)
 import subprocess
 import getpass
 from pathlib import Path
@@ -277,36 +279,64 @@ class SSHManager:
         Returns:
             Connected SSHClient or None if connection fails
         """
-        try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Load private key
-            private_key = paramiko.Ed25519Key.from_private_key_file(
-                str(self.private_key_path)
-            )
-            
-            # Connect
-            client.connect(
-                hostname=ip_address,
-                port=port,
-                username=username,
-                pkey=private_key,
-                timeout=10
-            )
-            
-            logger.debug(f"Created SSH client for {ip_address}")
-            return client
-            
-        except Exception as e:
-            logger.error(f"Failed to create SSH client for {ip_address}: {e}")
-            return None
+        import time
+        
+        # Retry loop for connection
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                # Load private key
+                private_key = paramiko.Ed25519Key.from_private_key_file(
+                    str(self.private_key_path)
+                )
+                
+                logger.debug(f"Connecting to {repr(ip_address)}:{port} as {username} (Attempt {attempt+1}/{max_retries})")
+                
+                # Connect with specific parameters to avoid ambiguity and timeouts
+                client.connect(
+                    hostname=ip_address,
+                    port=port,
+                    username=username,
+                    pkey=private_key,
+                    timeout=30,             # Increased from 10
+                    banner_timeout=60,      # Give ample time for banner
+                    auth_timeout=30,        # Give time for auth
+                )
+                
+                logger.debug(f"Created SSH client for {ip_address}")
+                return client
+                
+            except paramiko.AuthenticationException:
+                logger.error(f"Authentication failed for {username}@{ip_address}")
+                return None
+            except paramiko.SSHException as e:
+                # Handle "Errno None" specifically if possible, but usually caught as SSHException/OSError
+                if attempt < max_retries - 1:
+                    logger.warning(f"SSH protocol error for {ip_address}: {e}. Retrying in 3s...")
+                    time.sleep(3)
+                    continue
+                logger.error(f"SSH protocol error for {ip_address}: {e}")
+                return None
+            except OSError as e: # Socket errors
+                if attempt < max_retries - 1:
+                    logger.warning(f"Network error connecting to {ip_address}:{port} - {e}. Retrying in 3s...")
+                    time.sleep(3)
+                    continue
+                logger.error(f"Network error connecting to {ip_address}:{port} - {e}")
+                return None
+            except Exception as e:
+                logger.error(f"Failed to create SSH client for {ip_address}: {e}")
+                return None
     
     def execute_command(
         self,
         client: "paramiko.SSHClient",
         command: str,
-        timeout: int = 60
+        timeout: int = 60,
+        sudo_password: Optional[str] = None
     ) -> tuple[int, str, str]:
         """
         Execute a command on a remote device.
@@ -315,6 +345,7 @@ class SSHManager:
             client: Connected SSH client
             command: Command to execute
             timeout: Command timeout in seconds
+            sudo_password: Password for sudo (optional)
             
         Returns:
             Tuple of (exit_code, stdout, stderr)
@@ -322,8 +353,55 @@ class SSHManager:
         try:
             logger.debug(f"Executing: {command}")
             
-            stdin, stdout, stderr = client.exec_command(command, timeout=timeout)
-            exit_code = stdout.channel.recv_exit_status()
+            # Handle sudo with password mechanism
+            if sudo_password:
+                # "Prime" the sudo credential cache in the same session chain.
+                # This allows the subsequent command to use 'sudo' without a terminal/password prompt.
+                # We use '&&' to ensure the command only runs if priming succeeds.
+                
+                # Escape single quotes in password for shell compatibility
+                safe_password = sudo_password.replace("'", "'\\''")
+                
+                # Construct chained command:
+                # 1. echo password | sudo -S -p '' -v  (Reads pass from stdin, validates, update timestamp)
+                # 2. command                           (Runs if priming success, finds cached credential)
+                # We separate with && so strict error handling applies.
+                
+                # Note: We must be careful not to interfere with the main command's stdin.
+                # The 'echo | sudo' pipe is self-contained. The '&& command' starts after.
+                
+                # Use sh -c to wrap the whole thing to ensure shell operators work as expected
+                # and to avoid ambiguity with existing parameters.
+                # But overly wrapping might break escaping in 'command'.
+                # Simply chaining string is usually safe if 'command' is a valid shell string.
+                
+                logger.debug("Executing with sudo priming")
+                full_command = f"echo '{safe_password}' | sudo -S -p '' -v && {{ {command} ; }}"
+                
+                stdin, stdout, stderr = client.exec_command(full_command)
+                # We don't write password to stdin here because it's already in the echo pipe.
+                
+            else:
+                # No sudo password, just run
+                stdin, stdout, stderr = client.exec_command(command)
+            
+            # CRITICAL FIX: Set timeout on the channel for command execution
+            # The timeout parameter in exec_command() only affects channel creation,
+            # not command execution. We must set the channel timeout explicitly.
+            stdout.channel.settimeout(timeout)
+            stderr.channel.settimeout(timeout)
+            
+            try:
+                exit_code = stdout.channel.recv_exit_status()
+            except socket.timeout:
+                logger.error(f"Command timed out after {timeout}s: {command}")
+                # Try to close the channel gracefully
+                try:
+                    stdout.channel.close()
+                except:
+                    pass
+                return -1, "", f"Command timed out after {timeout} seconds"
+                
             
             stdout_str = stdout.read().decode().strip()
             stderr_str = stderr.read().decode().strip()
@@ -335,6 +413,9 @@ class SSHManager:
             
             return exit_code, stdout_str, stderr_str
             
+        except socket.timeout:
+            logger.error(f"Command timed out after {timeout}s: {command}")
+            return -1, "", f"Command timed out after {timeout} seconds"
         except Exception as e:
             logger.error(f"Error executing command: {e}")
             return -1, "", str(e)
@@ -359,55 +440,75 @@ class SSHManager:
         Returns:
             Tuple of (success, exit_code, stdout, stderr)
         """
-        try:
-            if not PARAMIKO_AVAILABLE:
-                logger.error("Paramiko not available for remote execution")
-                return False, -1, "", "Paramiko not installed"
-            
-            logger.debug(f"Connecting to {credentials.ip_address} to execute: {command}")
-            
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            
-            # Connect using password or key
-            if credentials.password:
-                client.connect(
-                    hostname=credentials.ip_address,
-                    port=credentials.port,
-                    username=credentials.username,
-                    password=credentials.password,
-                    timeout=10
+        if not PARAMIKO_AVAILABLE:
+            logger.error("Paramiko not available for remote execution")
+            return False, -1, "", "Paramiko not installed"
+        
+        logger.debug(f"Connecting to {credentials.ip_address} to execute: {command}")
+        
+        # Retry loop for connection and execution
+        import time
+        max_retries = 3
+        
+        for attempt in range(max_retries):
+            try:
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                
+                # Connect using password or key
+                if credentials.password:
+                    client.connect(
+                        hostname=credentials.ip_address,
+                        port=credentials.port,
+                        username=credentials.username,
+                        password=credentials.password,
+                        timeout=30
+                    )
+                elif credentials.key_path:
+                    private_key = paramiko.Ed25519Key.from_private_key_file(credentials.key_path)
+                    client.connect(
+                        hostname=credentials.ip_address,
+                        port=credentials.port,
+                        username=credentials.username,
+                        pkey=private_key,
+                        timeout=30
+                    )
+                else:
+                    logger.error("No password or key provided")
+                    return False, -1, "", "No authentication method provided"
+                
+                # Execute command
+                # Check if command starts with sudo and we have a password
+                sudo_pass = credentials.password if command.strip().startswith("sudo") else None
+                
+                exit_code, stdout, stderr = self.execute_command(
+                    client, 
+                    command, 
+                    timeout,
+                    sudo_password=sudo_pass
                 )
-            elif credentials.key_path:
-                private_key = paramiko.Ed25519Key.from_private_key_file(credentials.key_path)
-                client.connect(
-                    hostname=credentials.ip_address,
-                    port=credentials.port,
-                    username=credentials.username,
-                    pkey=private_key,
-                    timeout=10
-                )
-            else:
-                logger.error("No password or key provided")
-                return False, -1, "", "No authentication method provided"
-            
-            # Execute command
-            exit_code, stdout, stderr = self.execute_command(client, command, timeout)
-            
-            # Close connection
-            client.close()
-            
-            return True, exit_code, stdout, stderr
-            
-        except paramiko.AuthenticationException:
-            logger.error(f"Authentication failed for {credentials.ip_address}")
-            return False, -1, "", "Authentication failed"
-        except paramiko.SSHException as e:
-            logger.error(f"SSH error for {credentials.ip_address}: {e}")
-            return False, -1, "", f"SSH error: {e}"
-        except Exception as e:
-            logger.error(f"Error executing remote command on {credentials.ip_address}: {e}")
-            return False, -1, "", str(e)
+                
+                # Close connection
+                client.close()
+                
+                return True, exit_code, stdout, stderr
+                
+            except paramiko.AuthenticationException:
+                logger.error(f"Authentication failed for {credentials.ip_address}")
+                return False, -1, "", "Authentication failed"
+            except (paramiko.SSHException, OSError) as e:
+                # Retry on network/protocol errors
+                if attempt < max_retries - 1:
+                    logger.warning(f"Connection/SSH error for {credentials.ip_address}: {e}. Retrying...")
+                    time.sleep(2)
+                    continue
+                logger.error(f"SSH error for {credentials.ip_address}: {e}")
+                return False, -1, "", f"SSH error: {e}"
+            except Exception as e:
+                logger.error(f"Error executing remote command on {credentials.ip_address}: {e}")
+                return False, -1, "", str(e)
+                
+        return False, -1, "", "Max retries exceeded"
     
     def transfer_file(
         self,
@@ -441,23 +542,25 @@ class SSHManager:
             return False
     
     def transfer_directory(
-        self,
-        client: "paramiko.SSHClient",
-        local_dir: str,
+        self, 
+        client: "paramiko.SSHClient", 
+        local_dir: str, 
         remote_dir: str,
-        excludes: List[str] = None
+        excludes: List[str] = None,
+        sudo_password: str = None
     ) -> bool:
         """
-        Transfer entire directory to remote device using SFTP.
+        Recursively transfer a directory to the remote device.
         
         Args:
             client: Connected SSH client
             local_dir: Local directory path
-            remote_dir: Remote directory path
-            excludes: List of glob patterns to exclude (e.g. ["node_modules", "*.pyc"])
+            remote_dir: Remote destination path
+            excludes: List of glob patterns to exclude
+            sudo_password: Password for sudo operations (mkdir, chown)
             
         Returns:
-            True if transfer successful
+            True if successful
         """
         import fnmatch
         
@@ -524,14 +627,14 @@ class SSHManager:
                     # Directory doesn't exist, create it with sudo
                     # This is required because we're creating directories under /opt
                     create_cmd = f"sudo mkdir -p {dir_path}"
-                    exit_code, _, err = self.execute_command(client, create_cmd)
+                    exit_code, _, err = self.execute_command(client, create_cmd, sudo_password=sudo_password)
                     if exit_code != 0:
                         logger.warning(f"Failed to create directory {dir_path}: {err}")
                     else:
                         # Set ownership to the connecting user for SFTP access
                         # This prevents "Permission denied" errors when SFTP tries to write files
                         chown_cmd = f"sudo chown -R {username}:{username} {dir_path}"
-                        exit_code, _, err = self.execute_command(client, chown_cmd)
+                        exit_code, _, err = self.execute_command(client, chown_cmd, sudo_password=sudo_password)
                         if exit_code != 0:
                             logger.warning(f"Failed to set ownership for {dir_path}: {err}")
             
@@ -559,7 +662,8 @@ class SSHManager:
     def create_remote_directory(
         self,
         client: "paramiko.SSHClient",
-        path: str
+        path: str,
+        sudo_password: str = None
     ) -> bool:
         """
         Create a directory on remote device.
@@ -567,6 +671,7 @@ class SSHManager:
         Args:
             client: Connected SSH client
             path: Remote directory path
+            sudo_password: Password for sudo operations
             
         Returns:
             True if directory created or already exists
@@ -574,7 +679,7 @@ class SSHManager:
         try:
             # Use sudo for directory creation to handle /opt and other system directories
             command = f"sudo mkdir -p {path}"
-            exit_code, stdout, stderr = self.execute_command(client, command)
+            exit_code, stdout, stderr = self.execute_command(client, command, sudo_password=sudo_password)
             
             if exit_code == 0:
                 logger.debug(f"Created remote directory: {path}")

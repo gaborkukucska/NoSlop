@@ -244,6 +244,11 @@ class ApiClient {
         return this.request(`/api/workers/${workerType}/capabilities`);
     }
 
+    // Activity APIs
+    async getActivityHistory(): Promise<any[]> {
+        return this.request<any[]>('/api/activity/history');
+    }
+
     // Personality APIs
     async getPersonalityPreset(type: string): Promise<any> {
         // This endpoint might not require auth, but it doesn't hurt to send the token if available

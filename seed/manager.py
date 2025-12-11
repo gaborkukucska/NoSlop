@@ -16,6 +16,7 @@ from seed.models import DeploymentPlan, NodeAssignment
 from seed.ssh_manager import SSHManager
 from seed.service_registry import ServiceRegistry, ServiceType
 from seed.device_rediscovery import DeviceRediscovery
+from seed.credential_store import CredentialStore
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +29,26 @@ class ServiceManager:
     Handles start, stop, restart, status, and uninstall operations.
     """
     
-    def __init__(self, deployment_dir: Path, ssh_manager: SSHManager):
+    def __init__(self, deployment_dir: Path, ssh_manager: SSHManager, sudo_password: Optional[str] = None):
         """
         Initialize service manager.
         
         Args:
-            deployment_dir: Path to deployment artifacts directory
-            ssh_manager: SSH manager for remote operations
+            deployment_dir: Path to deployment directory
+            ssh_manager: Initialized SSH manager
+            sudo_password: Global sudo password for management commands
         """
-        self.deployment_dir = deployment_dir
+        self.deployment_dir = Path(deployment_dir)
         self.ssh_manager = ssh_manager
+        self.sudo_password = sudo_password
+        self.deployment_id = self.deployment_dir.name
+        self.rediscovery = DeviceRediscovery()
+        self.credential_store = CredentialStore()
+        
+        logger.info(f"Service manager initialized for deployment: {self.deployment_id}")
         
         # Load deployment plan
-        plan_file = deployment_dir / "deployment_plan.json"
+        plan_file = self.deployment_dir / "deployment_plan.json"
         if not plan_file.exists():
             raise FileNotFoundError(f"Deployment plan not found: {plan_file}")
         
@@ -252,9 +260,20 @@ class ServiceManager:
             # Local execution
             import subprocess
             try:
+                # Handle local sudo with password
+                cmd = command
+                input_data = None
+                
+                if self.sudo_password and cmd.strip().startswith("sudo"):
+                     if "sudo -S" not in cmd:
+                         cmd = cmd.replace("sudo", "sudo -S", 1)
+                     input_data = f"{self.sudo_password}\n"
+                     logger.debug("Executing local command with sudo password")
+
                 result = subprocess.run(
-                    command,
+                    cmd,
                     shell=True,
+                    input=input_data,
                     capture_output=True,
                     text=True,
                     timeout=timeout
@@ -281,7 +300,17 @@ class ServiceManager:
                 
                 return -1, "", "Failed to connect to remote node"
             
-            exit_code, stdout, stderr = self.ssh_manager.execute_command(client, command, timeout)
+            # Determine specific password to use for this node
+            # Priority: 1. Stored credential for this IP. 2. Global sudo password provided at startup.
+            node_password = self.credential_store.get_password(node.device.ip_address)
+            password_to_use = node_password if node_password else self.sudo_password
+
+            exit_code, stdout, stderr = self.ssh_manager.execute_command(
+                client, 
+                command, 
+                timeout, 
+                sudo_password=password_to_use
+            )
             client.close()
             return exit_code, stdout, stderr
     

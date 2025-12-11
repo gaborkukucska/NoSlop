@@ -3,33 +3,16 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { ActivityMessage } from '../../hooks/useAgentActivity';
 
-interface ActivityMessage {
-    type: string;
-    data: any;
+interface AgentActivityTerminalProps {
+    messages: ActivityMessage[];
 }
 
-export default function AgentActivityTerminal() {
-    const [messages, setMessages] = useState<ActivityMessage[]>([]);
+export default function AgentActivityTerminal({ messages }: AgentActivityTerminalProps) {
     const [isPaused, setIsPaused] = useState(false);
     const terminalRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => {
-        const hostname = window.location.hostname;
-        const wsUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
-            ? `ws://${hostname}:8000/ws/activity`
-            : 'ws://localhost:8000/ws/activity';
-        const ws = new WebSocket(wsUrl);
-
-        ws.onmessage = (event) => {
-            const message = JSON.parse(event.data);
-            setMessages((prevMessages) => [...prevMessages, message]);
-        };
-
-        return () => {
-            ws.close();
-        };
-    }, []);
 
     useEffect(() => {
         if (!isPaused && terminalRef.current) {

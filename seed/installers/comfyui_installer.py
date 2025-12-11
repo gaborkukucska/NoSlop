@@ -46,7 +46,7 @@ class ComfyUIInstaller(BaseInstaller):
         self.logger.info(f"Installing ComfyUI to {self.install_dir}...")
         
         # Install system dependencies
-        self.install_packages(["git", "python3", "python3-venv", "python3-pip"])
+        self.install_packages_with_retry(["git", "python3", "python3-venv", "python3-pip"])
         
         # Create directory with sudo
         self.execute_remote(f"sudo mkdir -p {self.install_dir}")

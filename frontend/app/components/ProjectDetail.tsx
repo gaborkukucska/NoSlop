@@ -4,14 +4,17 @@
 import { useState, useEffect } from 'react';
 import api, { Project, Task, ProjectRequest } from '../../utils/api';
 import SceneWizard from './wizard/SceneWizard';
+import AgentActivityTerminal from './AgentActivityTerminal';
+
 
 interface ProjectDetailProps {
     projectId: string;
     onClose?: () => void;
     onProjectUpdate: () => void;
+    activityMessages: any[];
 }
 
-export default function ProjectDetail({ projectId, onClose, onProjectUpdate }: ProjectDetailProps) {
+export default function ProjectDetail({ projectId, onClose, onProjectUpdate, activityMessages }: ProjectDetailProps) {
     const [project, setProject] = useState<Project | null>(null);
     const [tasks, setTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
@@ -301,6 +304,14 @@ export default function ProjectDetail({ projectId, onClose, onProjectUpdate }: P
                         ))}
                     </div>
                 )}
+            </div>
+
+            {/* Agent Activity Log */}
+            <div>
+                <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-3">
+                    Agent Activity
+                </h3>
+                <AgentActivityTerminal messages={activityMessages} />
             </div>
         </div>
     );

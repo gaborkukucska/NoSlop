@@ -96,7 +96,7 @@ class StoryboardArtist(WorkerAgent):
         logger.debug("StoryboardArtist result validation passed")
         return True
     
-    def process_task(self, task) -> Dict[str, Any]:
+    async def process_task(self, task) -> Dict[str, Any]:
         """
         Generate storyboard from script.
         
@@ -143,7 +143,7 @@ class StoryboardArtist(WorkerAgent):
             self.report_progress(task.id, 50, "Generating storyboard")
             
             logger.debug("Calling LLM for storyboard generation")
-            response_content = self.call_llm(
+            response_content = await self.call_llm(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.7,
                 format="json"

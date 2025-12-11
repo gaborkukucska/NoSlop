@@ -11,6 +11,7 @@ import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import LoadingScreen from './components/LoadingScreen';
 import AgentActivityTerminal from './components/AgentActivityTerminal';
+import { useAgentActivity } from '../hooks/useAgentActivity';
 
 export default function Home() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -20,6 +21,7 @@ export default function Home() {
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [refreshProjects, setRefreshProjects] = useState(0);
+  const { messages } = useAgentActivity();
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -140,6 +142,7 @@ export default function Home() {
                   projectId={selectedProject}
                   onClose={() => setSelectedProject(null)}
                   onProjectUpdate={() => setRefreshProjects(prev => prev + 1)}
+                  activityMessages={messages}
                 />
               </div>
             ) : (
@@ -148,7 +151,7 @@ export default function Home() {
                   <ChatInterface />
                 </div>
                 <div className="h-1/3 pt-4">
-                  <AgentActivityTerminal />
+                  <AgentActivityTerminal messages={messages} />
                 </div>
               </div>
             )}

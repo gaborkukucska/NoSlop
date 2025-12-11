@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
 import uvicorn
@@ -18,6 +18,8 @@ from models import (
     User,
     UserCreate
 )
+from collections import deque
+import asyncio
 from admin_ai import AdminAI
 from config import settings
 from logging_config import setup_logging
@@ -105,24 +107,32 @@ def get_admin_ai(session_id: str = "default") -> AdminAI:
     """Get or create Admin AI instance for session"""
     if session_id not in admin_ai_instance:
         logger.info(f"Creating new Admin AI instance for session: {session_id}")
-        admin_ai_instance[session_id] = AdminAI()
+        # Inject the global connection manager
+        admin_ai_instance[session_id] = AdminAI(connection_manager=manager)
     return admin_ai_instance[session_id]
 
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.history = deque(maxlen=50)  # Keep last 50 logs
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        self.history.append(message)
         for connection in self.active_connections:
-            await connection.send_json(message)
+            try:
+                await connection.send_json(message)
+            except Exception:
+                # Handle potential disconnects gracefully
+                pass
 
 manager = ConnectionManager()
 
@@ -180,6 +190,12 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.get("/api/activity/history")
+async def get_activity_history(current_user: User = Depends(get_current_user)):
+    """Get recent agent activity logs."""
+    return list(manager.history)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -249,7 +265,7 @@ async def chat_with_admin_ai(
         db.commit()
         
         # Process chat
-        response = admin_ai.chat(request.message, request.context, db=db, session_id=session_id)
+        response = await admin_ai.chat(request.message, request.context, db=db, session_id=session_id)
         
         return response
         
@@ -783,7 +799,7 @@ async def execute_task(
     
     try:
         pm = ProjectManager(db, manager)
-        result = pm.dispatch_task(task_id)
+        result = await pm.dispatch_task(task_id)
         
         if not result:
             # Check if task exists but no worker found or other issue
@@ -913,7 +929,7 @@ async def execute_project(
     
     try:
         executor = TaskExecutor(db, manager)
-        result = executor.execute_project(project_id)
+        result = await executor.execute_project(project_id)
 
         return result
 
@@ -922,9 +938,30 @@ async def execute_project(
         raise HTTPException(status_code=500, detail=f"Error executing project: {str(e)}")
 
 
+
+
+async def run_background_project_execution(project_id: str):
+    """
+    Run project execution in background with its own database session.
+    Using a dedicated session prevents 'PendingRollbackError' when the main request session
+    is closed or reused while the background task is still running.
+    """
+    logger.info(f"Starting background execution for project {project_id}")
+    db = SessionLocal()
+    try:
+        executor = TaskExecutor(db, manager)
+        result = await executor.execute_project(project_id)
+        logger.info(f"Background execution finished for project {project_id}: {result}")
+    except Exception as e:
+        logger.error(f"Background project execution failed: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 @app.post("/api/projects/{project_id}/start", response_model=Project)
 async def start_project(
     project_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -935,6 +972,11 @@ async def start_project(
     project = await pm.start_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Trigger execution in background on the main loop with isolated session
+    asyncio.create_task(run_background_project_execution(project_id))
+    logger.info(f"Project execution scheduled in background: {project_id}")
+    
     return project
 
 
@@ -1024,7 +1066,7 @@ async def execute_task_with_dependencies(
     
     try:
         executor = TaskExecutor(db, manager)
-        result = executor.execute_task_with_dependencies(task_id)
+        result = await executor.execute_task_with_dependencies(task_id)
 
         return result
 

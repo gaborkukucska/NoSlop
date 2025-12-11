@@ -4,6 +4,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import logging
+import asyncio
+from functools import partial
 
 from models import (
     PersonalityProfile, 
@@ -29,20 +31,43 @@ class AdminAI:
     Guides users through media creation workflows with a customizable personality.
     """
     
-    def __init__(self, personality: Optional[PersonalityProfile] = None):
+    def __init__(self, personality: Optional[PersonalityProfile] = None, connection_manager: Any = None):
         """
         Initialize Admin AI with a personality profile.
         
         Args:
             personality: Personality configuration. Defaults to balanced.
+            connection_manager: WebSocket manager for broadcasting logs.
         """
         self.personality = personality or PersonalityProfile(type=PersonalityType.BALANCED)
         # self.conversation_history is now managed via database
         self.model = settings.ollama_default_model
         self.context: Dict[str, Any] = {}
         self.prompt_manager = get_prompt_manager()
+        self.connection_manager = connection_manager
         
         logger.info("Admin AI initialized", extra={"context": {"personality": self.personality.type, "model": self.model}})
+
+    async def broadcast_activity(self, activity_type: str, message: str, data: Optional[Dict] = None):
+        """
+        Broadcast admin activity to frontend.
+        """
+        if self.connection_manager:
+            payload = {
+                "type": "agent_activity",
+                "data": {
+                    "project_id": "admin_chat",  # logical ID for grouping in terminal
+                    "agent_type": "Admin AI",
+                    "activity_type": activity_type,
+                    "message": message,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "details": data or {}
+                }
+            }
+            try:
+                await self.connection_manager.broadcast(payload)
+            except Exception as e:
+                logger.warning(f"Failed to broadcast activity: {e}")
         
     def load_personality(self, personality_type: str) -> None:
         """
@@ -125,7 +150,7 @@ class AdminAI:
         
         return [msg.to_dict() for msg in messages]
 
-    def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None, session_id: str = "default") -> ChatResponse:
+    async def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None, session_id: str = "default") -> ChatResponse:
         """
         Main conversation interface with the Admin AI.
         
@@ -173,7 +198,15 @@ class AdminAI:
             # Call Ollama
             logger.debug("Calling Ollama", extra={"context": {"model": self.model, "message_count": len(messages)}})
             
-            response = ollama.chat(
+            await self.broadcast_activity(
+                "thinking", 
+                "Admin AI is thinking...", 
+                {"context_length": len(messages)}
+            )
+
+            loop = asyncio.get_event_loop()
+            func = partial(
+                ollama.chat,
                 model=self.model,
                 messages=messages,
                 options={
@@ -181,9 +214,16 @@ class AdminAI:
                     "num_predict": int(200 * self.personality.verbosity + 100)
                 }
             )
+            response = await loop.run_in_executor(None, func)
             
             ai_message = response['message']['content']
             logger.info("Ollama response received", extra={"context": {"response_length": len(ai_message)}})
+            
+            await self.broadcast_activity(
+                "response", 
+                "Response received from Admin AI", 
+                {"response_length": len(ai_message)}
+            )
             
             # Save AI response to DB
             ai_msg_db = ChatMessageModel(
@@ -204,7 +244,16 @@ class AdminAI:
             # Handle project creation if action detected and DB is available
             if action == "create_project" and db and settings.enable_project_manager:
                 logger.info("Attempting to create project from chat")
-                project_result = self.guide_project_creation(message + "\n" + ai_message)
+                
+                await self.broadcast_activity("action", "Initiating project creation workflow...")
+                
+                # Convert guide_project_creation to async execution wrapper
+                # Since guide_project_creation is sync and uses ollama, we should run it in executor
+                project_result = await loop.run_in_executor(
+                    None, 
+                    self.guide_project_creation, 
+                    message + "\n" + ai_message
+                )
                 
                 if project_result.get("status") == "ready_for_creation":
                     try:
