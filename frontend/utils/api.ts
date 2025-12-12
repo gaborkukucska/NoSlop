@@ -7,6 +7,12 @@
 // If accessing via network IP (e.g., 10.0.0.3:3000), use same IP for backend (10.0.0.3:8000)
 // Otherwise fall back to localhost for local development
 const getApiBaseUrl = () => {
+    // 1. Check environment variable first (set during build/deployment)
+    if (process.env.NEXT_PUBLIC_API_URL) {
+        return process.env.NEXT_PUBLIC_API_URL;
+    }
+
+    // 2. Dynamic detection (fallback for dev mode or unconfigured deployments)
     if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
 
@@ -15,11 +21,12 @@ const getApiBaseUrl = () => {
             return 'http://localhost:8000';
         }
 
-        // If accessing via network IP (e.g., 192.168.x.x), use same IP for backend
+        // If accessing via network IP (e.g., 192.168.x.x), guess backend is on same IP
         return `http://${hostname}:8000`;
     }
-    // Fall back to environment variable or localhost
-    return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+    // 3. Last resort fallback
+    return 'http://localhost:8000';
 };
 
 const API_BASE_URL = getApiBaseUrl();

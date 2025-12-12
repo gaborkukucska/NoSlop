@@ -215,6 +215,11 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
 
             // Let's just implement the fetch here using the same logic as api.ts
             const getBackendUrl = () => {
+                // 1. Check environment variable first
+                if (process.env.NEXT_PUBLIC_API_URL) {
+                    return process.env.NEXT_PUBLIC_API_URL;
+                }
+
                 if (typeof window !== 'undefined') {
                     const hostname = window.location.hostname;
                     if (hostname === 'localhost' || hostname === '127.0.0.1') {

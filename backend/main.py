@@ -81,24 +81,15 @@ if settings.enable_project_manager:
 
 # CORS middleware for frontend communication
 # Allow all origins for development (frontend accessible from multiple IPs)
-if settings.cors_origins == "*":
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origin_regex=".*",  # Allow all origins
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    logger.info("CORS enabled for all origins (development mode)")
-else:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins_list,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    logger.info(f"CORS enabled for origins: {settings.cors_origins_list}")
+# In production, this should be restricted, but for a self-hosted local tool, functionality is prioritized.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=".*",  # Allow all origins with credentials
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+logger.info("CORS enabled for all origins (development mode)")
 
 # Global Admin AI instance (in production, this would be per-user)
 admin_ai_instance: Dict[str, AdminAI] = {}

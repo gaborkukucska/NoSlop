@@ -11,6 +11,38 @@ current_cycle: "Deployment Stabilization"
 
 ## Recent Changes
 
+- **2025-12-12** (Session 7):
+    - **Status Command & Installer Improvements - COMPLETE**:
+      - **Objective**: Improve visibility of installed tools and installer summary accuracy as requested by user.
+      - **Implementation**:
+        - Updated `seed/manager.py` to check status of non-systemd tools (`ffmpeg`, `opencv`).
+        - Implemented `_check_tool_status` method for custom binary checks.
+        - Updated `seed/seed_cli.py` to display dynamic frontend URL in deployment summary.
+      - **Files Modified**: `seed/manager.py`, `seed/seed_cli.py`
+      - **Impact**:
+        - `--status` command now lists `ffmpeg` and `opencv` status (Ready/Missing) for each node.
+        - Installer "Next steps" points to actual frontend IP (e.g. `http://192.168.0.15:3000`) instead of localhost.
+        - Nodes without systemd services now correctly show their installed tools.
+
+    - **Frontend Connection Improvements - COMPLETE**:
+      - **Objective**: Fix `net::ERR_CONNECTION_REFUSED` when accessing frontend on worker nodes and CORS errors.
+      - **Implementation**:
+        - Updated `frontend/utils/api.ts`, `frontend/hooks/useAgentActivity.ts`, `frontend/app/page.tsx`, and `ChatInterface.tsx` to prioritize `NEXT_PUBLIC_API_URL` environment variable.
+        - Fixed auth race condition in `useAgentActivity.ts` by waiting for `useAuth`.
+        - Relaxed CORS configuration in `backend/main.py` to allow all origins via regex.
+      - **Files Modified**: `frontend/utils/api.ts`, `frontend/hooks/useAgentActivity.ts`, `frontend/app/components/ChatInterface.tsx`, `frontend/app/page.tsx`, `backend/main.py`
+      - **Impact**: Worker node frontends now correctly connect to the Master Node backend with proper CORS acceptance.
+
+    - **Deployment Fixes (Syntax, Roles, Upgrades) - COMPLETE**:
+      - **Objective**: Resolve build failures, redundant deployments, and model pull errors.
+      - **Implementation**:
+        - Fixed syntax error in `frontend/hooks/useAgentActivity.ts`.
+        - Optimized `seed/role_assigner.py` to only deploy frontend to Master as a fallback.
+        - Updated `seed/installers/ollama_installer.py` to auto-upgrade using a robust 2-step install process (download then execute) to avoid sudo/pipe stalls.
+        - Updated `seed/installers/frontend_installer.py` to bind to `0.0.0.0`, fixing generic connection refused errors.
+      - **Files Modified**: `frontend/hooks/useAgentActivity.ts`, `seed/role_assigner.py`, `seed/installers/ollama_installer.py`, `seed/installers/frontend_installer.py`
+      - **Impact**: Successful deployment with correct service distribution, accessible frontend, and up-to-date dependencies.
+
 - **2025-12-11** (Session 6):
     - **Deployment Resilience & Timeout Fixes - COMPLETE**:
       - **Objective**: Resolve critical deployment failures preventing successful multi-device installations

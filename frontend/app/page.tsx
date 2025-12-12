@@ -38,11 +38,19 @@ export default function Home() {
 
   const checkHealth = async () => {
     try {
-      // Dynamically determine backend URL based on current hostname
-      const hostname = window.location.hostname;
-      const backendUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
-        ? `http://${hostname}:8000`
-        : 'http://localhost:8000';
+      // Dynamically determine backend URL
+      let backendUrl = 'http://localhost:8000';
+
+      // 1. Check environment variable first
+      if (process.env.NEXT_PUBLIC_API_URL) {
+        backendUrl = process.env.NEXT_PUBLIC_API_URL;
+      } else if (typeof window !== 'undefined') {
+        // 2. Fallback to dynamic hostname
+        const hostname = window.location.hostname;
+        backendUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
+          ? `http://${hostname}:8000`
+          : 'http://localhost:8000';
+      }
 
       const response = await fetch(`${backendUrl}/health`);
       const data = await response.json();

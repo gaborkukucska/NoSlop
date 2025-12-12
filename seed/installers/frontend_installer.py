@@ -193,6 +193,7 @@ class FrontendInstaller(BaseInstaller):
             env_vars_list = []
             if self.env_config:
                 env_vars_list.extend([f"{k}={v}" for k, v in self.env_config.items()])
+            env_vars_list.append("HOSTNAME=0.0.0.0")  # Bind to all interfaces
             env_vars = " ".join(env_vars_list)
             
             # Use system npm directly

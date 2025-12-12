@@ -525,8 +525,28 @@ class NoSlopSeedCLI:
             print("✅ Deployment Complete!")
             print("=" * 70)
             print(f"\n📁 Deployment artifacts: {self.deployer.deployment_dir}")
+            
+            # Get access URL
+            try:
+                from seed.service_registry import ServiceType
+                frontends = self.deployer.registry.get_instances_by_type(ServiceType.NOSLOP_FRONTEND)
+                if frontends:
+                    # Use the first one
+                    fe = frontends[0]
+                    # If host is 0.0.0.0, try to find better IP
+                    host = fe.host
+                    if host == "0.0.0.0":
+                         # finding current device ip if possible, but fe.host should be the node ip from deployment
+                         pass
+                    
+                    url = f"http://{host}:{fe.port}"
+                else:
+                    url = "http://localhost:3000"
+            except Exception:
+                url = "http://localhost:3000"
+
             print("\nNext steps:")
-            print("1. Access the dashboard at http://localhost:3000")
+            print(f"1. Access the dashboard at {url}")
             print("2. Check service status with: python seed_cli.py --status")
             print("\n")
             return True

@@ -316,7 +316,7 @@ class ServiceManager:
     
     def _get_service_names(self, node: NodeAssignment) -> List[str]:
         """
-        Get list of systemd service names for a node.
+        Get list of service names for a node.
         
         Args:
             node: Node to get services for
@@ -336,9 +336,45 @@ class ServiceManager:
                 services.append("comfyui")
             elif service == "postgresql":
                 services.append("postgresql")
+            elif service == "ffmpeg":
+                services.append("ffmpeg")
+            elif service == "opencv":
+                services.append("opencv")
         
         return services
     
+    def _is_systemd_service(self, service_name: str) -> bool:
+        """Check if service is managed by systemd."""
+        return service_name in [
+            "noslop-backend", 
+            "noslop-frontend", 
+            "ollama", 
+            "comfyui", 
+            "postgresql"
+        ]
+
+    def _check_tool_status(self, node: NodeAssignment, tool_name: str) -> tuple[bool, str, str]:
+        """
+        Check status of a command-line tool.
+        Returns: (is_active, status_text, details)
+        """
+        if tool_name == "ffmpeg":
+            code, stdout, _ = self._execute_on_node(node, "ffmpeg -version")
+            if code == 0:
+                first_line = stdout.split('\n')[0] if stdout else "Installed"
+                return True, "ready", first_line
+            return False, "missing", "FFmpeg not found"
+            
+        elif tool_name == "opencv":
+            # Check OpenCV via python
+            cmd = "python3 -c 'import cv2; print(cv2.__version__)'"
+            code, stdout, stderr = self._execute_on_node(node, cmd)
+            if code == 0:
+                return True, "ready", f"OpenCV {stdout.strip()}"
+            return False, "missing", f"OpenCV not found: {stderr}"
+            
+        return False, "unknown", "Unknown tool"
+
     def start_all(self) -> bool:
         """
         Start all services on all nodes.
@@ -354,6 +390,9 @@ class ServiceManager:
             
             services = self._get_service_names(node)
             for service in services:
+                if not self._is_systemd_service(service):
+                    continue
+
                 logger.info(f"  Starting {service}...")
                 code, _, err = self._execute_on_node(
                     node,
@@ -383,6 +422,9 @@ class ServiceManager:
             
             services = self._get_service_names(node)
             for service in services:
+                if not self._is_systemd_service(service):
+                    continue
+
                 logger.info(f"  Stopping {service}...")
                 code, _, err = self._execute_on_node(
                     node,
@@ -412,6 +454,9 @@ class ServiceManager:
             
             services = self._get_service_names(node)
             for service in services:
+                if not self._is_systemd_service(service):
+                    continue
+
                 logger.info(f"  Restarting {service}...")
                 code, _, err = self._execute_on_node(
                     node,
@@ -449,26 +494,36 @@ class ServiceManager:
             
             services = self._get_service_names(node)
             for service in services:
-                code, stdout, _ = self._execute_on_node(
-                    node,
-                    f"sudo systemctl is-active {service}"
-                )
-                
-                is_active = stdout.strip() == "active"
-                
-                # Get more detailed status
-                code2, stdout2, _ = self._execute_on_node(
-                    node,
-                    f"sudo systemctl status {service} --no-pager -l"
-                )
-                
-                service_status = {
-                    "name": service,
-                    "active": is_active,
-                    "status": stdout.strip(),
-                    "details": stdout2 if code2 == 0 else None
-                }
-                
+                if self._is_systemd_service(service):
+                    code, stdout, _ = self._execute_on_node(
+                        node,
+                        f"sudo systemctl is-active {service}"
+                    )
+                    
+                    is_active = stdout.strip() == "active"
+                    
+                    # Get more detailed status
+                    code2, stdout2, _ = self._execute_on_node(
+                        node,
+                        f"sudo systemctl status {service} --no-pager -l"
+                    )
+                    
+                    service_status = {
+                        "name": service,
+                        "active": is_active,
+                        "status": stdout.strip(),
+                        "details": stdout2 if code2 == 0 else None
+                    }
+                else:
+                    # Check tool status
+                    is_active, status_text, details = self._check_tool_status(node, service)
+                    service_status = {
+                        "name": service,
+                        "active": is_active,
+                        "status": status_text,
+                        "details": details
+                    }
+
                 node_status["services"].append(service_status)
             
             status["nodes"].append(node_status)

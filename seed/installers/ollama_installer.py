@@ -132,13 +132,8 @@ class OllamaInstaller(BaseInstaller):
                     if major == 0 and minor < 5:
                         self.logger.warning(f"Ollama {current_version} is outdated (< 0.5.0)")
                         print(f"\n⚠️  Ollama {current_version} detected - newer models may not work")
-                        print(f"   Upgrade to latest version?")
-                        response = input("   Upgrade Ollama? (Y/n): ").strip().lower()
-                        if response == '' or response == 'y' or response == 'yes':
-                            self.logger.info("User approved upgrade")
-                            should_install = True
-                        else:
-                            self.logger.warning("User declined upgrade, continuing with old version")
+                        print(f"   Auto-upgrading to latest version...")
+                        should_install = True
             except Exception as e:
                 self.logger.warning(f"Could not parse version: {e}, assuming need to install")
                 should_install = True
@@ -146,8 +141,16 @@ class OllamaInstaller(BaseInstaller):
         # Install or upgrade Ollama
         if should_install:
             if self.device.os_type.value == "linux":
-                install_cmd = "curl -fsSL https://ollama.com/install.sh | sh"
+                # Method 3: Download to temp file then run (most robust)
+                dl_cmd = "curl -fsSL https://ollama.com/install.sh -o /tmp/ollama_install.sh"
+                self.execute_remote(dl_cmd, timeout=300)
+                
+                install_cmd = "sudo sh /tmp/ollama_install.sh"
                 code, out, err = self.execute_remote(install_cmd, timeout=600)
+                
+                # Cleanup
+                self.execute_remote("rm /tmp/ollama_install.sh")
+                
                 if code != 0:
                     self.logger.error(f"Ollama installation failed: {err}")
                     return False
@@ -480,8 +483,54 @@ class OllamaInstaller(BaseInstaller):
             # We use the CLI to pull, setting OLLAMA_HOST
             pull_cmd = f"OLLAMA_HOST=localhost:{self.port} ollama pull {model}"
             # This can take a while
+            # This can take a while
             code, out, err = self.execute_remote(pull_cmd, timeout=1200) # 20 mins timeout
             if code != 0:
+                # Check for 412 (outdated version)
+                if "412" in err or "requires a newer version" in err:
+                    self.logger.warning(f"Ollama is outdated (412 error). Forcing upgrade...")
+                    
+                    # Method 3: Download to temp file then run (most robust)
+                    dl_cmd = "curl -fsSL https://ollama.com/install.sh -o /tmp/ollama_install.sh"
+                    self.execute_remote(dl_cmd, timeout=300)
+                    
+                    install_cmd = "sudo sh /tmp/ollama_install.sh"
+                    code_up, out_up, err_up = self.execute_remote(install_cmd, timeout=600)
+                    
+                    # Cleanup
+                    self.execute_remote("rm /tmp/ollama_install.sh")
+                    
+                    if code_up == 0:
+                        self.logger.info("✓ Ollama upgraded successfully. Restarting service...")
+                        
+                        # Restart service
+                        service_name = "ollama" if not self.is_secondary else f"ollama-{self.port}"
+                        if self.device.os_type.value == "linux":
+                            self.execute_remote(f"sudo systemctl restart {service_name}", timeout=60)
+                        
+                        # Wait for service to be ready
+                        self.logger.info("Waiting for Ollama to be ready...")
+                        max_wait = 60
+                        is_ready = False
+                        for i in range(max_wait):
+                            check_cmd = f"curl -s http://localhost:{self.port}/api/tags"
+                            c, _, _ = self.execute_remote(check_cmd)
+                            if c == 0:
+                                is_ready = True
+                                break
+                            time.sleep(1)
+                            
+                        if not is_ready:
+                             self.logger.warning("Ollama service did not become ready in time, but trying pull anyway...")
+
+                        # Retry pull
+                        code, out, err = self.execute_remote(pull_cmd, timeout=1200)
+                        if code == 0:
+                             self.logger.info(f"✓ Model {model} pulled successfully (after upgrade)")
+                             continue
+                    else:
+                        self.logger.error(f"Failed to upgrade Ollama: {err_up}")
+                
                 self.logger.error(f"Failed to pull model {model}: {err}")
                 # We don't fail the whole installation if one model fails, but we log it
             else:

@@ -309,10 +309,10 @@ class RoleAssigner:
         if master_node:
             master_node.add_service("noslop-backend")
             master_node.add_service("postgresql")
-            master_node.add_service("noslop-frontend")
+            # Frontend will be assigned later if needed (to avoid duplicate with client nodes)
             logger.info(
                 f"Core services assigned to {master_node.device.hostname}: "
-                f"backend, postgresql, frontend"
+                f"backend, postgresql"
             )
         
         # 2. Ollama Distribution - Deploy to All Devices with Sufficient RAM
@@ -399,6 +399,17 @@ class RoleAssigner:
                 )
             else:
                 logger.info(f"  {node.device.hostname}: 0 services (below all thresholds)")
+        
+        # Final Check: Ensure Frontend is assigned somewhere
+        frontend_assigned = False
+        for node in plan.nodes:
+            if "noslop-frontend" in node.services:
+                frontend_assigned = True
+                break
+        
+        if not frontend_assigned and master_node:
+            master_node.add_service("noslop-frontend")
+            logger.info(f"Frontend assigned to Master {master_node.device.hostname} (fallback)")
     
     def _find_node_assignment(
         self, 
