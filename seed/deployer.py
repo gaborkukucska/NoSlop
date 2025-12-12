@@ -249,15 +249,27 @@ class Deployer:
         # Ollama (Master + Compute)
         for node in plan.nodes:
             if "ollama" in node.services:
-                # Determine port (default 11434, but could be others if multi-instance)
-                # For now we stick to default port for primary instance
-                username, password = get_credentials(node.device)
+                logger.info(f"Starting installation of ollama on {node.device.hostname}")
                 
-                # Pass shared models directory if configured
-                models_dir = self.storage_config.ollama_models_dir if self.storage_config else None
+                # Determine correct models directory path
+                # Master uses its actual storage path, workers use NFS mount point
+                if node == plan.master_node:
+                    # Master node - use actual storage path
+                    models_dir = self.storage_config.ollama_models_dir if self.storage_config else None
+                else:
+                    # Worker nodes - use NFS mount point
+                    if self.storage_config:
+                        # Replace base path with /mnt/noslop
+                        models_dir = "/mnt/noslop/ollama/models"
+                    else:
+                        models_dir = None
+                
+                username, password = get_credentials(node.device)
                 installer = OllamaInstaller(
-                    node.device, self.ssh_manager, 
-                    username=username, password=password,
+                    node.device,
+                    self.ssh_manager,
+                    username=username,
+                    password=password,
                     models_dir=models_dir
                 )
                 if not installer.run():
@@ -277,16 +289,29 @@ class Deployer:
         # ComfyUI (Compute)
         for node in plan.nodes:
             if "comfyui" in node.services:
-                # Determine GPU index (default 0)
+                logger.info(f"Starting installation of comfyui on {node.device.hostname}")
+                
+                # Determine correct storage paths
+                # Master uses its actual storage path, workers use NFS mount point
+                if node == plan.master_node:
+                    # Master node - use actual storage paths
+                    models_dir = self.storage_config.comfyui_models_dir if self.storage_config else None
+                    custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir if self.storage_config else None
+                else:
+                    # Worker nodes - use NFS mount points
+                    if self.storage_config:
+                        models_dir = "/mnt/noslop/comfyui/models"
+                        custom_nodes_dir = "/mnt/noslop/comfyui/custom_nodes"
+                    else:
+                        models_dir = None
+                        custom_nodes_dir = None
+                
                 username, password = get_credentials(node.device)
-                
-                # Pass shared storage directories if configured
-                models_dir = self.storage_config.comfyui_models_dir if self.storage_config else None
-                custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir if self.storage_config else None
-                
                 installer = ComfyUIInstaller(
-                    node.device, self.ssh_manager, 
-                    username=username, password=password,
+                    node.device,
+                    self.ssh_manager,
+                    username=username,
+                    password=password,
                     models_dir=models_dir,
                     custom_nodes_dir=custom_nodes_dir
                 )

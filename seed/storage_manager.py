@@ -82,17 +82,21 @@ class StorageManager:
             return self.config
         
         # Custom paths
+        default_base = self.config.base_path
         print("\nEnter custom storage paths (press Enter to use default):")
+        base_path = input(f"Base storage path [{default_base}]: ").strip()
+        if not base_path:
+            base_path = default_base
         
-        base_path = input(f"Base storage path [{self.config.base_path}]: ").strip()
-        if base_path:
-            self.config.base_path = base_path
-            # Update all paths to use new base
-            self.config.ollama_models_dir = f"{base_path}/ollama/models"
-            self.config.comfyui_models_dir = f"{base_path}/comfyui/models"
-            self.config.comfyui_custom_nodes_dir = f"{base_path}/comfyui/custom_nodes"
-            self.config.project_storage_dir = f"{base_path}/projects"
-            self.config.media_cache_dir = f"{base_path}/media_cache"
+        # Remove trailing slashes to prevent double slashes
+        base_path = base_path.rstrip('/')
+        
+        self.config.base_path = base_path
+        self.config.ollama_models_dir = f"{base_path}/ollama/models"
+        self.config.comfyui_models_dir = f"{base_path}/comfyui/models"
+        self.config.comfyui_custom_nodes_dir = f"{base_path}/comfyui/custom_nodes"
+        self.config.project_storage_dir = f"{base_path}/projects"
+        self.config.media_cache_dir = f"{base_path}/media_cache"
         
         logger.info(f"Storage configured with base path: {self.config.base_path}")
         return self.config

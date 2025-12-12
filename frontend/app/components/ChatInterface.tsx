@@ -34,6 +34,7 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
     const [isListening, setIsListening] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [ttsEnabled, setTtsEnabled] = useState(false);
+    const [isSpeechAvailable, setIsSpeechAvailable] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const recognitionRef = useRef<any>(null);
@@ -88,27 +89,45 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
     // Initialize Speech Recognition
     useEffect(() => {
         if (typeof window !== 'undefined') {
+            // Check if we're in a secure context (HTTPS or localhost)
+            const isSecure = window.isSecureContext ||
+                window.location.hostname === 'localhost' ||
+                window.location.hostname === '127.0.0.1';
+
             const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-            if (SpeechRecognition) {
-                recognitionRef.current = new SpeechRecognition();
-                recognitionRef.current.continuous = false;
-                recognitionRef.current.interimResults = false;
-                recognitionRef.current.lang = 'en-US';
 
-                recognitionRef.current.onresult = (event: any) => {
-                    const transcript = event.results[0][0].transcript;
-                    setInput((prev) => prev + (prev ? ' ' : '') + transcript);
-                    setIsListening(false);
-                };
+            if (SpeechRecognition && isSecure) {
+                try {
+                    recognitionRef.current = new SpeechRecognition();
+                    recognitionRef.current.continuous = false;
+                    recognitionRef.current.interimResults = false;
+                    recognitionRef.current.lang = 'en-US';
 
-                recognitionRef.current.onerror = (event: any) => {
-                    console.error('Speech recognition error', event.error);
-                    setIsListening(false);
-                };
+                    recognitionRef.current.onresult = (event: any) => {
+                        const transcript = event.results[0][0].transcript;
+                        setInput((prev) => prev + (prev ? ' ' : '') + transcript);
+                        setIsListening(false);
+                    };
 
-                recognitionRef.current.onend = () => {
-                    setIsListening(false);
-                };
+                    recognitionRef.current.onerror = (event: any) => {
+                        console.error('Speech recognition error', event.error);
+                        setIsListening(false);
+                    };
+
+                    recognitionRef.current.onend = () => {
+                        setIsListening(false);
+                    };
+
+                    setIsSpeechAvailable(true);
+                } catch (error) {
+                    console.warn('Speech recognition initialization failed:', error);
+                    setIsSpeechAvailable(false);
+                }
+            } else {
+                if (!isSecure) {
+                    console.warn('Speech recognition requires HTTPS or localhost');
+                }
+                setIsSpeechAvailable(false);
             }
         }
     }, []);
@@ -410,13 +429,23 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
                     )}
 
                     <div className="flex gap-2">
-                        <button
-                            onClick={toggleListening}
-                            className={`p-3 rounded-lg transition-colors ${isListening ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
-                            title="Voice Input"
-                        >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
-                        </button>
+                        {isSpeechAvailable ? (
+                            <button
+                                onClick={toggleListening}
+                                className={`p-3 rounded-lg transition-colors ${isListening ? 'bg-red-600 text-white animate-pulse' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}`}
+                                title="Voice Input"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                            </button>
+                        ) : (
+                            <button
+                                disabled
+                                className="p-3 rounded-lg bg-gray-700 text-gray-600 cursor-not-allowed opacity-50"
+                                title="Voice input requires HTTPS or localhost"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                            </button>
+                        )}
 
                         <input
                             type="text"

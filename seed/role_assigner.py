@@ -292,38 +292,113 @@ class RoleAssigner:
     
     def _map_services_to_nodes(self, plan: DeploymentPlan):
         """
-        Map services to nodes based on their roles.
+        Intelligently map services to nodes based on hardware capabilities.
         
-        Service mapping:
-        - MASTER: noslop-backend, database, ollama
-        - COMPUTE: comfyui, ffmpeg, opencv
-        - STORAGE: (no specific services, just storage)
-        - CLIENT: noslop-frontend
+        Strategy:
+        - Core services (backend, database): Master node only
+        - Frontend: Master node + low-spec devices (for access points)
+        - AI services (ollama, comfyui): Distributed across capable devices
+        - Media processing (ffmpeg, opencv): Distributed to devices with sufficient resources
+        
+        This approach maximizes hardware utilization and enables load balancing.
         """
+        logger.info("Mapping services to nodes based on hardware capabilities...")
+        
+        # 1. Core Services - Deploy to Master Node Only
+        master_node = plan.master_node
+        if master_node:
+            master_node.add_service("noslop-backend")
+            master_node.add_service("postgresql")
+            master_node.add_service("noslop-frontend")
+            logger.info(
+                f"Core services assigned to {master_node.device.hostname}: "
+                f"backend, postgresql, frontend"
+            )
+        
+        # 2. Ollama Distribution - Deploy to All Devices with Sufficient RAM
+        # Threshold: 8GB RAM (can run small to medium models)
+        ollama_count = 0
         for node in plan.nodes:
-            if NodeRole.MASTER in node.roles:
-                node.add_service("noslop-backend")
-                node.add_service("postgresql")
+            if node.device.ram_total_gb >= 8.0:
                 node.add_service("ollama")
-                logger.debug(
-                    f"Mapped MASTER services to {node.device.hostname}: "
-                    f"noslop-backend, postgresql, ollama"
+                ollama_count += 1
+                logger.info(
+                    f"Ollama assigned to {node.device.hostname} "
+                    f"({node.device.ram_total_gb:.1f}GB RAM available)"
                 )
+        
+        if ollama_count == 0:
+            logger.warning("No devices meet Ollama RAM requirements (8GB+)")
+        else:
+            logger.info(f"Ollama will run on {ollama_count} device(s) for load balancing")
+        
+        # 3. ComfyUI Distribution - Deploy to All Devices with Capable GPUs
+        # Threshold: 4GB+ VRAM (can run SDXL with optimizations)
+        comfyui_count = 0
+        for node in plan.nodes:
+            if node.device.gpu_vendor in [GPUVendor.NVIDIA, GPUVendor.AMD, GPUVendor.APPLE]:
+                if node.device.vram_total_gb >= 4.0:
+                    node.add_service("comfyui")
+                    comfyui_count += 1
+                    logger.info(
+                        f"ComfyUI assigned to {node.device.hostname} "
+                        f"({node.device.gpu_vendor.value}, {node.device.vram_total_gb:.1f}GB VRAM)"
+                    )
+        
+        if comfyui_count == 0:
+            logger.warning("No devices meet ComfyUI GPU requirements (4GB+ VRAM)")
+        else:
+            logger.info(f"ComfyUI will run on {comfyui_count} device(s) for parallel generation")
+        
+        # 4. FFmpeg/OpenCV Distribution - Deploy to Devices with Good CPU or GPU
+        # Criteria: 4+ cores OR has GPU (for hardware acceleration)
+        media_processing_count = 0
+        for node in plan.nodes:
+            has_good_cpu = node.device.cpu_cores >= 4
+            has_gpu = node.device.gpu_vendor != GPUVendor.NONE
             
-            if NodeRole.COMPUTE in node.roles:
-                node.add_service("comfyui")
+            if has_good_cpu or has_gpu:
                 node.add_service("ffmpeg")
                 node.add_service("opencv")
-                logger.debug(
-                    f"Mapped COMPUTE services to {node.device.hostname}: "
-                    f"comfyui, ffmpeg, opencv"
+                media_processing_count += 1
+                reason = []
+                if has_good_cpu:
+                    reason.append(f"{node.device.cpu_cores} CPU cores")
+                if has_gpu:
+                    reason.append(f"{node.device.gpu_vendor.value} GPU")
+                logger.info(
+                    f"Media processing assigned to {node.device.hostname} "
+                    f"({', '.join(reason)})"
                 )
-            
-            if NodeRole.CLIENT in node.roles:
+        
+        if media_processing_count == 0:
+            logger.warning("No devices meet media processing requirements")
+        else:
+            logger.info(
+                f"Media processing will run on {media_processing_count} device(s) "
+                f"for distributed encoding"
+            )
+        
+        # 5. Frontend for Low-Spec Devices - Utilize devices that don't meet other thresholds
+        # Deploy frontend to devices with no other services (access points)
+        for node in plan.nodes:
+            if len(node.services) == 0:
                 node.add_service("noslop-frontend")
-                logger.debug(
-                    f"Mapped CLIENT services to {node.device.hostname}: noslop-frontend"
+                logger.info(
+                    f"Frontend assigned to {node.device.hostname} "
+                    f"(provides network access point)"
                 )
+        
+        # Log summary
+        logger.info("Service distribution summary:")
+        for node in plan.nodes:
+            if len(node.services) > 0:
+                logger.info(
+                    f"  {node.device.hostname}: {len(node.services)} service(s) - "
+                    f"{', '.join(node.services)}"
+                )
+            else:
+                logger.info(f"  {node.device.hostname}: 0 services (below all thresholds)")
     
     def _find_node_assignment(
         self, 
