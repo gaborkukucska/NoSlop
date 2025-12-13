@@ -274,19 +274,56 @@ class StorageManager:
             return False
         logger.info("✓ NFS server packages installed")
         
-        # Create storage directories
+        # Validate and prepare storage directories SAFELY
+        logger.info("Preparing storage directories...")
+        
+        # Check if base path already exists and has content
+        code, out, _ = self.ssh_manager.execute_command(
+            client,
+            f"[ -d {self.config.base_path} ] && ls -A {self.config.base_path} | head -5"
+        )
+        
+        if code == 0 and out.strip():
+            # Directory exists and has content - CRITICAL: Get user confirmation
+            print(f"\n{'='*70}")
+            print(f"⚠️  EXISTING DIRECTORY DETECTED")
+            print(f"{'='*70}")
+            print(f"\nThe storage path you specified already exists and contains files:")
+            print(f"  Path: {self.config.base_path}")
+            print(f"  Contents preview:")
+            for line in out.strip().split('\n')[:5]:
+                print(f"    - {line}")
+            print(f"\n{'='*70}")
+            print(f"The installer will:")
+            print(f"  ✓ PRESERVE all existing files")
+            print(f"  ✓ Create additional subdirectories as needed")
+            print(f"  ✓ Set permissions to allow NFS sharing")
+            print(f"\n⚠️  WARNING: The installer will NOT delete your existing data.")
+            print(f"{'='*70}")
+            
+            response = input(f"\nContinue using {self.config.base_path}? (yes/no): ").strip().lower()
+            if response not in ['yes', 'y']:
+                logger.info("User declined to use existing directory")
+                print("\n❌ Installation cancelled.")
+                print("   Please choose a different storage path or manually clear the directory.")
+                return False
+            
+            logger.info("User confirmed using existing directory with data")
+        
+        # Create storage directories (mkdir -p won't delete existing content)
         logger.info("Creating storage directories...")
         for path in [
+            self.config.base_path,  # Create base first
             self.config.ollama_models_dir,
             self.config.comfyui_models_dir,
             self.config.comfyui_custom_nodes_dir,
             self.config.project_storage_dir,
             self.config.media_cache_dir
         ]:
-            logger.debug(f"Creating directory: {path}")
+            logger.debug(f"Ensuring directory exists: {path}")
             code, out, err = self.ssh_manager.execute_command(
                 client,
-                f"sudo mkdir -p {path} && sudo chmod 777 {path}"
+                f"sudo mkdir -p {path} && sudo chmod 755 {path}"
             )
             if code != 0:
                 logger.error(f"❌ Failed to create directory {path} (exit code {code})")
@@ -295,8 +332,8 @@ class StorageManager:
                 print(f"   Path: {path}")
                 print(f"   Error: {err[:200]}")
                 return False
-            logger.debug(f"✓ Created {path}")
-        logger.info("✓ All storage directories created")
+            logger.debug(f"✓ Directory ready: {path}")
+        logger.info("✓ All storage directories ready")
         
         # Configure NFS exports with robust deduplication
         logger.info("Configuring NFS exports...")
@@ -438,19 +475,66 @@ class StorageManager:
             logger.error(f"Failed to install NFS client: {err}")
             return False
         
-        # IMPORTANT: Workers mount at /mnt/noslop, NOT at master's storage path
-        # The master's path (e.g. /media/tom/Data/NoSlop/) may:
-        # - Not exist on worker nodes
-        # - Be on device-specific mounts
-        # - Trigger automount/hang issues
-        worker_mount_point = "/mnt/noslop"
+        # CRITICAL: Workers mount NFS shares at the configured path
+        # We must NEVER delete this directory if it contains actual data
+        worker_mount_point = self.config.base_path
         
-        # Create mount point
-        logger.info(f"Creating mount point {worker_mount_point}...")
+        # Clean up any stale mounts SAFELY
+        logger.info(f"Checking for existing mounts at {worker_mount_point}...")
+        
+        # Check if it's currently mounted
+        code, out, _ = self.ssh_manager.execute_command(
+            client,
+            f"mountpoint -q {worker_mount_point} && echo 'mounted' || echo 'not_mounted'",
+            timeout=10,
+            sudo_password=password
+        )
+        
+        if 'mounted' in out:
+            logger.info(f"Found existing mount at {worker_mount_point}, unmounting...")
+            # Try to unmount gracefully first
+            self.ssh_manager.execute_command(
+                client,
+                f"sudo umount {worker_mount_point} 2>/dev/null || true",
+                timeout=10,
+                sudo_password=password
+            )
+            # If graceful unmount fails, force it
+            self.ssh_manager.execute_command(
+                client,
+                f"sudo umount -f {worker_mount_point} 2>/dev/null || true",
+                timeout=10,
+                sudo_password=password
+            )
+        
+        # Check if directory exists and if it has contents
+        code, out, _ = self.ssh_manager.execute_command(
+            client,
+            f"[ -d {worker_mount_point} ] && ls -A {worker_mount_point} | head -1",
+            timeout=10,
+            sudo_password=password
+        )
+        
+        if code == 0 and out.strip():
+            # Directory exists and has contents - DO NOT DELETE
+            logger.warning(f"Directory {worker_mount_point} exists and contains files - preserving it")
+            logger.info("This might be from a previous deployment or local storage")
+        elif code == 0:
+            # Directory exists but is empty - safe to remove and recreate
+            logger.info(f"Removing empty directory {worker_mount_point}")
+            self.ssh_manager.execute_command(
+                client,
+                f"sudo rmdir {worker_mount_point} 2>/dev/null || true",
+                timeout=10,
+                sudo_password=password
+            )
+        
+        # Create mount point fresh (mkdir -p won't fail if it already exists)
+        logger.info(f"Ensuring mount point {worker_mount_point} exists...")
         code, _, err = self.ssh_manager.execute_command(
             client,
             f"sudo mkdir -p {worker_mount_point}",
-            timeout=30,  # 30 second timeout for mkdir
+            timeout=30,
             sudo_password=password
         )
         
@@ -511,8 +595,8 @@ class StorageManager:
         """
         logger.info(f"Verifying shared storage on {device.ip_address}...")
         
-        # Workers mount at /mnt/noslop, not at master's storage path
-        test_path = "/mnt/noslop"
+        # Use configured base path (same path on all nodes via NFS)
+        test_path = self.config.base_path
         logger.debug(f"Test path: {test_path}")
         
         if not self.ssh_manager:

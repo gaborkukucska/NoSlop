@@ -13,3 +13,10 @@ websocket-client>=1.6.0
 websockets>=12.0
 python-jose[cryptography]
 passlib[argon2]
+faster-whisper>=0.10.0
+transformers>=4.35.0
+torch>=2.0.0
+scipy>=1.11.0
+soundfile>=0.12.0
+datasets>=0.12.0
+sentencepiece

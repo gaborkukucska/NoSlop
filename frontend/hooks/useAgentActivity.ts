@@ -21,13 +21,25 @@ export const useAgentActivity = () => {
         // Determine WebSocket URL explicitly
         let wsUrl = 'ws://localhost:8000/ws/activity';
 
-        // 1. Check environment variable first (NEXT_PUBLIC_API_URL)
-        if (process.env.NEXT_PUBLIC_API_URL) {
+        // 1. Check environment variable for direct Backend URL (best for multi-node)
+        if (process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL) {
+            const backendUrl = process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+            wsUrl = backendUrl.replace('http', 'ws') + '/ws/activity';
+        }
+        // 2. Check general API URL
+        else if (process.env.NEXT_PUBLIC_API_URL) {
             const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-            // Convert http(s) to ws(s)
-            wsUrl = apiUrl.replace('http', 'ws') + '/ws/activity';
-        } else if (typeof window !== 'undefined') {
-            // 2. Fallback to existing logic if env var missing
+            // If it's a full URL, use it
+            if (apiUrl.startsWith('http')) {
+                wsUrl = apiUrl.replace('http', 'ws') + '/ws/activity';
+            } else {
+                // It's a relative path (unlikely for WS but handle just in case) or empty
+                // Fallback to window location stuff below
+            }
+        }
+
+        // 3. Fallback to dynamic detection (for dev/localhost)
+        if (!wsUrl.includes('ws://') && !wsUrl.includes('wss://') && typeof window !== 'undefined') {
             const hostname = window.location.hostname;
             wsUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
                 ? `ws://${hostname}:8000/ws/activity`

@@ -38,10 +38,13 @@ current_cycle: "Deployment Stabilization"
       - **Implementation**:
         - Fixed syntax error in `frontend/hooks/useAgentActivity.ts`.
         - Optimized `seed/role_assigner.py` to only deploy frontend to Master as a fallback.
-        - Updated `seed/installers/ollama_installer.py` to auto-upgrade using a robust 2-step install process (download then execute) to avoid sudo/pipe stalls.
+        - Updated `seed/installers/ollama_installer.py` to auto-upgrade using a robust 2-step install process (download then execute).
+        - Updated `seed/deployer.py` and `seed/installers/frontend_installer.py` to support `NOSLOP_FRONTEND_EXTERNAL_URL` for configuring external HTTPS access.
+        - **Implemented Local Voice Services**: Added `faster-whisper` (STT) and `SpeechT5` (TTS) to backend, updated Frontend to use them.
+        - **Configured Shared Storage**: Backend now uses `/mnt/noslop/models` (or `/var/noslop/models`) for caching Voice models to support multi-node persistence.
         - Updated `seed/installers/frontend_installer.py` to bind to `0.0.0.0`, fixing generic connection refused errors.
-      - **Files Modified**: `frontend/hooks/useAgentActivity.ts`, `seed/role_assigner.py`, `seed/installers/ollama_installer.py`, `seed/installers/frontend_installer.py`
-      - **Impact**: Successful deployment with correct service distribution, accessible frontend, and up-to-date dependencies.
+      - **Files Modified**: `backend/main.py`, `backend/requirements.txt`, `backend/voice_service.py`, `frontend/app/components/ChatInterface.tsx`, `seed/role_assigner.py`, `seed/installers/ollama_installer.py`, `seed/installers/frontend_installer.py`, `seed/deployer.py`, `seed/installers/backend_installer.py`
+      - **Impact**: Successful deployment with correct service distribution, accessible frontend (LAN + External HTTPS), up-to-date dependencies, offline voice capabilities, and efficient model storage.
 
 - **2025-12-11** (Session 6):
     - **Deployment Resilience & Timeout Fixes - COMPLETE**:

@@ -108,6 +108,36 @@ class Deployer:
         except Exception as e:
             logger.error(f"Failed to save deployment plan: {e}")
     
+    def stop_all_services(self, deployment_plan: Dict, credentials_map: Dict = None):
+        """Stop all NoSlop services on all nodes to ensure clean installation."""
+        logger.info("Stopping existing NoSlop services...")
+        
+        if credentials_map is None:
+            credentials_map = {}
+        
+        # Collect all unique nodes
+        nodes = deployment_plan.nodes
+            
+        # Services to stop
+        services = ["noslop-backend", "noslop-frontend", "ollama", "comfyui"]
+        
+        for node in nodes:
+            logger.info(f"Stopping services on {node.device.hostname}...")
+            # We use semicolon to run all commands even if some fail (e.g. service not found)
+            # using '|| true' to suppress errors if service doesn't exist
+            cmd = "sudo systemctl stop " + " ".join(services) + " || true"
+            
+            # Execute directly via SSH manager
+            username = node.device.ssh_username or "root"
+            
+            # Get password from credentials_map
+            creds = credentials_map.get(node.device.ip_address)
+            password = creds.password if creds else None
+            
+            client = self.ssh_manager.create_ssh_client(node.device.ip_address, username=username)
+            if client:
+                 self.ssh_manager.execute_command(client, cmd, sudo_password=password)
+            
     def generate_node_config(
         self, 
         node: NodeAssignment, 
@@ -128,6 +158,22 @@ class Deployer:
             config["NOSLOP_MASTER_IP"] = plan.master_node.device.ip_address
             config["NOSLOP_MASTER_HOSTNAME"] = plan.master_node.device.hostname
         
+        # Default Models Configuration (aligned with what we install)
+        # This ensures the .env matches the installed models
+        # defaults: "gemma3:4b-it-q4_K_M", "qwen3-vl:4b-instruct-q8_0", "llava:latest"
+        default_logic_model = "gemma3:4b-it-q4_K_M"
+        
+        config["OLLAMA_DEFAULT_MODEL"] = default_logic_model
+        config["MODEL_LOGIC"] = default_logic_model
+        config["MODEL_VIDEO"] = "qwen3-vl:4b-instruct-q8_0" # Video/Multimodal analysis
+        config["MODEL_IMAGE"] = "llava:latest" # Image analysis
+        config["MODEL_MATH"] = default_logic_model
+        config["MODEL_CODE"] = "qwen2.5-coder:7b"
+        config["MODEL_EMBEDDING"] = "nomic-embed-text"
+        
+        # NOTE: MODEL_TTS and MODEL_TTV are not set here as they do not use Ollama models.
+        # The backend uses faster-whisper and SpeechT5 for voice services.
+        
         # Service URLs
         # We prefer using the registry if populated, otherwise fallback to plan
         # Since we generate config BEFORE installation, we use plan
@@ -145,6 +191,11 @@ class Deployer:
                 # Remote workers connect to master's postgresql (future TODO: configure properly)
                 # Currently workers don't need direct DB access, only backend does.
                 config["OLLAMA_HOST"] = f"http://{plan.master_node.device.ip_address}:11434"
+        
+        # EXPOSE BACKEND URL TO FRONTEND CLIENT
+        # This is critical for client-side calls (Health Check, WebSockets) in multi-node setups
+        if "NOSLOP_BACKEND_URL" in config:
+             config["NEXT_PUBLIC_NOSLOP_BACKEND_URL"] = config["NOSLOP_BACKEND_URL"]
         
         # ComfyUI URLs
         compute_nodes = plan.get_node_by_role(NodeRole.COMPUTE)
@@ -164,11 +215,50 @@ class Deployer:
         if NodeRole.STORAGE in node.roles or NodeRole.ALL in node.roles:
             config["MEDIA_STORAGE_PATH"] = "/var/noslop/media"
             # config["NOSLOP_BLOCKCHAIN_PATH"] = "/var/noslop/blockchain" # Not used in backend config yet
+
+        # Voice Model Storage (Shared or Local)
+        # Using shared storage for heavy models is preferred in multi-node setups
+        models_base = None
         
-        # Model preferences
-        config["MODEL_LOGIC"] = "llama3.2"
-        config["MODEL_IMAGE"] = "llama3.2" # Placeholder, user should update for SD
-        config["MODEL_VIDEO"] = "llama3.2" # Placeholder, user should update for AnimateDiff
+        if self.storage_config:
+            # We have shared storage configured
+            if NodeRole.MASTER in node.roles:
+                # Master node: Use the actual physical path (base_path)
+                # Ensure we append /models to the base path
+                base_path = self.storage_config.base_path
+                models_base = f"{base_path}/models"
+            else:
+                # Worker node: Use the configured NFS mount point (same path structure)
+                models_base = f"{self.storage_config.base_path}/models"
+        else:
+            # Single device or no shared storage - use local /var path
+            models_base = "/var/noslop/models"
+            
+        config["HF_HOME"] = f"{models_base}/transformers"
+        config["WHISPER_CACHE_DIR"] = f"{models_base}/whisper"
+        
+        # Check for external URL override
+        import os
+        external_url = os.environ.get("NOSLOP_FRONTEND_EXTERNAL_URL")
+
+        if external_url:
+             config["NOSLOP_FRONTEND_EXTERNAL_URL"] = external_url
+
+        # Centralized Logging
+        # If shared storage is available, we write logs to it so they are aggregated on Master
+        if self.storage_config:
+            if NodeRole.MASTER in node.roles:
+                 # Master: Write to physical storage path
+                 config["LOG_DIR"] = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
+            else:
+                 # Worker: Write to mounted NFS path (same base_path as master)
+                 config["LOG_DIR"] = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
+        else:
+             # Local logging fallback (installers usually default to this, but explicit is better)
+             # However, we can't easily expand ~ for remote user here, so we let installer handle default
+             # or we construct it if we know username. Installer knows username.
+             # We'll just skip setting LOG_DIR here if not shared, and update installers to use config["LOG_DIR"] if present.
+             pass
         
         return config
     
@@ -205,6 +295,17 @@ class Deployer:
         4. NoSlop Services (Backend, Frontend)
         """
         logger.info("\n🛠️  Starting Service Installation...")
+        
+        # Define the models we want to install
+        # This MUST align with what we put in generate_node_config
+        target_models = [
+            "gemma3:4b-it-q4_K_M", 
+            "qwen3-vl:4b-instruct-q8_0", 
+            "llava:latest",
+            "qwen2.5-coder:7b",
+            "nomic-embed-text",
+            "llama3.2" # Safe fallback/standard model
+        ]
 
         def get_credentials(device):
             """Helper to get username and password for a device."""
@@ -253,14 +354,18 @@ class Deployer:
                 
                 # Determine correct models directory path
                 # Master uses its actual storage path, workers use NFS mount point
+                logs_dir = None
                 if node == plan.master_node:
                     # Master node - use actual storage path
                     models_dir = self.storage_config.ollama_models_dir if self.storage_config else None
-                else:
-                    # Worker nodes - use NFS mount point
                     if self.storage_config:
-                        # Replace base path with /mnt/noslop
-                        models_dir = "/mnt/noslop/ollama/models"
+                         logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
+                else:
+                    # Worker nodes - use NFS mount points (same base path structure)
+                    if self.storage_config:
+                        # Use configured ollama path
+                        models_dir = self.storage_config.ollama_models_dir
+                        logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
                     else:
                         models_dir = None
                 
@@ -270,7 +375,9 @@ class Deployer:
                     self.ssh_manager,
                     username=username,
                     password=password,
-                    models_dir=models_dir
+                    models_dir=models_dir,
+                    logs_dir=logs_dir,
+                    models=target_models
                 )
                 if not installer.run():
                     logger.error(f"Failed to install Ollama on {node.device.hostname}")
@@ -293,15 +400,19 @@ class Deployer:
                 
                 # Determine correct storage paths
                 # Master uses its actual storage path, workers use NFS mount point
+                logs_dir = None
                 if node == plan.master_node:
                     # Master node - use actual storage paths
                     models_dir = self.storage_config.comfyui_models_dir if self.storage_config else None
                     custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir if self.storage_config else None
-                else:
-                    # Worker nodes - use NFS mount points
                     if self.storage_config:
-                        models_dir = "/mnt/noslop/comfyui/models"
-                        custom_nodes_dir = "/mnt/noslop/comfyui/custom_nodes"
+                         logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
+                else:
+                    # Worker nodes - use NFS mount points (same base path structure)
+                    if self.storage_config:
+                        models_dir = self.storage_config.comfyui_models_dir
+                        custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir
+                        logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
                     else:
                         models_dir = None
                         custom_nodes_dir = None
@@ -313,7 +424,8 @@ class Deployer:
                     username=username,
                     password=password,
                     models_dir=models_dir,
-                    custom_nodes_dir=custom_nodes_dir
+                    custom_nodes_dir=custom_nodes_dir,
+                    logs_dir=logs_dir
                 )
                 if not installer.run():
                     logger.error(f"Failed to install ComfyUI on {node.device.hostname}")
@@ -387,7 +499,7 @@ class Deployer:
 
         return True
 
-    def deploy(self, plan: DeploymentPlan, credentials_map: Dict = None) -> bool:
+    def deploy(self, plan: DeploymentPlan, credentials_map: Dict = None, storage_config: Optional[StorageConfig] = None) -> bool:
         """Execute deployment plan."""
         logger.info("="*70)
         logger.info(f"Starting NoSlop Deployment (ID: {self.deployment_id})")
@@ -418,12 +530,19 @@ class Deployer:
         # Configure Shared Storage (if multi-device)
         if len(plan.nodes) > 1:
             logger.info("\n🗄️  Configuring Shared Storage...")
-            print("\n" + "="*70)
-            print("Shared Storage Configuration")
-            print("="*70)
             
-            # Prompt for storage configuration
-            self.storage_config = self.storage_manager.prompt_storage_config()
+            if storage_config:
+                 self.storage_config = storage_config
+                 # CRITICAL: Update storage_manager's config to match
+                 self.storage_manager.config = storage_config
+                 logger.info(f"Using upfront storage configuration: {storage_config.base_path}")
+            else:
+                # Fallback to prompting if not provided (legacy behavior)
+                print("\n" + "="*70)
+                print("Shared Storage Configuration")
+                print("="*70)
+                # Prompt for storage configuration
+                self.storage_config = self.storage_manager.prompt_storage_config()
             
             # Helper to get credentials
             def get_credentials(device):
@@ -432,6 +551,9 @@ class Deployer:
                 if creds:
                     return creds.username, creds.password
                 return "root", None
+                
+            # Stop existing services before messing with storage or installing
+            self.stop_all_services(plan, credentials_map)
             
             # Setup NFS server on master node
             if plan.master_node:

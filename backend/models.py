@@ -128,6 +128,10 @@ class Project(BaseModel):
     reference_media: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    class Config:
+        from_attributes = True
+        orm_mode = True
+
 
 class TaskStatus(str, Enum):
     """Task execution status"""
@@ -151,6 +155,10 @@ class Task(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     result: Optional[Dict[str, Any]] = Field(default=None, description="Task execution result")
+
+    class Config:
+        from_attributes = True
+        orm_mode = True
 
 
 class HealthStatus(BaseModel):
@@ -179,6 +187,10 @@ class User(BaseModel):
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     last_login: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        orm_mode = True
 
 
 class UserInDB(User):

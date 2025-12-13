@@ -20,7 +20,8 @@ class ComfyUIInstaller(BaseInstaller):
     
     def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, 
                  username: str = "root", password: str = None, 
-                 models_dir: Optional[str] = None, custom_nodes_dir: Optional[str] = None):
+                 models_dir: Optional[str] = None, custom_nodes_dir: Optional[str] = None,
+                 logs_dir: Optional[str] = None):
         super().__init__(device, ssh_manager, "comfyui", username=username, password=password)
         self.port = port
         self.gpu_index = gpu_index
@@ -29,6 +30,7 @@ class ComfyUIInstaller(BaseInstaller):
         self.is_secondary = port != 8188
         self.models_dir = models_dir  # Shared models directory (optional)
         self.custom_nodes_dir = custom_nodes_dir  # Shared custom nodes directory (optional)
+        self.logs_dir = logs_dir # Shared logs directory (optional)
 
     def check_installed(self) -> bool:
         """Check if ComfyUI is installed and running on the specific port."""
@@ -128,17 +130,50 @@ class ComfyUIInstaller(BaseInstaller):
                 self.logger.info(f"Linking models directory to {self.models_dir}")
                 # Ensure shared directory exists
                 self.execute_remote(f"sudo mkdir -p {self.models_dir}")
-                self.execute_remote(f"sudo chmod 777 {self.models_dir}")
+                self.execute_remote(f"sudo chmod 755 {self.models_dir}")
                 
                 # Create subdirectories for different model types
                 for subdir in ["checkpoints", "vae", "loras", "embeddings", "controlnet", "upscale_models"]:
                     self.execute_remote(f"sudo mkdir -p {self.models_dir}/{subdir}")
                 
-                # Remove local models directory if it exists
-                self.execute_remote(f"rm -rf {self.install_dir}/models")
+                # Check if local models directory exists and has content
+                local_models = f"{self.install_dir}/models"
+                code, local_files, _ = self.execute_remote(f"[ -d {local_models} ] && find {local_models} -type f | head -1")
+                
+                if code == 0 and local_files.strip():
+                    # Local models exist - check if shared directory has content
+                    code_shared, shared_files, _ = self.execute_remote(f"find {self.models_dir} -type f | head -1")
+                    
+                    if code_shared != 0 or not shared_files.strip():
+                        # Shared directory is empty - migrate local models first
+                        self.logger.info(f"Migrating local models to shared storage...")
+                        print(f"\n📦 Migrating ComfyUI models to shared storage...")
+                        print(f"   From: {local_models}")
+                        print(f"   To: {self.models_dir}")
+                        
+                        # Use rsync with --ignore-existing to preserve any existing files
+                        code_rsync, _, _ = self.execute_remote("which rsync")
+                        if code_rsync == 0:
+                            migrate_cmd = f"sudo rsync -av --ignore-existing {local_models}/ {self.models_dir}/"
+                            print(f"   Using rsync (won't overwrite existing files)...")
+                        else:
+                            migrate_cmd = f"sudo cp -rn {local_models}/* {self.models_dir}/"
+                            print(f"   Using cp (won't overwrite existing files)...")
+                        
+                        code_migrate, _, err = self.execute_remote(migrate_cmd, timeout=3600)
+                        if code_migrate != 0:
+                            self.logger.warning(f"Migration had issues: {err}")
+                            print(f"\n⚠️  Migration completed with warnings")
+                        else:
+                            self.logger.info("✓ Models migrated successfully")
+                            print(f"✓ Models migrated successfully")
+                
+                # NOW safe to remove local directory and create symlink
+                # (Either it was empty, or we've migrated its contents)
+                self.execute_remote(f"rm -rf {local_models}")
                 
                 # Create symlink to shared models
-                code, _, err = self.execute_remote(f"ln -s {self.models_dir} {self.install_dir}/models")
+                code, _, err = self.execute_remote(f"ln -s {self.models_dir} {local_models}")
                 if code != 0:
                     self.logger.error(f"Failed to create models symlink: {err}")
                     return False
@@ -149,13 +184,40 @@ class ComfyUIInstaller(BaseInstaller):
                 self.logger.info(f"Linking custom_nodes directory to {self.custom_nodes_dir}")
                 # Ensure shared directory exists
                 self.execute_remote(f"sudo mkdir -p {self.custom_nodes_dir}")
-                self.execute_remote(f"sudo chmod 777 {self.custom_nodes_dir}")
+                self.execute_remote(f"sudo chmod 755 {self.custom_nodes_dir}")
                 
-                # Remove local custom_nodes directory if it exists
-                self.execute_remote(f"rm -rf {self.install_dir}/custom_nodes")
+                # Check if local custom_nodes directory exists and has content
+                local_custom_nodes = f"{self.install_dir}/custom_nodes"
+                code, local_files, _ = self.execute_remote(f"[ -d {local_custom_nodes} ] && find {local_custom_nodes} -type f | head -1")
+                
+                if code == 0 and local_files.strip():
+                    # Local custom_nodes exist - check if shared directory has content
+                    code_shared, shared_files, _ = self.execute_remote(f"find {self.custom_nodes_dir} -type f | head -1")
+                    
+                    if code_shared != 0 or not shared_files.strip():
+                        # Shared directory is empty - migrate local custom_nodes first
+                        self.logger.info(f"Migrating local custom_nodes to shared storage...")
+                        print(f"\n📦 Migrating ComfyUI custom nodes to shared storage...")
+                        
+                        # Use rsync with --ignore-existing
+                        code_rsync, _, _ = self.execute_remote("which rsync")
+                        if code_rsync == 0:
+                            migrate_cmd = f"sudo rsync -av --ignore-existing {local_custom_nodes}/ {self.custom_nodes_dir}/"
+                        else:
+                            migrate_cmd = f"sudo cp -rn {local_custom_nodes}/* {self.custom_nodes_dir}/"
+                        
+                        code_migrate, _, err = self.execute_remote(migrate_cmd, timeout=1800)
+                        if code_migrate != 0:
+                            self.logger.warning(f"Migration had issues: {err}")
+                        else:
+                            self.logger.info("✓ Custom nodes migrated successfully")
+                            print(f"✓ Custom nodes migrated successfully")
+                
+                # NOW safe to remove local directory and create symlink
+                self.execute_remote(f"rm -rf {local_custom_nodes}")
                 
                 # Create symlink to shared custom_nodes
-                code, _, err = self.execute_remote(f"ln -s {self.custom_nodes_dir} {self.install_dir}/custom_nodes")
+                code, _, err = self.execute_remote(f"ln -s {self.custom_nodes_dir} {local_custom_nodes}")
                 if code != 0:
                     self.logger.error(f"Failed to create custom_nodes symlink: {err}")
                     return False
@@ -172,18 +234,20 @@ class ComfyUIInstaller(BaseInstaller):
             # Command to run ComfyUI
             # We need to pass port and GPU args
             # Determine logs directory
-            if self.username == "root":
-                home_dir = "/root"
+            # Use shared logs dir if configured, otherwise use home
+            if self.logs_dir:
+                logs_dir = self.logs_dir
+            elif self.username == "root":
+                logs_dir = "/root/NoSlop/logs"
             else:
-                home_dir = f"/home/{self.username}"
-            logs_dir = f"{home_dir}/NoSlop/logs"
+                logs_dir = f"/home/{self.username}/NoSlop/logs"
             
             # Command to run ComfyUI
             exec_cmd = f"{self.venv_dir}/bin/python main.py --port {self.port} --listen"
             
             # Ensure logs directory exists
-            self.execute_remote(f"mkdir -p {logs_dir}")
-            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            self.execute_remote(f"sudo mkdir -p {logs_dir}")
+            self.execute_remote(f"sudo chown {self.username}:{self.username} {logs_dir}")
             
             # Create timestamped log file path
             from datetime import datetime

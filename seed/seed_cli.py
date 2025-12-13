@@ -9,6 +9,7 @@ Interactive deployment wizard for NoSlop across local network devices.
 import argparse
 import logging
 import sys
+import os
 import subprocess
 from pathlib import Path
 from typing import List, Optional
@@ -149,6 +150,8 @@ def setup_logging(log_level: str = "INFO", module_name: str = "seed_installer"):
 logger = logging.getLogger(__name__)
 
 
+from seed.storage_manager import StorageManager
+
 class NoSlopSeedCLI:
     """
     Command-line interface for NoSlop Seed installer.
@@ -170,6 +173,7 @@ class NoSlopSeedCLI:
         self.role_assigner = RoleAssigner()
         self.ssh_manager = SSHManager()
         self.credential_store = CredentialStore()
+        self.storage_manager = StorageManager(self.ssh_manager)
         self.deployer = None  # Created later with SSH manager
     
     def print_banner(self):
@@ -244,9 +248,81 @@ class NoSlopSeedCLI:
         # Deploy
         return self.execute_deployment(plan, credentials_map)
     
+    def configure_storage(self):
+        """Configure shared storage upfront."""
+        print("\n" + "="*70)
+        print("🗄️  Storage Configuration")
+        print("="*70)
+        print("\nCentralized logging and model storage relies on a shared folder.")
+        print("We configure this upfront so logs are captured correctly from the start.\n")
+        
+        return self.storage_manager.prompt_storage_config()
+
+    def load_env_file(self):
+        """Load environment variables from .env file."""
+        env_path = Path(".env")
+        if not env_path.exists():
+            return
+            
+        print("📄 Loading configuration from .env...")
+        try:
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip().strip("'").strip('"')
+                        
+                        # Only set if not already set (respect existing env vars)
+                        if key not in os.environ:
+                            os.environ[key] = value
+                            # logging.debug(f"Loaded {key} from .env")
+        except Exception as e:
+            logger.warning(f"Failed to parse .env file: {e}")
+
+    def configure_external_access(self):
+        """Configure external access URL."""
+        # Check if already set in environment (e.g. from .env)
+        external_url = os.environ.get("NOSLOP_FRONTEND_EXTERNAL_URL")
+        
+        if external_url:
+            print(f"✓ Using configured external URL: {external_url}")
+            return
+            
+        # Not set - ask user
+        print("\n" + "="*70)
+        print("🌐 External Access Configuration")
+        print("="*70)
+        print("\nDo you have an existing external URL (e.g., Cloudflare Tunnel)?")
+        print("This enables features like Voice input/output over HTTPS.")
+        print("Example: https://noslop.example.com\n")
+        
+        response = input("External URL [Leave empty or 's' to skip]: ").strip()
+        
+        if response and response.lower() != 's':
+            # Basic validation
+            if not response.startswith("http"):
+                response = f"https://{response}"
+                print(f"   corrected to: {response}")
+                
+            os.environ["NOSLOP_FRONTEND_EXTERNAL_URL"] = response
+            print(f"   ✓ Configured: {response}")
+        else:
+            print("   Skipped external access configuration.")
+
     def run_interactive_mode(self):
         """Interactive deployment wizard."""
         print("🧙 Interactive Deployment Wizard\n")
+
+        # Load environment variables
+        self.load_env_file()
+        
+        # Configure external access early
+        self.configure_external_access()
 
         if not PARAMIKO_AVAILABLE:
             logger.error("SSH library (paramiko) is not installed.")
@@ -255,6 +331,9 @@ class NoSlopSeedCLI:
             print("\n   Please install all dependencies with:")
             print("   pip install -r seed/requirements.txt\n")
             return False
+        
+        # Step 0: Configure Storage (Upfront)
+        storage_config = self.configure_storage()
         
         # Step 1: Discover devices (stores credentials internally)
         devices, credentials_map = self.discover_devices()
@@ -288,7 +367,7 @@ class NoSlopSeedCLI:
                 return False
         
         # Step 6: Execute deployment
-        return self.execute_deployment(plan, credentials_map)
+        return self.execute_deployment(plan, credentials_map, storage_config)
     
     def discover_devices(self):
         """Discover devices on the network. Returns (devices, credentials_map)."""
@@ -350,13 +429,35 @@ class NoSlopSeedCLI:
                             print(f"   Hostname: {discovered_device.hostname}")
                         
                         # Prompt for credentials
-                        username = input(f"   Username [root]: ").strip() or "root"
+                        # Prompt for credentials with retry
+                        current_user = os.getenv("USER", "root")
+                        username = current_user
+                        password = None
                         
-                        import getpass
-                        password = getpass.getpass(f"   Password: ")
+                        while True:
+                            user_input = input(f"   Username [{current_user}] (or 's' to skip): ").strip()
+                            
+                            if user_input.lower() == 's':
+                                print(f"   ⚠️  Skipping {discovered_device.ip_address}\n")
+                                password = None # Ensure we break out later
+                                break
+                                
+                            username = user_input or current_user
+                            
+                            import getpass
+                            password = getpass.getpass(f"   Password: ")
+                            
+                            if password:
+                                break
+                                
+                            print(f"   ⚠️  Password is required.")
+                            retry = input("   Retry? [Y/n]: ").strip().lower()
+                            if retry == 'n':
+                                print(f"   ⚠️  Skipping {discovered_device.ip_address}\n")
+                                password = None
+                                break
                         
                         if not password:
-                            print(f"   ⚠️  Skipping {discovered_device.ip_address} (no password provided)\n")
                             continue
                         
                         # Create credentials
@@ -490,7 +591,7 @@ class NoSlopSeedCLI:
             print("   You may need to enter passwords during deployment.\n")
             return self.confirm("Continue anyway?")
     
-    def execute_deployment(self, plan, credentials_map=None) -> bool:
+    def execute_deployment(self, plan, credentials_map=None, storage_config=None) -> bool:
         """Execute the deployment plan."""
         if credentials_map is None:
             credentials_map = {}
@@ -518,7 +619,7 @@ class NoSlopSeedCLI:
             print("\n❌ Installation cancelled.")
             return False
 
-        success = self.deployer.deploy(plan, credentials_map)
+        success = self.deployer.deploy(plan, credentials_map, storage_config)
 
         if success:
             print("\n" + "=" * 70)

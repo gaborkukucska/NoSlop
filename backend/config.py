@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     model_math: str = "llama3.2"
     model_tts: str = "llama3.2"
     model_ttv: str = "llama3.2"
+    model_code: str = "qwen2.5-coder:7b"
+    model_embedding: str = "nomic-embed-text"
     
     # ========================================================================
     # ComfyUI Configuration

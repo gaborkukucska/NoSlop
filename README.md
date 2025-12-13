@@ -90,11 +90,69 @@ python3 -m seed.seed_cli --single-device
 
 # OR deploy across multiple devices (requires ssh access to other devices on the local network)
 python3 -m seed.seed_cli
+
+# OR if you are planning to open a Cloudflare tunnel to access the local UI from the internet
+NOSLOP_FRONTEND_EXTERNAL_URL=https://app.your-domain.com python3 -m seed.seed_cli
+
 ```
 
 The installer will:
+-    **Find Local Devices**: Scans your local network for available devices to deploy NoSlop on.
 - 🔍 **Detect Hardware**: Analyzes CPU, RAM, GPU, and Disk to assign optimal roles.
-- 🌐 **Discover Services**: Scans your network for existing Ollama, ComfyUI, or PostgreSQL instances to reuse.
+- 🌐 **Discover Existing Services**: Scans your network for existing Ollama, ComfyUI, or PostgreSQL instances to reuse.
+-    **Creates A Deployment Plan**: Based on the available devices and their capabilities, it creates a deployment plan that assigns roles to each device like this:
+
+```
+======================================================================
+NoSlop Deployment Summary
+======================================================================
+Deployment ID: 20251213_204737
+Deployment Type: Multi-Device
+Total Nodes: 5
+
+Services to Deploy: comfyui, ffmpeg, noslop-backend, noslop-frontend, ollama, opencv, postgresql
+
+Node Details:
+----------------------------------------------------------------------
+
+1. BigBOY (192.168.0.22)
+   Roles: master, compute, storage, client
+   Services: noslop-backend, postgresql, ollama, comfyui, ffmpeg, opencv
+   Hardware: 16 cores, 31.15GB RAM, 12.0GB VRAM
+
+2. tomsbot (192.168.0.30)
+   Roles: client
+   Services: ollama, comfyui, ffmpeg, opencv
+   Hardware: 20 cores, 15.32GB RAM, 4.0GB VRAM
+
+3. 2014 (192.168.0.24)
+   Roles: client
+   Services: ollama, ffmpeg, opencv
+   Hardware: 8 cores, 15.53GB RAM, 0.0GB VRAM
+
+4. mac2014 (192.168.0.26)
+   Roles: client
+   Services: ffmpeg, opencv
+   Hardware: 4 cores, 7.66GB RAM, 0.0GB VRAM
+
+5. lenovo (192.168.0.15)
+   Roles: client
+   Services: noslop-frontend
+   Hardware: 2 cores, 5.67GB RAM, 0.0GB VRAM
+
+======================================================================
+
+📦 Starting deployment process...
+   This involves:
+   1. Network discovery for existing services
+   2. Configuration generation
+   3. Service installation (PostgreSQL, Ollama, ComfyUI, etc.)
+   4. Verification
+
+   This may take 10-20 minutes depending on internet speed.
+
+Start installation? [y/N]:
+```
 - 📦 **Install Services**: Automatically installs and configures:
     - **PostgreSQL** (Database)
     - **Ollama** (LLM Inference)

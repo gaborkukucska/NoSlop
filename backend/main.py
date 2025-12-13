@@ -802,9 +802,96 @@ async def execute_task(
             
         return result
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error executing task: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error executing task: {str(e)}")
+
+
+# ============================================================================
+# Voice Services (STT & TTS)
+# ============================================================================
+
+from fastapi import UploadFile, File
+from fastapi.responses import StreamingResponse
+from voice_service import VoiceService
+# Global variable for Voice Service
+voice_service = None
+
+def initialize_voice_service_background():
+    """Helper function to load models in background thread"""
+    global voice_service
+    try:
+        logger.info("Starting background initialization of Voice Service (downloading models)...")
+        # Initialize Voice Service
+        # We use strict=False or similar if needed, but here we just catch exceptions
+        service = VoiceService(model_size="tiny", device="cpu")
+        voice_service = service
+        logger.info("Voice Service initialized successfully and ready to use.")
+    except Exception as e:
+        logger.error(f"Failed to initialize Voice Service in background: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    """Event handler for application startup."""
+    import threading
+    
+    # Start Voice Service initialization in a separate thread to not block API startup
+    # This prevents systemd from killing the service due to timeout during model downloads
+    init_thread = threading.Thread(target=initialize_voice_service_background, daemon=True)
+    init_thread.start()
+    logger.info("Scheduled Voice Service initialization in background")
+
+
+@app.post("/api/audio/transcribe")
+async def transcribe_audio(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
+    """
+    Transcribe uploaded audio file to text.
+    """
+    if not voice_service:
+        raise HTTPException(status_code=503, detail="Voice service not available")
+    
+    try:
+        # Save temp file
+        import tempfile
+        import os
+        import shutil
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+            
+        try:
+            text = voice_service.transcribe(tmp_path)
+            return {"text": text}
+        finally:
+            os.unlink(tmp_path)
+            
+    except Exception as e:
+        logger.error(f"Transcription error: {e}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+@app.post("/api/audio/speak")
+async def generate_speech(request: dict, current_user: User = Depends(get_current_user)):
+    """
+    Generate speech from text.
+    """
+    if not voice_service:
+        raise HTTPException(status_code=503, detail="Voice service not available")
+    
+    text = request.get("text")
+    if not text:
+        raise HTTPException(status_code=400, detail="Text required")
+        
+    try:
+        audio_buffer = voice_service.generate_speech(text)
+        return StreamingResponse(audio_buffer, media_type="audio/wav")
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
+            
+
 
 
 # ============================================================================

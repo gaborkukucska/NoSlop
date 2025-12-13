@@ -41,11 +41,16 @@ export default function Home() {
       // Dynamically determine backend URL
       let backendUrl = 'http://localhost:8000';
 
-      // 1. Check environment variable first
-      if (process.env.NEXT_PUBLIC_API_URL) {
+      // 1. Check environment variable first (Direct Backend URL)
+      if (process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL) {
+        backendUrl = process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+      }
+      // 2. Check generic API URL
+      else if (process.env.NEXT_PUBLIC_API_URL) {
         backendUrl = process.env.NEXT_PUBLIC_API_URL;
-      } else if (typeof window !== 'undefined') {
-        // 2. Fallback to dynamic hostname
+      }
+      // 3. Fallback to dynamic hostname
+      else if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
         backendUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
           ? `http://${hostname}:8000`

@@ -86,72 +86,141 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         loadHistory();
     }, [sessionId]);
 
-    // Initialize Speech Recognition
+    // Audio Recording State
+    const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+
+    // Initialize (No browser speech init needed anymore)
     useEffect(() => {
-        if (typeof window !== 'undefined') {
-            // Check if we're in a secure context (HTTPS or localhost)
-            const isSecure = window.isSecureContext ||
-                window.location.hostname === 'localhost' ||
-                window.location.hostname === '127.0.0.1';
-
-            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-            if (SpeechRecognition && isSecure) {
-                try {
-                    recognitionRef.current = new SpeechRecognition();
-                    recognitionRef.current.continuous = false;
-                    recognitionRef.current.interimResults = false;
-                    recognitionRef.current.lang = 'en-US';
-
-                    recognitionRef.current.onresult = (event: any) => {
-                        const transcript = event.results[0][0].transcript;
-                        setInput((prev) => prev + (prev ? ' ' : '') + transcript);
-                        setIsListening(false);
-                    };
-
-                    recognitionRef.current.onerror = (event: any) => {
-                        console.error('Speech recognition error', event.error);
-                        setIsListening(false);
-                    };
-
-                    recognitionRef.current.onend = () => {
-                        setIsListening(false);
-                    };
-
-                    setIsSpeechAvailable(true);
-                } catch (error) {
-                    console.warn('Speech recognition initialization failed:', error);
-                    setIsSpeechAvailable(false);
-                }
-            } else {
-                if (!isSecure) {
-                    console.warn('Speech recognition requires HTTPS or localhost');
-                }
-                setIsSpeechAvailable(false);
-            }
+        // Just verify media devices support
+        if (navigator.mediaDevices) {
+            setIsSpeechAvailable(true);
         }
     }, []);
 
-    const toggleListening = () => {
-        if (isListening) {
-            recognitionRef.current?.stop();
-        } else {
-            recognitionRef.current?.start();
+    const startRecording = async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const recorder = new MediaRecorder(stream);
+
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    audioChunksRef.current.push(e.data);
+                }
+            };
+
+            recorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+                audioChunksRef.current = []; // Reset chunks
+
+                // Transcribe
+                setIsLoading(true);
+                try {
+                    const formData = new FormData();
+                    formData.append('file', audioBlob);
+
+                    const backendUrl = getBackendUrl();
+                    const response = await fetch(`${backendUrl}/api/audio/transcribe`, {
+                        method: 'POST',
+                        headers: {
+                            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                        },
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.text) {
+                            setInput((prev) => prev + (prev ? ' ' : '') + data.text);
+                        }
+                    } else {
+                        console.error('Transcription failed');
+                    }
+                } catch (error) {
+                    console.error('Transcription error:', error);
+                } finally {
+                    setIsLoading(false);
+                }
+
+                // Stop tracks
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            recorder.start();
+            setMediaRecorder(recorder);
             setIsListening(true);
+
+        } catch (error) {
+            console.error('Error accessing microphone:', error);
+            alert('Could not access microphone.');
         }
     };
 
-    const speak = (text: string) => {
-        if (!ttsEnabled || typeof window === 'undefined') return;
+    const stopRecording = () => {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.stop();
+            setIsListening(false);
+            setMediaRecorder(null);
+        }
+    };
 
-        window.speechSynthesis.cancel(); // Stop any current speech
+    const toggleListening = () => {
+        if (isListening) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    };
 
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.onstart = () => setIsSpeaking(true);
-        utterance.onend = () => setIsSpeaking(false);
-        utterance.onerror = () => setIsSpeaking(false);
+    const speak = async (text: string) => {
+        if (!ttsEnabled) return;
 
-        window.speechSynthesis.speak(utterance);
+        setIsSpeaking(true);
+        try {
+            const backendUrl = getBackendUrl();
+            const response = await fetch(`${backendUrl}/api/audio/speak`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+                },
+                body: JSON.stringify({ text })
+            });
+
+            if (response.ok) {
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const audio = new Audio(url);
+
+                audio.onended = () => {
+                    setIsSpeaking(false);
+                    URL.revokeObjectURL(url);
+                };
+
+                audio.onerror = () => {
+                    setIsSpeaking(false);
+                };
+
+                audio.play();
+            } else {
+                console.error("TTS failed");
+                setIsSpeaking(false);
+            }
+        } catch (error) {
+            console.error("TTS error:", error);
+            setIsSpeaking(false);
+        }
+    };
+
+    // Helper needed inside component
+    const getBackendUrl = () => {
+        if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+        if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+        if (typeof window !== 'undefined') {
+            const h = window.location.hostname;
+            return (h === 'localhost' || h === '127.0.0.1') ? 'http://localhost:8000' : `http://${h}:8000`;
+        }
+        return 'http://localhost:8000';
     };
 
     const createNewSession = async () => {
@@ -215,6 +284,11 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
 
             // Let's just implement the fetch here using the same logic as api.ts
             const getBackendUrl = () => {
+                // 0. Use Explicit Backend URL (Critical for Multi-Node)
+                if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') {
+                    return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+                }
+
                 // 1. Check environment variable first
                 if (process.env.NEXT_PUBLIC_API_URL) {
                     return process.env.NEXT_PUBLIC_API_URL;

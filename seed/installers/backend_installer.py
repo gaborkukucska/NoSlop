@@ -57,6 +57,28 @@ class BackendInstaller(BaseInstaller):
         # makes files owned by root.
         self.logger.info(f"Fixing ownership of {self.install_dir} to {self.username}...")
         self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.install_dir}")
+        
+        # Ensure model directories exist (for local storage fallback)
+        # If shared storage is mounted at /mnt/noslop, this might already be handled by StorageManager,
+        # but we ensure local fallback /var/noslop/models exists too.
+        models_dir = "/var/noslop/models"
+        self.execute_remote(f"sudo mkdir -p {models_dir}/transformers {models_dir}/whisper")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {models_dir}")
+        
+        # Also check if we are using custom paths from env code (e.g. shared storage)
+        # and ensure they exist and are writable
+        hf_home = self.env_config.get("HF_HOME")
+        whisper_cache = self.env_config.get("WHISPER_CACHE_DIR")
+        
+        if hf_home:
+             self.execute_remote(f"sudo mkdir -p {hf_home}")
+             self.execute_remote(f"sudo chown -R {self.username}:{self.username} {hf_home}")
+             
+        if whisper_cache:
+             self.execute_remote(f"sudo mkdir -p {whisper_cache}")
+             self.execute_remote(f"sudo chown -R {self.username}:{self.username} {whisper_cache}")
+
+
             
         # Check if venv exists
         code, _, _ = self.execute_remote(f"test -d {self.venv_dir}")
@@ -117,16 +139,18 @@ class BackendInstaller(BaseInstaller):
             # We want logs to go to /home/<user>/NoSlop/logs
             # Since we are installing on a remote device, we construct the path
             # assuming standard home directory structure
-            if self.username == "root":
-                home_dir = "/root"
+            # Determine logs directory
+            # If LOG_DIR is passed in config (e.g. from shared storage), use it
+            if self.env_config.get("LOG_DIR"):
+                logs_dir = self.env_config["LOG_DIR"]
+            elif self.username == "root":
+                logs_dir = "/root/NoSlop/logs"
             else:
-                home_dir = f"/home/{self.username}"
-                
-            logs_dir = f"{home_dir}/NoSlop/logs"
+                logs_dir = f"/home/{self.username}/NoSlop/logs"
             
             # Ensure logs directory exists with correct permissions
-            self.execute_remote(f"mkdir -p {logs_dir}")
-            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            self.execute_remote(f"sudo mkdir -p {logs_dir}")
+            self.execute_remote(f"sudo chown {self.username}:{self.username} {logs_dir}")
             
             service_content = template.replace("{{SERVICE_NAME}}", "noslop-backend")
             service_content = service_content.replace("{{USER}}", self.username) # Use the actual user
@@ -174,8 +198,9 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Verifying NoSlop Backend...")
         
         # Retry loop for health check
-        max_retries = 10
-        retry_interval = 2
+        # Increased timeout to handle large model downloads (Whisper/SpeechT5) on first run
+        max_retries = 60
+        retry_interval = 10
         
         for i in range(max_retries):
             cmd = "curl -s http://localhost:8000/health"
@@ -185,13 +210,15 @@ class BackendInstaller(BaseInstaller):
                 self.logger.info("✓ Backend API is accessible")
                 return True
                 
-            self.logger.info(f"Health check attempt {i+1}/{max_retries} failed. Retrying in {retry_interval}s...")
+            if (i + 1) % 5 == 0:
+                 self.logger.info(f"Health check attempt {i+1}/{max_retries} failed. Backend might be downloading models...")
+            
             time.sleep(retry_interval)
             
         self.logger.error(f"Backend health check failed after {max_retries} attempts.")
         # Try to get logs to help debugging
         self.logger.info("Fetching recent logs...")
-        self.execute_remote("sudo journalctl -u noslop-backend -n 20 --no-pager")
+        self.execute_remote("sudo journalctl -u noslop-backend -n 50 --no-pager")
         return False
 
     def rollback(self):

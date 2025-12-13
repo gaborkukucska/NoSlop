@@ -18,12 +18,14 @@ class OllamaInstaller(BaseInstaller):
     """
     
     def __init__(self, device, ssh_manager, port: int = 11434, models: List[str] = None, 
-                 username: str = "root", password: str = None, models_dir: Optional[str] = None):
+                 username: str = "root", password: str = None, models_dir: Optional[str] = None, 
+                 logs_dir: Optional[str] = None):
         super().__init__(device, ssh_manager, "ollama", username=username, password=password)
         self.port = port
         self.models = models or ["gemma3:4b-it-q4_K_M", "qwen3-vl:4b-instruct-q8_0", "llava:latest"]
         self.is_secondary = port != 11434
         self.models_dir = models_dir  # Shared models directory (optional)
+        self.logs_dir = logs_dir # Shared logs directory (optional)
 
     def check_installed(self) -> bool:
         """Check if Ollama is installed and running on the specific port."""
@@ -242,8 +244,8 @@ class OllamaInstaller(BaseInstaller):
         print(f"   Location: {existing_models_dir}")
         print(f"   Files: {model_count}")
         print(f"   Size: {model_size}")
-        print(f"\n   Migrate to shared storage ({self.models_dir})?")
-        print(f"   This will avoid re-downloading models.")
+        print(f"\n   Migrate found models to storage ({self.models_dir})?")
+        print(f"   This will avoid re-downloading models if they are not already in storage.")
         response = input("   Migrate models? (Y/n): ").strip().lower()
         
         if response == '' or response == 'y' or response == 'yes':
@@ -283,9 +285,13 @@ class OllamaInstaller(BaseInstaller):
             
             code, _, _ = self.execute_remote("which rsync")
             if code == 0:
-                migrate_cmd = f"sudo rsync -av {existing_models_dir}/ {self.models_dir}/"
+                # --ignore-existing: Skip files that already exist in destination (DON'T overwrite)
+                migrate_cmd = f"sudo rsync -av --ignore-existing {existing_models_dir}/ {self.models_dir}/"
+                print(f"\n📋 Using rsync with --ignore-existing (won't overwrite existing models)")
             else:
-                migrate_cmd = f"sudo cp -r {existing_models_dir}/* {self.models_dir}/"
+                # -n: no-clobber, don't overwrite existing files
+                migrate_cmd = f"sudo cp -rn {existing_models_dir}/* {self.models_dir}/"
+                print(f"\n📋 Using cp with -n flag (won't overwrite existing models)")
             
             code, out, err = self.execute_remote(migrate_cmd, timeout=copy_timeout)
             if code != 0:
@@ -300,6 +306,43 @@ class OllamaInstaller(BaseInstaller):
                 self.execute_remote(f"sudo chmod -R 755 {self.models_dir}", timeout=60)
         else:
             self.logger.info("User chose not to migrate models")
+            
+            # CRITICAL: User declined migration - check if shared directory is empty
+            code, shared_files, _ = self.execute_remote(f"ls -A {self.models_dir} 2>/dev/null | head -1")
+            
+            if code == 0 and shared_files.strip():
+                # Shared directory has models - use it
+                self.logger.info(f"Shared directory has existing models, will use them")
+            else:
+                # Shared directory is EMPTY - give user a choice
+                print(f"\n{'='*70}")
+                print(f"⚠️  SHARED STORAGE IS EMPTY")
+                print(f"{'='*70}")
+                print(f"\nYou chose NOT to migrate models from {existing_models_dir}")
+                print(f"But the shared storage directory is empty: {self.models_dir}\n")
+                print(f"Choose an option:")
+                print(f"  1) Use LOCAL models (keep using {existing_models_dir})")
+                print(f"     - Faster to start, but won't share models across nodes")
+                print(f"  2) Download FRESH models to shared storage")
+                print(f"     - Slower (re-downloads), but shares across all nodes")
+                print(f"  3) Cancel installation")
+                print(f"{'='*70}")
+                
+                choice = input("\nYour choice (1/2/3): ").strip()
+                
+                if choice == '1':
+                    self.logger.info(f"User chose to use local models directory")
+                    # Override models_dir to use local directory
+                    self.models_dir = existing_models_dir
+                    print(f"\n✓ Will use local models: {self.models_dir}")
+                elif choice == '2':
+                    self.logger.info(f"User chose to download fresh models to shared storage")
+                    print(f"\n⚠️  Models will be downloaded to: {self.models_dir}")
+                    # Continue with shared dir (empty) - models will be pulled later
+                else:
+                    self.logger.info("Installation cancelled by user")
+                    print(f"\n❌ Installation cancelled")
+                    return False
         
         return True
 
@@ -330,8 +373,10 @@ class OllamaInstaller(BaseInstaller):
             service_content = service_content.replace("{{WORKING_DIR}}", "/root")
             
             # Determine logs directory
-            # Use the user's home directory for logs, not /root
-            if self.username == "root":
+            # Use shared logs dir if configured, otherwise use home
+            if self.logs_dir:
+                logs_dir = self.logs_dir
+            elif self.username == "root":
                 logs_dir = "/root/NoSlop/logs"
             else:
                 logs_dir = f"/home/{self.username}/NoSlop/logs"
@@ -340,7 +385,7 @@ class OllamaInstaller(BaseInstaller):
             # Use sudo to create directory and then set ownership
             self.execute_remote(f"sudo mkdir -p {logs_dir}", timeout=30)
             if self.username != "root":
-                self.execute_remote(f"sudo chown -R {self.username}:{self.username} /home/{self.username}/NoSlop", timeout=30)
+                self.execute_remote(f"sudo chown -R {self.username}:{self.username} {logs_dir}", timeout=30)
             
             # Create timestamped log file path
             from datetime import datetime

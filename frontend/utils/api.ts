@@ -7,8 +7,18 @@
 // If accessing via network IP (e.g., 10.0.0.3:3000), use same IP for backend (10.0.0.3:8000)
 // Otherwise fall back to localhost for local development
 const getApiBaseUrl = () => {
+    // 0. Use Explicit Backend URL if available (Critical for Multi-Node)
+    if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') {
+        return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+    }
+
     // 1. Check environment variable first (set during build/deployment)
-    if (process.env.NEXT_PUBLIC_API_URL) {
+    if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined') {
+        // If explicitly set to empty string, use relative paths (proxy mode)
+        // This enables Next.js rewrites to handle /api/* requests
+        if (process.env.NEXT_PUBLIC_API_URL === '') {
+            return ''; // Relative mode - URLs will be /api/... 
+        }
         return process.env.NEXT_PUBLIC_API_URL;
     }
 

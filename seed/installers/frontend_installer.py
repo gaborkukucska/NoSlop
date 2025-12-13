@@ -124,6 +124,60 @@ class FrontendInstaller(BaseInstaller):
         # self.logger.info("Cleaning up existing node_modules if present...")
         # self.execute_remote(f"sudo rm -rf {self.install_dir}/node_modules {self.install_dir}/.next")
             
+        # Create .env.local file with frontend-specific environment variables
+        self.logger.info("Creating .env.local file for frontend...")
+        env_local_content = ""
+        
+        # Add NEXT_PUBLIC_API_URL
+        # Add NEXT_PUBLIC_API_URL
+        # We now use Next.js Rewrites to proxy API requests to avoid CORS/Mixed Content issues
+        # So we want the frontend to call its own domain (relative path)
+        if "NOSLOP_FRONTEND_EXTERNAL_URL" in self.env_config:
+            self.logger.info(f"Using external frontend URL: {self.env_config['NOSLOP_FRONTEND_EXTERNAL_URL']}")
+            # When using external URL (e.g. Cloudflare), we proxy /api -> Backend
+            # Setting it to empty string or just the base makes it relative?
+            # Actually, typically we can just leave it empty if the code handles it, 
+            # or set it to the external URL itself if we want absolute, 
+            # BUT the rewrites work on the Next.js server.
+            # If we set NEXT_PUBLIC_API_URL to "", axios/fetch might need handling.
+            # Let's check how the frontend uses it. 
+            # Assuming standard usage: fetch(`${API_URL}/endpoint`)
+            # If API_URL is empty, it becomes fetch(`/endpoint`) -> hits frontend -> rewritten.
+            # However, our rewrites are for /api/:path*.
+            # So we probably want just "" and ensure code appends /api or set it to "/api"
+            # Let's look at the previous content: it was full URL.
+            # If we set it to just "", then `${API_URL}/api/foo` -> `/api/foo`. Correct.
+            pass
+        
+        # We enforce using the proxy for consistent behavior across LAN/WAN
+        # The proxy destination is handled by NOSLOP_BACKEND_URL in next.config.ts (server-side env)
+        # So client-side API_URL should be empty (relative root)
+        env_local_content += f"NEXT_PUBLIC_API_URL=\n"
+        
+        # We MUST ensure NOSLOP_BACKEND_URL is available to Next.js server (in .env.local)
+        if "NOSLOP_BACKEND_URL" in self.env_config:
+             env_local_content += f"NOSLOP_BACKEND_URL={self.env_config['NOSLOP_BACKEND_URL']}\n"
+             
+        # ALSO ensure the client-side variable is set
+        if "NEXT_PUBLIC_NOSLOP_BACKEND_URL" in self.env_config:
+             env_local_content += f"NEXT_PUBLIC_NOSLOP_BACKEND_URL={self.env_config['NEXT_PUBLIC_NOSLOP_BACKEND_URL']}\n"
+        
+        # Write .env.local file
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env') as tmp:
+            tmp.write(env_local_content)
+            tmp_env_path = tmp.name
+        
+        try:
+            if not self.transfer_file(tmp_env_path, f"{self.install_dir}/.env.local"):
+                self.logger.warning("Failed to transfer .env.local file")
+            else:
+                # Set ownership
+                self.execute_remote(f"sudo chown {self.username}:{self.username} {self.install_dir}/.env.local")
+        finally:
+            import os
+            os.unlink(tmp_env_path)
+            
         # Install dependencies as the user (not root)
         self.logger.info(f"Installing npm dependencies as user {self.username}...")
         code, out, err = self.execute_remote(
@@ -149,33 +203,7 @@ class FrontendInstaller(BaseInstaller):
             self.logger.error(f"npm build stdout: {out}")
             return False
         
-        # Create .env.local file with frontend-specific environment variables
-        self.logger.info("Creating .env.local file for frontend...")
-        env_local_content = ""
-        
-        # Add NEXT_PUBLIC_API_URL from NOSLOP_BACKEND_URL
-        if "NOSLOP_BACKEND_URL" in self.env_config:
-            env_local_content += f"NEXT_PUBLIC_API_URL={self.env_config['NOSLOP_BACKEND_URL']}\n"
-        else:
-            # Fallback to localhost
-            env_local_content += "NEXT_PUBLIC_API_URL=http://localhost:8000\n"
-        
-        # Write .env.local file
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env') as tmp:
-            tmp.write(env_local_content)
-            tmp_env_path = tmp.name
-        
-        try:
-            if not self.transfer_file(tmp_env_path, f"{self.install_dir}/.env.local"):
-                self.logger.warning("Failed to transfer .env.local file")
-            else:
-                # Set ownership
-                self.execute_remote(f"sudo chown {self.username}:{self.username} {self.install_dir}/.env.local")
-        finally:
-            import os
-            os.unlink(tmp_env_path)
-            
+
         return True
 
     def configure(self) -> bool:
@@ -200,15 +228,17 @@ class FrontendInstaller(BaseInstaller):
             exec_start = "/usr/bin/npm start"
             
             # Determine logs directory
-            if self.username == "root":
-                home_dir = "/root"
+            # Determine logs directory
+            if self.env_config.get("LOG_DIR"):
+                logs_dir = self.env_config["LOG_DIR"]
+            elif self.username == "root":
+                logs_dir = "/root/NoSlop/logs"
             else:
-                home_dir = f"/home/{self.username}"
-            logs_dir = f"{home_dir}/NoSlop/logs"
+                logs_dir = f"/home/{self.username}/NoSlop/logs"
             
             # Ensure logs directory exists
-            self.execute_remote(f"mkdir -p {logs_dir}")
-            self.execute_remote(f"chown {self.username}:{self.username} {logs_dir}")
+            self.execute_remote(f"sudo mkdir -p {logs_dir}")
+            self.execute_remote(f"sudo chown {self.username}:{self.username} {logs_dir}")
 
             # Create timestamped log file path
             from datetime import datetime
