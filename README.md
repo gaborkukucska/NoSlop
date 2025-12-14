@@ -15,6 +15,20 @@
 
 ---
 
+## Why NoSlop
+
+**The key reasons why NoSlop is revolutionary are:**
+- Easy automated multi device deployment to maximize your local compute potential (compute sharing / borrowing is coming soon)
+- On demand, self hosted, pier-to-pier, post and media sharing (with hash on the blockchain to ), and aggregation (users in full control)
+- You can still Like, Dislike, Collect (ad to playlist), Boost (share), Hide (flag), or even Comment on media others share with you
+- Built in blockchain to track media ownership on NoSlop, the hash of the original, and the digitally watermarked media are saved together on chain at the time of the first share.
+- No fees EVER, no advertisements, no central control, no censorship
+- Open Source community developed framework for creators and their audiences
+- AI driven media production workflows from editing, to local audio, image and video generation
+- Follow EXACTLY who you want, control your own information bubble
+
+---
+
 ## 🧩 Core Modules
 
 ### 🌱 **NoSlop Seed**
