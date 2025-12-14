@@ -219,6 +219,15 @@ class BackendInstaller(BaseInstaller):
         # Try to get logs to help debugging
         self.logger.info("Fetching recent logs...")
         self.execute_remote("sudo journalctl -u noslop-backend -n 50 --no-pager")
+        
+        # Actually fetch the logs (previous command was just running it in void context if result ignored?)
+        # Wait, execute_remote executes and returns code, out, err.
+        # We need to capture and log 'out'.
+        code, logs, err = self.execute_remote("sudo journalctl -u noslop-backend -n 50 --no-pager")
+        if code == 0:
+            self.logger.error(f"Backend Logs:\n{logs}")
+        else:
+            self.logger.error(f"Failed to fetch logs: {err}")
         return False
 
     def rollback(self):

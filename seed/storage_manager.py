@@ -23,6 +23,7 @@ class StorageConfig:
         self.comfyui_custom_nodes_dir = "/mnt/noslop/comfyui/custom_nodes"
         self.project_storage_dir = "/mnt/noslop/projects"
         self.media_cache_dir = "/mnt/noslop/media_cache"
+        self.workflows_dir = "/mnt/noslop/comfyui/workflows"
         self.base_path = "/mnt/noslop"
     
     def to_dict(self) -> Dict[str, str]:
@@ -33,6 +34,7 @@ class StorageConfig:
             "comfyui_custom_nodes_dir": self.comfyui_custom_nodes_dir,
             "project_storage_dir": self.project_storage_dir,
             "media_cache_dir": self.media_cache_dir,
+            "workflows_dir": self.workflows_dir,
             "base_path": self.base_path
         }
     
@@ -44,6 +46,7 @@ class StorageConfig:
             "COMFYUI_CUSTOM_NODES_DIR": self.comfyui_custom_nodes_dir,
             "PROJECT_STORAGE_DIR": self.project_storage_dir,
             "MEDIA_CACHE_DIR": self.media_cache_dir,
+            "COMFYUI_WORKFLOWS_DIR": self.workflows_dir,
             "SHARED_STORAGE_ENABLED": "true"
         }
 
@@ -95,8 +98,10 @@ class StorageManager:
         self.config.ollama_models_dir = f"{base_path}/ollama/models"
         self.config.comfyui_models_dir = f"{base_path}/comfyui/models"
         self.config.comfyui_custom_nodes_dir = f"{base_path}/comfyui/custom_nodes"
+        self.config.comfyui_custom_nodes_dir = f"{base_path}/comfyui/custom_nodes"
         self.config.project_storage_dir = f"{base_path}/projects"
         self.config.media_cache_dir = f"{base_path}/media_cache"
+        self.config.workflows_dir = f"{base_path}/comfyui/workflows"
         
         logger.info(f"Storage configured with base path: {self.config.base_path}")
         return self.config
@@ -318,7 +323,8 @@ class StorageManager:
             self.config.comfyui_models_dir,
             self.config.comfyui_custom_nodes_dir,
             self.config.project_storage_dir,
-            self.config.media_cache_dir
+            self.config.media_cache_dir,
+            self.config.workflows_dir
         ]:
             logger.debug(f"Ensuring directory exists: {path}")
             code, out, err = self.ssh_manager.execute_command(

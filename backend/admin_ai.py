@@ -92,8 +92,14 @@ class AdminAI:
             System prompt string
         """
         # Use centralized prompt management
+        # Pass .value to ensure we get the string "balanced" not "PersonalityType.BALANCED"
+        # even if str(Enum) behavior varies.
+        p_type = self.personality.type
+        if hasattr(p_type, "value"):
+            p_type = p_type.value
+            
         system_prompt = self.prompt_manager.get_admin_ai_system_prompt(
-            personality_type=self.personality.type,
+            personality_type=p_type,
             formality=self.personality.formality,
             enthusiasm=self.personality.enthusiasm
         )

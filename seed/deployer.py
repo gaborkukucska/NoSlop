@@ -405,6 +405,7 @@ class Deployer:
                     # Master node - use actual storage paths
                     models_dir = self.storage_config.comfyui_models_dir if self.storage_config else None
                     custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir if self.storage_config else None
+                    workflows_dir = self.storage_config.workflows_dir if hasattr(self.storage_config, 'workflows_dir') and self.storage_config else None
                     if self.storage_config:
                          logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
                 else:
@@ -412,10 +413,12 @@ class Deployer:
                     if self.storage_config:
                         models_dir = self.storage_config.comfyui_models_dir
                         custom_nodes_dir = self.storage_config.comfyui_custom_nodes_dir
+                        workflows_dir = self.storage_config.workflows_dir if hasattr(self.storage_config, 'workflows_dir') else None
                         logs_dir = f"{self.storage_config.base_path}/logs/{node.device.hostname}"
                     else:
                         models_dir = None
                         custom_nodes_dir = None
+                        workflows_dir = None
                 
                 username, password = get_credentials(node.device)
                 installer = ComfyUIInstaller(
@@ -425,6 +428,7 @@ class Deployer:
                     password=password,
                     models_dir=models_dir,
                     custom_nodes_dir=custom_nodes_dir,
+                    workflows_dir=workflows_dir,
                     logs_dir=logs_dir
                 )
                 if not installer.run():

@@ -136,6 +136,12 @@ class OllamaInstaller(BaseInstaller):
                         print(f"\n⚠️  Ollama {current_version} detected - newer models may not work")
                         print(f"   Auto-upgrading to latest version...")
                         should_install = True
+                    else:
+                        self.logger.info("✓ Existing Ollama version is sufficient")
+                        should_install = False
+                else:
+                    self.logger.warning(f"Could not parse version string, assuming sufficient if running: {version_str}")
+                    should_install = False
             except Exception as e:
                 self.logger.warning(f"Could not parse version: {e}, assuming need to install")
                 should_install = True
@@ -236,7 +242,17 @@ class OllamaInstaller(BaseInstaller):
         code, count_out, _ = self.execute_remote(f"find {existing_models_dir} -type f | wc -l")
         code2, size_out, _ = self.execute_remote(f"du -sh {existing_models_dir} 2>/dev/null")
         
-        model_count = count_out.strip() if code == 0 else "unknown"
+        model_count = count_out.strip() if code == 0 else "0"
+        
+        # Check size threshold (ignore if \u003c 100MB)
+        # du -sm returns size in MB
+        code_size, size_mb_out, _ = self.execute_remote(f"du -sm {existing_models_dir} | awk '{{print $1}}'")
+        size_mb = int(size_mb_out.strip()) if code_size == 0 and size_mb_out.strip().isdigit() else 0
+        
+        if size_mb < 100:
+            self.logger.info(f"Existing models directory is too small ({size_mb} MB), ignoring.")
+            return True
+
         model_size = size_out.split()[0] if code2 == 0 else "unknown"
         
         # Prompt user for migration

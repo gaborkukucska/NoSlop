@@ -21,7 +21,7 @@ class ComfyUIInstaller(BaseInstaller):
     def __init__(self, device, ssh_manager, port: int = 8188, gpu_index: int = 0, 
                  username: str = "root", password: str = None, 
                  models_dir: Optional[str] = None, custom_nodes_dir: Optional[str] = None,
-                 logs_dir: Optional[str] = None):
+                 workflows_dir: Optional[str] = None, logs_dir: Optional[str] = None):
         super().__init__(device, ssh_manager, "comfyui", username=username, password=password)
         self.port = port
         self.gpu_index = gpu_index
@@ -30,6 +30,7 @@ class ComfyUIInstaller(BaseInstaller):
         self.is_secondary = port != 8188
         self.models_dir = models_dir  # Shared models directory (optional)
         self.custom_nodes_dir = custom_nodes_dir  # Shared custom nodes directory (optional)
+        self.workflows_dir = workflows_dir # Shared workflows directory (optional)
         self.logs_dir = logs_dir # Shared logs directory (optional)
 
     def check_installed(self) -> bool:
@@ -46,6 +47,13 @@ class ComfyUIInstaller(BaseInstaller):
     def install(self) -> bool:
         """Install ComfyUI and dependencies."""
         self.logger.info(f"Installing ComfyUI to {self.install_dir}...")
+        
+        # Check if already installed (files exist even if service is stopped)
+        # We check for main.py and venv
+        code, _, _ = self.execute_remote(f"test -f {self.install_dir}/main.py && test -d {self.venv_dir}")
+        if code == 0:
+            self.logger.info(f"✓ Found existing ComfyUI installation at {self.install_dir}, skipping install.")
+            return True
         
         # Install system dependencies
         self.install_packages_with_retry(["git", "python3", "python3-venv", "python3-pip"])
@@ -146,9 +154,18 @@ class ComfyUIInstaller(BaseInstaller):
                     
                     if code_shared != 0 or not shared_files.strip():
                         # Shared directory is empty - migrate local models first
-                        self.logger.info(f"Migrating local models to shared storage...")
-                        print(f"\n📦 Migrating ComfyUI models to shared storage...")
-                        print(f"   From: {local_models}")
+                        
+                        # Check size threshold (ignore if < 100MB)
+                        code_size, size_mb_out, _ = self.execute_remote(f"du -sm {local_models} | awk '{{print $1}}'")
+                        size_mb = int(size_mb_out.strip()) if code_size == 0 and size_mb_out.strip().isdigit() else 0
+                        
+                        if size_mb < 100:
+                             self.logger.info(f"Local models directory is too small ({size_mb} MB), skipping migration.")
+                             # Safe to remove local and link
+                        else:
+                            self.logger.info(f"Migrating local models to shared storage...")
+                            print(f"\n📦 Migrating ComfyUI models to shared storage...")
+                            print(f"   From: {local_models}")
                         print(f"   To: {self.models_dir}")
                         
                         # Use rsync with --ignore-existing to preserve any existing files
@@ -196,8 +213,16 @@ class ComfyUIInstaller(BaseInstaller):
                     
                     if code_shared != 0 or not shared_files.strip():
                         # Shared directory is empty - migrate local custom_nodes first
-                        self.logger.info(f"Migrating local custom_nodes to shared storage...")
-                        print(f"\n📦 Migrating ComfyUI custom nodes to shared storage...")
+                        
+                        # Check size threshold for custom nodes (ignore if < 10MB as they are code)
+                        code_size, size_mb_out, _ = self.execute_remote(f"du -sm {local_custom_nodes} | awk '{{print $1}}'")
+                        size_mb = int(size_mb_out.strip()) if code_size == 0 and size_mb_out.strip().isdigit() else 0
+                        
+                        if size_mb < 10:
+                             self.logger.info(f"Local custom_nodes directory is small ({size_mb} MB), skipping migration.")
+                        else:
+                            self.logger.info(f"Migrating local custom_nodes to shared storage...")
+                            print(f"\n📦 Migrating ComfyUI custom nodes to shared storage...")
                         
                         # Use rsync with --ignore-existing
                         code_rsync, _, _ = self.execute_remote("which rsync")
@@ -223,6 +248,50 @@ class ComfyUIInstaller(BaseInstaller):
                     return False
                 
                 self.logger.info("✓ Custom nodes directory linked to shared storage")
+            
+            if self.workflows_dir:
+                self.logger.info(f"Setting up shared workflows directory: {self.workflows_dir}")
+                self.execute_remote(f"sudo mkdir -p {self.workflows_dir}")
+                self.execute_remote(f"sudo chmod 777 {self.workflows_dir}") # Allow users to write
+                
+                
+                # Check if workflows already exist
+                code, out, _ = self.execute_remote(f"ls -1 {self.workflows_dir}/*.json 2>/dev/null | head -1")
+                has_workflows = code == 0 and out.strip()
+                
+                if has_workflows:
+                     self.logger.info(f"✓ Workflows directory already populated at {self.workflows_dir}")
+                else:
+                    # Prompt user for local workflows to import
+                    print(f"\n" + "="*70)
+                    print(f"📄 ComfyUI Workflows")
+                    print(f"="*70)
+                    print(f"Do you have a folder of existing ComfyUI workflows (.json)?")
+                    print(f"The installer can import them to shared storage for the Agent to use.")
+                    
+                    workflows_src = input("Path to workflows folder [Leave empty to skip]: ").strip()
+                    
+                    if workflows_src:
+                        # Validate local path
+                        import os
+                        if os.path.isdir(workflows_src):
+                            print(f"   ✓ Found directory: {workflows_src}")
+                            print(f"   Importing workflows...")
+                            
+                            if self.transfer_directory(workflows_src, self.workflows_dir):
+                                 self.logger.info(f"Workflows transferred to {self.workflows_dir}")
+                                 print(f"   ✓ Workflows imported successfully")
+                                 
+                                 # Fix permissions
+                                 self.execute_remote(f"sudo chown -R {self.username}:{self.username} {self.workflows_dir}")
+                            else:
+                                 self.logger.error("Failed to transfer workflows")
+                                 print(f"   ❌ Failed to import workflows")
+                        else:
+                            print(f"   ⚠️  Directory not found: {workflows_src}")
+                            self.logger.warning(f"User provided invalid workflows path: {workflows_src}")
+                    else:
+                        self.logger.info("No workflows imported")
         
         if self.device.os_type.value == "linux":
             service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"

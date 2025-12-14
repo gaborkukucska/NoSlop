@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     ollama_models_dir: str = "/mnt/noslop/ollama/models"
     comfyui_models_dir: str = "/mnt/noslop/comfyui/models"
     comfyui_custom_nodes_dir: str = "/mnt/noslop/comfyui/custom_nodes"
+    comfyui_workflows_dir: str = "/mnt/noslop/comfyui/workflows"
     project_storage_dir: str = "/mnt/noslop/projects"
     media_cache_dir: str = "/mnt/noslop/media_cache"
     
