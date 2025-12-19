@@ -212,13 +212,28 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         }
     };
 
-    // Helper needed inside component
+    // Helper to get backend URL
     const getBackendUrl = () => {
-        if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+        // 1. If HTTPS, use relative paths (Caddy/Tunnel)
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+            return '';
+        }
+
+        // 2. Check API URL from environment
         if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+
+        // 3. Dynamic detection based on window location
         if (typeof window !== 'undefined') {
-            const h = window.location.hostname;
-            return (h === 'localhost' || h === '127.0.0.1') ? 'http://localhost:8000' : `http://${h}:8000`;
+            const hostname = window.location.hostname;
+            const protocol = window.location.protocol;
+
+            // For localhost
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                return `${protocol}//localhost:8000`;
+            }
+
+            // HTTP fallback
+            return `${protocol}//${hostname}:8000`;
         }
         return 'http://localhost:8000';
     };
@@ -278,27 +293,30 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
             // Wait, I can just use api.request if I made it public, but it's private.
             // I'll stick to the fetch but use the improved URL logic.
 
-            // Actually, the previous implementation had getBackendUrl inside the component.
-            // I should replace that with importing the URL or logic.
-            // But api.ts doesn't export the URL getter.
-
-            // Let's just implement the fetch here using the same logic as api.ts
+            // Get backend URL (matches api.ts logic)
             const getBackendUrl = () => {
-                // 0. Use Explicit Backend URL (Critical for Multi-Node)
-                if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') {
-                    return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
-                }
-
-                // 1. Check environment variable first
+                // 1. Check API URL from environment
                 if (process.env.NEXT_PUBLIC_API_URL) {
                     return process.env.NEXT_PUBLIC_API_URL;
                 }
 
+                // 2. Dynamic detection based on window location
                 if (typeof window !== 'undefined') {
                     const hostname = window.location.hostname;
+                    const protocol = window.location.protocol;
+
+                    // For localhost
                     if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                        return 'http://localhost:8000';
+                        return `${protocol}//localhost:8000`;
                     }
+
+                    // For HTTPS deployments (Cloudflare Tunnel)
+                    // This shouldn't be reached if NEXT_PUBLIC_API_URL is set correctly
+                    if (protocol === 'https:') {
+                        return '';  // Relative paths
+                    }
+
+                    // HTTP fallback
                     return `http://${hostname}:8000`;
                 }
                 return 'http://localhost:8000';

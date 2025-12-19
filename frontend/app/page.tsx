@@ -39,22 +39,24 @@ export default function Home() {
   const checkHealth = async () => {
     try {
       // Dynamically determine backend URL
+      // Dynamically determine backend URL
       let backendUrl = 'http://localhost:8000';
 
-      // 1. Check environment variable first (Direct Backend URL)
-      if (process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL) {
-        backendUrl = process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+      // 1. HTTPS check (Priority for Cloudflare Tunnel)
+      if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        backendUrl = ''; // Relative path
       }
-      // 2. Check generic API URL
+      // 2. Check environment variable
       else if (process.env.NEXT_PUBLIC_API_URL) {
         backendUrl = process.env.NEXT_PUBLIC_API_URL;
       }
-      // 3. Fallback to dynamic hostname
+      // 3. Fallback: Dynamic detection
       else if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
-        backendUrl = (hostname !== 'localhost' && hostname !== '127.0.0.1')
-          ? `http://${hostname}:8000`
-          : 'http://localhost:8000';
+        const protocol = window.location.protocol;
+        if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          backendUrl = `${protocol}//${hostname}:8000`;
+        }
       }
 
       const response = await fetch(`${backendUrl}/health`);

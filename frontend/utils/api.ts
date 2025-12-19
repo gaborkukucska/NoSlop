@@ -7,35 +7,36 @@
 // If accessing via network IP (e.g., 10.0.0.3:3000), use same IP for backend (10.0.0.3:8000)
 // Otherwise fall back to localhost for local development
 const getApiBaseUrl = () => {
-    // 0. Use Explicit Backend URL if available (Critical for Multi-Node)
-    if (typeof process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL !== 'undefined') {
-        return process.env.NEXT_PUBLIC_NOSLOP_BACKEND_URL;
+    // 1. If we are on HTTPS, always use relative paths (assuming Caddy/Tunnel handles routing)
+    // This prevents Mixed Content errors when accessing via Cloudflare Tunnel
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        return ''; 
     }
 
-    // 1. Check environment variable first (set during build/deployment)
-    if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined') {
-        // If explicitly set to empty string, use relative paths (proxy mode)
-        // This enables Next.js rewrites to handle /api/* requests
-        if (process.env.NEXT_PUBLIC_API_URL === '') {
-            return ''; // Relative mode - URLs will be /api/... 
-        }
+    // 2. Check environment variable (set during build/deployment)
+    // This handles local access where we need to point to a specific backend IP
+    if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined' && process.env.NEXT_PUBLIC_API_URL !== '') {
         return process.env.NEXT_PUBLIC_API_URL;
     }
 
-    // 2. Dynamic detection (fallback for dev mode or unconfigured deployments)
+    // 3. Dynamic detection (fallback for dev mode or unconfigured deployments)
     if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
+        const protocol = window.location.protocol;
 
-        // If on localhost, ALWAYS use localhost:8000
+        // If on localhost, use localhost backend with proper port
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
-            return 'http://localhost:8000';
+            return `${protocol}//localhost:8000`;
         }
 
-        // If accessing via network IP (e.g., 192.168.x.x), guess backend is on same IP
-        return `http://${hostname}:8000`;
+        // For HTTP access on valid IP/Host, assume backend is on same IP:8000 
+        // if no env var was provided.
+        // NOTE: This might fail for worker nodes if they don't have local backend,
+        // which is why NEXT_PUBLIC_API_URL should be set in production.
+        return `${protocol}//${hostname}:8000`;
     }
 
-    // 3. Last resort fallback
+    // 4. Last resort fallback
     return 'http://localhost:8000';
 };
 

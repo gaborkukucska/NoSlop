@@ -178,6 +178,24 @@ Start installation? [y/N]:
 
 See [`seed/README.md`](seed/README.md) for detailed usage instructions.
 
+See [`seed/README.md`](seed/README.md) for detailed usage instructions.
+
+### 🌐 Accessing Your Dashboard
+
+NoSlop supports **Hybrid Access**, meaning you can use it locally and remotely at the same time!
+
+#### 🏠 Local Access (LAN)
+Use this when you are at home for the fastest connection.
+*   **URL**: `http://<node-ip>:3000`
+*   **Example**: `http://192.168.0.22:3000`
+
+#### ☁️ Web Access (Remote)
+Use this when you are away, via Cloudflare Tunnel (if configured).
+*   **URL**: `https://app.your-domain.com`
+*   **Example**: `https://app.noslop.me`
+
+Both methods work simultaneously. The system automatically detects your connection method and optimizes API routing to prevent errors.
+
 ### Managing Your Deployment
 
 After deployment, you can manage your NoSlop services using these commands:

@@ -35,6 +35,13 @@ const nextConfig: NextConfig = {
         source: '/openapi.json',
         destination: `${process.env.NOSLOP_BACKEND_URL || 'http://localhost:8000'}/openapi.json`,
       },
+      {
+        source: '/health',
+        destination: `${process.env.NOSLOP_BACKEND_URL || 'http://localhost:8000'}/health`,
+      },
+      // Note: Next.js rewrites do not support WebSockets (ws://) directly.
+      // However, Caddy should handle /ws/* routing before it hits Next.js.
+      // If hitting Next.js directly via HTTP/WS, this won't proxy the WS upgrade correctly.
     ];
   },
 };

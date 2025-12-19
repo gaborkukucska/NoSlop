@@ -15,7 +15,17 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 
 **Last Updated**: 2025-12-05
 
-## ✅ Recently Completed (Session 5 - 2025-12-05)
+## ✅ Recently Completed (Session 8 - 2025-12-19)
+
+### Hybrid Access & SSL Stabilization
+- **Dual Access Modes**: Successfully implemented simultaneous Local (HTTP) and Web (HTTPS) access.
+- **Frontend Routing**: Smart URL detection handles both relative paths (for Tunnel) and absolute IPs (for LAN).
+- **Tunnel Compatibility**: Fixed `/health` and API routing to work even when Tunnel points directly to Next.js.
+- **Documentation**: Updated guides for hybrid access configuration.
+
+**Status**: ✅ **Hybrid Access Operational** - Ready for detailed testing.
+
+## ✅ Previously Completed (Session 5 - 2025-12-05)
 
 ### Phase 0: Shared Storage & Project Organization
 - **Storage Manager**: Complete NFS/SMB configuration and automation

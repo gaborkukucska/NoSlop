@@ -110,3 +110,4 @@ Desktop.ini
 # Misc
 .vercel
 *.pem
+certs/

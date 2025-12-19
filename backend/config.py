@@ -111,6 +111,23 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
     
     # ========================================================================
+    # SSL/TLS Configuration
+    # ========================================================================
+    ssl_enabled: bool = False
+    ssl_cert_path: str = "/etc/noslop/certs/server.crt"
+    ssl_key_path: str = "/etc/noslop/certs/server.key"
+    
+    # External URL for backend (used by frontend for API calls)
+    # For HTTPS: https://192.168.0.22:8443 or https://api.noslop.me
+    # For HTTP: http://192.168.0.22:8000
+    backend_external_url: str = "http://localhost:8000"
+    
+    # Frontend external URL (for browser access)
+    # For HTTPS: https://app.noslop.me
+    # For HTTP: http://192.168.0.22:3000
+    frontend_external_url: str = "http://localhost:3000"
+    
+    # ========================================================================
     # Feature Flags
     # ========================================================================
     enable_project_manager: bool = True

@@ -128,39 +128,23 @@ class FrontendInstaller(BaseInstaller):
         self.logger.info("Creating .env.local file for frontend...")
         env_local_content = ""
         
-        # Add NEXT_PUBLIC_API_URL
-        # Add NEXT_PUBLIC_API_URL
-        # We now use Next.js Rewrites to proxy API requests to avoid CORS/Mixed Content issues
-        # So we want the frontend to call its own domain (relative path)
-        if "NOSLOP_FRONTEND_EXTERNAL_URL" in self.env_config:
-            self.logger.info(f"Using external frontend URL: {self.env_config['NOSLOP_FRONTEND_EXTERNAL_URL']}")
-            # When using external URL (e.g. Cloudflare), we proxy /api -> Backend
-            # Setting it to empty string or just the base makes it relative?
-            # Actually, typically we can just leave it empty if the code handles it, 
-            # or set it to the external URL itself if we want absolute, 
-            # BUT the rewrites work on the Next.js server.
-            # If we set NEXT_PUBLIC_API_URL to "", axios/fetch might need handling.
-            # Let's check how the frontend uses it. 
-            # Assuming standard usage: fetch(`${API_URL}/endpoint`)
-            # If API_URL is empty, it becomes fetch(`/endpoint`) -> hits frontend -> rewritten.
-            # However, our rewrites are for /api/:path*.
-            # So we probably want just "" and ensure code appends /api or set it to "/api"
-            # Let's look at the previous content: it was full URL.
-            # If we set it to just "", then `${API_URL}/api/foo` -> `/api/foo`. Correct.
-            pass
-        
-        # We enforce using the proxy for consistent behavior across LAN/WAN
-        # The proxy destination is handled by NOSLOP_BACKEND_URL in next.config.ts (server-side env)
-        # So client-side API_URL should be empty (relative root)
-        env_local_content += f"NEXT_PUBLIC_API_URL=\n"
+        # Add NEXT_PUBLIC_API_URL from deployer configuration
+        # Deployer sets this based on deployment scenario:
+        # - HTTPS mode (Cloudflare): empty string for relative paths
+        # - HTTP multi-node: explicit backend URL (e.g., http://192.168.0.22:8000)
+        # - HTTP single-node: backend URL or empty for dynamic detection
+        if "NEXT_PUBLIC_API_URL" in self.env_config:
+            api_url = self.env_config["NEXT_PUBLIC_API_URL"]
+            env_local_content += f"NEXT_PUBLIC_API_URL={api_url}\n"
+            self.logger.info(f"Setting NEXT_PUBLIC_API_URL={api_url}")
+        else:
+            # Fallback: empty string for relative paths
+            env_local_content += f"NEXT_PUBLIC_API_URL=\n"
+            self.logger.warning("NEXT_PUBLIC_API_URL not in config, using empty string")
         
         # We MUST ensure NOSLOP_BACKEND_URL is available to Next.js server (in .env.local)
         if "NOSLOP_BACKEND_URL" in self.env_config:
              env_local_content += f"NOSLOP_BACKEND_URL={self.env_config['NOSLOP_BACKEND_URL']}\n"
-             
-        # ALSO ensure the client-side variable is set
-        if "NEXT_PUBLIC_NOSLOP_BACKEND_URL" in self.env_config:
-             env_local_content += f"NEXT_PUBLIC_NOSLOP_BACKEND_URL={self.env_config['NEXT_PUBLIC_NOSLOP_BACKEND_URL']}\n"
         
         # Write .env.local file
         import tempfile

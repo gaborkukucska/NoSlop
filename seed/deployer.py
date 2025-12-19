@@ -24,7 +24,9 @@ from seed.installers.comfyui_installer import ComfyUIInstaller
 from seed.installers.ffmpeg_installer import FFmpegInstaller
 from seed.installers.backend_installer import BackendInstaller
 from seed.installers.frontend_installer import FrontendInstaller
+from seed.installers.caddy_installer import CaddyInstaller
 from seed.storage_manager import StorageManager, StorageConfig
+from seed.manage_certs import CertificateManager
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,29 @@ class Deployer:
         logger.info(f"Deployer initialized. Deployment ID: {self.deployment_id}")
         logger.info(f"Deployment directory: {self.deployment_dir}")
     
+    
+    def _load_env_file(self) -> Dict[str, str]:
+        """Load .env file and return dict of key-value pairs"""
+        env_vars = {}
+        env_path = Path.home() / "NoSlop" / ".env"
+        
+        if not env_path.exists():
+            return env_vars
+        
+        try:
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key.strip()] = value.strip()
+        except Exception as e:
+            logger.warning(f"Failed to read .env file: {e}")
+        
+        return env_vars
+
     def validate_plan(self, plan: DeploymentPlan) -> tuple[bool, str]:
         """Validate deployment plan before execution."""
         logger.info("Validating deployment plan...")
@@ -192,10 +217,8 @@ class Deployer:
                 # Currently workers don't need direct DB access, only backend does.
                 config["OLLAMA_HOST"] = f"http://{plan.master_node.device.ip_address}:11434"
         
-        # EXPOSE BACKEND URL TO FRONTEND CLIENT
-        # This is critical for client-side calls (Health Check, WebSockets) in multi-node setups
-        if "NOSLOP_BACKEND_URL" in config:
-             config["NEXT_PUBLIC_NOSLOP_BACKEND_URL"] = config["NOSLOP_BACKEND_URL"]
+        # NOTE: NEXT_PUBLIC_NOSLOP_BACKEND_URL will be set later based on external URL configuration
+        # to avoid mixed content errors when using HTTPS (Cloudflare Tunnel, etc.)
         
         # ComfyUI URLs
         compute_nodes = plan.get_node_by_role(NodeRole.COMPUTE)
@@ -237,12 +260,64 @@ class Deployer:
         config["HF_HOME"] = f"{models_base}/transformers"
         config["WHISPER_CACHE_DIR"] = f"{models_base}/whisper"
         
-        # Check for external URL override
+        env_config = self._load_env_file()
+        
+        # Check for external URL override from .env file
         import os
-        external_url = os.environ.get("NOSLOP_FRONTEND_EXTERNAL_URL")
+        frontend_external_url = env_config.get("NOSLOP_FRONTEND_EXTERNAL_URL",
+                                               os.environ.get("NOSLOP_FRONTEND_EXTERNAL_URL", ""))
+        backend_external_url = env_config.get("NOSLOP_BACKEND_EXTERNAL_URL",
+                                              os.environ.get("NOSLOP_BACKEND_EXTERNAL_URL", ""))
 
-        if external_url:
-             config["NOSLOP_FRONTEND_EXTERNAL_URL"] = external_url
+        if frontend_external_url:
+             config["NOSLOP_FRONTEND_EXTERNAL_URL"] = frontend_external_url
+        
+        # Determine if we're in Cloudflare Tunnel / HTTPS mode
+        is_https_mode = (
+            frontend_external_url.startswith("https://") or 
+            backend_external_url.startswith("https://")
+        )
+        
+        # Determine the backend URL for client-side access
+        # For HTTPS mode: use relative paths (Caddy routing)
+        # For HTTP mode: use explicit backend URL (important for multi-node deployments)
+        if backend_external_url:
+            config["NOSLOP_BACKEND_EXTERNAL_URL"] = backend_external_url
+            
+            # HTTPS Clients (External): Use relative paths (handled by frontend logic)
+            # HTTP Clients (Internal): Use internal backend URL (NOSLOP_BACKEND_URL)
+            # We set NEXT_PUBLIC_API_URL to the internal URL so local worker nodes can connect.
+            if "NOSLOP_BACKEND_URL" in config:
+                config["NEXT_PUBLIC_API_URL"] = config["NOSLOP_BACKEND_URL"]
+            else:
+                config["NEXT_PUBLIC_API_URL"] = backend_external_url
+
+        elif frontend_external_url and frontend_external_url.startswith("https://"):
+            # Frontend is HTTPS but backend URL not explicitly set
+            # Assume Caddy is handling routing
+            
+            # Identify the backend IP (Master Node IP)
+            backend_ip = plan.master_node.device.ip_address if plan.master_node else node.device.ip_address
+            # SSR URL: Use internal HTTP for server-side calls
+            internal_backend_url = f"http://{backend_ip}:8000"
+            
+            config["NOSLOP_BACKEND_EXTERNAL_URL"] = internal_backend_url
+            
+            # HTTPS Clients (External): Use relative paths (handled by frontend logic)
+            # HTTP Clients (Internal): Use internal backend URL
+            if "NOSLOP_BACKEND_URL" in config:
+                config["NEXT_PUBLIC_API_URL"] = config["NOSLOP_BACKEND_URL"]
+            else:
+                 config["NEXT_PUBLIC_API_URL"] = internal_backend_url
+        else:
+            # No explicit external URLs set - standard HTTP deployment
+            # For multi-node: frontend needs to know where backend is
+            # For single-node: frontend and backend are on same machine
+            
+            if "NOSLOP_BACKEND_URL" in config:
+                # Use the backend URL we set earlier (lines 207 or 215)
+                # This handles both single-node and multi-node cases
+                config["NEXT_PUBLIC_API_URL"] = config["NOSLOP_BACKEND_URL"]
 
         # Centralized Logging
         # If shared storage is available, we write logs to it so they are aggregated on Master
@@ -445,6 +520,234 @@ class Deployer:
                     health_status="healthy"
                 ))
 
+        # Phase 4.5: SSL/TLS Setup (if HTTPS is required)
+        logger.info("\n[Phase 4.5] Checking SSL/TLS Requirements...")
+        
+        # Load configuration from .env file
+        env_config = self._load_env_file()
+        
+        # Check for HTTPS URLs (prioritize .env file, fallback to environment)
+        import os
+        frontend_external_url = env_config.get("NOSLOP_FRONTEND_EXTERNAL_URL", 
+                                               os.environ.get("NOSLOP_FRONTEND_EXTERNAL_URL", ""))
+        backend_external_url = env_config.get("NOSLOP_BACKEND_EXTERNAL_URL",
+                                              os.environ.get("NOSLOP_BACKEND_EXTERNAL_URL", ""))
+        
+        needs_https = (
+            frontend_external_url.startswith("https://") or 
+            backend_external_url.startswith("https://")
+        )
+        
+        if needs_https and plan.master_node:
+            logger.info("🔐 HTTPS detected in configuration - Setting up SSL/TLS...")
+            logger.info(f"   Frontend URL: {frontend_external_url}")
+            logger.info(f"   Backend URL: {backend_external_url}")
+            
+            master_node = plan.master_node
+            master_ip = master_node.device.ip_address
+            master_hostname = master_node.device.hostname
+            username, password = get_credentials(master_node.device)
+            
+            # Determine certificate hostname and IPs
+            # Extract domain from URLs if present
+            cert_hostname = master_ip  # Default to IP
+            cert_ips = [master_ip]
+            
+            if frontend_external_url and "://" in frontend_external_url:
+                # Extract hostname from URL
+                from urllib.parse import urlparse
+                parsed = urlparse(frontend_external_url)
+                if parsed.hostname and not parsed.hostname.startswith("192.168") and not parsed.hostname.startswith("10."):
+                    # It's a domain name, use it as cert hostname
+                    cert_hostname = parsed.hostname
+            
+            logger.info(f"   Certificate hostname: {cert_hostname}")
+            logger.info(f"   Certificate IPs: {', '.join(cert_ips)}")
+            
+            # Step 1: Generate SSL certificates
+            logger.info("   📜 Generating SSL certificates...")
+            cert_manager = CertificateManager(cert_dir="/home/tom/NoSlop/certs")
+            
+            try:
+                cert_path, key_path = cert_manager.generate_self_signed_cert(
+                    hostname=cert_hostname,
+                    ip_addresses=cert_ips,
+                    output_name="server",
+                    validity_days=365
+                )
+                logger.info(f"   ✓ Certificates generated: {cert_path}")
+            except Exception as e:
+                logger.error(f"   ✗ Failed to generate certificates: {e}")
+                # Continue without SSL - services will still work on HTTP
+                needs_https = False
+            
+            if needs_https:
+                # Step 2: Copy certificates to master node
+                logger.info("   📤 Copying certificates to master node...")
+                try:
+                    # Check if master node is local (same machine)
+                    import socket
+                    local_hostname = socket.gethostname()
+                    local_ips = []
+                    try:
+                        local_ips.append(socket.gethostbyname(local_hostname))
+                        # Also check all local IPs
+                        import netifaces
+                        for interface in netifaces.interfaces():
+                            addrs = netifaces.ifaddresses(interface)
+                            if netifaces.AF_INET in addrs:
+                                for addr in addrs[netifaces.AF_INET]:
+                                    local_ips.append(addr['addr'])
+                    except:
+                        pass
+                    
+                    is_local = (
+                        master_hostname == local_hostname or
+                        master_hostname == "localhost" or
+                        master_ip == "127.0.0.1" or
+                        master_ip in local_ips
+                    )
+                    
+                    remote_cert_path = "/etc/noslop/certs/server.crt"
+                    remote_key_path = "/etc/noslop/certs/server.key"
+                    
+                    if is_local:
+                        # Local deployment - use local file operations
+                        logger.info("   📋 Local deployment detected - copying certificates locally...")
+                        import subprocess
+                        import shutil
+                        
+                        # Create directory with sudo
+                        subprocess.run(
+                            ["sudo", "mkdir", "-p", "/etc/noslop/certs"],
+                            check=True,
+                            timeout=30
+                        )
+                        
+                        # Copy files with sudo
+                        subprocess.run(
+                            ["sudo", "cp", cert_path, remote_cert_path],
+                            check=True,
+                            timeout=30
+                        )
+                        subprocess.run(
+                            ["sudo", "cp", key_path, remote_key_path],
+                            check=True,
+                            timeout=30
+                        )
+                        
+                        # Set permissions
+                        subprocess.run(
+                            ["sudo", "chmod", "644", remote_cert_path],
+                            check=True,
+                            timeout=30
+                        )
+                        subprocess.run(
+                            ["sudo", "chmod", "600", remote_key_path],
+                            check=True,
+                            timeout=30
+                        )
+                        
+                        logger.info("   ✓ Certificates copied locally")
+                    else:
+                        # Remote deployment - use SSH
+                        logger.info("   📤 Remote deployment detected - copying via SSH...")
+                        
+                        # Create SSH client
+                        client = self.ssh_manager.create_ssh_client(
+                            master_ip,
+                            username=username,
+                            port=22
+                        )
+                        
+                        if not client:
+                            raise Exception(f"Failed to create SSH connection to {master_ip}")
+                        
+                        # Create remote directory
+                        exit_code, stdout, stderr = self.ssh_manager.execute_command(
+                            client,
+                            "sudo mkdir -p /etc/noslop/certs && sudo chown -R $USER:$USER /etc/noslop",
+                            timeout=30,
+                            sudo_password=password
+                        )
+                        
+                        if exit_code != 0:
+                            raise Exception(f"Failed to create remote directory: {stderr}")
+                        
+                        # Transfer files
+                        if not self.ssh_manager.transfer_file(client, cert_path, remote_cert_path):
+                            raise Exception("Failed to transfer certificate file")
+                        
+                        if not self.ssh_manager.transfer_file(client, key_path, remote_key_path):
+                            raise Exception("Failed to transfer key file")
+                        
+                        # Set permissions
+                        exit_code, stdout, stderr = self.ssh_manager.execute_command(
+                            client,
+                            f"chmod 644 {remote_cert_path} && chmod 600 {remote_key_path}",
+                            timeout=30
+                        )
+                        
+                        if exit_code != 0:
+                            raise Exception(f"Failed to set permissions: {stderr}")
+                        
+                        client.close()
+                        logger.info("   ✓ Certificates copied to remote node")
+                    
+                    # Use remote paths for Caddy
+                    cert_path = remote_cert_path
+                    key_path = remote_key_path
+                    
+                except Exception as e:
+                    logger.error(f"   ✗ Failed to copy certificates: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
+                    needs_https = False
+            
+            if needs_https:
+                # Step 3: Install and configure Caddy
+                logger.info("   🔧 Installing Caddy reverse proxy...")
+                try:
+                    caddy_installer = CaddyInstaller(
+                        ssh_manager=self.ssh_manager,
+                        node_hostname=master_hostname,
+                        node_ip=master_ip
+                    )
+                    
+                    # Find frontend node IP
+                    frontend_node_ip = "127.0.0.1"
+                    for node in plan.nodes:
+                        if "noslop-frontend" in node.services:
+                            if node.device.hostname == master_hostname:
+                                frontend_node_ip = "127.0.0.1"
+                            else:
+                                frontend_node_ip = node.device.ip_address
+                            break
+
+                    if caddy_installer.install(
+                        cert_path=cert_path,
+                        key_path=key_path,
+                        backend_port=8000,
+                        frontend_port=3000,
+                        enable_frontend_proxy=True,
+                        frontend_node_ip=frontend_node_ip,
+                        external_hostname=cert_hostname
+                    ):
+                        logger.info("   ✓ Caddy installed and configured")
+                        logger.info(f"   🔒 HTTPS Backend: https://{master_ip}:8443")
+                        logger.info(f"   🔒 HTTPS Frontend: https://{master_ip}:3443")
+                    else:
+                        logger.warning("   ⚠ Caddy installation failed - continuing without SSL")
+                        needs_https = False
+                        
+                except Exception as e:
+                    logger.error(f"   ✗ Caddy installation error: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
+                    needs_https = False
+        else:
+            logger.info("   ℹ HTTP configuration detected - Skipping SSL setup")
+
         # Phase 4: NoSlop Services
         logger.info("\n[Phase 4] Installing NoSlop Services...")
 
@@ -621,14 +924,61 @@ class Deployer:
         backend_instances = self.registry.get_instances_by_type(ServiceType.NOSLOP_BACKEND)
         if backend_instances:
             backend = backend_instances[0]
-            logger.info(f"\n📡 Backend API: http://{backend.host}:{backend.port}")
+            # Check if SSL was enabled (quick check via env config or default port assumptions)
+            # Better to use the registry or just check if 8443 port is active?
+            # Ideally registry would track https scheme.
+            # For now, we reuse the logic: if we deployed caddy, we have https.
+            # But simpler: check if we set up SSL logic.
+            # We can check if `needs_https` was true, but that variable is local to deploy().
+            # Let's check environment variable in config or registry.
+            # Or just check if we have https urls in registry? Registry currently stores http scheme mostly.
+            
+            # Simple heuristic: Check if env config has external URL with https
+            env_config = self._load_env_file()
+            backend_url = f"http://{backend.host}:{backend.port}"
+            
+            if env_config.get("NOSLOP_BACKEND_EXTERNAL_URL", "").startswith("https://"):
+                 backend_url = env_config.get("NOSLOP_BACKEND_EXTERNAL_URL")
+            elif env_config.get("NOSLOP_FRONTEND_EXTERNAL_URL", "").startswith("https://"):
+                 # Assume backend also https
+                 backend_url = f"https://{backend.host}:8443"
+
+            logger.info(f"\n📡 Backend API: {backend_url}")
         
         # Frontend URLs
         frontend_instances = self.registry.get_instances_by_type(ServiceType.NOSLOP_FRONTEND)
         if frontend_instances:
             logger.info(f"\n🖥️  Frontend (Web UI):")
             for i, frontend in enumerate(frontend_instances, 1):
-                logger.info(f"   {i}. http://{frontend.host}:{frontend.port}")
+                frontend_url = f"http://{frontend.host}:{frontend.port}"
+                
+                if env_config.get("NOSLOP_FRONTEND_EXTERNAL_URL", "").startswith("https://"):
+                     # If override matches IP, use it. If it's a domain, use it.
+                     frontend_url = env_config.get("NOSLOP_FRONTEND_EXTERNAL_URL")
+                     
+                     logger.info(f"   {i}. {frontend_url}")
+                     
+                     # Check if it is a domain name. If so, also show the IP based access.
+                     if "://" in frontend_url:
+                        try:
+                           from urllib.parse import urlparse
+                           u = urlparse(frontend_url)
+                           # Check if hostname is an IP
+                           import ipaddress
+                           try:
+                               ipaddress.ip_address(u.hostname)
+                           except ValueError:
+                               # It's a domain name. Show IP fallback.
+                               # Assuming Caddy is on Master Node / Local Node.
+                               # We need Master IP. 
+                               # Since we are inside deploy(), we might not have master_ip variable easily unless we get it from plan.
+                               if plan.master_node:
+                                    master_ip = plan.master_node.device.ip_address
+                                    logger.info(f"      (IP Access: https://{master_ip}:3443)")
+                        except:
+                            pass
+                else:
+                    logger.info(f"   {i}. {frontend_url}")
         
         logger.info("\n" + "="*70)
         

@@ -11,6 +11,19 @@ current_cycle: "Deployment Stabilization"
 
 ## Recent Changes
 
+- **2025-12-19** (Session 8):
+    - **Hybrid Access & SSL Fixes - COMPLETE**:
+      - **Objective**: Key requirement: Enable simultaneous Local (LAN) and Web (Cloudflare) access without Mixed Content or Connection Refused errors.
+      - **Implementation**:
+        - Refactored `frontend/utils/api.ts` to use relative paths ONLY for HTTPS, ensuring Cloudflare compatibility.
+        - Updated `seed/deployer.py` to always set internal backend URL for local connectivity.
+        - Added `next.config.ts` rewrite rules for `/health` to support direct-to-frontend tunnel routing.
+      - **Files Modified**: `frontend/utils/api.ts`, `frontend/app/page.tsx`, `frontend/next.config.ts`, `seed/deployer.py`, `helperfiles/CLOUDFLARE_SETUP.md`
+      - **Impact**: 
+        - ✅ **Local Access**: `http://192.168.0.x:3000` works perfectly (Worker nodes connect).
+        - ✅ **Web Access**: `https://app.noslop.me` works perfectly (No SSL errors).
+        - **Status**: Deployment is fully robust for both access methods.
+
 - **2025-12-12** (Session 7):
     - **Status Command & Installer Improvements - COMPLETE**:
       - **Objective**: Improve visibility of installed tools and installer summary accuracy as requested by user.
