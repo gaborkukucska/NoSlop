@@ -6,12 +6,12 @@ The deployer has been fixed to fully support **Hybrid Access** (Simultaneous Loc
 
 ### 1. Update Your `.env` File
 
-Edit `/home/tom/NoSlop/.env` and make sure these are set:
+Edit `.env` and make sure these are set:
 
 ```bash
 # Set external URLs to your Cloudflare domain
-NOSLOP_FRONTEND_EXTERNAL_URL=https://app.noslop.me
-NOSLOP_BACKEND_EXTERNAL_URL=https://app.noslop.me
+NOSLOP_FRONTEND_EXTERNAL_URL=https://yourdomain.com
+NOSLOP_BACKEND_EXTERNAL_URL=https://yourdomain.com
 ```
 
 ### 2. Redeploy the Framework
@@ -25,7 +25,7 @@ python -m seed.seed_cli deploy
 
 Make sure your Cloudflare Tunnel points to:
 
-* **Public Hostname**: `app.noslop.me` (or your domain)
+* **Public Hostname**: `yourdomain.com` (or your domain)
 * **Service**:
   * **Single-Device**: `http://localhost:8080` (Direct to Caddy)
   * **Multi-Device**: `http://<MASTER_NODE_IP>:8080` (Direct to Caddy on Master)
@@ -36,7 +36,7 @@ Make sure your Cloudflare Tunnel points to:
 
 **Web Access (HTTPS)**:
 
-* Visit `https://app.noslop.me`
+* Visit `https://yourdomain.com`
 * ✅ No Mixed Content errors
 * ✅ Health check passes (via `/health` rewrite)
 * ✅ Chat works
@@ -49,17 +49,9 @@ Make sure your Cloudflare Tunnel points to:
 
 ## How It Works
 
-**Before (Broken)**:
-
-* Frontend: `https://app.noslop.me`
-* Tries to call: `http://app.noslop.me:8000/health` ❌ (blocked by browser)
-* WebSocket: `ws://localhost:8000/ws/activity` ❌ (wrong host)
-
-**After (Fixed)**:
-
-* Frontend: `https://app.noslop.me`
-* API calls: `https://app.noslop.me/api/health` ✅
-* WebSocket: `wss://app.noslop.me/ws/activity` ✅
+* Frontend: `https://yourdomain.com`
+* API calls: `https://yourdomain.com/api/health` ✅
+* WebSocket: `wss://yourdomain.com/ws/activity` ✅
 * Caddy routes `/api/*` and `/ws/*` to backend internally
 
 ## Troubleshooting

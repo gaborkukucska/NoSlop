@@ -11,6 +11,34 @@ current_cycle: "Deployment Stabilization"
 
 ## Recent Changes
 
+- **2025-12-19** (Session 9 - Part 2):
+  - **Authentication Hardening & Caddy Gateway Architecture - COMPLETE**:
+    - **Objective**: Harden security against invalid sessions and fix WebSocket connectivity for distributed nodes via Cloudflare.
+    - **Implementation**:
+      - **Caddy Gateway Architecture**: Established Caddy (Port 8080) on Master Node as the required Gateway for Cloudflare Tunnels (routes `/api` & `/ws` locally, proxies `/*` to frontend).
+      - **Auth Hardening**: Implemented global 401 Unauthorized interceptor in `ApiClient` and strict token verification on app mount.
+      - **Auto-Logout**: Users are instantly logged out and redirected if session becomes invalid during usage.
+      - **Documentation**: Updated `CLOUDFLARE_SETUP.md` with critical Port 8080 requirement.
+    - **Files Modified**: `frontend/utils/api.ts`, `frontend/app/context/AuthContext.tsx`, `helperfiles/CLOUDFLARE_SETUP.md`, `README.md`.
+    - **Impact**:
+      - ✅ **Robust Security**: No more "disconnected" UI state for unauthenticated users.
+      - ✅ **Reliable WebSockets**: Fixed connection failures by routing WSS traffic through Caddy Gateway.
+      - **Status**: **Critical Infrastructure Fixes Complete**.
+
+- **2025-12-19** (Session 9):
+  - **Authentication Hardening & Caddy Gateway Architecture - COMPLETE**:
+    - **Objective**: Harden security against invalid sessions and fix WebSocket connectivity for distributed nodes via Cloudflare.
+    - **Implementation**:
+      - **Caddy Gateway Architecture**: Established Caddy (Port 8080) on Master Node as the required Gateway for Cloudflare Tunnels (routes `/api` & `/ws` locally, proxies `/*` to frontend).
+      - **Auth Hardening**: Implemented global 401 Unauthorized interceptor in `ApiClient` and strict token verification on app mount.
+      - **Auto-Logout**: Users are instantly logged out and redirected if session becomes invalid during usage.
+      - **Documentation**: Updated `CLOUDFLARE_SETUP.md` with critical Port 8080 requirement.
+    - **Files Modified**: `frontend/utils/api.ts`, `frontend/app/context/AuthContext.tsx`, `helperfiles/CLOUDFLARE_SETUP.md`, `README.md`.
+    - **Impact**:
+      - ✅ **Robust Security**: No more "disconnected" UI state for unauthenticated users.
+      - ✅ **Reliable WebSockets**: Fixed connection failures by routing WSS traffic through Caddy Gateway.
+      - **Status**: **Critical Infrastructure Fixes Complete**.
+
 - **2025-12-19** (Session 9):
   - **Admin AI Workflow Orchestration & Chat Fixes - COMPLETE**:
     - **Objective**: Fix Admin AI chat truncation and enable natural language generation of ComfyUI workflows.
