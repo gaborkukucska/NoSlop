@@ -18,7 +18,9 @@ from models import (
 from config import settings
 from prompt_manager import get_prompt_manager
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
 from project_manager import ProjectManager
+from workflow_generator import WorkflowGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ class AdminAI:
         self.context: Dict[str, Any] = {}
         self.prompt_manager = get_prompt_manager()
         self.connection_manager = connection_manager
+        self.workflow_generator = WorkflowGenerator()
         
         logger.info("Admin AI initialized", extra={"context": {"personality": self.personality.type, "model": self.model}})
 
@@ -217,7 +220,7 @@ class AdminAI:
                 messages=messages,
                 options={
                     "temperature": self.personality.creativity,
-                    "num_predict": int(200 * self.personality.verbosity + 100)
+                    "num_predict": int(settings.ollama_max_predict * self.personality.verbosity + 500)
                 }
             )
             response = await loop.run_in_executor(None, func)
@@ -269,7 +272,8 @@ class AdminAI:
                             description=details.get("description", ""),
                             project_type=details.get("project_type", "custom"),
                             duration=details.get("duration"),
-                            style=details.get("style")
+                            style=details.get("style"),
+                            workflow_path=self.context.get("last_workflow_path")
                         )
                         
                         pm = ProjectManager(db)
@@ -290,6 +294,55 @@ class AdminAI:
                         logger.error(f"Failed to create project from chat: {e}", exc_info=True)
                         metadata["project_creation_error"] = str(e)
             
+            # Handle workflow generation
+            if action == "generate_workflow":
+                logger.info("Attempting to generate workflow from chat")
+                await self.broadcast_activity("action", "Generating ComfyUI workflow...")
+                
+                try:
+                    # Run generation in executor
+                    workflow_result = await loop.run_in_executor(
+                        None,
+                        self.workflow_generator.generate_workflow,
+                        message + "\n" + ai_message
+                    )
+                    
+                    if workflow_result.get("success"):
+                        # Extract a name from the request or use default
+                        # Simple heuristic: use first few words of message or "generated_workflow"
+                        # For now, let's use a generic name plus timestamp handled by save_workflow
+                        name_hint = "generated_workflow"
+                        if len(message) < 50:
+                             name_hint = message.strip()
+                        
+                        save_result = self.workflow_generator.save_workflow(
+                            workflow_result["workflow"], 
+                            name_hint
+                        )
+                        
+                        metadata["workflow_generated"] = True
+                        metadata["workflow_data"] = workflow_result["workflow"]
+                        
+                        ai_message += f"\n\nI've generated a new ComfyUI workflow for you based on your request."
+                        
+                        if save_result.get("success"):
+                            metadata["workflow_path"] = save_result["path"]
+                            self.context["last_workflow_path"] = save_result["path"]
+                            ai_message += f"\n\n It has been saved to `{save_result['filename']}` and is ready for use by the workers."
+                        else:
+                            ai_message += f"\n\n However, I couldn't save it to disk: {save_result.get('error')}"
+                        
+                        # Update AI message
+                        ai_msg_db.content = ai_message
+                        db.commit()
+                    else:
+                        ai_message += f"\n\nI attempted to generate a workflow but ran into an issue: {workflow_result.get('error')}"
+                        ai_msg_db.content = ai_message
+                        db.commit()
+                        
+                except Exception as e:
+                    logger.error(f"Failed to generate workflow: {e}", exc_info=True)
+                    metadata["workflow_error"] = str(e)
             if action:
                 logger.info(f"Action detected: {action}")
             
@@ -327,6 +380,8 @@ class AdminAI:
         if any(keyword in user_lower for keyword in create_keywords):
             if any(pt.value in user_lower for pt in ProjectType):
                 return "create_project"
+            if "workflow" in user_lower:
+                return "generate_workflow"
         
         return None
     

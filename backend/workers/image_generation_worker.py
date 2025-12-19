@@ -145,18 +145,42 @@ class ImageGenerationWorker(WorkerAgent):
             prompt_data = self._get_prompt_data(task)
             
             # Prepare workflow
+            # Prepare workflow
             self.report_progress(task.id, 30, "Preparing workflow")
-            workflow = self._get_default_workflow()
             
-            # Inject parameters
-            seed = random.randint(1, 1000000000)
-            workflow["3"]["inputs"]["seed"] = seed
-            workflow["6"]["inputs"]["text"] = prompt_data.get("positive_prompt", "")
-            workflow["7"]["inputs"]["text"] = prompt_data.get("negative_prompt", "")
+            # Check for custom workflow in task metadata
+            custom_workflow_path = task.meta_data.get("custom_workflow") if task.meta_data else None
             
-            # Queue prompt
-            self.report_progress(task.id, 50, "Queuing generation job")
-            prompt_id = self.client.queue_prompt(workflow)
+            if custom_workflow_path:
+                logger.info(f"Using custom workflow: {custom_workflow_path}")
+                # Use client's high-level execute_workflow which handles loading and injection
+                # We need to map our prompt_data to the workflow inputs
+                
+                # Simple mapping for now
+                seed = random.randint(1, 1000000000)
+                inputs = {
+                    "seed": seed,
+                    "positive_prompt": prompt_data.get("positive_prompt", ""),
+                    "negative_prompt": prompt_data.get("negative_prompt", "")
+                }
+                
+                self.report_progress(task.id, 50, "Queuing generation job")
+                prompt_id = self.client.execute_workflow(custom_workflow_path, inputs)
+                
+            else:
+                # Fallback to built-in default workflow
+                workflow = self._get_default_workflow()
+                
+                # Inject parameters
+                seed = random.randint(1, 1000000000)
+                workflow["3"]["inputs"]["seed"] = seed
+                workflow["6"]["inputs"]["text"] = prompt_data.get("positive_prompt", "")
+                workflow["7"]["inputs"]["text"] = prompt_data.get("negative_prompt", "")
+                
+                # Queue prompt
+                self.report_progress(task.id, 50, "Queuing generation job")
+                prompt_id = self.client.queue_prompt(workflow)
+                
             logger.info(f"Queued prompt {prompt_id}")
             
             # Wait for completion

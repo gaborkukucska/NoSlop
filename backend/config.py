@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     model_ttv: str = "llama3.2"
     model_code: str = "qwen2.5-coder:7b"
     model_embedding: str = "nomic-embed-text"
+    ollama_max_predict: int = 2048
+    
     
     # ========================================================================
     # ComfyUI Configuration

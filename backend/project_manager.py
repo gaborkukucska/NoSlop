@@ -79,7 +79,10 @@ class ProjectManager:
             "duration": project_request.duration,
             "style": project_request.style,
             "reference_media": project_request.reference_media or [],
-            "meta_data": {}
+            "reference_media": project_request.reference_media or [],
+            "meta_data": {
+                "custom_workflow": project_request.workflow_path
+            } if project_request.workflow_path else {}
         }
         
         project_model = ProjectCRUD.create(self.db, project_data)
@@ -113,14 +116,21 @@ class ProjectManager:
         logger.info(f"Generating plan for project: {project.id}")
         
         # Build prompt with project details
-        prompt = self.prompt_manager.get_project_manager_prompt(
-            "project_planning",
-            project_title=project.title,
-            project_type=project.project_type.value,
-            project_description=project.description,
-            duration=project.duration or "not specified",
-            style=project.style or "not specified"
+        prompt = self.prompt_manager.get_prompt(
+            "project_manager.project_planning",
+            {
+                "project_title": project.title,
+                "project_type": project.project_type.value,
+                "project_description": project.description,
+                "duration": project.duration or "variable",
+                "style": project.style or "standard"
+            }
         )
+        
+        # Inject custom workflow instruction if present
+        if project.meta_data and project.meta_data.get("custom_workflow"):
+            workflow_path = project.meta_data["custom_workflow"]
+            prompt += f"\n\nCRITICAL INSTRUCTION: The user has provided a custom ComfyUI workflow located at '{workflow_path}'. You MUST create a task of type 'image_generation' or 'video_generation' that specifically mentions using this workflow file."
         
         try:
             # Call LLM to generate plan

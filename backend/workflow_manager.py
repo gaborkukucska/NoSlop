@@ -28,8 +28,24 @@ class WorkflowManager:
         return sorted(workflows)
     
     def load_workflow(self, name: str) -> Optional[Dict[str, Any]]:
-        """Load a workflow by name."""
-        path = os.path.join(self.workflows_dir, f"{name}.json")
+        """
+        Load a workflow by name or absolute path.
+        
+        Args:
+            name: Workflow name (in workflows dir) or absolute file path.
+        """
+        # Check if name is an absolute path to an existing file
+        if os.path.isabs(name) and os.path.exists(name):
+            path = name
+        # Check if name is a relative path to an existing file
+        elif os.path.exists(name):
+            path = name
+        else:
+            # Fallback to default workflows directory
+            # Strip extension if provided for backward compatibility
+            clean_name = name[:-5] if name.endswith(".json") else name
+            path = os.path.join(self.workflows_dir, f"{clean_name}.json")
+            
         if not os.path.exists(path):
             logger.error(f"Workflow not found: {path}")
             return None

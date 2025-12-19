@@ -3,7 +3,8 @@
 **Phase 2: Service Installers is COMPLETE!** ✅
 The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQL, Ollama, ComfyUI, Backend, Frontend) across single or multiple devices.
 
-### What's Working:
+### What's Working
+
 - ✅ **Smart Installer**: `python3 -m seed.seed_cli` handles everything.
 - ✅ **Service Discovery**: Automatically finds existing Ollama/ComfyUI instances to reuse.
 - ✅ **Service Registry**: Tracks all services and handles load balancing.
@@ -11,13 +12,28 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 - ✅ **Configuration**: Generates `.env` and systemd services.
 - ✅ **User Management**: Backend supports user creation and personality persistence.
 - ✅ **Deployment Summary**: Clearly lists all access points (Backend/Frontend URLs).
+
 # NoSlop - Continue Development
 
 **Last Updated**: 2025-12-05
 
+## ✅ Recently Completed (Session 9 - 2025-12-19)
+
+### Admin AI Workflow Orchestration & Chat Fixes
+
+- **Workflow Generation**: Admin AI can now create ComfyUI workflows from natural language descriptions.
+- **Workflow Saving**: Generated workflows are automatically saved to the shared storage for workers to use.
+- **Worker Integration**: Updated `ImageGenerationWorker` and `ComfyUIClient` to load and execute custom workflow files.
+- **Project Integration**: `ProjectManager` automatically injects custom workflow instructions into tasks.
+- **Chat Stability**: Fixed the `num_predict` token limit issue.
+- **Configuration**: Added `ollama_max_predict` setting for better control over response length.
+
+**Status**: ✅ **Workflow Orchestration & Integration COMPLETE**.
+
 ## ✅ Recently Completed (Session 8 - 2025-12-19)
 
 ### Hybrid Access & SSL Stabilization
+
 - **Dual Access Modes**: Successfully implemented simultaneous Local (HTTP) and Web (HTTPS) access.
 - **Frontend Routing**: Smart URL detection handles both relative paths (for Tunnel) and absolute IPs (for LAN).
 - **Tunnel Compatibility**: Fixed `/health` and API routing to work even when Tunnel points directly to Next.js.
@@ -28,6 +44,7 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 ## ✅ Previously Completed (Session 5 - 2025-12-05)
 
 ### Phase 0: Shared Storage & Project Organization
+
 - **Storage Manager**: Complete NFS/SMB configuration and automation
 - **Project Organization**: Comprehensive folder structure and file management
 - **Database Enhancement**: Storage tracking in ProjectModel
@@ -44,6 +61,7 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 ## ✅ Previously Completed (Session 4 - 2025-12-05)
 
 ### Admin AI Chat Integration
+
 - **Chat Interface Fix**: Dynamic backend URL detection implemented
 - **Multi-Device Support**: Chat works from all frontend instances
 - **Service Deployment**: All 7 services running across 3 devices
@@ -56,6 +74,7 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 ## ✅ Previously Completed (Session 3 - 2025-12-05)
 
 ### Authentication & Frontend Integration
+
 - **User Authentication System**: Complete JWT-based authentication with registration, login, and logout
 - **Frontend Auth Flow**: Protected routes, automatic redirects, token persistence
 - **CORS Configuration**: Development mode allows all origins for multi-device access
@@ -96,6 +115,7 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 **Goal**: Enable AI-driven ComfyUI workflow generation and management
 
 **Key Features**:
+
 - ⏳ Admin AI generates ComfyUI workflows from project requirements
 - ⏳ Workflows optimized for available hardware
 - ⏳ Workflow validation and versioning
@@ -132,24 +152,28 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 ## 📋 Phase 3 Roadmap
 
 ### Week 1: Testing & Validation
+
 - [ ] Comprehensive authentication testing
 - [ ] Project creation workflow testing
 - [ ] Multi-device deployment validation
 - [ ] Performance benchmarking
 
 ### Week 2: Worker Agent Integration
+
 - [ ] Test ComfyUI worker integration
 - [ ] Implement task assignment logic
 - [ ] Add progress tracking
 - [ ] Test end-to-end media generation
 
 ### Week 3: Frontend Polish
+
 - [ ] Improve UI/UX based on testing
 - [ ] Add loading states and animations
 - [ ] Implement real-time updates
 - [ ] Add media preview functionality
 
 ### Week 4: Documentation & Deployment
+
 - [ ] Update user documentation
 - [ ] Create deployment guides
 - [ ] Add troubleshooting guides
@@ -191,7 +215,8 @@ The NoSlop Seed Installer can now automatically deploy the full stack (PostgreSQ
 - [Development Rules](./0_DEVELOPMENT_RULES.md) - Coding standards
 r UI.
 
-### What Needs Implementation:
+### What Needs Implementation
+
 **Phase 3: Integration & Workflow**
 
 1. **Local Service Orchestration**:

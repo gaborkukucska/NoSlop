@@ -100,6 +100,7 @@ class ProjectRequest(BaseModel):
     duration: Optional[int] = Field(default=None, description="Target duration in seconds")
     style: Optional[str] = Field(default=None, description="Visual/audio style preferences")
     reference_media: Optional[List[str]] = Field(default=None, description="Paths to reference media")
+    workflow_path: Optional[str] = Field(default=None, description="Path to custom ComfyUI workflow to use")
     
     class Config:
         json_schema_extra = {
