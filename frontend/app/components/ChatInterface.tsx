@@ -116,25 +116,9 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
                 // Transcribe
                 setIsLoading(true);
                 try {
-                    const formData = new FormData();
-                    formData.append('file', audioBlob);
-
-                    const backendUrl = getBackendUrl();
-                    const response = await fetch(`${backendUrl}/api/audio/transcribe`, {
-                        method: 'POST',
-                        headers: {
-                            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                        },
-                        body: formData
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.text) {
-                            setInput((prev) => prev + (prev ? ' ' : '') + data.text);
-                        }
-                    } else {
-                        console.error('Transcription failed');
+                    const data = await api.transcribe(audioBlob);
+                    if (data.text) {
+                        setInput((prev) => prev + (prev ? ' ' : '') + data.text);
                     }
                 } catch (error) {
                     console.error('Transcription error:', error);
@@ -176,67 +160,29 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         if (!ttsEnabled) return;
 
         setIsSpeaking(true);
+
         try {
-            const backendUrl = getBackendUrl();
-            const response = await fetch(`${backendUrl}/api/audio/speak`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({ text })
-            });
+            const blob = await api.speak(text);
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
 
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                const audio = new Audio(url);
-
-                audio.onended = () => {
-                    setIsSpeaking(false);
-                    URL.revokeObjectURL(url);
-                };
-
-                audio.onerror = () => {
-                    setIsSpeaking(false);
-                };
-
-                audio.play();
-            } else {
-                console.error("TTS failed");
+            audio.onended = () => {
                 setIsSpeaking(false);
-            }
+                URL.revokeObjectURL(url);
+            };
+
+            audio.onerror = () => {
+                setIsSpeaking(false);
+            };
+
+            audio.play();
         } catch (error) {
             console.error("TTS error:", error);
             setIsSpeaking(false);
         }
     };
 
-    // Helper to get backend URL
-    const getBackendUrl = () => {
-        // 1. If HTTPS, use relative paths (Caddy/Tunnel)
-        if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-            return '';
-        }
 
-        // 2. Check API URL from environment
-        if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-
-        // 3. Dynamic detection based on window location
-        if (typeof window !== 'undefined') {
-            const hostname = window.location.hostname;
-            const protocol = window.location.protocol;
-
-            // For localhost
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                return `${protocol}//localhost:8000`;
-            }
-
-            // HTTP fallback
-            return `${protocol}//${hostname}:8000`;
-        }
-        return 'http://localhost:8000';
-    };
 
     const createNewSession = async () => {
         try {
@@ -280,66 +226,8 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         setIsLoading(true);
 
         try {
-            // Use direct fetch for now as api.ts doesn't have a generic chat method yet
-            // but we can use the base URL logic from api.ts if we exposed it, 
-            // or just rely on relative paths if we had a proxy.
-            // Since we don't, let's use the same logic as before but updated.
-
-            // Actually, let's use the api client's request method if we can, 
-            // or just copy the URL logic. 
-            // Better yet, let's add a chat method to api.ts? 
-            // For now, I'll just use the hardcoded logic but with the fix.
-
-            // Wait, I can just use api.request if I made it public, but it's private.
-            // I'll stick to the fetch but use the improved URL logic.
-
-            // Get backend URL (matches api.ts logic)
-            const getBackendUrl = () => {
-                // 1. Check API URL from environment
-                if (process.env.NEXT_PUBLIC_API_URL) {
-                    return process.env.NEXT_PUBLIC_API_URL;
-                }
-
-                // 2. Dynamic detection based on window location
-                if (typeof window !== 'undefined') {
-                    const hostname = window.location.hostname;
-                    const protocol = window.location.protocol;
-
-                    // For localhost
-                    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                        return `${protocol}//localhost:8000`;
-                    }
-
-                    // For HTTPS deployments (Cloudflare Tunnel)
-                    // This shouldn't be reached if NEXT_PUBLIC_API_URL is set correctly
-                    if (protocol === 'https:') {
-                        return '';  // Relative paths
-                    }
-
-                    // HTTP fallback
-                    return `http://${hostname}:8000`;
-                }
-                return 'http://localhost:8000';
-            };
-
-            const backendUrl = getBackendUrl();
-
-            const response = await fetch(`${backendUrl}/api/chat?session_id=${sessionId}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-                },
-                body: JSON.stringify({
-                    message: textToSend,
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to get response');
-            }
-
-            const data = await response.json();
+            // Updated to use centralized api.sendMessage which handles URLs correctly
+            const data = await api.sendMessage(textToSend, sessionId);
 
             const aiMessage: Message = {
                 role: 'assistant',

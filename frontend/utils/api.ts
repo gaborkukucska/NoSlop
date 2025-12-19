@@ -10,7 +10,7 @@ const getApiBaseUrl = () => {
     // 1. If we are on HTTPS, always use relative paths (assuming Caddy/Tunnel handles routing)
     // This prevents Mixed Content errors when accessing via Cloudflare Tunnel
     if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
-        return ''; 
+        return '';
     }
 
     // 2. Check environment variable (set during build/deployment)
@@ -38,6 +38,34 @@ const getApiBaseUrl = () => {
 
     // 4. Last resort fallback
     return 'http://localhost:8000';
+};
+
+const getWebSocketUrl = () => {
+    // 1. HTTPS check (Priority for Cloudflare Tunnel)
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+        // Use relative path upgraded to WSS
+        const host = window.location.host;
+        return `wss://${host}`;
+    }
+
+    // 2. Check API URL environment variable
+    if (typeof process.env.NEXT_PUBLIC_API_URL !== 'undefined' && process.env.NEXT_PUBLIC_API_URL !== '') {
+        return process.env.NEXT_PUBLIC_API_URL.replace(/^http/, 'ws');
+    }
+
+    // 3. Dynamic detection
+    if (typeof window !== 'undefined') {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const hostname = window.location.hostname;
+
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return `${protocol}//localhost:8000`;
+        }
+
+        return `${protocol}//${hostname}:8000`;
+    }
+
+    return 'ws://localhost:8000';
 };
 
 const API_BASE_URL = getApiBaseUrl();
@@ -100,6 +128,12 @@ class ApiClient {
         this.token = token;
     }
 
+    private onUnauthorized: (() => void) | null = null;
+
+    setUnauthorizedCallback(callback: () => void) {
+        this.onUnauthorized = callback;
+    }
+
     private async request<T>(
         endpoint: string,
         options: RequestInit = {}
@@ -114,12 +148,90 @@ class ApiClient {
             },
         });
 
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
         if (!response.ok) {
             const error = await response.text();
             throw new Error(`API Error: ${response.status} - ${error}`);
         }
 
         return response.json();
+    }
+
+    // Public helper for WebSocket URL
+    getWebSocketUrl(): string {
+        return getWebSocketUrl();
+    }
+
+    // Chat APIs
+    async sendMessage(message: string, sessionId: string = 'default'): Promise<{ message: string; suggestions?: string[] }> {
+        return this.request<{ message: string; suggestions?: string[] }>(`/api/chat?session_id=${sessionId}`, {
+            method: 'POST',
+            body: JSON.stringify({ message }),
+        });
+    }
+
+    async transcribe(audioBlob: Blob): Promise<{ text: string }> {
+        const formData = new FormData();
+        formData.append('file', audioBlob);
+
+        // We can't use this.request because it sets Content-Type to application/json
+        // So we construct the request manually using the same base logic
+        const url = `${this.baseUrl}/api/audio/transcribe`;
+
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Transcription Failed: ${response.status} - ${error}`);
+        }
+
+        return response.json();
+    }
+
+    async speak(text: string): Promise<Blob> {
+        return this.request<any>('/api/audio/speak', { // Returns Blob, handled below
+            method: 'POST',
+            body: JSON.stringify({ text })
+        }).then(async (res: any) => {
+            // Wait, this.request returns response.json(). 
+            // We need a way to get raw blob.
+            // Let's implement a private helper requestRaw if needed, or just do fetch here.
+
+            const url = `${this.baseUrl}/api/audio/speak`;
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json'
+            };
+            if (this.token) {
+                headers['Authorization'] = `Bearer ${this.token}`;
+            }
+
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) {
+                const error = await response.text();
+                throw new Error(`TTS Failed: ${response.status} - ${error}`);
+            }
+
+            return response.blob();
+        });
     }
 
     // Auth APIs

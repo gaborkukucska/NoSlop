@@ -39,6 +39,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (storedToken) {
             setToken(storedToken);
             api.setToken(storedToken);
+
+            // Register logout callback for 401s
+            api.setUnauthorizedCallback(() => {
+                logout();
+            });
+
+            // Verify token validity by making a lightweight authenticated call
+            // We use getSessions as it requires auth and is lightweight
+            api.getSessions()
+                .then(() => {
+                    // Token is valid
+                    setIsLoading(false);
+                })
+                .catch((err) => {
+                    console.error("Token verification failed:", err);
+                    // If 401, the interceptor will handle logout. 
+                    // If other error (network), we might still want to allow access or retry?
+                    // For now, if verification fails entirely, we should probably assume invalid session to be safe,
+                    // BUT be careful of network errors flaking.
+
+                    // Actually, since we added the interceptor, if it was a 401, logout() already ran.
+                    // If it was another error, we probably shouldn't force logout immediately.
+                    setIsLoading(false);
+                });
+        } else {
+            setIsLoading(false);
         }
 
         if (storedUser) {
@@ -48,8 +74,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 console.error("Failed to parse stored user", e);
             }
         }
-
-        setIsLoading(false);
     }, []);
 
     const login = async (username: string, password: string) => {
