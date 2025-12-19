@@ -2,7 +2,9 @@
 <!-- # IT IS CRITICAL THAT ALL AIs and LLMs FOLLOW THE DEVELOPMENT INSTRUCTIONS IN THE `helperfiles/0_DEVELOPMENT_RULES.md` FILE WHEN FURTHER DEVELOPING THIS FRAMEWORK!!! -->
 
 # NoSlop 🚫🥣
+
 ### **Self-hosted media making and sharing decentralized social network.**
+
 *Power to the creators!* ✊✨
 
 ---
@@ -18,6 +20,7 @@
 ## Why NoSlop
 
 **The key reasons why NoSlop is revolutionary are:**
+
 - Easy automated multi device deployment to maximize your local compute potential (compute sharing / borrowing is coming soon)
 - On demand, self hosted, pier-to-pier, post and media sharing (with hash on the blockchain to ), and aggregation (users in full control)
 - You can still Like, Dislike, Collect (ad to playlist), Boost (share), Hide (flag), or even Comment on media others share with you
@@ -32,23 +35,29 @@
 ## 🧩 Core Modules
 
 ### 🌱 **NoSlop Seed**
+
 *The Smart Installer*
 Automatically scans your local network and deploys the NoSlop cluster across available devices. It intelligently assigns roles (Master, Compute, Storage) based on hardware capabilities (CPU, GPU, RAM).
 
 ### 🎬 **NoSlop Media Creator**
+
 *Your AI-Powered Studio*
 A local, AI-driven media production cluster.
+
 - **Admin AI**: Your personal creative director and **Pro Editor**. Capable of editing existing footage, color grading, and compiling complex films to industry standards. 🎞️✨
 - **Worker Agents**: Specialized AI agents for scriptwriting, prompting, and editing. 👷‍♂️
 - **Tools**: Integrates **ComfyUI** 🎨, **FFmpeg** 🎥, and **OpenCV** 👁️ for professional-grade output.
 
 ### ⛓️ **NoSlop Blockchain**
+
 *Decentralized Registry*
 Ensures media authenticity and provenance. A tamper-proof ledger that proves **you** created your content. 🛡️
 
 ### 🕸️ **NoSlop Social Network**
+
 *The Mesh*
 A peer-to-peer, decentralized social graph. Share content directly from your node to others without intermediate servers.
+
 - **Ad-Free & Cost-Free**: No corporate overlords, no subscription fees, no data mining, and no advertisements. 🚫💰
 - **Your Feed, Your Rules**: You control the algorithm. Tweak the parameters to see exactly what you want, not what an engagement engine forces on you. 🎛️
 - **Guardian LLM**: A dedicated AI agent that protects you and the network. Combined with community up/down voting, it ensures a safe environment without censorship. 🛡️🗳️
@@ -57,29 +66,32 @@ A peer-to-peer, decentralized social graph. Share content directly from your nod
 
 ## 🏗️ Architecture & Flow
 
-1.  **Deploy**: Run **NoSlop Seed** to turn your home devices into a supercomputer. 🚀
-2.  **Create**: Chat with your **Admin AI** to brainstorm ideas. 💡
-3.  **Orchestrate**: The **Project Manager Agent** breaks down your vision into tasks. 📋
-4.  **Execute**: **Worker Agents** generate images, edit video, and compose audio using local tools. ⚙️
-5.  **Refine**: Iterate with the AI until it's perfect. ✨
-6.  **Share**: Publish to the **NoSlop Network**, verified by the **Blockchain**. 📢
+1. **Deploy**: Run **NoSlop Seed** to turn your home devices into a supercomputer. 🚀
+2. **Create**: Chat with your **Admin AI** to brainstorm ideas. 💡
+3. **Orchestrate**: The **Project Manager Agent** breaks down your vision into tasks. 📋
+4. **Execute**: **Worker Agents** generate images, edit video, and compose audio using local tools. ⚙️
+5. **Refine**: Iterate with the AI until it's perfect. ✨
+6. **Share**: Publish to the **NoSlop Network**, verified by the **Blockchain**. 📢
 
 ---
 
 ## 🛠️ Tech Stack
 
 ### **Backend**
+
 - 🐍 **Python** (FastAPI)
 - 🦙 **Ollama** (Local LLM Inference)
 - 🎨 **ComfyUI** (Generative AI)
 - 🎥 **FFmpeg & OpenCV** (Media Processing)
 
 ### **Frontend**
+
 - ⚛️ **Next.js** (React Framework)
 - 💅 **Tailwind CSS** (Styling)
 - 📱 **Mobile App** (Planned)
 
 ### **Data & Storage**
+
 - 🗄️ **PostgreSQL / SQLite**
 - 📦 **Local Mesh Storage**
 
@@ -111,10 +123,11 @@ NOSLOP_FRONTEND_EXTERNAL_URL=https://app.your-domain.com python3 -m seed.seed_cl
 ```
 
 The installer will:
--    **Find Local Devices**: Scans your local network for available devices to deploy NoSlop on.
+
+- **Find Local Devices**: Scans your local network for available devices to deploy NoSlop on.
 - 🔍 **Detect Hardware**: Analyzes CPU, RAM, GPU, and Disk to assign optimal roles.
 - 🌐 **Discover Existing Services**: Scans your network for existing Ollama, ComfyUI, or PostgreSQL instances to reuse.
--    **Creates A Deployment Plan**: Based on the available devices and their capabilities, it creates a deployment plan that assigns roles to each device like this:
+- **Creates A Deployment Plan**: Based on the available devices and their capabilities, it creates a deployment plan that assigns roles to each device like this:
 
 ```
 ======================================================================
@@ -129,27 +142,27 @@ Services to Deploy: comfyui, ffmpeg, noslop-backend, noslop-frontend, ollama, op
 Node Details:
 ----------------------------------------------------------------------
 
-1. BigBOY (192.168.0.22)
+1. Master (192.168.0.01)
    Roles: master, compute, storage, client
    Services: noslop-backend, postgresql, ollama, comfyui, ffmpeg, opencv
    Hardware: 16 cores, 31.15GB RAM, 12.0GB VRAM
 
-2. tomsbot (192.168.0.30)
+2. Slave-1 (192.168.0.02)
    Roles: client
    Services: ollama, comfyui, ffmpeg, opencv
    Hardware: 20 cores, 15.32GB RAM, 4.0GB VRAM
 
-3. 2014 (192.168.0.24)
+3. Slave-2 (192.168.0.03)
    Roles: client
    Services: ollama, ffmpeg, opencv
    Hardware: 8 cores, 15.53GB RAM, 0.0GB VRAM
 
-4. mac2014 (192.168.0.26)
+4. Slave-3 (192.168.0.04)
    Roles: client
    Services: ffmpeg, opencv
    Hardware: 4 cores, 7.66GB RAM, 0.0GB VRAM
 
-5. lenovo (192.168.0.15)
+5. Slave-4 (192.168.0.05)
    Roles: client
    Services: noslop-frontend
    Hardware: 2 cores, 5.67GB RAM, 0.0GB VRAM
@@ -167,13 +180,14 @@ Node Details:
 
 Start installation? [y/N]:
 ```
+
 - 📦 **Install Services**: Automatically installs and configures:
-    - **PostgreSQL** (Database)
-    - **Ollama** (LLM Inference)
-    - **ComfyUI** (Generative AI with GPU support)
-    - **FFmpeg/OpenCV** (Media Processing)
-    - **NoSlop Backend** (FastAPI)
-    - **NoSlop Frontend** (Next.js)
+  - **PostgreSQL** (Database)
+  - **Ollama** (LLM Inference)
+  - **ComfyUI** (Generative AI with GPU support)
+  - **FFmpeg/OpenCV** (Media Processing)
+  - **NoSlop Backend** (FastAPI)
+  - **NoSlop Frontend** (Next.js)
 - ⚙️ **Configure**: Generates `.env` files and systemd services for auto-start.
 
 See [`seed/README.md`](seed/README.md) for detailed usage instructions.
@@ -185,14 +199,16 @@ See [`seed/README.md`](seed/README.md) for detailed usage instructions.
 NoSlop supports **Hybrid Access**, meaning you can use it locally and remotely at the same time!
 
 #### 🏠 Local Access (LAN)
+
 Use this when you are at home for the fastest connection.
-*   **URL**: `http://<node-ip>:3000`
-*   **Example**: `http://192.168.0.22:3000`
+- **URL**: `http://<node-ip>:3000`
+- **Example**: `http://192.168.0.01:3000`
 
 #### ☁️ Web Access (Remote)
+
 Use this when you are away, via Cloudflare Tunnel (if configured).
-*   **URL**: `https://app.your-domain.com`
-*   **Example**: `https://app.noslop.me`
+- **URL**: `https://your-domain.com`
+- **Example**: `https://noslop.me`
 
 Both methods work simultaneously. The system automatically detects your connection method and optimizes API routing to prevent errors.
 
@@ -223,18 +239,21 @@ python3 -m seed.seed_cli --status --deployment-id 20251203_121141
 ### System Requirements
 
 **Minimum (Basic)**:
+
 - 2+ CPU cores
 - 4 GB RAM
 - 100 GB disk space
 - Linux, macOS, or Windows (WSL2)
 
 **Recommended (Good Performance)**:
+
 - 4+ CPU cores
 - 16 GB RAM
 - 8 GB VRAM (NVIDIA/AMD GPU)
 - 500 GB disk space
 
 **Optimal (Best Experience)**:
+
 - 8+ CPU cores
 - 32 GB RAM
 - 12+ GB VRAM (NVIDIA RTX series)
@@ -290,6 +309,7 @@ grep -r "WARNING" logs/
 ### Common Issues
 
 Check the relevant log files if you encounter issues:
+
 - **Installation failures**: Check `{service}_installer_*.log` files
 - **Service startup issues**: Check `backend_*.log` or systemd logs with `journalctl -u noslop-backend`
 - **Service management**: Check `service_manager_*.log`
@@ -297,5 +317,5 @@ Check the relevant log files if you encounter issues:
 ---
 
 ## 📜 License
-Open Source. Built for the people. ❤️
 
+Open Source. Built for the people. ❤️
