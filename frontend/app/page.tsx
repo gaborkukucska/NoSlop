@@ -7,11 +7,13 @@ import { useAuth } from './context/AuthContext';
 import ChatInterface from './components/ChatInterface';
 import PersonalitySelector from './components/PersonalitySelector';
 import SceneWizard from './components/wizard/SceneWizard';
+import SetupWizard from './components/SetupWizard';
 import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import LoadingScreen from './components/LoadingScreen';
 import AgentActivityTerminal from './components/AgentActivityTerminal';
 import { useAgentActivity } from '../hooks/useAgentActivity';
+import api from '../utils/api';
 
 export default function Home() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -19,8 +21,11 @@ export default function Home() {
   const [healthStatus, setHealthStatus] = useState<any>(null);
   const [showPersonality, setShowPersonality] = useState(false);
   const [showProjectForm, setShowProjectForm] = useState(false);
+  const [showSetupWizard, setShowSetupWizard] = useState(false);
+  const [isPriming, setIsPriming] = useState(false);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [refreshProjects, setRefreshProjects] = useState(0);
+  const [chatRefreshTrigger, setChatRefreshTrigger] = useState(0);
   const { messages } = useAgentActivity();
 
   // Redirect to login if not authenticated
@@ -33,25 +38,19 @@ export default function Home() {
   useEffect(() => {
     if (isAuthenticated) {
       checkHealth();
+      checkSetupStatus();
     }
   }, [isAuthenticated]);
 
   const checkHealth = async () => {
     try {
       // Dynamically determine backend URL
-      // Dynamically determine backend URL
       let backendUrl = 'http://localhost:8000';
-
-      // 1. HTTPS check (Priority for Cloudflare Tunnel)
       if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
         backendUrl = ''; // Relative path
-      }
-      // 2. Check environment variable
-      else if (process.env.NEXT_PUBLIC_API_URL) {
+      } else if (process.env.NEXT_PUBLIC_API_URL) {
         backendUrl = process.env.NEXT_PUBLIC_API_URL;
-      }
-      // 3. Fallback: Dynamic detection
-      else if (typeof window !== 'undefined') {
+      } else if (typeof window !== 'undefined') {
         const hostname = window.location.hostname;
         const protocol = window.location.protocol;
         if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
@@ -66,6 +65,43 @@ export default function Home() {
       console.error('Health check failed:', error);
       setHealthStatus({ status: 'error', ollama: 'disconnected' });
     }
+  };
+
+  const checkSetupStatus = async () => {
+    try {
+      const status = await api.getSetupStatus();
+      if (status.setup_required) {
+        setShowSetupWizard(true);
+      } else {
+        // If setup done, prime the AI (only if not already done in this session)
+        // Using session storage to avoid re-priming on every refresh if desired, 
+        // but requirements say "on startup". Let's do it every refresh for now as it's a "session start".
+        const hasPrimed = sessionStorage.getItem('noslop_primed');
+        if (!hasPrimed) {
+          primeSystem();
+        }
+      }
+    } catch (error) {
+      console.error("Failed to check setup status:", error);
+    }
+  };
+
+  const primeSystem = async () => {
+    setIsPriming(true);
+    try {
+      await api.primeAdminAI();
+      setChatRefreshTrigger(prev => prev + 1);
+      sessionStorage.setItem('noslop_primed', 'true');
+    } catch (error) {
+      console.error("Priming failed:", error);
+    } finally {
+      setIsPriming(false);
+    }
+  };
+
+  const handleSetupComplete = () => {
+    setShowSetupWizard(false);
+    primeSystem();
   };
 
   const handleProjectCreated = (project: any) => {
@@ -161,9 +197,18 @@ export default function Home() {
                 />
               </div>
             ) : (
-              <div className="h-[calc(100vh-200px)] flex flex-col">
+              <div className="h-[calc(100vh-200px)] flex flex-col relative">
+                {isPriming && (
+                  <div className="absolute inset-x-0 top-0 z-10 bg-blue-500/10 backdrop-blur-sm p-4 rounded-t-lg flex items-center justify-center space-x-3 text-blue-600 dark:text-blue-400 border-b border-blue-500/20 animate-pulse">
+                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span className="font-semibold tracking-wide">ESTABLISHING NEURAL LINK...</span>
+                  </div>
+                )}
                 <div className="h-2/3">
-                  <ChatInterface />
+                  <ChatInterface refreshTrigger={chatRefreshTrigger} />
                 </div>
                 <div className="h-1/3 pt-4">
                   <AgentActivityTerminal messages={messages} />
@@ -287,6 +332,13 @@ export default function Home() {
               ✕
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Setup Wizard Modal */}
+      {showSetupWizard && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[60] p-4">
+          <SetupWizard onComplete={handleSetupComplete} />
         </div>
       )}
 

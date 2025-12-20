@@ -45,6 +45,8 @@ Automatically scans your local network and deploys the NoSlop cluster across ava
 A local, AI-driven media production cluster.
 
 - **Admin AI**: Your personal creative director and **Pro Editor**. Capable of editing existing footage, color grading, and compiling complex films to industry standards. 🎞️✨
+    - **Proactive Assistant**: Greets you with context-aware updates and project suggestions.
+    - **Setup Wizard**: Guided onboarding to customize your AI's personality and style.
 - **Worker Agents**: Specialized AI agents for scriptwriting, prompting, and editing. 👷‍♂️
 - **Tools**: Integrates **ComfyUI** 🎨, **FFmpeg** 🎥, and **OpenCV** 👁️ for professional-grade output.
 

@@ -20,9 +20,10 @@ interface Session {
 
 interface ChatInterfaceProps {
     initialSessionId?: string;
+    refreshTrigger?: number;
 }
 
-export default function ChatInterface({ initialSessionId = 'default' }: ChatInterfaceProps) {
+export default function ChatInterface({ initialSessionId = 'default', refreshTrigger = 0 }: ChatInterfaceProps) {
     const { token } = useAuth();
     const [sessionId, setSessionId] = useState(initialSessionId);
     const [sessions, setSessions] = useState<Session[]>([]);
@@ -63,7 +64,7 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         loadSessions();
     }, []);
 
-    // Load chat history when sessionId changes
+    // Load chat history when sessionId changes or refreshTrigger updates
     useEffect(() => {
         const loadHistory = async () => {
             try {
@@ -84,7 +85,7 @@ export default function ChatInterface({ initialSessionId = 'default' }: ChatInte
         };
 
         loadHistory();
-    }, [sessionId]);
+    }, [sessionId, refreshTrigger]);
 
     // Audio Recording State
     const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);

@@ -471,3 +471,36 @@ class ProjectManager:
             "type": "project_deleted",
             "data": {"id": project_id}
         })
+
+    def get_projects_summary(self) -> Dict[str, Any]:
+        """
+        Get a concise summary of all projects for AI context injection.
+        optimized for low-context LLMs.
+        
+        Returns:
+            Dictionary with project counts and short status strings.
+        """
+        projects = ProjectCRUD.get_all(self.db)
+        
+        total = len(projects)
+        active = sum(1 for p in projects if p.status == ProjectStatusEnum.IN_PROGRESS)
+        completed = sum(1 for p in projects if p.status == ProjectStatusEnum.COMPLETED)
+        failed = sum(1 for p in projects if p.status == ProjectStatusEnum.FAILED)
+        
+        # Create short list of active projects only
+        active_list = []
+        for p in projects:
+            if p.status == ProjectStatusEnum.IN_PROGRESS:
+                tasks = TaskCRUD.get_by_project(self.db, p.id)
+                task_progress = f"{sum(1 for t in tasks if t.status == TaskStatusEnum.COMPLETED)}/{len(tasks)}"
+                active_list.append(f"{p.title} ({task_progress} tasks)")
+                
+        return {
+            "total_count": total,
+            "status_counts": {
+                "active": active,
+                "completed": completed,
+                "failed": failed
+            },
+            "active_projects_summary": ", ".join(active_list) if active_list else "None"
+        }

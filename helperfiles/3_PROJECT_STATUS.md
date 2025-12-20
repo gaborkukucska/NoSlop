@@ -11,6 +11,25 @@ current_cycle: "Deployment Stabilization"
 
 ## Recent Changes
 
+- **2025-12-20** (Session 10):
+  - **Admin AI Proactive Enhancements & Context Optimization - COMPLETE**:
+    - **Objective**: Make Admin AI proactive (greeting/priming) and user-aware, while optimizing for local LLMs with limited context.
+    - **Implementation**:
+      - **Setup Wizard**: Created a multi-step wizard (`SetupWizard.tsx`) for first-time personality configuration.
+      - **Proactive Priming**: Implemented `prime_session` in `AdminAI` to greet users with context (time, projects) upon login.
+      - **Context Optimization**:
+        - Enforced strict 5-message history limit for chat context.
+        - Implemented "On-Demand" status injection (LLM only sees status if it detects "status" intent).
+        - Added `get_concise_status_report` to `AdminAI` for token-efficient system summaries.
+        - Added explicit `clear_context` action.
+      - **Action Detection**: Enhanced `_detect_action` to handle "system_status", "worker_status", and "clear_context".
+    - **Files Modified**: `backend/admin_ai.py`, `backend/project_manager.py`, `backend/main.py`, `frontend/app/page.tsx`, `frontend/app/components/SetupWizard.tsx`, `frontend/app/components/ChatInterface.tsx`.
+    - **Impact**:
+      - ✅ **Better UX**: Users are greeted and guided immediately.
+      - ✅ **Performance**: Local LLMs (Llama 3, Mistral) no longer choke on massive history/context dumps.
+      - ✅ **Control**: Users can reset context or ask for status reliably.
+      - **Status**: **Phase 3 Core Features operational**.
+
 - **2025-12-19** (Session 9 - Part 2):
   - **Authentication Hardening & Caddy Gateway Architecture - COMPLETE**:
     - **Objective**: Harden security against invalid sessions and fix WebSocket connectivity for distributed nodes via Cloudflare.

@@ -193,12 +193,31 @@ class AdminAI:
         db.commit()
         
         # Build messages for Ollama
+        # Context Optimization: Limit history size
         messages = [
             {"role": "system", "content": self._build_system_prompt()}
         ]
-        messages.extend(self._format_conversation_history(db, session_id))
+        # Only fetch last 5 messages for context
+        messages.extend(self._format_conversation_history(db, session_id, max_messages=5)) 
+
+        # Detect action PRE-chat for status injection
+        # Some actions like "status" need data injected BEFORE the LLM generates a response
+        pre_chat_action = self._detect_action(message, "")
         
-        # Add context if available
+        if pre_chat_action == "system_status":
+             status_report = self.get_concise_status_report(db)
+             # Inject status into system prompt or latest user message
+             messages[-1]["content"] += f"\n\n[SYSTEM DATA]\n{status_report}\nUser is asking for status. Summarize this data briefly."
+             
+        if pre_chat_action == "clear_context":
+             self.clear_history(db, session_id)
+             return ChatResponse(
+                 message="I've cleared our conversation context. What would you like to discuss next?",
+                 suggestions=["New Project", "System Status"],
+                 metadata={"cleared": True}
+             )
+
+        # Add generic context if available
         if self.context:
             context_str = f"\n\nCurrent context: {json.dumps(self.context, indent=2)}"
             messages[-1]["content"] += context_str
@@ -244,7 +263,7 @@ class AdminAI:
             db.add(ai_msg_db)
             db.commit()
             
-            # Detect if user wants to create a project
+            # Detect post-chat actions (like creation)
             action = self._detect_action(message, ai_message)
             suggestions = self._generate_suggestions(message, ai_message, db, session_id)
             
@@ -257,7 +276,6 @@ class AdminAI:
                 await self.broadcast_activity("action", "Initiating project creation workflow...")
                 
                 # Convert guide_project_creation to async execution wrapper
-                # Since guide_project_creation is sync and uses ollama, we should run it in executor
                 project_result = await loop.run_in_executor(
                     None, 
                     self.guide_project_creation, 
@@ -276,8 +294,8 @@ class AdminAI:
                             workflow_path=self.context.get("last_workflow_path")
                         )
                         
-                        pm = ProjectManager(db)
-                        project = pm.create_project(project_req)
+                        pm = ProjectManager(db, self.connection_manager)
+                        project = await pm.create_project(project_req) # Now async!
                         
                         metadata["project_created"] = True
                         metadata["project_id"] = project.id
@@ -365,17 +383,23 @@ class AdminAI:
     def _detect_action(self, user_message: str, ai_response: str) -> Optional[str]:
         """
         Detect if an action should be triggered based on conversation.
-        
-        Args:
-            user_message: User's message
-            ai_response: AI's response
-            
-        Returns:
-            Action name or None
         """
-        # Simple keyword detection (can be enhanced with LLM-based classification)
-        create_keywords = ["create", "make", "start", "new project", "begin"]
+        # Simple keyword detection
         user_lower = user_message.lower()
+        
+        # System status
+        if any(w in user_lower for w in ["status", "report", "how are things", "system check"]):
+            return "system_status"
+
+        # Worker status
+        if any(w in user_lower for w in ["workers", "agents", "capabilities", "online"]):
+            return "worker_status"
+
+        # Context clearing
+        if any(w in user_lower for w in ["forget", "reset", "clear history", "new topic"]):
+            return "clear_context"
+
+        create_keywords = ["create", "make", "start", "new project", "begin"]
         
         if any(keyword in user_lower for keyword in create_keywords):
             if any(pt.value in user_lower for pt in ProjectType):
@@ -388,36 +412,54 @@ class AdminAI:
     def _generate_suggestions(self, user_message: str, ai_response: str, db: Session, session_id: str) -> List[str]:
         """
         Generate follow-up suggestions based on conversation.
-        
-        Args:
-            user_message: User's message
-            ai_response: AI's response
-            db: Database session
-            session_id: Session ID
-            
-        Returns:
-            List of suggestion strings
         """
         suggestions = []
+        user_lower = user_message.lower()
         
         # Context-aware suggestions
-        if "project" in user_message.lower() or "create" in user_message.lower():
+        if "project" in user_lower or "create" in user_lower:
             suggestions.extend([
-                "Tell me more about the style you're envisioning",
-                "Do you have any reference media?",
+                "Tell me more about the style",
+                "Do you have reference media?",
                 "What's the target duration?"
+            ])
+        elif "status" in user_lower:
+            suggestions.extend([
+                "List available workers",
+                "Create a new project",
+                "Show detailed project view"
             ])
         else:
             # Check history length
             history_count = db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).count()
             if history_count < 3:
                 suggestions.extend([
+                    "System Status Report",
                     "I want to create a video",
-                    "Help me brainstorm ideas",
-                    "What can you help me with?"
+                    "Help me brainstorm ideas"
                 ])
         
         return suggestions[:3]  # Limit to 3 suggestions
+
+    def get_concise_status_report(self, db: Session) -> str:
+        """
+        Get a concise status report for context injection.
+        """
+        try:
+            if settings.enable_project_manager:
+                pm = ProjectManager(db, self.connection_manager)
+                summary = pm.get_projects_summary()
+                
+                return (
+                    f"System Status: "
+                    f"{summary['total_count']} Total Projects "
+                    f"({summary['status_counts']['active']} Active, {summary['status_counts']['completed']} Completed). "
+                    f"Active: {summary['active_projects_summary']}"
+                )
+            return "Project Manager disabled."
+        except Exception as e:
+            logger.error(f"Error generating status report: {e}")
+            return "Status unavailable."
     
     def guide_project_creation(self, user_input: str) -> Dict[str, Any]:
         """
@@ -509,3 +551,89 @@ class AdminAI:
             db.query(ChatMessageModel).filter(ChatMessageModel.session_id == session_id).delete()
             db.commit()
         self.context = {}
+
+    async def prime_session(self, user: Any, active_projects: List[Dict[str, Any]], db: Session, session_id: str = "default") -> ChatResponse:
+        """
+        Proactively prime the session with a greeting/status report.
+        
+        Args:
+            user: User object
+            active_projects: List of active projects
+            db: Database session
+            session_id: Session ID
+            
+        Returns:
+            ChatResponse with AI message
+        """
+        logger.info(f"Priming session {session_id} for user {user.username}")
+        
+        # Build priming prompt
+        prompt = self.prompt_manager.get_prompt(
+            "admin_ai.prime_session",
+            {
+                "username": user.username,
+                "time_of_day": datetime.now().strftime("%I:%M %p"),
+                "active_projects": json.dumps([p.get("title") for p in active_projects]),
+                "personality": self.personality.type
+            }
+        )
+        
+        # If prompt template doesn't exist (fallback), build it manually
+        if "{" in prompt: # Indicates template keys weren't replaced or prompt missing
+             prompt = (
+                f"You are the Admin AI, a {self.personality.type} assistant. "
+                f"The user {user.username} has just logged in at {datetime.now().strftime('%I:%M %p')}. "
+                f"They have {len(active_projects)} active projects: {', '.join([p.get('title') for p in active_projects])}. "
+                "Greet the user proactively, mention their projects if relevant, and ask how you can help. "
+                "Keep it concise and engaging."
+             )
+
+        try:
+            await self.broadcast_activity(
+                "thinking", 
+                "Priming neural link...", 
+                {"context": "startup"}
+            )
+            
+            loop = asyncio.get_event_loop()
+            func = partial(
+                ollama.chat,
+                model=self.model,
+                messages=[{"role": "system", "content": self._build_system_prompt()}, {"role": "user", "content": prompt}],
+                options={
+                    "temperature": self.personality.creativity,
+                    "num_predict": 150 # Keep greeting short
+                }
+            )
+            response = await loop.run_in_executor(None, func)
+            ai_message = response['message']['content']
+            
+            await self.broadcast_activity(
+                "response", 
+                "Connection established", 
+                {"response_length": len(ai_message)}
+            )
+            
+            # Save prime message to DB
+            ai_msg_db = ChatMessageModel(
+                session_id=session_id,
+                role="assistant",
+                content=ai_message,
+                timestamp=datetime.utcnow()
+            )
+            db.add(ai_msg_db)
+            db.commit()
+            
+            return ChatResponse(
+                message=ai_message,
+                suggestions=["Let's work on my project", "Create a new project", "What's the system status?"],
+                metadata={"primed": True}
+            )
+            
+        except Exception as e:
+            logger.error(f"Priming error: {e}", exc_info=True)
+            return ChatResponse(
+                message=f"Welcome back, {user.username}. I'm ready to help.",
+                suggestions=[],
+                metadata={"error": str(e)}
+            )

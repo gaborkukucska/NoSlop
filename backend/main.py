@@ -700,6 +700,98 @@ async def get_project(
         raise HTTPException(status_code=500, detail=f"Error getting project: {str(e)}")
 
 
+# ============================================================================
+# Setup & Admin Endpoints
+# ============================================================================
+
+@app.get("/api/setup/status")
+async def get_setup_status(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Check if user needs to run setup wizard.
+    """
+    # Check if user has specific setup flag in preferences
+    is_setup = current_user.preferences.get("is_setup_complete", False)
+    
+    # Also check if they have a non-default personality set (as a heuristic if flag missing)
+    # Default is typically "balanced" or None depending on registration
+    # But explicit flag is better.
+    
+    return {
+        "setup_required": not is_setup,
+        "username": current_user.username
+    }
+
+@app.post("/api/setup/complete")
+async def complete_setup(
+    data: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark setup as complete and update profile.
+    """
+    try:
+        # Update personality if provided
+        if "personality" in data:
+            personality_data = data["personality"] # Expects dict
+            # We need to explicitly update columns or the JSON field depending on User model
+            # UserCRUD.update handles dictionary mapping to columns
+            
+            updates = {
+                "personality_type": personality_data.get("type", "balanced"),
+                "personality_formality": personality_data.get("formality", 0.5),
+                "personality_enthusiasm": personality_data.get("enthusiasm", 0.5),
+                "personality_verbosity": personality_data.get("verbosity", 0.6)
+            }
+            UserCRUD.update(db, current_user.id, updates)
+            
+        # Update preferences to mark setup complete
+        new_preferences = dict(current_user.preferences) if current_user.preferences else {}
+        new_preferences["is_setup_complete"] = True
+        UserCRUD.update(db, current_user.id, {"preferences": new_preferences})
+        
+        return {"status": "success", "message": "Setup completed"}
+        
+    except Exception as e:
+        logger.error(f"Setup completion failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/admin/prime")
+async def prime_admin_ai(
+    session_id: str = "default",
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger proactive priming of Admin AI.
+    """
+    try:
+        admin_ai = get_admin_ai(session_id)
+        
+        # Get active projects for context
+        projects = []
+        if settings.enable_project_manager:
+            all_projects = ProjectCRUD.get_all(db, limit=5)
+            # Filter for active ones (simplified)
+            projects = [p.to_dict() for p in all_projects if p.status != "completed"]
+            
+        response = await admin_ai.prime_session(
+            user=current_user,
+            active_projects=projects,
+            db=db,
+            session_id=session_id
+        )
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"Priming failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/projects/{project_id}/tasks")
 async def get_project_tasks(
     project_id: str, 

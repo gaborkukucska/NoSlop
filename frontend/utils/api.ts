@@ -405,6 +405,24 @@ class ApiClient {
             body: JSON.stringify(personality)
         });
     }
+
+    // Setup & Priming APIs
+    async getSetupStatus(): Promise<{ setup_required: boolean; username: string }> {
+        return this.request<{ setup_required: boolean; username: string }>('/api/setup/status');
+    }
+
+    async completeSetup(data: any): Promise<any> {
+        return this.request('/api/setup/complete', {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async primeAdminAI(sessionId: string = 'default'): Promise<any> {
+        return this.request(`/api/admin/prime?session_id=${sessionId}`, {
+            method: 'POST'
+        });
+    }
 }
 
 export const api = new ApiClient();
