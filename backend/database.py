@@ -6,7 +6,7 @@ Provides SQLAlchemy models and CRUD operations for projects and tasks.
 Uses SQLite by default, but supports PostgreSQL for production.
 """
 
-from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, JSON, ForeignKey, Enum as SQLEnum
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime, Text, JSON, ForeignKey, Boolean, Enum as SQLEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 from datetime import datetime
@@ -82,6 +82,12 @@ class TaskTypeEnum(str, enum.Enum):
     STORYBOARD = "storyboard"
     RESEARCH = "research"
     CUSTOM = "custom"
+
+
+class UserRoleEnum(str, enum.Enum):
+    """User roles"""
+    ADMIN = "admin"
+    BASIC = "basic"
 
 
 # ============================================================================
@@ -428,6 +434,14 @@ class UserModel(Base):
     email = Column(String, unique=True, nullable=True)
     hashed_password = Column(String, nullable=False)
     
+    # Role and Status
+    role = Column(SQLEnum(UserRoleEnum), default=UserRoleEnum.BASIC)
+    is_active = Column(Boolean, default=True)
+    
+    # Profile
+    bio = Column(Text, nullable=True)
+    custom_data = Column(JSON, default=dict)
+
     # Admin AI Personality Settings
     personality_type = Column(String, default="balanced")  # creative, technical, balanced
     personality_formality = Column(Float, default=0.5)
@@ -447,6 +461,10 @@ class UserModel(Base):
             "id": self.id,
             "username": self.username,
             "email": self.email,
+            "role": self.role.value if self.role else "basic",
+            "is_active": self.is_active,
+            "bio": self.bio,
+            "custom_data": self.custom_data or {},
             "personality": {
                 "type": self.personality_type,
                 "formality": self.personality_formality,
@@ -503,3 +521,69 @@ class UserCRUD:
         logger.info(f"User updated: {user_id}")
         return user
 
+
+    @staticmethod
+    def get_all(db: Session, skip: int = 0, limit: int = 100) -> List[UserModel]:
+        """Get all users"""
+        return db.query(UserModel).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def delete(db: Session, user_id: str) -> bool:
+        """Delete user"""
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            return False
+        
+        db.delete(user)
+        db.commit()
+        logger.info(f"User deleted: {user_id}")
+        return True
+
+    @staticmethod
+    def count(db: Session) -> int:
+        """Count users"""
+        return db.query(UserModel).count()
+
+
+class SystemSettingsModel(Base):
+    """Database model for system settings"""
+    __tablename__ = "system_settings"
+    
+    id = Column(Integer, primary_key=True)  # Singleton, always ID=1
+    registration_enabled = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "registration_enabled": self.registration_enabled,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class SystemSettingsCRUD:
+    """CRUD for system settings"""
+    
+    @staticmethod
+    def get(db: Session) -> SystemSettingsModel:
+        """Get settings (create defaults if missing)"""
+        settings = db.query(SystemSettingsModel).first()
+        if not settings:
+            settings = SystemSettingsModel(id=1, registration_enabled=True)
+            db.add(settings)
+            db.commit()
+            db.refresh(settings)
+        return settings
+    
+    @staticmethod
+    def update(db: Session, updates: Dict[str, Any]) -> SystemSettingsModel:
+        """Update settings"""
+        settings = SystemSettingsCRUD.get(db)
+        
+        for key, value in updates.items():
+            if hasattr(settings, key):
+                setattr(settings, key, value)
+                
+        settings.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(settings)
+        return settings

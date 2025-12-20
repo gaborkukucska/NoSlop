@@ -235,7 +235,7 @@ class ApiClient {
     }
 
     // Auth APIs
-    async login(username: string, password: string): Promise<{ access_token: string; token_type: string }> {
+    async login(username: string, password: string): Promise<{ access_token: string; token_type: string; user: any }> {
         const formData = new URLSearchParams();
         formData.append('username', username);
         formData.append('password', password);
@@ -421,6 +421,46 @@ class ApiClient {
     async primeAdminAI(sessionId: string = 'default'): Promise<any> {
         return this.request(`/api/admin/prime?session_id=${sessionId}`, {
             method: 'POST'
+        });
+    }
+
+    // Admin APIs
+    async getUsers(skip: number = 0, limit: number = 100): Promise<{ users: any[] }> {
+        return this.request<{ users: any[] }>(`/api/admin/users?skip=${skip}&limit=${limit}`);
+    }
+
+    async adminUpdateUser(userId: string, updates: any): Promise<any> {
+        return this.request(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates),
+        });
+    }
+
+    async adminDeleteUser(userId: string): Promise<any> {
+        return this.request(`/api/admin/users/${userId}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async getSystemSettings(): Promise<any> {
+        return this.request('/api/admin/settings');
+    }
+
+    async updateSystemSettings(settings: any): Promise<any> {
+        return this.request('/api/admin/settings', {
+            method: 'PUT',
+            body: JSON.stringify(settings),
+        });
+    }
+
+    async exportData(): Promise<any> {
+        return this.request('/api/admin/export');
+    }
+
+    async importData(data: any): Promise<any> {
+        return this.request('/api/admin/import', {
+            method: 'POST',
+            body: JSON.stringify(data),
         });
     }
 }

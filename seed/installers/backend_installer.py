@@ -32,7 +32,7 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Installing NoSlop Backend...")
         
         # Install system dependencies
-        self.install_packages(["python3", "python3-venv", "python3-pip", "git", "curl"])
+        self.install_packages(["python3", "python3-venv", "python3-pip", "git", "curl", "postgresql-client"])
         
         # Create directory
         self.execute_remote(f"sudo mkdir -p {self.install_dir}")
@@ -125,8 +125,17 @@ class BackendInstaller(BaseInstaller):
         finally:
             os.unlink(tmp_path)
             
-        # Run database migrations (if any)
-        # For now we just ensure DB is accessible
+        # Run database migrations (if any) or schema check
+        self.logger.info("Checking database schema and performing necessary upgrades...")
+        cmd = f"cd {self.install_dir} && {self.venv_dir}/bin/python manage_db.py --check-and-upgrade"
+        code, out, err = self.execute_remote(cmd)
+        if code != 0:
+            self.logger.warning(f"Database check failed: {err}")
+            # We don't fail the install, but warn users
+        else:
+            self.logger.info("Database check completed.")
+            if "SAFEGUARD" in out: # Log the backup message if present
+                 self.logger.info(f"Database update info:\n{out}")
         
         if self.device.os_type.value == "linux":
             # Create systemd service

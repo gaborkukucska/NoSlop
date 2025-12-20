@@ -54,6 +54,12 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
             const data = await api.getSessions();
             if (data.sessions) {
                 setSessions(data.sessions);
+                // Auto-create session if none exist and we are in default state
+                if (data.sessions.length === 0 && sessionId === 'default') {
+                    // We need to call createNewSession but avoid infinite loop/race conditions
+                    // createNewSession updates sessions state
+                    createNewSession();
+                }
             }
         } catch (error) {
             console.error('Failed to load sessions:', error);

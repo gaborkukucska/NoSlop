@@ -9,6 +9,10 @@ interface User {
     id: string;
     username: string;
     email?: string;
+    role?: string;
+    is_active?: boolean;
+    bio?: string;
+    custom_data?: any;
     personality?: any;
     preferences?: any;
 }
@@ -17,6 +21,7 @@ interface AuthContextType {
     user: User | null;
     token: string | null;
     isAuthenticated: boolean;
+    isAdmin: boolean;
     isLoading: boolean;
     login: (username: string, password: string) => Promise<void>;
     register: (data: any) => Promise<void>;
@@ -80,18 +85,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         try {
             const data = await api.login(username, password);
             const accessToken = data.access_token;
+            const userData = data.user;
 
             setToken(accessToken);
             api.setToken(accessToken);
             localStorage.setItem('noslop_token', accessToken);
 
-            // For now, we construct a basic user object since the login endpoint only returns token
-            // In a real app, we might want to fetch user profile after login
-            // Or decode the JWT to get username
-            const basicUser = { id: 'temp', username: username };
-            setUser(basicUser);
-            localStorage.setItem('noslop_user', JSON.stringify(basicUser));
+            // Use returned user data
+            setUser(userData);
+            localStorage.setItem('noslop_user', JSON.stringify(userData));
 
+            // Redirect based on role? Or just home
             router.push('/');
         } catch (error) {
             console.error("Login failed", error);
@@ -129,6 +133,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             user,
             token,
             isAuthenticated: !!token,
+            isAdmin: user?.role === 'admin',
             isLoading,
             login,
             register,

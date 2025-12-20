@@ -69,14 +69,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = UserCRUD.get_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
+    
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Inactive user")
         
     # Convert SQLAlchemy model to Pydantic model
-    return User(
-        id=user.id,
-        username=user.username,
-        email=user.email,
-        personality=user.to_dict()["personality"],
-        preferences=user.preferences,
-        created_at=user.created_at,
-        last_login=user.last_login
-    )
+    user_dict = user.to_dict()
+    return User(**user_dict)

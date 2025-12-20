@@ -170,6 +170,25 @@ class HealthStatus(BaseModel):
     services: Dict[str, bool] = Field(default_factory=dict, description="Service availability")
 
 
+
+class UserRole(str, Enum):
+    """User roles"""
+    ADMIN = "admin"
+    BASIC = "basic"
+
+
+class SystemSettingsData(BaseModel):
+    """System settings data"""
+    registration_enabled: bool = Field(default=True, description="Allow new user registration")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "registration_enabled": True
+            }
+        }
+
+
 class UserCreate(BaseModel):
     """Request to create a new user"""
     username: str = Field(..., description="Unique username")
@@ -177,6 +196,8 @@ class UserCreate(BaseModel):
     email: Optional[str] = Field(default=None, description="User email")
     personality: Optional[PersonalityProfile] = Field(default=None, description="Initial personality settings")
     preferences: Optional[Dict[str, Any]] = Field(default=None, description="User preferences")
+    bio: Optional[str] = Field(default=None, description="User biography")
+    custom_data: Optional[Dict[str, Any]] = Field(default=None, description="Custom user data")
 
 
 class User(BaseModel):
@@ -184,6 +205,10 @@ class User(BaseModel):
     id: str = Field(..., description="Unique user ID")
     username: str
     email: Optional[str] = None
+    role: UserRole = UserRole.BASIC
+    is_active: bool = True
+    bio: Optional[str] = None
+    custom_data: Optional[Dict[str, Any]] = None
     personality: PersonalityProfile
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
@@ -203,8 +228,10 @@ class Token(BaseModel):
     """JWT Token response"""
     access_token: str
     token_type: str
+    user: User  # Return full user object on login
 
 
 class TokenData(BaseModel):
     """Data embedded in JWT token"""
     username: Optional[str] = None
+    role: Optional[str] = None

@@ -18,7 +18,6 @@ from models import (
 from config import settings
 from prompt_manager import get_prompt_manager
 from sqlalchemy.orm import Session
-from sqlalchemy.orm import Session
 from project_manager import ProjectManager
 from workflow_generator import WorkflowGenerator
 

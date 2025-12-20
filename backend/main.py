@@ -23,9 +23,8 @@ import asyncio
 from admin_ai import AdminAI
 from config import settings
 from logging_config import setup_logging
-from database import init_db, get_db, SessionLocal, ProjectCRUD, TaskCRUD, UserCRUD
+from database import init_db, get_db, SessionLocal, ProjectCRUD, TaskCRUD, UserCRUD, SystemSettingsCRUD
 from project_manager import ProjectManager
-from worker_registry import get_registry, initialize_workers
 from worker_registry import get_registry, initialize_workers
 from task_executor import TaskExecutor
 from fastapi.security import OAuth2PasswordRequestForm
@@ -36,7 +35,7 @@ from auth import (
     verify_password,
     ACCESS_TOKEN_EXPIRE_MINUTES
 )
-from models import Token
+from models import Token, UserRole, SystemSettingsData, UserCreate
 
 # Initialize logging with dated files
 log_file = setup_logging(
@@ -468,23 +467,49 @@ async def get_project_suggestions(
         raise HTTPException(status_code=500, detail=f"Error generating suggestions: {str(e)}")
 
 
+
 # ============================================================================
 # Authentication Endpoints
 # ============================================================================
 
+def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Dependency to check for admin privileges"""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return current_user
+
+
 @app.post("/auth/register", response_model=User)
 async def register(user_create: UserCreate, db: Session = Depends(get_db)):
     """Register a new user"""
+    # Check if registration is enabled
+    settings = SystemSettingsCRUD.get(db)
+    if not settings.registration_enabled:
+        # Check if any users exist. If 0, allow registration (first user setup)
+        user_count = UserCRUD.count(db)
+        if user_count > 0:
+            raise HTTPException(status_code=403, detail="Registration is disabled")
+
     if UserCRUD.get_by_username(db, user_create.username):
         raise HTTPException(status_code=400, detail="Username already registered")
     
     try:
+        # Determine role: First user is ADMIN
+        user_count = UserCRUD.count(db)
+        role = UserRole.ADMIN if user_count == 0 else UserRole.BASIC
+
         # Prepare user data
         user_data = {
-            "id": f"user_{int(time.time())}_{user_create.username}",  # Simple ID generation
+            "id": f"user_{int(time.time())}_{user_create.username}", 
             "username": user_create.username,
             "email": user_create.email,
             "hashed_password": get_password_hash(user_create.password),
+            "role": role.value,
+            "bio": user_create.bio,
+            "custom_data": user_create.custom_data or {},
             "preferences": user_create.preferences or {}
         }
         
@@ -512,11 +537,20 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="User account is inactive")
+
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username, "role": user.role.value if user.role else "basic"}, 
+        expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "user": user.to_dict()
+    }
 
 
 # ============================================================================
@@ -1278,6 +1312,238 @@ async def get_task_progress(
     except Exception as e:
         logger.error(f"Error getting task progress: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting task progress: {str(e)}")
+
+
+# ============================================================================
+# Admin API Endpoints
+# ============================================================================
+
+@app.get("/api/admin/users", response_model=Dict[str, Any])
+async def list_users(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """List all users (Admin only)"""
+    users = UserCRUD.get_all(db, skip=skip, limit=limit)
+    return {"users": [u.to_dict() for u in users]}
+
+
+@app.put("/api/admin/users/{user_id}")
+async def update_user_admin(
+    user_id: str,
+    updates: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Update user details including role/status (Admin only)"""
+    # Prevent admin from deactivating themselves? Maybe.
+    if user_id == current_user.id:
+        if "is_active" in updates and not updates["is_active"]:
+            raise HTTPException(status_code=400, detail="Cannot deactivate your own account")
+        if "role" in updates and updates["role"] != UserRole.ADMIN:
+            raise HTTPException(status_code=400, detail="Cannot demote your own account")
+
+    user = UserCRUD.update(db, user_id, updates)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user.to_dict()
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def delete_user_admin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Delete a user (Admin only)"""
+    if user_id == current_user.id:
+         raise HTTPException(status_code=400, detail="Cannot delete your own account")
+         
+    success = UserCRUD.delete(db, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"status": "success", "message": "User deleted"}
+
+
+@app.get("/api/admin/settings")
+async def get_system_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Get system settings"""
+    settings = SystemSettingsCRUD.get(db)
+    return settings.to_dict()
+
+
+@app.put("/api/admin/settings")
+async def update_system_settings(
+    settings_data: SystemSettingsData,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Update system settings"""
+    updates = settings_data.dict()
+    settings = SystemSettingsCRUD.update(db, updates)
+    return settings.to_dict()
+
+
+@app.get("/api/admin/export")
+async def export_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Export all system data (Admin only)"""
+    from database import ProjectModel, TaskModel, ChatSessionModel, ChatMessageModel, UserModel, SystemSettingsModel
+    
+    export = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "exported_by": current_user.username,
+        "users": [],
+        "projects": [],
+        "tasks": [],
+        "chat_sessions": [],
+        "chat_messages": [],
+        "system_settings": SystemSettingsCRUD.get(db).to_dict()
+    }
+
+    # Helper to serialize model
+    def model_to_dict(obj):
+        d = {}
+        for column in obj.__table__.columns:
+            val = getattr(obj, column.name)
+            if isinstance(val, datetime):
+                val = val.isoformat()
+            if isinstance(val, UserRole):
+                val = val.value
+            if hasattr(val, "value"): # Handle other enums
+                val = val.value
+            d[column.name] = val
+        return d
+
+    # Users
+    users = db.query(UserModel).all()
+    export["users"] = [model_to_dict(u) for u in users]
+    
+    # Projects
+    projects = db.query(ProjectModel).all()
+    export["projects"] = [model_to_dict(p) for p in projects]
+    
+    # Tasks
+    tasks = db.query(TaskModel).all()
+    export["tasks"] = [model_to_dict(t) for t in tasks]
+    
+    # Sessions
+    sessions = db.query(ChatSessionModel).all()
+    export["chat_sessions"] = [model_to_dict(s) for s in sessions]
+    
+    # Messages
+    messages = db.query(ChatMessageModel).all()
+    export["chat_messages"] = [model_to_dict(m) for m in messages]
+
+    return export
+
+
+@app.post("/api/admin/import")
+async def import_data(
+    data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Import system data (Wipes existing data) (Admin only)"""
+    from database import ProjectModel, TaskModel, ChatSessionModel, ChatMessageModel, UserModel, SystemSettingsModel
+    
+    try:
+        # Clear existing data - Order matters for Foreign Keys
+        db.query(ChatMessageModel).delete()
+        db.query(ChatSessionModel).delete()
+        db.query(TaskModel).delete()
+        db.query(ProjectModel).delete()
+        db.query(UserModel).delete()
+        
+        # Import Users
+        for u_data in data.get("users", []):
+            # Parse datetimes
+            if u_data.get("created_at"): u_data["created_at"] = datetime.fromisoformat(u_data["created_at"])
+            if u_data.get("updated_at"): u_data["updated_at"] = datetime.fromisoformat(u_data["updated_at"])
+            if u_data.get("last_login"): u_data["last_login"] = datetime.fromisoformat(u_data["last_login"])
+            
+            user = UserModel(**u_data)
+            db.add(user)
+            
+        # Import Projects
+        for p_data in data.get("projects", []):
+            if p_data.get("created_at"): p_data["created_at"] = datetime.fromisoformat(p_data["created_at"])
+            if p_data.get("updated_at"): p_data["updated_at"] = datetime.fromisoformat(p_data["updated_at"])
+            
+            project = ProjectModel(**p_data)
+            db.add(project)
+            
+        # Import Tasks
+        for t_data in data.get("tasks", []):
+            if t_data.get("created_at"): t_data["created_at"] = datetime.fromisoformat(t_data["created_at"])
+            if t_data.get("updated_at"): t_data["updated_at"] = datetime.fromisoformat(t_data["updated_at"])
+            if t_data.get("started_at"): t_data["started_at"] = datetime.fromisoformat(t_data["started_at"])
+            if t_data.get("completed_at"): t_data["completed_at"] = datetime.fromisoformat(t_data["completed_at"])
+            
+            task = TaskModel(**t_data)
+            db.add(task)
+            
+        # Import Chat Sessions
+        for s_data in data.get("chat_sessions", []):
+            if s_data.get("created_at"): s_data["created_at"] = datetime.fromisoformat(s_data["created_at"])
+            if s_data.get("updated_at"): s_data["updated_at"] = datetime.fromisoformat(s_data["updated_at"])
+            
+            session = ChatSessionModel(**s_data)
+            db.add(session)
+            
+        # Import Chat Messages
+        for m_data in data.get("chat_messages", []):
+            if m_data.get("timestamp"): m_data["timestamp"] = datetime.fromisoformat(m_data["timestamp"])
+            
+            message = ChatMessageModel(**m_data)
+            db.add(message)
+            
+        # Settings
+        if "system_settings" in data:
+            settings_data = data["system_settings"]
+            settings = SystemSettingsCRUD.update(db, settings_data)
+            
+        db.commit()
+        return {"status": "success", "message": "Data imported successfully"}
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Import failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+@app.put("/api/users/{user_id}")
+async def update_user_profile(
+    user_id: str,
+    updates: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update user profile (Self or Admin)"""
+    if user_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Not authorized to update this profile")
+        
+    # Whitelist allowed fields for non-admins
+    allowed_fields = ["bio", "custom_data", "preferences", "email"]
+    if current_user.role == UserRole.ADMIN:
+        allowed_fields.extend(["role", "is_active"])
+        
+    filtered_updates = {k: v for k, v in updates.items() if k in allowed_fields}
+    
+    if not filtered_updates and not current_user.role == UserRole.ADMIN: # Admins might update other things
+         return current_user # No op
+         
+    user = UserCRUD.update(db, user_id, filtered_updates)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
+    return user.to_dict()
 
 
 if __name__ == "__main__":
