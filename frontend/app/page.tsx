@@ -12,6 +12,7 @@ import ProjectList from './components/ProjectList';
 import ProjectDetail from './components/ProjectDetail';
 import LoadingScreen from './components/LoadingScreen';
 import AgentActivityTerminal from './components/AgentActivityTerminal';
+import ProfileModal from './components/ProfileModal';
 import { useAgentActivity } from '../hooks/useAgentActivity';
 import api from '../utils/api';
 
@@ -22,7 +23,8 @@ export default function Home() {
   const [showPersonality, setShowPersonality] = useState(false);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [showSetupWizard, setShowSetupWizard] = useState(false);
-  const [isPriming, setIsPriming] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [refreshProjects, setRefreshProjects] = useState(0);
   const [chatRefreshTrigger, setChatRefreshTrigger] = useState(0);
@@ -72,36 +74,16 @@ export default function Home() {
       const status = await api.getSetupStatus();
       if (status.setup_required) {
         setShowSetupWizard(true);
-      } else {
-        // If setup done, prime the AI (only if not already done in this session)
-        // Using session storage to avoid re-priming on every refresh if desired, 
-        // but requirements say "on startup". Let's do it every refresh for now as it's a "session start".
-        const hasPrimed = sessionStorage.getItem('noslop_primed');
-        if (!hasPrimed) {
-          primeSystem();
-        }
       }
     } catch (error) {
       console.error("Failed to check setup status:", error);
     }
   };
 
-  const primeSystem = async () => {
-    setIsPriming(true);
-    try {
-      await api.primeAdminAI();
-      setChatRefreshTrigger(prev => prev + 1);
-      sessionStorage.setItem('noslop_primed', 'true');
-    } catch (error) {
-      console.error("Priming failed:", error);
-    } finally {
-      setIsPriming(false);
-    }
-  };
-
   const handleSetupComplete = () => {
     setShowSetupWizard(false);
-    primeSystem();
+    // Refresh to trigger ChatInterface to load/create session
+    window.location.reload();
   };
 
   const handleProjectCreated = (project: any) => {
@@ -160,9 +142,13 @@ export default function Home() {
               </div>
 
               {/* User Info */}
-              <span className="text-sm text-zinc-600 dark:text-zinc-400">
+              <button
+                onClick={() => setShowProfile(true)}
+                className="text-sm text-zinc-600 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
                 👤 {user?.username}
-              </span>
+              </button>
+
 
               <button
                 onClick={() => setShowPersonality(!showPersonality)}
@@ -198,15 +184,6 @@ export default function Home() {
               </div>
             ) : (
               <div className="h-[calc(100vh-200px)] flex flex-col relative">
-                {isPriming && (
-                  <div className="absolute inset-x-0 top-0 z-10 bg-blue-500/10 backdrop-blur-sm p-4 rounded-t-lg flex items-center justify-center space-x-3 text-blue-600 dark:text-blue-400 border-b border-blue-500/20 animate-pulse">
-                    <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span className="font-semibold tracking-wide">ESTABLISHING NEURAL LINK...</span>
-                  </div>
-                )}
                 <div className="h-2/3">
                   <ChatInterface refreshTrigger={chatRefreshTrigger} />
                 </div>
@@ -304,45 +281,55 @@ export default function Home() {
               />
             </div>
           </div>
-        </div>
-      </main>
+        </div >
+      </main >
 
       {/* Project Form Modal */}
-      {showProjectForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-4xl">
-            <SceneWizard
-              onSuccess={handleProjectCreated}
-              onCancel={() => setShowProjectForm(false)}
-            />
+      {
+        showProjectForm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-4xl">
+              <SceneWizard
+                onSuccess={handleProjectCreated}
+                onCancel={() => setShowProjectForm(false)}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Personality Modal */}
-      {showPersonality && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="relative w-full max-w-2xl bg-white dark:bg-zinc-900 rounded-lg shadow-xl overflow-hidden">
+      {
+        showPersonality && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="relative w-full max-w-2xl bg-white dark:bg-zinc-900 rounded-lg shadow-xl overflow-hidden">
 
-            <PersonalitySelector />
-            <button
-              onClick={() => setShowPersonality(false)}
-              className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
-            >
-              ✕
-            </button>
+              <PersonalitySelector />
+              <button
+                onClick={() => setShowPersonality(false)}
+                className="absolute top-4 right-4 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Setup Wizard Modal */}
-      {showSetupWizard && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[60] p-4">
-          <SetupWizard onComplete={handleSetupComplete} />
-        </div>
-      )}
+      {
+        showSetupWizard && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center z-[60] p-4">
+            <SetupWizard onComplete={handleSetupComplete} />
+          </div>
+        )
+      }
 
-    </div>
+      <ProfileModal
+        isOpen={showProfile}
+        onClose={() => setShowProfile(false)}
+      />
+
+    </div >
   );
 }
-

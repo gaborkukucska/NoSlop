@@ -199,7 +199,13 @@ class UserCreate(BaseModel):
     bio: Optional[str] = Field(default=None, description="User biography")
     custom_data: Optional[Dict[str, Any]] = Field(default=None, description="Custom user data")
 
-
+class UserUpdate(BaseModel):
+    """Request to update user profile"""
+    email: Optional[str] = None
+    bio: Optional[str] = None
+    preferences: Optional[Dict[str, Any]] = None
+    custom_data: Optional[Dict[str, Any]] = None
+    personality: Optional[PersonalityProfile] = None
 class User(BaseModel):
     """User data model"""
     id: str = Field(..., description="Unique user ID")

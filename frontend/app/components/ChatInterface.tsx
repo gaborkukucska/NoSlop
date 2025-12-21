@@ -30,6 +30,7 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isPriming, setIsPriming] = useState(false);
     const [suggestions, setSuggestions] = useState<string[]>([]);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isListening, setIsListening] = useState(false);
@@ -46,7 +47,7 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
 
     useEffect(() => {
         scrollToBottom();
-    }, [messages]);
+    }, [messages, isPriming]);
 
     // Load sessions
     const loadSessions = async () => {
@@ -54,10 +55,9 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
             const data = await api.getSessions();
             if (data.sessions) {
                 setSessions(data.sessions);
-                // Auto-create session if none exist and we are in default state
-                if (data.sessions.length === 0 && sessionId === 'default') {
-                    // We need to call createNewSession but avoid infinite loop/race conditions
-                    // createNewSession updates sessions state
+                // Always create a new session on initial load (default state)
+                // This ensures we get a fresh "Daily Briefing" / Priming sequence
+                if (sessionId === 'default') {
                     createNewSession();
                 }
             }
@@ -73,6 +73,7 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
     // Load chat history when sessionId changes or refreshTrigger updates
     useEffect(() => {
         const loadHistory = async () => {
+            setIsLoading(true);
             try {
                 const data = await api.getChatHistory(sessionId);
                 if (data.history) {
@@ -87,6 +88,8 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
             } catch (error) {
                 console.error('Failed to load chat history:', error);
                 setMessages([]);
+            } finally {
+                setIsLoading(false);
             }
         };
 
@@ -192,14 +195,40 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
 
 
     const createNewSession = async () => {
+        setIsPriming(true);
         try {
             const newSession = await api.createSession();
             setSessions((prev) => [newSession, ...prev]);
             setSessionId(newSession.id);
             setMessages([]);
             if (window.innerWidth < 768) setIsSidebarOpen(false);
+
+            // Prime the new session immediately so Admin AI introduces itself
+            try {
+                // Await this to keep overlay visible during generation
+                await api.primeAdminAI(newSession.id);
+
+                // Fetch updated history containing the prime message
+                try {
+                    const data = await api.getChatHistory(newSession.id);
+                    if (data.history && data.history.length > 0) {
+                        setMessages(data.history.map((msg: any) => ({
+                            role: msg.role,
+                            content: msg.content,
+                            timestamp: msg.timestamp || new Date().toISOString()
+                        })));
+                    }
+                } catch (historyError) {
+                    console.error("Failed to fetch history after priming:", historyError);
+                }
+            } catch (e) {
+                console.error("Failed to prime new session:", e);
+            }
+
         } catch (error) {
             console.error('Failed to create session:', error);
+        } finally {
+            setIsPriming(false);
         }
     };
 
@@ -365,8 +394,25 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.length === 0 && (
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 relative">
+                    {/* Priming Overlay */}
+                    {isPriming && (
+                        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-900/90 backdrop-blur-sm">
+                            <div className="flex flex-col items-center space-y-4 animate-pulse">
+                                <div className="relative">
+                                    <div className="absolute inset-0 bg-blue-500 rounded-full blur-xl opacity-20 animate-pulse"></div>
+                                    <svg className="relative w-16 h-16 text-blue-600 dark:text-blue-400 animate-spin-slow" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                </div>
+                                <h2 className="text-xl font-bold text-zinc-800 dark:text-zinc-100 mt-4">ESTABLISHING NEURAL LINK</h2>
+                                <p className="text-zinc-500 dark:text-zinc-400">Calibrating Admin AI Personality...</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {!isPriming && messages.length === 0 && (
                         <div className="text-center text-gray-500 mt-8">
                             <p className="text-lg mb-2">👋 Hello! I'm your Admin AI.</p>
                             <p className="text-sm">How can I help you create amazing content today?</p>

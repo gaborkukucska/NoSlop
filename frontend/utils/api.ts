@@ -167,6 +167,14 @@ class ApiClient {
         return getWebSocketUrl();
     }
 
+    // User APIs
+    async updateProfile(data: any): Promise<any> {
+        return this.request('/api/users/me', {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
     // Chat APIs
     async sendMessage(message: string, sessionId: string = 'default'): Promise<{ message: string; suggestions?: string[] }> {
         return this.request<{ message: string; suggestions?: string[] }>(`/api/chat?session_id=${sessionId}`, {

@@ -16,7 +16,8 @@ from models import (
     ProjectRequest,
     Project,
     User,
-    UserCreate
+    UserCreate,
+    UserUpdate
 )
 from collections import deque
 import asyncio
@@ -589,6 +590,36 @@ async def create_user(user_create: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Error creating user: {str(e)}")
 
 
+@app.put("/api/users/me", response_model=User)
+async def update_user_me(
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update current user profile"""
+    try:
+        user = UserCRUD.get(db, current_user.id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        update_data = user_update.dict(exclude_unset=True)
+        
+        # Handle nested personality update
+        if "personality" in update_data and update_data["personality"]:
+            p_data = update_data.pop("personality")
+            update_data["personality_type"] = p_data["type"].value
+            update_data["personality_formality"] = p_data["formality"]
+            update_data["personality_enthusiasm"] = p_data["enthusiasm"]
+            update_data["personality_verbosity"] = p_data["verbosity"]
+            
+        updated_user = UserCRUD.update(db, user.id, update_data)
+        return updated_user.to_dict()
+        
+    except Exception as e:
+        logger.error(f"Error updating user: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating user: {str(e)}")
+
+
 @app.get("/api/users/{user_id}", response_model=User)
 async def get_user(user_id: str, db: Session = Depends(get_db)):
     """Get user profile"""
@@ -781,6 +812,20 @@ async def complete_setup(
                 "personality_verbosity": personality_data.get("verbosity", 0.6)
             }
             UserCRUD.update(db, current_user.id, updates)
+            
+        # Update extra profile fields if provided
+        profile_updates = {}
+        if "bio" in data:
+            profile_updates["bio"] = data["bio"]
+        
+        if "custom_data" in data:
+            # Merge with existing custom_data if present
+            current_custom = current_user.custom_data or {}
+            merged_custom = {**current_custom, **data["custom_data"]}
+            profile_updates["custom_data"] = merged_custom
+            
+        if profile_updates:
+            UserCRUD.update(db, current_user.id, profile_updates)
             
         # Update preferences to mark setup complete
         new_preferences = dict(current_user.preferences) if current_user.preferences else {}

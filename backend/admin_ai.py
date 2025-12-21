@@ -581,10 +581,9 @@ class AdminAI:
         if "{" in prompt: # Indicates template keys weren't replaced or prompt missing
              prompt = (
                 f"You are the Admin AI, a {self.personality.type} assistant. "
-                f"The user {user.username} has just logged in at {datetime.now().strftime('%I:%M %p')}. "
-                f"They have {len(active_projects)} active projects: {', '.join([p.get('title') for p in active_projects])}. "
-                "Greet the user proactively, mention their projects if relevant, and ask how you can help. "
-                "Keep it concise and engaging."
+                "The user has just started a new session. "
+                "Give a very short, crisp welcome. State that you are online and ready to create media. "
+                "Do not apologize for anything. Do not mention hiccups. Just be helpful and ready."
              )
 
         try:
@@ -601,7 +600,7 @@ class AdminAI:
                 messages=[{"role": "system", "content": self._build_system_prompt()}, {"role": "user", "content": prompt}],
                 options={
                     "temperature": self.personality.creativity,
-                    "num_predict": 150 # Keep greeting short
+                    "num_predict": 500 # Ensure greeting isn't truncated
                 }
             )
             response = await loop.run_in_executor(None, func)
