@@ -93,14 +93,58 @@ class VoiceService:
         if not self.tts_model:
             raise RuntimeError("TTS model not initialized")
 
-        inputs = self.processor(text=text, return_tensors="pt")
+        # Chunk text to avoid tensor size mismatch (limit ~400-500 chars)
+        max_chars = 450
+        chunks = []
         
-        # Generate speech
-        speech = self.tts_model.generate_speech(inputs["input_ids"], self.speaker_embeddings, vocoder=self.vocoder)
+        # Simple splitting by sentences
+        sentences = text.replace("!", ".").replace("?", ".").split(".")
+        current_chunk = ""
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
+                continue
+                
+            if len(current_chunk) + len(sentence) < max_chars:
+                current_chunk += sentence + ". "
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = sentence + ". "
+                
+        if current_chunk:
+            chunks.append(current_chunk)
+            
+        if not chunks:
+            chunks = [text]
+
+        # Generate audio for each chunk and concatenate
+        audio_segments = []
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+            
+            try:
+                inputs = self.processor(text=chunk, return_tensors="pt")
+                speech = self.tts_model.generate_speech(
+                    inputs["input_ids"], 
+                    self.speaker_embeddings, 
+                    vocoder=self.vocoder
+                )
+                audio_segments.append(speech.numpy())
+            except Exception as e:
+                self.logger.warning(f"Failed to generate speech for chunk: {e}")
+        
+        if not audio_segments:
+             raise RuntimeError("No audio generated")
+             
+        # Concatenate using numpy
+        full_audio = np.concatenate(audio_segments)
         
         # Convert to WAV
         buffer = io.BytesIO()
-        sf.write(buffer, speech.numpy(), samplerate=16000, format='WAV')
+        sf.write(buffer, full_audio, samplerate=16000, format='WAV')
         buffer.seek(0)
         
         return buffer

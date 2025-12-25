@@ -34,7 +34,7 @@ class FrontendInstaller(BaseInstaller):
         self.logger.info("Installing Node.js 20.x from NodeSource...")
         
         # Install prerequisites
-        self.install_packages(["curl", "ca-certificates", "gnupg"])
+        self.install_packages(["curl", "ca-certificates", "gnupg", "rsync"])
         
         # Add NodeSource repository for Node.js 20.x
         code, _, err = self.execute_remote(

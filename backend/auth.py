@@ -46,6 +46,25 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
+def verify_token(token: str) -> dict:
+    """
+    Verify JWT token and return payload.
+    Raises HTTPException (401) if invalid.
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("sub") is None:
+            raise credentials_exception
+        return payload
+    except JWTError:
+        raise credentials_exception
+
+
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
     """
     Get the current authenticated user from the token.
@@ -57,14 +76,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except JWTError:
-        raise credentials_exception
+    # Use the shared verification logic
+    # Note: verify_token raises the exception if it fails
+    payload = verify_token(token)
+    username: str = payload.get("sub")
+    token_data = TokenData(username=username)
         
     user = UserCRUD.get_by_username(db, username=token_data.username)
     if user is None:
@@ -76,3 +92,65 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     # Convert SQLAlchemy model to Pydantic model
     user_dict = user.to_dict()
     return User(**user_dict)
+
+
+def change_password(
+    db: Session,
+    user_id: str,
+    current_password: str,
+    new_password: str
+) -> bool:
+    """
+    Change user password with validation.
+    
+    Args:
+        db: Database session
+        user_id: User ID
+        current_password: Current password for verification
+        new_password: New password to set
+        
+    Returns:
+        True if password changed successfully
+        
+    Raises:
+        HTTPException: If current password is incorrect or validation fails
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Get user
+    user = UserCRUD.get(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Verify current password
+    if not verify_password(current_password, user.hashed_password):
+        logger.warning(f"Password change failed: incorrect current password for user {user_id}")
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect"
+        )
+    
+    # Validate new password strength
+    if len(new_password) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be at least 8 characters long"
+        )
+    
+    # Don't allow same password
+    if verify_password(new_password, user.hashed_password):
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be different from current password"
+        )
+    
+    # Hash and update password
+    hashed_password = get_password_hash(new_password)
+    UserCRUD.update(db, user_id, {
+        "hashed_password": hashed_password,
+        "password_changed_at": datetime.utcnow()
+    })
+    
+    logger.info(f"Password changed successfully for user: {user_id}")
+    return True

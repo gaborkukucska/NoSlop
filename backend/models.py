@@ -128,6 +128,7 @@ class Project(BaseModel):
     style: Optional[str] = None
     reference_media: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    tasks: List["Task"] = Field(default_factory=list)
 
     class Config:
         from_attributes = True
@@ -206,6 +207,26 @@ class UserUpdate(BaseModel):
     preferences: Optional[Dict[str, Any]] = None
     custom_data: Optional[Dict[str, Any]] = None
     personality: Optional[PersonalityProfile] = None
+    
+    # Extended Profile
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    date_of_birth: Optional[datetime] = None
+    location: Optional[str] = None
+    address: Optional[str] = None
+    timezone: Optional[str] = None
+    avatar_url: Optional[str] = None
+    
+    # Personalization
+    interests: Optional[List[str]] = None
+    occupation: Optional[str] = None
+    experience_level: Optional[str] = None
+    preferred_media_types: Optional[List[str]] = None
+    content_goals: Optional[str] = None
+    social_links: Optional[Dict[str, str]] = None
+    profile_visibility: Optional[str] = None
+
 class User(BaseModel):
     """User data model"""
     id: str = Field(..., description="Unique user ID")
@@ -215,10 +236,29 @@ class User(BaseModel):
     is_active: bool = True
     bio: Optional[str] = None
     custom_data: Optional[Dict[str, Any]] = None
-    personality: PersonalityProfile
+    personality: Optional[PersonalityProfile] = None # Make optional to handle legacy data if needed
     preferences: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     last_login: Optional[datetime] = None
+    
+    # Extended Profile
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    date_of_birth: Optional[datetime] = None
+    location: Optional[str] = None
+    address: Optional[str] = None
+    timezone: Optional[str] = None
+    avatar_url: Optional[str] = None
+    
+    # Personalization
+    interests: Optional[List[str]] = None
+    occupation: Optional[str] = None
+    experience_level: Optional[str] = None
+    preferred_media_types: Optional[List[str]] = None
+    content_goals: Optional[str] = None
+    social_links: Optional[Dict[str, str]] = None
+    profile_visibility: Optional[str] = None
 
     class Config:
         from_attributes = True

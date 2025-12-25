@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, status, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, status, BackgroundTasks, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import ollama
 import uvicorn
@@ -84,14 +84,51 @@ if settings.enable_project_manager:
 # In production, this should be restricted, but for a self-hosted local tool, functionality is prioritized.
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",  # Allow all origins with credentials
+    # Use dynamic origins from settings (injected by deployer) + explicit dev defaults
+    allow_origins=settings.cors_origins_list if settings.cors_origins != "*" else ["*"],
+    allow_origin_regex=".*", 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 logger.info("CORS enabled for all origins (development mode)")
 
-# Global Admin AI instance (in production, this would be per-user)
+# ... (omitted code) ...
+
+@app.post("/api/projects/{project_id}/start", response_model=Project)
+async def start_project(
+    project_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    if not settings.enable_project_manager:
+        raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
+    logger.info(f"Project start requested: {project_id}")
+    
+    try:
+        pm = ProjectManager(db, manager)
+        project = await pm.start_project(project_id)
+        
+        if not project:
+            logger.warning(f"Project not found: {project_id}")
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Trigger execution in background on the main loop with isolated session
+        asyncio.create_task(run_background_project_execution(project_id))
+        logger.info(f"Project execution scheduled in background: {project_id}")
+        
+        # Ensure we return a Pydantic model compatible object
+        # project is a SQLAlchemy model, Pydantic's from_attributes=True should handle it
+        # but let's be explicit if there were issues
+        return project
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error starting project: {str(e)}")
 admin_ai_instance: Dict[str, AdminAI] = {}
 
 def get_admin_ai(session_id: str = "default") -> AdminAI:
@@ -103,84 +140,105 @@ def get_admin_ai(session_id: str = "default") -> AdminAI:
     return admin_ai_instance[session_id]
 
 
+from fastapi import Query, WebSocketException
+
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.history = deque(maxlen=50)  # Keep last 50 logs
+        # Store connections as {user_id: [websocket1, websocket2]}
+        self.active_connections: Dict[str, List[WebSocket]] = {}
+        self.history: deque = deque(maxlen=50)
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket, user_id: str):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+        logger.info(f"WebSocket connected for user {user_id}")
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    def disconnect(self, websocket: WebSocket, user_id: str):
+        if user_id in self.active_connections:
+            if websocket in self.active_connections[user_id]:
+                self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+        logger.info(f"WebSocket disconnected for user {user_id}")
 
-    async def broadcast(self, message: dict):
+    async def broadcast(self, message: dict, user_id: Optional[str] = None):
+        """
+        Broadcast message to connected clients.
+        If user_id is provided, only send to that user.
+        If user_id is None, broadcast to ALL (admin/system events only).
+        """
         self.history.append(message)
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                # Handle potential disconnects gracefully
-                pass
+        
+        # If specific user targeted
+        if user_id:
+            if user_id in self.active_connections:
+                # Iterate over a copy of the list to handle concurrent disconnections
+                for connection in list(self.active_connections[user_id]):
+                    try:
+                        await connection.send_json(message)
+                    except Exception:
+                        pass
+            return
+
+        # Broadcast to all (legacy behavior or system-wide alerts)
+        # Iterate over a copy of values to handle concurrent dictionary changes
+        for user_conns in list(self.active_connections.values()):
+            for connection in list(user_conns):
+                try:
+                    await connection.send_json(message)
+                except Exception:
+                    pass
 
 manager = ConnectionManager()
 
 
-@app.get("/")
-def read_root():
-    return {
-        "message": "NoSlop Backend API",
-        "version": settings.app_version,
-        "docs": "/docs"
-    }
-
-
-@app.get("/health", response_model=HealthStatus)
-def health_check():
-    """
-    Checks the health of the backend and the connection to Ollama.
-    """
-    logger.debug("Health check requested")
-    try:
-        # Attempt to list models to verify connection
-        models = ollama.list()
-        
-        # Check optional services
-        services = {
-            "ollama": True,
-            "comfyui": False,  # TODO: Implement ComfyUI health check
-            "database": True   # TODO: Implement database health check
-        }
-        
-        logger.debug(f"Health check passed: {len(models.get('models', []))} models available")
-        
-        return HealthStatus(
-            status="ok", 
-            ollama="connected", 
-            model_count=len(models.get('models', [])),
-            services=services
-        )
-    except Exception as e:
-        logger.error(f"Health check failed: {e}", exc_info=True)
-        return HealthStatus(
-            status="degraded", 
-            ollama="disconnected", 
-            model_count=0,
-            services={"ollama": False}
-        )
-
+# Import verify_token from auth to validate WS token
+from auth import verify_token
 
 @app.websocket("/ws/activity")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
+    user_id = "anonymous"
+    
+    # Authenticate
+    if token:
+        try:
+            payload = verify_token(token)
+            username = payload.get("sub")
+            # In a real app we'd fetch the user ID from DB, but for now username/id mapping 
+            # or just using username as ID for connection tracking is sufficient?
+            # Existing User model has specific IDs (user_timestamp_username).
+            # Let's try to get the real user to be safe.
+            
+            # Create a localized db session just for this check might be expensive per connect,
+            # but acceptable.
+            db = SessionLocal()
+            try:
+                user = UserCRUD.get_by_username(db, username)
+                if user:
+                    user_id = user.id
+            finally:
+                db.close()
+                
+        except HTTPException:
+            # Invalid token
+            logger.warning("Invalid WebSocket token")
+            # close with policy violation
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+    else:
+        # No token provided
+        logger.warning("No WebSocket token provided")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await manager.connect(websocket, user_id)
     try:
         while True:
-            # Keep the connection open to receive messages if needed in the future
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        manager.disconnect(websocket, user_id)
 
 
 @app.get("/api/activity/history")
@@ -256,7 +314,7 @@ async def chat_with_admin_ai(
         db.commit()
         
         # Process chat
-        response = await admin_ai.chat(request.message, request.context, db=db, session_id=session_id)
+        response = await admin_ai.chat(request.message, request.context, db=db, session_id=session_id, user=current_user)
         
         return response
         
@@ -284,6 +342,17 @@ async def get_chat_history(
         List of chat messages
     """
     try:
+        # Security: Verify session belongs to current user
+        from database import ChatSessionModel
+        if session_id != "default":
+            session = db.query(ChatSessionModel).filter(
+                ChatSessionModel.id == session_id,
+                ChatSessionModel.user_id == current_user.id
+            ).first()
+            
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found or access denied")
+        
         admin_ai = get_admin_ai(session_id)
         history = admin_ai.get_history(db, session_id, limit)
         return {"history": history}
@@ -299,7 +368,9 @@ async def get_chat_sessions(
 ):
     """List all chat sessions for the current user."""
     from database import ChatSessionModel
-    sessions = db.query(ChatSessionModel).order_by(ChatSessionModel.updated_at.desc()).all()
+    sessions = db.query(ChatSessionModel).filter(
+        ChatSessionModel.user_id == current_user.id
+    ).order_by(ChatSessionModel.updated_at.desc()).all()
     return {"sessions": [s.to_dict() for s in sessions]}
 
 
@@ -334,7 +405,10 @@ async def update_chat_session(
     """Update a chat session (e.g. title)."""
     from database import ChatSessionModel
     
-    session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+    session = db.query(ChatSessionModel).filter(
+        ChatSessionModel.id == session_id,
+        ChatSessionModel.user_id == current_user.id  # Security: Only allow user to update their own sessions
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
         
@@ -356,7 +430,10 @@ async def delete_chat_session(
     """Delete a chat session."""
     from database import ChatSessionModel, ChatMessageModel
     
-    session = db.query(ChatSessionModel).filter(ChatSessionModel.id == session_id).first()
+    session = db.query(ChatSessionModel).filter(
+        ChatSessionModel.id == session_id,
+        ChatSessionModel.user_id == current_user.id  # Security: Only allow user to delete their own sessions
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
         
@@ -506,7 +583,7 @@ async def register(user_create: UserCreate, db: Session = Depends(get_db)):
         user_data = {
             "id": f"user_{int(time.time())}_{user_create.username}", 
             "username": user_create.username,
-            "email": user_create.email,
+            "email": user_create.email if user_create.email else None,  # Convert empty string to None
             "hashed_password": get_password_hash(user_create.password),
             "role": role.value,
             "bio": user_create.bio,
@@ -530,28 +607,34 @@ async def register(user_create: UserCreate, db: Session = Depends(get_db)):
 @app.post("/auth/token", response_model=Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Login to get access token"""
-    user = UserCRUD.get_by_username(db, form_data.username)
-    if not user or not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="User account is inactive")
+    try:
+        user = UserCRUD.get_by_username(db, form_data.username)
+        if not user or not verify_password(form_data.password, user.hashed_password):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        if not user.is_active:
+            raise HTTPException(status_code=400, detail="User account is inactive")
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value if user.role else "basic"}, 
-        expires_delta=access_token_expires
-    )
-    
-    return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "user": user.to_dict()
-    }
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username, "role": user.role.value if user.role else "basic"}, 
+            expires_delta=access_token_expires
+        )
+        
+        return {
+            "access_token": access_token, 
+            "token_type": "bearer",
+            "user": user.to_dict()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 
 # ============================================================================
@@ -662,6 +745,281 @@ async def update_user_personality(
     except Exception as e:
         logger.error(f"Error updating personality: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error updating personality: {str(e)}")
+
+
+# ============================================================================
+# Enhanced User Management Endpoints
+# ============================================================================
+
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from auth import change_password
+from data_export import UserDataExporter
+from data_import import UserDataImporter
+from avatar_service import AvatarService
+
+# Initialize services
+avatar_service = AvatarService()
+
+
+class PasswordChangeRequest(BaseModel):
+    """Password change request model"""
+    current_password: str
+    new_password: str
+
+
+class DataImportRequest(BaseModel):
+    """Data import options"""
+    mode: str = "merge"  # merge or replace
+
+
+@app.put("/api/users/me/password")
+async def change_own_password(
+    password_data: PasswordChangeRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Change current user's password.
+    Requires current password for verification.
+    """
+    try:
+        change_password(
+            db=db,
+            user_id=current_user.id,
+            current_password=password_data.current_password,
+            new_password=password_data.new_password
+        )
+        return {"status": "success", "message": "Password changed successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Password change error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/users/me/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Upload avatar image for current user"""
+    try:
+        # Upload and process avatar
+        avatar_url = await avatar_service.upload_avatar(current_user.id, file)
+        
+        # Update user record
+        UserCRUD.update(db, current_user.id, {"avatar_url": avatar_url})
+        
+        return {
+            "status": "success",
+            "message": "Avatar uploaded successfully",
+            "avatar_url": avatar_url
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Avatar upload error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/users/me/avatar")
+async def delete_own_avatar(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete current user's avatar"""
+    try:
+        # Delete avatar file
+        if current_user.avatar_url:
+            avatar_service.delete_avatar(current_user.id, current_user.avatar_url)
+        
+        # Update user record
+        UserCRUD.update(db, current_user.id, {"avatar_url": None})
+        
+        return {"status": "success", "message": "Avatar deleted"}
+    except Exception as e:
+        logger.error(f"Avatar deletion error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/users/me/export")
+async def export_own_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Export complete user data as downloadable JSON file.
+    Includes profile, sessions, messages, projects, and tasks.
+    """
+    try:
+        # Export user data
+        data = UserDataExporter.export_user_complete(db, current_user.id)
+        
+        if not data:
+            raise HTTPException(status_code=404, detail="User data not found")
+        
+        # Create file
+        file_buffer = UserDataExporter.create_export_file(data, format="json")
+        filename = UserDataExporter.get_export_filename(current_user.username)
+        
+        # Return as downloadable file
+        return StreamingResponse(
+            file_buffer,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Data export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/users/me/import")
+async def import_own_data(
+    file: UploadFile = File(...),
+    mode: str = "merge",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Import user data from JSON file.
+    Mode can be 'merge' (add new, keep existing) or 'replace' (overwrite existing).
+    """
+    try:
+        # Read and parse file
+        content = await file.read()
+        import json
+        data = json.loads(content.decode('utf-8'))
+        
+        # Import data
+        result = UserDataImporter.import_user_data(
+            db=db,
+            data=data,
+            target_user_id=current_user.id,
+            mode=mode
+        )
+        
+        return result
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON file")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Data import error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/users/me")
+async def delete_own_account(
+    password: str,
+    cascade: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete own account (requires password confirmation).
+    If cascade=True, deletes all related data (sessions, messages, projects).
+    """
+    try:
+        from auth import verify_password
+        
+        # Verify password
+        user = UserCRUD.get(db, current_user.id)
+        if not verify_password(password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Incorrect password")
+        
+        # Delete user
+        if cascade:
+            UserCRUD.delete_cascade(db, current_user.id)
+        else:
+            UserCRUD.delete(db, current_user.id)
+        
+        return {"status": "success", "message": "Account deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Account deletion error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Admin endpoints for user data management
+
+@app.get("/api/admin/users/{user_id}/export")
+async def export_user_data_admin(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Admin: Export specific user's complete data"""
+    try:
+        # Get user to check existence
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Export user data
+        data = UserDataExporter.export_user_complete(db, user_id)
+        
+        # Create file
+        file_buffer = UserDataExporter.create_export_file(data, format="json")
+        filename = UserDataExporter.get_export_filename(user.username)
+        
+        # Return as downloadable file
+        return StreamingResponse(
+            file_buffer,
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin export error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/users/{user_id}/import")
+async def import_user_data_admin(
+    user_id: str,
+    file: UploadFile = File(...),
+    mode: str = "merge",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin)
+):
+    """Admin: Import data for specific user"""
+    try:
+        # Check user exists
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Read and parse file
+        content = await file.read()
+        import json
+        data = json.loads(content.decode('utf-8'))
+        
+        # Import data
+        result = UserDataImporter.import_user_data(
+            db=db,
+            data=data,
+            target_user_id=user_id,
+            mode=mode
+        )
+        
+        return result
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON file")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin import error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
@@ -817,6 +1175,11 @@ async def complete_setup(
         profile_updates = {}
         if "bio" in data:
             profile_updates["bio"] = data["bio"]
+        
+        # New profile detail fields from expanded wizard
+        for field in ["display_name", "first_name", "last_name", "address", "location", "timezone", "occupation", "interests"]:
+            if field in data:
+                profile_updates[field] = data[field]
         
         if "custom_data" in data:
             # Merge with existing custom_data if present
@@ -1216,17 +1579,28 @@ async def start_project(
 ):
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
+    
     logger.info(f"Project start requested: {project_id}")
-    pm = ProjectManager(db, manager)
-    project = await pm.start_project(project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
     
-    # Trigger execution in background on the main loop with isolated session
-    asyncio.create_task(run_background_project_execution(project_id))
-    logger.info(f"Project execution scheduled in background: {project_id}")
-    
-    return project
+    try:
+        pm = ProjectManager(db, manager)
+        project = await pm.start_project(project_id)
+        
+        if not project:
+            logger.warning(f"Project not found: {project_id}")
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Trigger execution in background on the main loop with isolated session
+        asyncio.create_task(run_background_project_execution(project_id))
+        logger.info(f"Project execution scheduled in background: {project_id}")
+        
+        return project
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error starting project: {str(e)}")
 
 
 @app.post("/api/projects/{project_id}/pause", response_model=Project)
@@ -1260,6 +1634,11 @@ async def stop_project(
         raise HTTPException(status_code=404, detail="Project not found")
     return project
 
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 @app.put("/api/projects/{project_id}", response_model=Project)
 async def update_project(
@@ -1402,14 +1781,15 @@ async def delete_user_admin(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin)
 ):
-    """Delete a user (Admin only)"""
+    """Delete a user (Admin only) - Uses cascade delete to remove all related data"""
     if user_id == current_user.id:
          raise HTTPException(status_code=400, detail="Cannot delete your own account")
          
-    success = UserCRUD.delete(db, user_id)
+    # Use cascade delete to properly clean up all user data
+    success = UserCRUD.delete_cascade(db, user_id)
     if not success:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"status": "success", "message": "User deleted"}
+    return {"status": "success", "message": "User and all related data deleted"}
 
 
 @app.get("/api/admin/settings")

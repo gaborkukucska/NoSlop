@@ -1,0 +1,4 @@
+[2025-12-25 00:13:36] ERROR    - seed.ssh_manager - [ssh_manager.py:328] - Network error connecting to 192.168.0.30:22 - [Errno None] Unable to connect to port 22 on 192.168.0.30
+[2025-12-25 00:14:38] ERROR    - seed.manager - [manager.py:194] - Could not find device tomsbot
+[2025-12-25 00:14:38] ERROR    - seed.manager - [manager.py:437] -   ✗ Failed to stop ollama: Failed to connect to remote node
+[2025-12-25 00:15:02] ERROR    - seed.ssh_manager - [ssh_manager.py:328] - Network error connecting to 192.168.0.30:22 - [Errno None] Unable to connect to port 22 on 192.168.0.30

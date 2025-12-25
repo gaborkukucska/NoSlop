@@ -1,0 +1,10 @@
+[2025-12-23 19:20:18] ERROR    - seed.installers.base_installer.comfyui - [comfyui_installer.py:381] - Error configuring ComfyUI service: cannot access local variable 'os' where it is not associated with a value
+Traceback (most recent call last):
+  File "/home/tom/NoSlop/seed/installers/comfyui_installer.py", line 311, in configure
+    if not os.path.exists(template_path):
+           ^^
+UnboundLocalError: cannot access local variable 'os' where it is not associated with a value
+[2025-12-23 19:20:18] ERROR    - seed.installers.base_installer.comfyui - [base_installer.py:478] - Configuration of comfyui failed.
+[2025-12-23 19:20:19] ERROR    - seed.deployer - [deployer.py:556] - Failed to install ComfyUI on BigBOY
+[2025-12-23 19:20:19] ERROR    - seed.deployer - [deployer.py:970] - 
+❌ Service installation failed!

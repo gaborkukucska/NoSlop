@@ -38,19 +38,22 @@ class ProjectManager:
     - Adapt plans based on worker feedback
     """
     
-    def __init__(self, db: Session, manager):
+    def __init__(self, db: Session, manager, user_id: Optional[str] = None):
         """
         Initialize Project Manager.
         
         Args:
             db: Database session
+            manager: Connection manager
+            user_id: User ID for scoped broadcasting
         """
         self.db = db
         self.model = settings.model_logic  # Use logic model for planning
         self.prompt_manager = get_prompt_manager()
         self.manager = manager
+        self.user_id = user_id
         
-        logger.info("Project Manager initialized", extra={"context": {"model": self.model}})
+        logger.info("Project Manager initialized", extra={"context": {"model": self.model, "user_id": user_id}})
     
     async def create_project(self, project_request: ProjectRequest) -> Project:
         """
@@ -90,7 +93,7 @@ class ProjectManager:
         await self.manager.broadcast({
             "type": "project_created",
             "data": project_model.to_dict()
-        })
+        }, user_id=self.user_id)
 
         # Generate project plan
         logger.info(f"Generating plan for project {project_id}")
@@ -375,7 +378,7 @@ class ProjectManager:
         await self.manager.broadcast({
             "type": "task_status_updated",
             "data": task.to_dict()
-        })
+        }, user_id=self.user_id)
 
         return task
     
@@ -417,7 +420,15 @@ class ProjectManager:
     
     def _model_to_pydantic(self, project_model: ProjectModel) -> Project:
         """Convert database model to Pydantic model"""
-        return Project(**project_model.to_dict())
+        p_dict = project_model.to_dict()
+        
+        # Populate tasks if available
+        # We need to fetch them from DB or use relationship if configured
+        # Using explicit query to be safe
+        tasks = TaskCRUD.get_by_project(self.db, project_model.id)
+        p_dict["tasks"] = [Task(**t.to_dict()) for t in tasks]
+        
+        return Project(**p_dict)
 
     async def start_project(self, project_id: str) -> Optional[ProjectModel]:
         """Start a project."""
@@ -427,7 +438,7 @@ class ProjectManager:
             await self.manager.broadcast({
                 "type": "project_status_updated",
                 "data": project.to_dict()
-            })
+            }, user_id=self.user_id)
         return project
 
     async def pause_project(self, project_id: str) -> Optional[ProjectModel]:
@@ -438,7 +449,7 @@ class ProjectManager:
             await self.manager.broadcast({
                 "type": "project_status_updated",
                 "data": project.to_dict()
-            })
+            }, user_id=self.user_id)
         return project
 
     async def stop_project(self, project_id: str) -> Optional[ProjectModel]:
@@ -449,7 +460,7 @@ class ProjectManager:
             await self.manager.broadcast({
                 "type": "project_status_updated",
                 "data": project.to_dict()
-            })
+            }, user_id=self.user_id)
         return project
 
     async def update_project(self, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectModel]:
@@ -460,7 +471,7 @@ class ProjectManager:
             await self.manager.broadcast({
                 "type": "project_updated",
                 "data": project.to_dict()
-            })
+            }, user_id=self.user_id)
         return project
 
     async def delete_project(self, project_id: str):
@@ -470,7 +481,7 @@ class ProjectManager:
         await self.manager.broadcast({
             "type": "project_deleted",
             "data": {"id": project_id}
-        })
+        }, user_id=self.user_id)
 
     def get_projects_summary(self) -> Dict[str, Any]:
         """

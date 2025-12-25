@@ -11,6 +11,22 @@ current_cycle: "Deployment Stabilization"
 
 ## Recent Changes
 
+- **2025-12-23** (Session 11):
+  - **ComfyUI Reliability & Installer Robustness - COMPLETE**:
+    - **Objective**: Fix critical runtime errors (400 Bad Request, 500 Internal Error) and enable seamless ComfyUI deployment with automatic model management.
+    - **Implementation**:
+      - **ComfyUI Model Downloader**: Added interactive model downloader to `ComfyUIInstaller` to fetch SDXL Base/Refiner if missing.
+      - **Smart Installer**: Added idempotency to PyTorch installation (checks version before downloading) and fixed `UnboundLocalError` in configuration.
+      - **Dynamic CORS**: Updated `deployer.py` and `backend/config.py` to auto-generate `CORS_ORIGINS` based on detected network IPs, resolving connection refusals.
+      - **Robust Error Handling**: Added try-except blocks to `ProjectManager.start_project` and `ImageGenerationWorker` to prevent crashes when models are missing.
+      - **Health Check**: Added `/health` endpoint to backend for better service monitoring.
+    - **Files Modified**: `seed/installers/comfyui_installer.py`, `backend/main.py`, `backend/workers/image_generation_worker.py`, `seed/deployer.py`, `backend/project_manager.py`.
+    - **Impact**:
+      - ✅ **Zero-Touch ComfyUI**: Installer now handles model downloads automatically.
+      - ✅ **Faster Re-deployment**: Skips heavy PyTorch download if already installed.
+      - ✅ **Stable Backend**: No more 500 crashes on bad states; clear error messages for missing models.
+      - **Status**: **System Fully Robust & User-Friendly**.
+
 - **2025-12-20** (Session 10):
   - **Admin AI Proactive Enhancements & Context Optimization - COMPLETE**:
     - **Objective**: Make Admin AI proactive (greeting/priming) and user-aware, while optimizing for local LLMs with limited context.

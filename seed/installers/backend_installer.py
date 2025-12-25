@@ -32,7 +32,7 @@ class BackendInstaller(BaseInstaller):
         self.logger.info("Installing NoSlop Backend...")
         
         # Install system dependencies
-        self.install_packages(["python3", "python3-venv", "python3-pip", "git", "curl", "postgresql-client"])
+        self.install_packages(["python3", "python3-venv", "python3-pip", "git", "curl", "postgresql-client", "rsync"])
         
         # Create directory
         self.execute_remote(f"sudo mkdir -p {self.install_dir}")
@@ -77,6 +77,16 @@ class BackendInstaller(BaseInstaller):
         if whisper_cache:
              self.execute_remote(f"sudo mkdir -p {whisper_cache}")
              self.execute_remote(f"sudo chown -R {self.username}:{self.username} {whisper_cache}")
+        
+        # Ensure media storage directory exists (for user avatars, generated content, etc.)
+        media_dir = self.env_config.get("MEDIA_STORAGE_PATH", "/var/noslop/media")
+        self.execute_remote(f"sudo mkdir -p {media_dir}")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {media_dir}")
+        
+        # Ensure project storage directory exists
+        project_dir = self.env_config.get("PROJECT_STORAGE_PATH", "/var/noslop/projects")
+        self.execute_remote(f"sudo mkdir -p {project_dir}")
+        self.execute_remote(f"sudo chown -R {self.username}:{self.username} {project_dir}")
 
 
             
@@ -127,7 +137,12 @@ class BackendInstaller(BaseInstaller):
             
         # Run database migrations (if any) or schema check
         self.logger.info("Checking database schema and performing necessary upgrades...")
-        cmd = f"cd {self.install_dir} && {self.venv_dir}/bin/python manage_db.py --check-and-upgrade"
+        
+        # Explicitly pass DATABASE_URL to ensure manage_db.py connects to the correct DB (Postgres)
+        # and not the default SQLite if .env loading fails or is ambiguous.
+        db_url = self.env_config.get("DATABASE_URL", "")
+        cmd = f"cd {self.install_dir} && DATABASE_URL='{db_url}' {self.venv_dir}/bin/python manage_db.py --check-and-upgrade"
+        
         code, out, err = self.execute_remote(cmd)
         if code != 0:
             self.logger.warning(f"Database check failed: {err}")

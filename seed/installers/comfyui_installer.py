@@ -92,30 +92,36 @@ class ComfyUIInstaller(BaseInstaller):
         # We don't use sudo for pip inside venv if we own the venv
         # But to be consistent and ensure correct permissions/environment, we use sudo -u
         pip_cmd = f"sudo -u {self.username} {self.venv_dir}/bin/pip"
+        python_cmd = f"sudo -u {self.username} {self.venv_dir}/bin/python"
         
         # Upgrade pip
         self.execute_remote(f"{pip_cmd} install --upgrade pip")
         
-        # Determine PyTorch command based on GPU
-        torch_cmd = ""
-        if self.device.gpu_vendor == GPUVendor.NVIDIA:
-            self.logger.info("Detected NVIDIA GPU. Installing PyTorch with CUDA...")
-            torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121"
-        elif self.device.gpu_vendor == GPUVendor.AMD:
-            self.logger.info("Detected AMD GPU. Installing PyTorch with ROCm...")
-            torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0"
-        elif self.device.gpu_vendor == GPUVendor.APPLE:
-            self.logger.info("Detected Apple Silicon. Installing PyTorch with MPS support...")
-            torch_cmd = f"{pip_cmd} install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cpu"
+        # Check if PyTorch is already installed
+        code, out, _ = self.execute_remote(f"{python_cmd} -c 'import torch; print(torch.__version__)'")
+        if code == 0:
+            self.logger.info(f"✓ PyTorch already installed (version {out.strip()}), skipping heavy install.")
         else:
-            self.logger.info("No dedicated GPU detected. Installing PyTorch for CPU...")
-            torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu"
-            
-        # Install PyTorch
-        code, _, err = self.execute_remote(torch_cmd, timeout=900)
-        if code != 0:
-            self.logger.error(f"Failed to install PyTorch: {err}")
-            return False
+            # Determine PyTorch command based on GPU
+            torch_cmd = ""
+            if self.device.gpu_vendor == GPUVendor.NVIDIA:
+                self.logger.info("Detected NVIDIA GPU. Installing PyTorch with CUDA...")
+                torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu121"
+            elif self.device.gpu_vendor == GPUVendor.AMD:
+                self.logger.info("Detected AMD GPU. Installing PyTorch with ROCm...")
+                torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.0"
+            elif self.device.gpu_vendor == GPUVendor.APPLE:
+                self.logger.info("Detected Apple Silicon. Installing PyTorch with MPS support...")
+                torch_cmd = f"{pip_cmd} install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cpu"
+            else:
+                self.logger.info("No dedicated GPU detected. Installing PyTorch for CPU...")
+                torch_cmd = f"{pip_cmd} install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cpu"
+                
+            # Install PyTorch
+            code, _, err = self.execute_remote(torch_cmd, timeout=900)
+            if code != 0:
+                self.logger.error(f"Failed to install PyTorch: {err}")
+                return False
             
         # Install ComfyUI requirements
         self.logger.info("Installing ComfyUI requirements...")
@@ -273,7 +279,6 @@ class ComfyUIInstaller(BaseInstaller):
                     
                     if workflows_src:
                         # Validate local path
-                        import os
                         if os.path.isdir(workflows_src):
                             print(f"   ✓ Found directory: {workflows_src}")
                             print(f"   Importing workflows...")
@@ -293,75 +298,425 @@ class ComfyUIInstaller(BaseInstaller):
                     else:
                         self.logger.info("No workflows imported")
         
+        # Automatic Model Download
+        self.download_models()
+
         if self.device.os_type.value == "linux":
-            service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
-            
-            # Read template
-            with open("seed/templates/systemd_template.service", "r") as f:
-                template = f.read()
-            
-            # Command to run ComfyUI
-            # We need to pass port and GPU args
-            # Determine logs directory
-            # Use shared logs dir if configured, otherwise use home
-            if self.logs_dir:
-                logs_dir = self.logs_dir
-            elif self.username == "root":
-                logs_dir = "/root/NoSlop/logs"
-            else:
-                logs_dir = f"/home/{self.username}/NoSlop/logs"
-            
-            # Command to run ComfyUI
-            exec_cmd = f"{self.venv_dir}/bin/python main.py --port {self.port} --listen"
-            
-            # Ensure logs directory exists
-            self.execute_remote(f"sudo mkdir -p {logs_dir}")
-            self.execute_remote(f"sudo chown {self.username}:{self.username} {logs_dir}")
-            
-            # Create timestamped log file path
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            service_name_log = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
-            log_file = f"{logs_dir}/{service_name_log}_{timestamp}.log"
-            
-            # Environment variables
-            env_vars = ""
-            if self.device.gpu_vendor == GPUVendor.NVIDIA:
-                env_vars = f"CUDA_VISIBLE_DEVICES={self.gpu_index}"
-            
-            # Fill template
-            service_content = template.replace("{{SERVICE_NAME}}", service_name)
-            service_content = service_content.replace("{{USER}}", self.username) # Run as the user
-            service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
-            service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
-            service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
-            
-            # Add StandardOutput and StandardError directives for logging
-            service_content = service_content.replace(
-                "[Service]",
-                f"[Service]\nStandardOutput=append:{log_file}\nStandardError=append:{log_file}"
-            )
-            
-            # Write service file
-            import tempfile
-            import os
-            
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
-                tmp.write(service_content)
-                tmp_path = tmp.name
-            
             try:
-                remote_path = f"/etc/systemd/system/{service_name}.service"
-                if not self.transfer_file(tmp_path, f"/tmp/{service_name}.service"):
-                    return False
+                service_name = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
                 
-                self.execute_remote(f"sudo mv /tmp/{service_name}.service {remote_path}")
-                self.execute_remote("sudo systemctl daemon-reload")
+                # Check template existence
+                template_path = "seed/templates/systemd_template.service"
+                if not os.path.exists(template_path):
+                     self.logger.error(f"Template not found at {template_path}")
+                     # Try absolute path or checking cwd
+                     template_path = os.path.join(os.getcwd(), "seed/templates/systemd_template.service")
                 
-            finally:
-                os.unlink(tmp_path)
+                # Read template
+                with open(template_path, "r") as f:
+                    template = f.read()
+                
+                # Command to run ComfyUI
+                # We need to pass port and GPU args
+                # Determine logs directory
+                # Use shared logs dir if configured, otherwise use home
+                if self.logs_dir:
+                    logs_dir = self.logs_dir
+                elif self.username == "root":
+                    logs_dir = "/root/NoSlop/logs"
+                else:
+                    logs_dir = f"/home/{self.username}/NoSlop/logs"
+                
+                # Command to run ComfyUI
+                exec_cmd = f"{self.venv_dir}/bin/python main.py --port {self.port} --listen"
+                
+                # Ensure logs directory exists
+                self.execute_remote(f"sudo mkdir -p {logs_dir}")
+                self.execute_remote(f"sudo chown {self.username}:{self.username} {logs_dir}")
+                
+                # Create timestamped log file path
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                service_name_log = "comfyui" if not self.is_secondary else f"comfyui-{self.port}"
+                log_file = f"{logs_dir}/{service_name_log}_{timestamp}.log"
+                
+                # Environment variables
+                env_vars = ""
+                if self.device.gpu_vendor == GPUVendor.NVIDIA:
+                    env_vars = f"CUDA_VISIBLE_DEVICES={self.gpu_index}"
+                
+                # Fill template
+                service_content = template.replace("{{SERVICE_NAME}}", service_name)
+                service_content = service_content.replace("{{USER}}", self.username) # Run as the user
+                service_content = service_content.replace("{{WORKING_DIR}}", self.install_dir)
+                service_content = service_content.replace("{{EXEC_START}}", exec_cmd)
+                service_content = service_content.replace("{{ENVIRONMENT_VARS}}", env_vars)
+                
+                # Add StandardOutput and StandardError directives for logging
+                service_content = service_content.replace(
+                    "[Service]",
+                    f"[Service]\nStandardOutput=append:{log_file}\nStandardError=append:{log_file}"
+                )
+                
+                # Write service file
+                import tempfile
+                
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmp:
+                    tmp.write(service_content)
+                    tmp_path = tmp.name
+                
+                try:
+                    remote_path = f"/etc/systemd/system/{service_name}.service"
+                    if not self.transfer_file(tmp_path, f"/tmp/{service_name}.service"):
+                        self.logger.error("Failed to transfer service file to /tmp")
+                        return False
+                    
+                    self.execute_remote(f"sudo mv /tmp/{service_name}.service {remote_path}")
+                    self.execute_remote("sudo systemctl daemon-reload")
+                    
+                finally:
+                    os.unlink(tmp_path)
+            except Exception as e:
+                self.logger.error(f"Error configuring ComfyUI service: {e}", exc_info=True)
+                return False
                 
         return True
+
+    def _download_file(self, url: str, dest_path: str, description: str = "file") -> bool:
+        """Download a file using wget with progress bar."""
+        self.logger.info(f"Downloading {description} from {url}...")
+        print(f"   ⬇️  Downloading {description}...")
+        
+        # Use wget with progress bar
+        # -q --show-progress: quiet but show progress bar
+        # -c: continue partial download
+        cmd = f"sudo wget -q --show-progress -c -O {dest_path} {url}"
+        
+        # If we are not root, run as the user to own the file (or chown later)
+        # Actually, it's safer to run as root to write to shared dirs, then chown.
+        
+        code, _, err = self.execute_remote(cmd, timeout=3600) # 1 hour timeout for large models
+        if code != 0:
+            self.logger.error(f"Failed to download {description}: {err}")
+            print(f"   ❌ Failed to download {description}")
+            return False
+            
+        print(f"   ✓ Download complete")
+        return True
+
+    def download_models(self):
+        """Interactive model downloader."""
+        print(f"\n" + "="*70)
+        print(f"🧠 ComfyUI Model Manager")
+        print(f"="*70)
+        
+        # Define defaults
+        defaults = {
+            "sd_xl_base_1.0.safetensors": {
+                "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+                "type": "checkpoints",
+                "desc": "SDXL Base 1.0 (Recommended Default)"
+            },
+            "sd_xl_refiner_1.0.safetensors": {
+                "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+                "type": "checkpoints",
+                "desc": "SDXL Refiner 1.0"
+            }
+        }
+        
+        # 1. Identify valid models directory
+        if self.models_dir:
+            base_dir = self.models_dir
+        else:
+            base_dir = f"{self.install_dir}/models"
+            
+        # 2. Scan workflows for required models
+        workflow_models = {}
+        if self.workflows_dir:
+            self.logger.info(f"Scanning workflows in {self.workflows_dir} for required models...")
+            print(f"\n📄 Scanning imported workflows for model dependencies...")
+            
+            # List workflow files remotely
+            code, workflow_files_out, _ = self.execute_remote(
+                f"find {self.workflows_dir} -name '*.json' -type f 2>/dev/null"
+            )
+            
+            if code == 0 and workflow_files_out.strip():
+                workflow_files = workflow_files_out.strip().split('\n')
+                self.logger.info(f"Found {len(workflow_files)} workflow files to scan")
+                
+                for workflow_path in workflow_files:
+                    # Download workflow JSON to analyze
+                    code, workflow_json, _ = self.execute_remote(f"cat {workflow_path}")
+                    
+                    if code != 0:
+                        self.logger.warning(f"Could not read workflow: {workflow_path}")
+                        continue
+                    
+                    try:
+                        import json
+                        workflow_data = json.loads(workflow_json)
+                        
+                        # Parse ComfyUI workflow structure
+                        # Workflows contain nodes with "inputs" that may reference models
+                        for node_id, node_data in workflow_data.items():
+                            if isinstance(node_data, dict) and "inputs" in node_data:
+                                inputs = node_data["inputs"]
+                                class_type = node_data.get("class_type", "")
+                                
+                                # Common model-loading nodes
+                                model_key = None
+                                model_type = None
+                                
+                                # Checkpoint loaders
+                                if "CheckpointLoaderSimple" in class_type or "CheckpointLoader" in class_type:
+                                    model_key = "ckpt_name"
+                                    model_type = "checkpoints"
+                                # VAE loaders
+                                elif "VAELoader" in class_type:
+                                    model_key = "vae_name"
+                                    model_type = "vae"
+                                # LoRA loaders
+                                elif "LoraLoader" in class_type or "LoRALoader" in class_type:
+                                    model_key = "lora_name"
+                                    model_type = "loras"
+                                # ControlNet loaders
+                                elif "ControlNetLoader" in class_type:
+                                    model_key = "control_net_name"
+                                    model_type = "controlnet"
+                                # Upscale model loaders
+                                elif "UpscaleModelLoader" in class_type:
+                                    model_key = "model_name"
+                                    model_type = "upscale_models"
+                                # Embeddings/Textual Inversion
+                                elif "CLIPTextEncode" in class_type:
+                                    # Embeddings are embedded in the text, need to extract
+                                    if "text" in inputs:
+                                        text = inputs["text"]
+                                        # Look for embedding:<name> pattern
+                                        import re
+                                        embedding_matches = re.findall(r'embedding:([^\s,\)]+)', str(text))
+                                        for emb_name in embedding_matches:
+                                            emb_filename = f"{emb_name}.pt" if not emb_name.endswith(('.pt', '.safetensors')) else emb_name
+                                            if emb_filename not in workflow_models:
+                                                workflow_models[emb_filename] = {
+                                                    "type": "embeddings",
+                                                    "workflows": []
+                                                }
+                                            workflow_models[emb_filename]["workflows"].append(
+                                                workflow_path.split("/")[-1]
+                                            )
+                                
+                                # Extract model filename for non-embedding loaders
+                                if model_key and model_key in inputs:
+                                    model_filename = inputs[model_key]
+                                    if model_filename and model_type:
+                                        if model_filename not in workflow_models:
+                                            workflow_models[model_filename] = {
+                                                "type": model_type,
+                                                "workflows": []
+                                            }
+                                        workflow_models[model_filename]["workflows"].append(
+                                            workflow_path.split("/")[-1]
+                                        )
+                    
+                    except json.JSONDecodeError as e:
+                        self.logger.warning(f"Invalid JSON in workflow {workflow_path}: {e}")
+                    except Exception as e:
+                        self.logger.warning(f"Error parsing workflow {workflow_path}: {e}")
+                
+                if workflow_models:
+                    self.logger.info(f"Detected {len(workflow_models)} models referenced in workflows")
+                    self.logger.info(f"Detected {len(workflow_models)} models referenced in workflows")
+                    print(f"   Found {len(workflow_models)} model references in workflows")
+                else:
+                    self.logger.info("No model references found in workflows")
+
+
+        # 3. Combine defaults and workflow models
+        all_models = {}
+        
+        # Add defaults first
+        for filename, info in defaults.items():
+            all_models[filename] = {
+                "url": info["url"],
+                "type": info["type"],
+                "desc": info["desc"],
+                "source": "default"
+            }
+        
+        # Add workflow models (these won't have URLs yet)
+        for filename, info in workflow_models.items():
+            if filename not in all_models:
+                all_models[filename] = {
+                    "url": None,  # Will need user to provide or skip
+                    "type": info["type"],
+                    "desc": f"Required by: {', '.join(info['workflows'][:2])}{'...' if len(info['workflows']) > 2 else ''}",
+                    "source": "workflow",
+                    "workflows": info["workflows"]
+                }
+        
+        # 4. Check which models are missing
+        missing = []
+        for filename, info in all_models.items():
+            path = f"{base_dir}/{info['type']}/{filename}"
+            # Check existence
+            code, _, _ = self.execute_remote(f"test -f {path}")
+            if code != 0:
+                missing.append((filename, info, path))
+        
+        if not missing:
+            self.logger.info("All required models are present.")
+            if workflow_models:
+                print(f"\n✓ All {len(all_models)} required models are already installed")
+            return
+
+        # Separate models by whether they have download URLs
+        downloadable = [(f, i, p) for f, i, p in missing if i.get("url")]
+        manual = [(f, i, p) for f, i, p in missing if not i.get("url")]
+        
+        # 5. Device capability check - estimate VRAM requirements
+        if downloadable or manual:
+            self._check_device_capabilities(all_models, missing)
+        
+        if downloadable:
+            print(f"\n📦 The following models can be auto-downloaded:")
+            for filename, info, _ in downloadable:
+                source_tag = "[Default]" if info.get("source") == "default" else "[Workflow]"
+                print(f" {source_tag} {info['desc']}")
+                print(f"          → {filename}")
+            
+        if manual:
+            print(f"\n⚠️  The following models are required by workflows but need manual download:")
+            for filename, info, path in manual:
+                print(f" - {info['desc']}")
+                print(f"   File: {filename}")
+                print(f"   Type: {info['type']}")
+                print(f"   Place in: {base_dir}/{info['type']}/")
+            print(f"\n   💡 Tip: Search HuggingFace or CivitAI for these models")
+        
+        # Download auto-downloadable models
+        if downloadable:
+            response = input(f"\nDownload {len(downloadable)} available model(s)? [Y/n]: ").strip().lower()
+            if response in ["", "y", "yes"]:
+                print(f"\n⬇️  Downloading models...")
+                for filename, info, path in downloadable:
+                    success = self._download_file(info['url'], path, info['desc'])
+                    if success:
+                        # Fix permissions
+                        self.execute_remote(f"sudo chown {self.username}:{self.username} {path}")
+                        self.execute_remote(f"sudo chmod 644 {path}")
+                print(f"\n✓ Auto-download complete")
+        
+        # Reminder about manual models
+        if manual:
+            print(f"\n📌 Remember to manually download {len(manual)} workflow-required model(s)")
+            print(f"   Models directory: {base_dir}/")
+        elif not downloadable:
+            print("\nNo models to download or install.")
+    
+    def _estimate_model_vram(self, filename: str, model_type: str) -> int:
+        """
+        Estimate VRAM requirements in GB based on model filename patterns.
+        
+        Returns:
+            Estimated VRAM in GB
+        """
+        filename_lower = filename.lower()
+        
+        # Checkpoint size estimation
+        if model_type == "checkpoints":
+            # SDXL models
+            if "xl" in filename_lower or "sdxl" in filename_lower:
+                return 8  # SDXL needs ~8GB
+            # SD 1.5/2.1 models
+            elif "sd15" in filename_lower or "sd_15" in filename_lower or "v1-5" in filename_lower:
+                return 4  # SD1.5 needs ~4GB
+            elif "sd21" in filename_lower or "sd_21" in filename_lower or "v2-1" in filename_lower:
+                return 5  # SD2.1 needs ~5GB
+            # Flux models (very large)
+            elif "flux" in filename_lower:
+                return 24  # Flux needs significant VRAM
+            else:
+                return 6  # Conservative estimate for unknown checkpoints
+        
+        # ControlNet models
+        elif model_type == "controlnet":
+            if "xl" in filename_lower or "sdxl" in filename_lower:
+                return 3  # SDXL ControlNet
+            else:
+                return 2  # SD1.5 ControlNet
+        
+        # LoRA models (generally small, add to base model)
+        elif model_type == "loras":
+            return 1  # LoRAs are small, ~1GB overhead
+        
+        # Upscale models
+        elif model_type == "upscale_models":
+            return 2  # Most upscale models need ~2GB
+        
+        # VAE and embeddings are small
+        elif model_type in ["vae", "embeddings"]:
+            return 0.5  # Negligible
+        
+        return 2  # Default conservative estimate
+    
+    def _check_device_capabilities(self, all_models: dict, missing: list):
+        """
+        Check if device can handle the required models based on GPU VRAM.
+        """
+        # Get device GPU info
+        gpu_vendor = self.device.gpu_vendor
+        gpu_info = getattr(self.device, 'gpu_vram_gb', None)
+        
+        # Estimate total VRAM needed for missing models
+        total_vram_needed = 0
+        largest_checkpoint = 0
+        
+        for filename, info, _ in missing:
+            model_type = info['type']
+            estimated_vram = self._estimate_model_vram(filename, model_type)
+            
+            if model_type == "checkpoints" and estimated_vram > largest_checkpoint:
+                largest_checkpoint = estimated_vram
+            elif model_type != "checkpoints":
+                total_vram_needed += estimated_vram
+        
+        # Add largest checkpoint (only one loads at a time typically)
+        total_vram_needed += largest_checkpoint
+        
+        if total_vram_needed > 0:
+            print(f"\n💾 Device Capability Analysis:")
+            print(f"   GPU: {gpu_vendor.value if gpu_vendor else 'Unknown'}")
+            
+            if gpu_info:
+                print(f"   VRAM Available: ~{gpu_info}GB")
+                print(f"   VRAM Required: ~{total_vram_needed}GB (estimated)")
+                
+                if total_vram_needed > gpu_info:
+                    print(f"\n   ⚠️  WARNING: Required models may exceed available VRAM!")
+                    print(f"   Consider:")
+                    print(f"   • Using smaller checkpoint variants (SD1.5 instead of SDXL)")
+                    print(f"   • Offloading to CPU (slower but works)")
+                    print(f"   • Using quantized model versions (Q4, Q8)")
+                elif total_vram_needed > gpu_info * 0.8:
+                    print(f"\n   ⚠️  Tight fit: Models will use ~{int(total_vram_needed/gpu_info*100)}% of VRAM")
+                    print(f"   May need to close other GPU applications")
+                else:
+                    print(f"   ✓ Sufficient VRAM for required models")
+            else:
+                print(f"   Estimated VRAM needed: ~{total_vram_needed}GB")
+                
+                # Provide general guidance based on GPU vendor
+                if gpu_vendor == GPUVendor.NVIDIA:
+                    print(f"   💡 For NVIDIA GPUs, 8GB+ recommended for SDXL, 4GB+ for SD1.5")
+                elif gpu_vendor == GPUVendor.AMD:
+                    print(f"   💡 For AMD GPUs with ROCm, 8GB+ recommended for SDXL")
+                elif gpu_vendor == GPUVendor.APPLE:
+                    print(f"   💡 For Apple Silicon, models will use unified memory")
+                else:
+                    print(f"   💡 For CPU-only: Expect slower generation times")
+
 
     def start(self) -> bool:
         """Start ComfyUI service."""

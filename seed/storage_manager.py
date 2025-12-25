@@ -618,11 +618,14 @@ class StorageManager:
             logger.warning("Failed to create SSH connection for verification")
             return True  # Don't fail deployment on verification
         
-        # Write test file with timeout
+        # Write test file with timeout using sudo tee to handle permissions
+        # Use simple echo pipe to sudo tee
+        cmd = f"echo '{test_content}' | sudo tee {test_file} > /dev/null"
         code, _, err = self.ssh_manager.execute_command(
             client,
-            f"echo '{test_content}' > {test_file}",
-            timeout=10
+            cmd,
+            timeout=10,
+            sudo_password=password
         )
         
         if code != 0:

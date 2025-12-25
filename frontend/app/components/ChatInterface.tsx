@@ -24,7 +24,7 @@ interface ChatInterfaceProps {
 }
 
 export default function ChatInterface({ initialSessionId = 'default', refreshTrigger = 0 }: ChatInterfaceProps) {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
     const [sessionId, setSessionId] = useState(initialSessionId);
     const [sessions, setSessions] = useState<Session[]>([]);
     const [messages, setMessages] = useState<Message[]>([]);
@@ -55,9 +55,9 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
             const data = await api.getSessions();
             if (data.sessions) {
                 setSessions(data.sessions);
-                // Always create a new session on initial load (default state)
-                // This ensures we get a fresh "Daily Briefing" / Priming sequence
-                if (sessionId === 'default') {
+                // Only auto-create session if setup is complete
+                // This prevents AI priming before wizard finishes
+                if (sessionId === 'default' && user?.preferences?.is_setup_complete) {
                     createNewSession();
                 }
             }
@@ -80,7 +80,7 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
                     setMessages(data.history.map((msg: any) => ({
                         role: msg.role,
                         content: msg.content,
-                        timestamp: msg.timestamp || new Date().toISOString()
+                        timestamp: msg.timestamp ? (msg.timestamp.endsWith('Z') ? msg.timestamp : msg.timestamp + 'Z') : new Date().toISOString()
                     })));
                 } else {
                     setMessages([]);
@@ -215,7 +215,7 @@ export default function ChatInterface({ initialSessionId = 'default', refreshTri
                         setMessages(data.history.map((msg: any) => ({
                             role: msg.role,
                             content: msg.content,
-                            timestamp: msg.timestamp || new Date().toISOString()
+                            timestamp: msg.timestamp ? (msg.timestamp.endsWith('Z') ? msg.timestamp : msg.timestamp + 'Z') : new Date().toISOString()
                         })));
                     }
                 } catch (historyError) {

@@ -102,6 +102,22 @@ class ComfyUIClient:
             logger.error(f"Failed to get history: {e}")
             raise
 
+    def get_object_info(self, node_class: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get object info (node definitions) from ComfyUI.
+        Useful for retrieving available models/checkpoints.
+        """
+        try:
+            url = f"{self.base_url}/object_info"
+            if node_class:
+                url += f"/{node_class}"
+                
+            with urllib.request.urlopen(url) as response:
+                return json.loads(response.read())
+        except Exception as e:
+            logger.error(f"Failed to get object info: {e}")
+            raise
+
     def get_image(self, filename: str, subfolder: str, folder_type: str) -> bytes:
         """Download generated image."""
         data = {"filename": filename, "subfolder": subfolder, "type": folder_type}

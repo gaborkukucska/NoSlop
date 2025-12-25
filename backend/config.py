@@ -186,6 +186,22 @@ class Settings(BaseSettings):
 settings = Settings()
 
 # Ensure storage directories exist
-os.makedirs(settings.media_storage_path, exist_ok=True)
-os.makedirs(settings.project_storage_path, exist_ok=True)
-os.makedirs(settings.log_storage_path, exist_ok=True)
+# Note: If permissions fail, log warning but don't crash - directories will be created on first use
+import logging
+logger = logging.getLogger(__name__)
+
+try:
+    os.makedirs(settings.media_storage_path, exist_ok=True)
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not create media storage directory {settings.media_storage_path}: {e}. Will be created on first use.")
+
+try:
+    os.makedirs(settings.project_storage_path, exist_ok=True)
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not create project storage directory {settings.project_storage_path}: {e}. Will be created on first use.")
+
+try:
+    os.makedirs(settings.log_storage_path, exist_ok=True)
+except (PermissionError, OSError) as e:
+    logger.warning(f"Could not create log storage directory {settings.log_storage_path}: {e}. Will be created on first use.")
+

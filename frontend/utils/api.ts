@@ -471,6 +471,182 @@ class ApiClient {
             body: JSON.stringify(data),
         });
     }
+
+    // Enhanced User Management APIs
+
+    // Password Change
+    async changePassword(currentPassword: string, newPassword: string): Promise<any> {
+        return this.request('/api/users/me/password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword
+            }),
+        });
+    }
+
+    // Avatar Management
+    async uploadAvatar(file: File): Promise<{ status: string; avatar_url: string }> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const url = `${this.baseUrl}/api/users/me/avatar`;
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Avatar upload failed: ${response.status} - ${error}`);
+        }
+
+        return response.json();
+    }
+
+    async deleteAvatar(): Promise<any> {
+        return this.request('/api/users/me/avatar', {
+            method: 'DELETE',
+        });
+    }
+
+    // Data Export/Import
+    async exportUserData(): Promise<Blob> {
+        const url = `${this.baseUrl}/api/users/me/export`;
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+        });
+
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Export failed: ${response.status} - ${error}`);
+        }
+
+        return response.blob();
+    }
+
+    async importUserData(file: File, mode: 'merge' | 'replace' = 'merge'): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const url = `${this.baseUrl}/api/users/me/import?mode=${mode}`;
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Import failed: ${response.status} - ${error}`);
+        }
+
+        return response.json();
+    }
+
+    // Account Deletion
+    async deleteOwnAccount(password: string, cascade: boolean = true): Promise<any> {
+        return this.request(`/api/users/me?password=${encodeURIComponent(password)}&cascade=${cascade}`, {
+            method: 'DELETE',
+        });
+    }
+
+    // Admin: Per-user Export/Import
+    async adminExportUser(userId: string): Promise<Blob> {
+        const url = `${this.baseUrl}/api/admin/users/${userId}/export`;
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: headers,
+        });
+
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Admin export failed: ${response.status} - ${error}`);
+        }
+
+        return response.blob();
+    }
+
+    async adminImportUser(userId: string, file: File, mode: 'merge' | 'replace' = 'merge'): Promise<any> {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const url = `${this.baseUrl}/api/admin/users/${userId}/import?mode=${mode}`;
+        const headers: Record<string, string> = {};
+        if (this.token) {
+            headers['Authorization'] = `Bearer ${this.token}`;
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: headers,
+            body: formData
+        });
+
+        if (response.status === 401) {
+            if (this.onUnauthorized) {
+                this.onUnauthorized();
+            }
+        }
+
+        if (!response.ok) {
+            const error = await response.text();
+            throw new Error(`Admin import failed: ${response.status} - ${error}`);
+        }
+
+        return response.json();
+    }
+
+    // Get current user info
+    async getCurrentUser(): Promise<any> {
+        return this.request('/api/users/me');
+    }
 }
 
 export const api = new ApiClient();

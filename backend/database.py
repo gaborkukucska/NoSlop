@@ -441,6 +441,27 @@ class UserModel(Base):
     # Profile
     bio = Column(Text, nullable=True)
     custom_data = Column(JSON, default=dict)
+    
+    # Extended Profile Fields (for Admin AI Personalization)
+    display_name = Column(String, nullable=True)  # Public display name
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    date_of_birth = Column(DateTime, nullable=True)
+    location = Column(String, nullable=True)  # City, Country
+    timezone = Column(String, default="UTC")  # User's timezone
+    avatar_url = Column(String, nullable=True)  # Path to avatar image
+    address = Column(Text, nullable=True)  # Full physical address (safe primarily because local-first)
+    
+    # Personalization Fields (for Admin AI to understand user better)
+    interests = Column(JSON, default=list)  # ["photography", "filmmaking", "music", ...]
+    occupation = Column(String, nullable=True)  # User's profession/job/role
+    experience_level = Column(String, default="beginner")  # beginner/intermediate/advanced/expert
+    preferred_media_types = Column(JSON, default=list)  # ["video", "podcast", "blog", ...]
+    content_goals = Column(Text, nullable=True)  # What user wants to create/achieve
+    
+    # Social & Privacy
+    social_links = Column(JSON, default=dict)  # {"twitter": "...", "youtube": "...", etc}
+    profile_visibility = Column(String, default="private")  # private/friends/public
 
     # Admin AI Personality Settings
     personality_type = Column(String, default="balanced")  # creative, technical, balanced
@@ -453,6 +474,10 @@ class UserModel(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime, nullable=True)
     
+    # Security
+    email_verified = Column(Boolean, default=False)
+    password_changed_at = Column(DateTime, nullable=True)
+    
     # JSON fields
     preferences = Column(JSON, default=dict)  # Additional user preferences
     
@@ -463,16 +488,49 @@ class UserModel(Base):
             "email": self.email,
             "role": self.role.value if self.role else "basic",
             "is_active": self.is_active,
+            
+            # Profile
             "bio": self.bio,
+            "display_name": self.display_name,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "date_of_birth": self.date_of_birth.isoformat() if self.date_of_birth else None,
+            "location": self.location,
+            "address": self.address,
+            "timezone": self.timezone,
+            "avatar_url": self.avatar_url,
+            
+            # Personalization
+            "interests": self.interests or [],
+            "occupation": self.occupation,
+            "experience_level": self.experience_level,
+            "preferred_media_types": self.preferred_media_types or [],
+            "content_goals": self.content_goals,
+            
+            # Social
+            "social_links": self.social_links or {},
+            "profile_visibility": self.profile_visibility,
+            
+            # Custom data
             "custom_data": self.custom_data or {},
+            
+            # Personality
             "personality": {
                 "type": self.personality_type,
                 "formality": self.personality_formality,
                 "enthusiasm": self.personality_enthusiasm,
                 "verbosity": self.personality_verbosity
             },
+            
+            # Security
+            "email_verified": self.email_verified,
+            
+            # Preferences
             "preferences": self.preferences or {},
+            
+            # Timestamps
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "last_login": self.last_login.isoformat() if self.last_login else None
         }
 
@@ -529,7 +587,7 @@ class UserCRUD:
 
     @staticmethod
     def delete(db: Session, user_id: str) -> bool:
-        """Delete user"""
+        """Delete user (basic - does not cascade, use delete_cascade for complete removal)"""
         user = UserCRUD.get(db, user_id)
         if not user:
             return False
@@ -538,11 +596,123 @@ class UserCRUD:
         db.commit()
         logger.info(f"User deleted: {user_id}")
         return True
+    
+    @staticmethod
+    def delete_cascade(db: Session, user_id: str) -> bool:
+        """
+        Delete user and ALL related data (cascade delete).
+        This removes:
+        - User record
+        - All chat sessions
+        - All chat messages
+        - All projects created by user
+        - All tasks for those projects
+        """
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            return False
+        
+        logger.info(f"Starting cascade delete for user: {user_id}")
+        
+        try:
+            # Delete chat messages
+            message_count = db.query(ChatMessageModel).filter(
+                ChatMessageModel.user_id == user_id
+            ).delete(synchronize_session=False)
+            logger.debug(f"Deleted {message_count} chat messages")
+            
+            # Delete chat sessions
+            session_count = db.query(ChatSessionModel).filter(
+                ChatSessionModel.user_id == user_id
+            ).delete(synchronize_session=False)
+            logger.debug(f"Deleted {session_count} chat sessions")
+            
+            # Get user's projects to delete their tasks
+            projects = db.query(ProjectModel).filter(
+                ProjectModel.id.in_(
+                    db.query(ProjectModel.id).filter(
+                        ProjectModel.meta_data['created_by'].astext == user_id
+                    )
+                )
+            ).all()
+            
+            project_ids = [p.id for p in projects]
+            
+            # Delete tasks for user's projects
+            if project_ids:
+                task_count = db.query(TaskModel).filter(
+                    TaskModel.project_id.in_(project_ids)
+                ).delete(synchronize_session=False)
+                logger.debug(f"Deleted {task_count} tasks")
+                
+                # Delete projects
+                project_count = db.query(ProjectModel).filter(
+                    ProjectModel.id.in_(project_ids)
+                ).delete(synchronize_session=False)
+                logger.debug(f"Deleted {project_count} projects")
+            
+            # Finally delete the user
+            db.delete(user)
+            db.commit()
+            
+            logger.info(f"User cascade delete completed: {user_id}")
+            return True
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error during cascade delete for user {user_id}: {e}", exc_info=True)
+            raise
 
     @staticmethod
     def count(db: Session) -> int:
         """Count users"""
         return db.query(UserModel).count()
+    
+    @staticmethod
+    def get_user_complete_data(db: Session, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get complete user data including all related data for export.
+        Returns dict with user profile and all related data.
+        """
+        user = UserCRUD.get(db, user_id)
+        if not user:
+            return None
+        
+        # Get all chat sessions
+        sessions = db.query(ChatSessionModel).filter(
+            ChatSessionModel.user_id == user_id
+        ).all()
+        
+        # Get all chat messages
+        messages = db.query(ChatMessageModel).filter(
+            ChatMessageModel.user_id == user_id
+        ).all()
+        
+        # Get user's projects (stored in meta_data)
+        projects = db.query(ProjectModel).filter(
+            ProjectModel.meta_data['created_by'].astext == user_id
+        ).all()
+        
+        # Get tasks for those projects
+        project_ids = [p.id for p in projects]
+        tasks = []
+        if project_ids:
+            tasks = db.query(TaskModel).filter(
+                TaskModel.project_id.in_(project_ids)
+            ).all()
+        
+        return {
+            "user": user.to_dict(),
+            "chat_sessions": [s.to_dict() for s in sessions],
+            "chat_messages": [m.to_dict() for m in messages],
+            "projects": [p.to_dict() for p in projects],
+            "tasks": [t.to_dict() for t in tasks],
+            "export_metadata": {
+                "exported_at": datetime.utcnow().isoformat(),
+                "user_id": user_id,
+                "username": user.username
+            }
+        }
 
 
 class SystemSettingsModel(Base):

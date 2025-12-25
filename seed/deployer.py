@@ -300,10 +300,31 @@ class Deployer:
             backend_ip = plan.master_node.device.ip_address if plan.master_node else node.device.ip_address
             # SSR URL: Use internal HTTP for server-side calls
             internal_backend_url = f"http://{backend_ip}:8000"
+            # SSR URL: Use internal HTTP for server-side calls
+            internal_backend_url = f"http://{backend_ip}:8000"
             
             config["NOSLOP_BACKEND_EXTERNAL_URL"] = internal_backend_url
             
-            # HTTPS Clients (External): Use relative paths (handled by frontend logic)
+            # CORS Configuration: Allow localhost, 127.0.0.1, and the node's own IP/Hostname
+            # If we are master, we also allow all known node IPs (implied, but for now we trust network)
+            # We construct a list of trusted origins
+            trusted_origins = [
+                "http://localhost:3000", 
+                "http://127.0.0.1:3000",
+                f"http://{node.device.ip_address}:3000",
+                f"http://{node.device.hostname}:3000"
+            ]
+            
+            # If we have a master node, add its frontend too
+            if plan.master_node:
+                trusted_origins.append(f"http://{plan.master_node.device.ip_address}:3000")
+                trusted_origins.append(f"http://{plan.master_node.device.hostname}:3000")
+
+            # Add external URL if present
+            if frontend_external_url:
+                 trusted_origins.append(frontend_external_url)
+
+            config["CORS_ORIGINS"] = ",".join(list(set(trusted_origins)))
             # HTTP Clients (Internal): Use internal backend URL
             if "NOSLOP_BACKEND_URL" in config:
                 config["NEXT_PUBLIC_API_URL"] = config["NOSLOP_BACKEND_URL"]
@@ -382,12 +403,37 @@ class Deployer:
             "llama3.2" # Safe fallback/standard model
         ]
 
+        if credentials_map:
+             logger.info(f"DEBUG: install_services called with credentials for IPs: {list(credentials_map.keys())}")
+        else:
+             logger.info("DEBUG: install_services called with EMPTY credentials_map")
+
         def get_credentials(device):
             """Helper to get username and password for a device."""
+            # DEBUG LOGGING
+            logger.info(f"DEBUG: Looking up credentials for {device.ip_address}")
             creds = credentials_map.get(device.ip_address)
+            
+            # Check for localhost/127.0.0.1 mismatch if map has local IP
+            if not creds and device.ip_address in ["127.0.0.1", "localhost"]:
+                 for ip, c in credentials_map.items():
+                     if ip.startswith("192.168.") or ip.startswith("10."):
+                         if len(credentials_map) == 1:
+                             creds = c
+                             break
+            
             if creds:
-                # It's an SSHCredentials object
+                logger.info(f"DEBUG: Found credentials for {device.ip_address}: User={creds.username}, Password={'****' if creds.password else 'NONE'}")
+                if not creds.password and device.os_type.value != "windows":
+                     logger.warning(f"⚠️  No password found for {device.ip_address} (User: {creds.username}) in install_services.")
                 return creds.username, creds.password
+            
+            # Fallback for localhost if not found in map at all (maybe running as user)
+            if device.ip_address in ["127.0.0.1", "localhost"]:
+                 import os
+                 return os.environ.get("USER", "root"), None
+                 
+            logger.warning(f"DEBUG: No credentials found for {device.ip_address}. Map keys: {list(credentials_map.keys())}. Using root/None.")
             return "root", None
 
         # Phase 1: Base Dependencies
@@ -812,11 +858,11 @@ class Deployer:
         logger.info(f"Starting NoSlop Deployment (ID: {self.deployment_id})")
         logger.info("="*70)
         
-        # Phase 0: Discovery
-        logger.info("\n🔍 [Phase 0] Network Discovery...")
-        discovered_services = self.discovery.scan_network()
-        for service in discovered_services:
-            self.registry.register_discovered_service(service)
+        # Phase 0: Discovery - Skipped as it's redundant with seed_cli.py discovery
+        # logger.info("\n🔍 [Phase 0] Network Discovery...")
+        # discovered_services = self.discovery.scan_network()
+        # for service in discovered_services:
+        #     self.registry.register_discovered_service(service)
         
         # Validate plan
         is_valid, error = self.validate_plan(plan)
@@ -855,8 +901,25 @@ class Deployer:
             def get_credentials(device):
                 """Helper to get username and password for a device."""
                 creds = credentials_map.get(device.ip_address)
+                
+                # Check for localhost/127.0.0.1 mismatch if map has local IP
+                if not creds and device.ip_address in ["127.0.0.1", "localhost"]:
+                     # Try finding credentials for any local IP
+                     # This is a bit hacky but helps single-device mode consistency
+                     for ip, c in credentials_map.items():
+                         if ip.startswith("192.168.") or ip.startswith("10."):
+                             # Assume this might be the local credential we want 
+                             # (if we only have one set of credentials and we are deploying locally)
+                             if len(credentials_map) == 1:
+                                 creds = c
+                                 break
+
                 if creds:
+                    if not creds.password and device.os_type.value != "windows": # Windows might use keys only?
+                        logger.warning(f"⚠️  No password found for {device.ip_address} (User: {creds.username}). Sudo commands may fail.")
                     return creds.username, creds.password
+                
+                logger.warning(f"⚠️  No credentials found for {device.ip_address}. using root/None.")
                 return "root", None
                 
             # Stop existing services before messing with storage or installing

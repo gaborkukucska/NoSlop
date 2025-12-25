@@ -11,10 +11,42 @@ interface User {
     email?: string;
     role?: string;
     is_active?: boolean;
+
+    // Profile
     bio?: string;
+    display_name?: string;
+    first_name?: string;
+    last_name?: string;
+    date_of_birth?: string;
+    location?: string;
+    address?: string;
+    timezone?: string;
+    avatar_url?: string;
+
+    // Personalization (for Admin AI)
+    interests?: string[];
+    occupation?: string;
+    experience_level?: string;
+    preferred_media_types?: string[];
+    content_goals?: string;
+
+    // Social & Privacy
+    social_links?: Record<string, string>;
+    profile_visibility?: string;
+
+    // Security
+    email_verified?: boolean;
+    password_changed_at?: string;
+
+    // Legacy fields
     custom_data?: any;
     personality?: any;
     preferences?: any;
+
+    // Timestamps
+    created_at?: string;
+    updated_at?: string;
+    last_login?: string;
 }
 
 interface AuthContextType {
@@ -26,6 +58,7 @@ interface AuthContextType {
     login: (username: string, password: string) => Promise<void>;
     register: (data: any) => Promise<void>;
     logout: () => void;
+    refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -128,6 +161,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         router.push('/login');
     };
 
+    const refreshUser = async () => {
+        try {
+            if (!token) return;
+            const userData = await api.getCurrentUser();
+            setUser(userData);
+            localStorage.setItem('noslop_user', JSON.stringify(userData));
+        } catch (error) {
+            console.error('Failed to refresh user data:', error);
+        }
+    };
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -137,7 +181,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             isLoading,
             login,
             register,
-            logout
+            logout,
+            refreshUser
         }}>
             {children}
         </AuthContext.Provider>

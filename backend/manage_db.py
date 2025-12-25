@@ -38,7 +38,11 @@ def check_schema():
             return False 
             
         columns = [c["name"] for c in inspector.get_columns("users")]
-        required_columns = ["role", "is_active", "bio", "custom_data"]
+        required_columns = [
+            "role", "is_active", "bio", "custom_data",
+            "display_name", "avatar_url", "interests", "address",
+            "content_goals", "timezone", "experience_level"
+        ]
         
         missing = [c for c in required_columns if c not in columns]
         if missing:

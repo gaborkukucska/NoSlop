@@ -34,7 +34,7 @@ export const useAgentActivity = () => {
             // It returns `wss://${host}` or `ws://localhost:8000`.
             // So we need to append /ws/activity.
 
-            const fullWsUrl = `${wsUrl}/ws/activity`;
+            const fullWsUrl = `${wsUrl}/ws/activity?token=${token}`;
             ws = new WebSocket(fullWsUrl);
 
             ws.onopen = () => {

@@ -50,9 +50,10 @@ class AdminAI:
         
         logger.info("Admin AI initialized", extra={"context": {"personality": self.personality.type, "model": self.model}})
 
-    async def broadcast_activity(self, activity_type: str, message: str, data: Optional[Dict] = None):
+    async def broadcast_activity(self, activity_type: str, message: str, data: Optional[Dict] = None, user_id: Optional[str] = None):
         """
         Broadcast admin activity to frontend.
+        If user_id is provided, only broadcast to that user.
         """
         if self.connection_manager:
             payload = {
@@ -67,7 +68,8 @@ class AdminAI:
                 }
             }
             try:
-                await self.connection_manager.broadcast(payload)
+                # Use the new user_id-aware broadcast
+                await self.connection_manager.broadcast(payload, user_id)
             except Exception as e:
                 logger.warning(f"Failed to broadcast activity: {e}")
         
@@ -158,7 +160,7 @@ class AdminAI:
         
         return [msg.to_dict() for msg in messages]
 
-    async def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None, session_id: str = "default") -> ChatResponse:
+    async def chat(self, message: str, context: Optional[Dict[str, Any]] = None, db: Optional[Session] = None, session_id: str = "default", user: Any = None) -> ChatResponse:
         """
         Main conversation interface with the Admin AI.
         
@@ -228,7 +230,8 @@ class AdminAI:
             await self.broadcast_activity(
                 "thinking", 
                 "Admin AI is thinking...", 
-                {"context_length": len(messages)}
+                {"context_length": len(messages)},
+                user_id=user.id if user else None
             )
 
             loop = asyncio.get_event_loop()
@@ -249,7 +252,8 @@ class AdminAI:
             await self.broadcast_activity(
                 "response", 
                 "Response received from Admin AI", 
-                {"response_length": len(ai_message)}
+                {"response_length": len(ai_message)},
+                user_id=user.id if user else None
             )
             
             # Save AI response to DB
@@ -272,7 +276,7 @@ class AdminAI:
             if action == "create_project" and db and settings.enable_project_manager:
                 logger.info("Attempting to create project from chat")
                 
-                await self.broadcast_activity("action", "Initiating project creation workflow...")
+                await self.broadcast_activity("action", "Initiating project creation workflow...", user_id=user.id if user else None)
                 
                 # Convert guide_project_creation to async execution wrapper
                 project_result = await loop.run_in_executor(
@@ -284,16 +288,26 @@ class AdminAI:
                 if project_result.get("status") == "ready_for_creation":
                     try:
                         details = project_result["project_details"]
+                        # Helper to sanitize duration
+                        raw_duration = details.get("duration")
+                        duration_val = None
+                        if raw_duration:
+                            try:
+                                duration_val = int(raw_duration)
+                            except (ValueError, TypeError):
+                                logger.warning(f"Invalid duration value: {raw_duration}")
+                        
                         project_req = ProjectRequest(
                             title=details.get("title", "New Project"),
                             description=details.get("description", ""),
                             project_type=details.get("project_type", "custom"),
-                            duration=details.get("duration"),
+                            duration=duration_val,
                             style=details.get("style"),
                             workflow_path=self.context.get("last_workflow_path")
                         )
                         
-                        pm = ProjectManager(db, self.connection_manager)
+                        # Pass user_id for scoped broadcasting
+                        pm = ProjectManager(db, self.connection_manager, user_id=user.id if user else None)
                         project = await pm.create_project(project_req) # Now async!
                         
                         metadata["project_created"] = True
@@ -314,7 +328,7 @@ class AdminAI:
             # Handle workflow generation
             if action == "generate_workflow":
                 logger.info("Attempting to generate workflow from chat")
-                await self.broadcast_activity("action", "Generating ComfyUI workflow...")
+                await self.broadcast_activity("action", "Generating ComfyUI workflow...", user_id=user.id if user else None)
                 
                 try:
                     # Run generation in executor
@@ -401,8 +415,26 @@ class AdminAI:
         create_keywords = ["create", "make", "start", "new project", "begin"]
         
         if any(keyword in user_lower for keyword in create_keywords):
-            if any(pt.value in user_lower for pt in ProjectType):
+            # Expanded detection for implicit project types (video, image, audio)
+            # This fixes the issue where "make a video" wasn't triggering creation
+            if any(pt.value in user_lower or pt.name.lower() in user_lower for pt in ProjectType):
                 return "create_project"
+            
+            # Helper keywords mapping to project types
+            media_keywords = {
+                "video": "custom",
+                "movie": "cinematic_film",
+                "film": "cinematic_film",
+                "image": "custom",
+                "picture": "custom",
+                "song": "custom",
+                "audio": "custom",
+                "track": "custom"
+            }
+            
+            if any(k in user_lower for k in media_keywords):
+                return "create_project"
+
             if "workflow" in user_lower:
                 return "generate_workflow"
         
@@ -590,7 +622,8 @@ class AdminAI:
             await self.broadcast_activity(
                 "thinking", 
                 "Priming neural link...", 
-                {"context": "startup"}
+                {"context": "startup"},
+                user_id=user.id
             )
             
             loop = asyncio.get_event_loop()
@@ -609,7 +642,8 @@ class AdminAI:
             await self.broadcast_activity(
                 "response", 
                 "Connection established", 
-                {"response_length": len(ai_message)}
+                {"response_length": len(ai_message)},
+                user_id=user.id
             )
             
             # Save prime message to DB

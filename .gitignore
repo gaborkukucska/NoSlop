@@ -69,12 +69,12 @@ pnpm-lock.yaml
 *.sublime-workspace
 
 # Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
-logs/
+#*.log
+#npm-debug.log*
+#yarn-debug.log*
+#yarn-error.log*
+#.pnpm-debug.log*
+#logs/
 
 # Testing
 .coverage

@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import api from '../../utils/api';
 
 interface SetupStep {
-    id: 'welcome' | 'personality' | 'about' | 'finish';
+    id: 'welcome' | 'personality' | 'about' | 'profile-details' | 'finish';
     title: string;
 }
 
@@ -31,12 +31,27 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
         interests: [] as string[]
     });
 
+    // Profile details state (optional fields)
+    const [profileDetails, setProfileDetails] = useState({
+        display_name: '',
+        first_name: '',
+        last_name: '',
+        address: '',
+        location: '',
+        timezone: 'UTC',
+        occupation: ''
+    });
+
     const handlePersonalityChange = (field: string, value: any) => {
         setPersonality(prev => ({ ...prev, [field]: value }));
     };
 
     const handleProfileChange = (field: string, value: any) => {
         setProfile(prev => ({ ...prev, [field]: value }));
+    };
+
+    const handleProfileDetailsChange = (field: string, value: any) => {
+        setProfileDetails(prev => ({ ...prev, [field]: value }));
     };
 
     const toggleInterest = (interest: string) => {
@@ -54,6 +69,7 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             await api.completeSetup({
                 personality,
                 ...profile,
+                ...profileDetails,
                 custom_data: { role: profile.role, interests: profile.interests }
             });
             onComplete();
@@ -72,6 +88,9 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
                 Welcome to NoSlop, {user?.username}!
             </h2>
+            <p className="text-sm text-blue-600 dark:text-blue-400 font-medium mb-2">
+                {user?.role === 'admin' ? '🔑 Admin Account' : '👤 Basic Account'}
+            </p>
             <p className="text-zinc-600 dark:text-zinc-400 max-w-md mx-auto">
                 I'm your Admin AI. Before we start creating amazing media, I'd like to get to know your preferences.
             </p>
@@ -105,8 +124,8 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
                             key={type}
                             onClick={() => handlePersonalityChange('type', type)}
                             className={`px-4 py-3 rounded-lg border-2 capitalize transition-all ${personality.type === type
-                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-                                    : 'border-transparent bg-white dark:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                : 'border-transparent bg-white dark:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600'
                                 }`}
                         >
                             {type}
@@ -198,8 +217,8 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
                                 key={interest}
                                 onClick={() => toggleInterest(interest)}
                                 className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${profile.interests.includes(interest)
-                                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 ring-2 ring-blue-500/20'
-                                        : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 ring-2 ring-blue-500/20'
+                                    : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
                                     }`}
                             >
                                 {interest}
@@ -212,6 +231,140 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
             <div className="flex justify-between pt-4">
                 <button
                     onClick={() => setStep('personality')}
+                    className="px-4 py-2 text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                >
+                    Back
+                </button>
+                <button
+                    onClick={() => setStep('profile-details')}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                    Next
+                </button>
+            </div>
+        </div>
+    );
+
+    const renderProfileDetails = () => (
+        <div className="space-y-6 animate-fadeIn">
+            <div className="text-center">
+                <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+                    Profile Details (Optional)
+                </h2>
+                <p className="text-zinc-600 dark:text-zinc-400">
+                    Help me personalize your experience even more
+                </p>
+            </div>
+
+            <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            Display Name
+                        </label>
+                        <input
+                            type="text"
+                            value={profileDetails.display_name}
+                            onChange={(e) => handleProfileDetailsChange('display_name', e.target.value)}
+                            placeholder="How should I address you?"
+                            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            Occupation
+                        </label>
+                        <input
+                            type="text"
+                            value={profileDetails.occupation}
+                            onChange={(e) => handleProfileDetailsChange('occupation', e.target.value)}
+                            placeholder="e.g., Video Editor, Developer"
+                            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            First Name
+                        </label>
+                        <input
+                            type="text"
+                            value={profileDetails.first_name}
+                            onChange={(e) => handleProfileDetailsChange('first_name', e.target.value)}
+                            placeholder="Optional"
+                            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                            Last Name
+                        </label>
+                        <input
+                            type="text"
+                            value={profileDetails.last_name}
+                            onChange={(e) => handleProfileDetailsChange('last_name', e.target.value)}
+                            placeholder="Optional"
+                            className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Location
+                    </label>
+                    <input
+                        type="text"
+                        value={profileDetails.location}
+                        onChange={(e) => handleProfileDetailsChange('location', e.target.value)}
+                        placeholder="City, Country"
+                        className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Address (Private - stored locally only)
+                    </label>
+                    <input
+                        type="text"
+                        value={profileDetails.address}
+                        onChange={(e) => handleProfileDetailsChange('address', e.target.value)}
+                        placeholder="Optional - helps with location-based suggestions"
+                        className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    />
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Timezone
+                    </label>
+                    <select
+                        value={profileDetails.timezone}
+                        onChange={(e) => handleProfileDetailsChange('timezone', e.target.value)}
+                        className="w-full px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    >
+                        <option value="UTC">UTC</option>
+                        <option value="America/New_York">Eastern Time</option>
+                        <option value="America/Chicago">Central Time</option>
+                        <option value="America/Denver">Mountain Time</option>
+                        <option value="America/Los_Angeles">Pacific Time</option>
+                        <option value="Europe/London">London</option>
+                        <option value="Europe/Paris">Paris</option>
+                        <option value="Asia/Tokyo">Tokyo</option>
+                        <option value="Asia/Shanghai">Shanghai</option>
+                        <option value="Australia/Sydney">Sydney</option>
+                    </select>
+                </div>
+            </div>
+
+            <div className="flex justify-between pt-4">
+                <button
+                    onClick={() => setStep('about')}
                     className="px-4 py-2 text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200"
                 >
                     Back
@@ -268,12 +421,13 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
                 {step === 'welcome' && renderWelcome()}
                 {step === 'personality' && renderPersonality()}
                 {step === 'about' && renderAboutYou()}
+                {step === 'profile-details' && renderProfileDetails()}
                 {step === 'finish' && renderFinish()}
             </div>
 
             {/* Progress Dots */}
             <div className="flex justify-center space-x-2 mt-8">
-                {['welcome', 'personality', 'about', 'finish'].map((s) => (
+                {['welcome', 'personality', 'about', 'profile-details', 'finish'].map((s) => (
                     <div
                         key={s}
                         className={`w-2 h-2 rounded-full transition-colors ${step === s ? 'bg-blue-600' : 'bg-zinc-200 dark:bg-zinc-700'

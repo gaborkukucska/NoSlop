@@ -103,7 +103,8 @@ class BaseInstaller(ABC):
                 self.logger.debug(f"Executing local: {command}")
                 
                 # Handle sudo with password if needed
-                if command.strip().startswith("sudo") and self.password:
+                # Check if command starts with sudo OR contains " sudo " (e.g. pipes)
+                if (command.strip().startswith("sudo") or " sudo " in command) and self.password:
                     # Use sudo -S to read password from stdin
                     cmd_parts = command.split(" ", 1)
                     if len(cmd_parts) > 1:
@@ -215,7 +216,8 @@ class BaseInstaller(ABC):
                         for pattern in excludes:
                             exclude_args += f" --exclude='{pattern}'"
                     
-                    cmd = f"sudo rsync -av {exclude_args} {local_dir}/ {remote_dir}/"
+                    # Use checksums (-c) to guarantee file updates even if timestamps are unreliable
+                    cmd = f"sudo rsync -avc {exclude_args} {local_dir}/ {remote_dir}/"
                     code, _, err = self.execute_remote(cmd)
                     if code != 0:
                         self.logger.error(f"Local directory sync failed: {err}")

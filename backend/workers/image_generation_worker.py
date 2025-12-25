@@ -67,8 +67,36 @@ class ImageGenerationWorker(WorkerAgent):
     def _get_default_workflow(self) -> Dict[str, Any]:
         """
         Returns a default SDXL text-to-image workflow.
-        In a real system, this would load from a file or template.
+        Dynamically detects available checkpoints.
         """
+        # Default checkpoint name
+        checkpoint_name = "sd_xl_base_1.0.safetensors"
+        
+        # Try to find available checkpoints
+        try:
+            if self.client.is_connected():
+                info = self.client.get_object_info("CheckpointLoaderSimple")
+                # Structure: {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["model1", "model2"], ...]}}}}
+                if info and "CheckpointLoaderSimple" in info:
+                    input_data = info["CheckpointLoaderSimple"].get("input", {}).get("required", {})
+                    ckpt_list = input_data.get("ckpt_name", [[]])[0]
+                    
+                    if ckpt_list:
+                        # Prefer SDXL if available, otherwise take first
+                        sdxl_models = [m for m in ckpt_list if "xl" in m.lower()]
+                        if sdxl_models:
+                            checkpoint_name = sdxl_models[0]
+                        else:
+                            checkpoint_name = ckpt_list[0]
+                            
+                        logger.info(f"Selected checkpoint: {checkpoint_name}")
+                    else:
+                        raise RuntimeError("No ComfyUI checkpoints found. Please install a model (e.g. SDXL) in ComfyUI/models/checkpoints.")
+        except Exception as e:
+            if "No ComfyUI checkpoints found" in str(e):
+                raise # Re-raise known error
+            logger.warning(f"Failed to query available checkpoints: {e}. Using default.")
+
         # Simplified workflow structure for demonstration
         # This matches standard ComfyUI API format (node graph)
         return {
@@ -89,7 +117,7 @@ class ImageGenerationWorker(WorkerAgent):
             },
             "4": {
                 "inputs": {
-                    "ckpt_name": "sd_xl_base_1.0.safetensors"
+                    "ckpt_name": checkpoint_name
                 },
                 "class_type": "CheckpointLoaderSimple"
             },

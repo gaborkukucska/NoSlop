@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.venv/
+vendor/
+
+# Build outputs
+dist/
+build/
+out/
+*.pyc
+__pycache__/
+
+# Environment and secrets
+.env
+secrets.json
+apikeys.txt
+
+# Large or irrelevant assets
+*.mp4
+*.zip
+data/
+
+# Cache and temporary files
+.cache/
+.tmp/
+
+# Logs (only if you want to hide them from Gemini)
+# logs/   
