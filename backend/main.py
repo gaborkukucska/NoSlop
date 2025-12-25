@@ -1220,6 +1220,35 @@ async def prime_admin_ai(
             # Filter for active ones (simplified)
             projects = [p.to_dict() for p in all_projects if p.status != "completed"]
             
+        # Cleanup "empty" sessions for this user to prevent history spam
+        # An empty session is one with NO user messages (only AI greeting or title)
+        from database import ChatSessionModel, ChatMessageModel
+        
+        # Get all sessions for this user
+        user_sessions = db.query(ChatSessionModel).filter(
+            ChatSessionModel.user_id == current_user.id
+        ).all()
+        
+        for sess in user_sessions:
+            # Skip the current session we are about to use
+            if sess.id == session_id:
+                continue
+                
+            # Check if session has ANY user messages
+            user_msg_count = db.query(ChatMessageModel).filter(
+                ChatMessageModel.session_id == sess.id,
+                ChatMessageModel.role == "user"
+            ).count()
+            
+            # If no user messages, it's an "empty" ghost session - DELETE IT
+            if user_msg_count == 0:
+                logger.info(f"Deleting empty session: {sess.id} (Title: {sess.title})")
+                db.query(ChatMessageModel).filter(ChatMessageModel.session_id == sess.id).delete()
+                db.delete(sess)
+        
+        # Commit cleanup
+        db.commit()
+
         response = await admin_ai.prime_session(
             user=current_user,
             active_projects=projects,

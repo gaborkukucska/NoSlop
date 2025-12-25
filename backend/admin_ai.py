@@ -297,8 +297,24 @@ class AdminAI:
                             except (ValueError, TypeError):
                                 logger.warning(f"Invalid duration value: {raw_duration}")
                         
+                        # Fallback title logic if LLM fails
+                        title = details.get("title", "New Project")
+                        if not title or title.lower() in ["new project", "untitled project", "my project"]:
+                            # Generate a better title from user message
+                            words = message.split()
+                            if len(words) > 0:
+                                # Use first few words of request (max 4 words)
+                                candidate = " ".join(words[:4]).title()
+                                # Clean up punctuation
+                                candidate = "".join(c for c in candidate if c.isalnum() or c.isspace())
+                                title = f"{candidate} Project"
+                            else:
+                                title = f"Project {datetime.utcnow().strftime('%Y%m%d_%H%M')}"
+                            
+                            logger.info(f"Replaced generic title with: {title}")
+
                         project_req = ProjectRequest(
-                            title=details.get("title", "New Project"),
+                            title=title,
                             description=details.get("description", ""),
                             project_type=details.get("project_type", "custom"),
                             duration=duration_val,
@@ -511,15 +527,32 @@ class AdminAI:
         )
 
         try:
-            logger.debug("Extracting project details from user input")
+            logger.info("Extracting project details", extra={"context": {"input_length": len(user_input)}})
+            
             response = ollama.chat(
                 model=self.model,
                 messages=[{"role": "user", "content": extraction_prompt}],
                 format="json"
             )
             
-            project_details = json.loads(response['message']['content'])
-            logger.info("Project details extracted", extra={"context": {"project_type": project_details.get("project_type")}})
+            raw_content = response['message']['content']
+            logger.debug(f"Raw LLM Extraction Response: {raw_content}")
+            
+            try:
+                project_details = json.loads(raw_content)
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON Decode Error: {e}", extra={"context": {"raw_content": raw_content}})
+                # Attempt to repair or fail gracefully
+                raise e
+
+            # Log pre-normalized keys for debugging
+            logger.debug(f"Pre-normalized project details: {project_details}")
+            
+            # Normalize keys to lowercase to handle LLM capitalization (e.g. "Title" vs "title")
+            project_details = {k.lower(): v for k, v in project_details.items()}
+            
+            logger.info(f"Final extracted details: {project_details}")
+
             
             return {
                 "project_details": project_details,

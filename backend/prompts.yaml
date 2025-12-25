@@ -70,7 +70,9 @@ admin_ai:
     2. Extract the Title. 
        - LOOK SPECIFICALLY for phrases like "called [Title]", "named [Title]", "title is [Title]", or "project [Title]".
        - IF a title is explicitly mentioned, YOU MUST USE IT.
-       - If no title is mentioned, generate a creative, relevant title based on the description (e.g. "Space Adventure" instead of "New Project").
+       - If no title is mentioned, YOU MUST GENERATE A CREATIVE TITLE based on the description (e.g. "Space Adventure", "Corporate Promo", "Cooking Vlog").
+       - ABSOLUTELY FORBIDDEN: Do NOT use "New Project", "Untitled Project", or "My Project" as the title.
+       - If you fail to generate a creative title, use "Untitled Media Project" as a last resort, but TRY to be creative first.
     3. Extract the Description. Summarize the user's intent.
     4. Extract Duration (in seconds) if mentioned. Return null/None if not.
     5. Extract Style preferences (e.g. "cyberpunk", "black and white").

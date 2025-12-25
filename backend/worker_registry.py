@@ -307,7 +307,7 @@ def initialize_workers():
     
     try:
         from workers.video_editor import VideoEditor
-        register_worker(VideoEditor, [TaskTypeEnum.VIDEO_EDITING])
+        register_worker(VideoEditor, [TaskTypeEnum.VIDEO_EDITING, TaskTypeEnum.VIDEO_GENERATION])
         logger.info("Registered VideoEditor")
     except ImportError as e:
         logger.warning(f"Could not import VideoEditor: {e}")
