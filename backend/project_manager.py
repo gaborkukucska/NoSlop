@@ -75,13 +75,13 @@ class ProjectManager:
         # Create project in database
         project_data = {
             "id": project_id,
+            "user_id": self.user_id,  # Set project owner
             "title": project_request.title,
             "project_type": ProjectTypeEnum[project_request.project_type.upper()],
             "description": project_request.description,
             "status": ProjectStatusEnum.PLANNING,
             "duration": project_request.duration,
             "style": project_request.style,
-            "reference_media": project_request.reference_media or [],
             "reference_media": project_request.reference_media or [],
             "meta_data": {
                 "custom_workflow": project_request.workflow_path

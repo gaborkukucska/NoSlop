@@ -26,6 +26,84 @@ from pathlib import Path
 from typing import Optional
 
 
+class StructuredFormatter(logging.Formatter):
+    """
+    Custom formatter that outputs structured JSON logs.
+    Includes timestamp, level, message, and optional context.
+    """
+    
+    def format(self, record: logging.LogRecord) -> str:
+        """Format log record as JSON."""
+        # Base log data
+        log_data = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "line": record.lineno
+        }
+        
+        # Add context if available
+        if hasattr(record, "context"):
+            log_data["context"] = record.context
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_data["exception"] = self.formatException(record.exc_info)
+        
+        # Add extra fields (excluding standard attributes)
+        for key, value in record.__dict__.items():
+            if key not in ["name", "msg", "args", "created", "filename", "funcName",
+                          "levelname", "levelno", "lineno", "module", "msecs",
+                          "message", "pathname", "process", "processName",
+                          "relativeCreated", "thread", "threadName", "exc_info",
+                          "exc_text", "stack_info", "context"]:
+                try:
+                    # Only add if serializable
+                    import json
+                    json.dumps(value)
+                    log_data[key] = value
+                except (TypeError, OverflowError):
+                    pass
+        
+        import json
+        return json.dumps(log_data)
+
+
+class ColoredConsoleFormatter(logging.Formatter):
+    """
+    Colored console formatter for development.
+    Makes logs easier to read in terminal.
+    """
+
+    # ANSI color codes
+    COLORS = {
+        "DEBUG": "\033[36m",      # Cyan
+        "INFO": "\033[32m",       # Green
+        "WARNING": "\033[33m",    # Yellow
+        "ERROR": "\033[31m",      # Red
+        "CRITICAL": "\033[35m",   # Magenta
+    }
+    RESET = "\033[0m"
+
+    def format(self, record: logging.LogRecord) -> str:
+        """Format log record with colors."""
+        color = self.COLORS.get(record.levelname, self.RESET)
+
+        # Format: [TIMESTAMP] LEVEL - logger [filename:lineno] - message
+        timestamp = datetime.fromtimestamp(record.created).strftime("%H:%M:%S")
+        log_message = f"[{timestamp}] {record.levelname:<8} - {record.name} - {record.getMessage()}"
+        formatted = f"{color}{log_message}{self.RESET}"
+
+        # Add exception if present
+        if record.exc_info:
+            # Color exception as well
+            formatted += f"\n{color}{self.formatException(record.exc_info)}{self.RESET}"
+
+        return formatted
+
+
 def setup_module_logging(
     module_name: str,
     log_level: str = "INFO",
@@ -38,25 +116,17 @@ def setup_module_logging(
     """
     Setup logging configuration for a NoSlop module.
     
-    Creates dated log files in the format: {module_name}_{YYYYMMDD_HHMMSS}.log
-    File logs always capture DEBUG level, console respects log_level parameter.
-    
     Args:
-        module_name: Name of the module (e.g., "backend", "seed_installer", "postgresql_installer")
-        log_level: Minimum log level for console output (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        log_dir: Directory for log files (relative to project root)
+        module_name: Name of the module (e.g., "backend", "seed_installer")
+        log_level: Minimum log level for console output
+        log_dir: Directory for log files
         enable_console: Enable console output
         enable_file: Enable file output
-        max_bytes: Maximum size of log file before rotation (only for non-dated files)
-        backup_count: Number of backup files to keep (only for non-dated files)
+        max_bytes: Max size for log files (unused for dated files)
+        backup_count: Backup count (unused for dated files)
         
     Returns:
         Path to main log file if file logging is enabled, None otherwise
-        
-    Example:
-        >>> log_file = setup_module_logging("postgresql_installer", log_level="DEBUG")
-        >>> logger = logging.getLogger(__name__)
-        >>> logger.info("PostgreSQL installation started")
     """
     # Create logs directory
     log_path = Path(log_dir)
@@ -78,21 +148,16 @@ def setup_module_logging(
     console_level = getattr(logging, log_level.upper(), logging.INFO)
     
     # Create formatters
-    detailed_formatter = logging.Formatter(
+    file_formatter = logging.Formatter(
         '[%(asctime)s] %(levelname)-8s - %(name)s - [%(filename)s:%(lineno)d] - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    console_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%H:%M:%S'
     )
     
     # Console handler (respects user's log level)
     if enable_console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(console_level)
-        console_handler.setFormatter(console_formatter)
+        console_handler.setFormatter(ColoredConsoleFormatter())
         root_logger.addHandler(console_handler)
     
     # File handler (always DEBUG to capture everything)
@@ -103,7 +168,7 @@ def setup_module_logging(
             encoding='utf-8'
         )
         file_handler.setLevel(logging.DEBUG)  # Always capture DEBUG to file
-        file_handler.setFormatter(detailed_formatter)
+        file_handler.setFormatter(file_formatter)
         root_logger.addHandler(file_handler)
         
         # Error file handler (only errors and above)
@@ -112,16 +177,15 @@ def setup_module_logging(
             encoding='utf-8'
         )
         error_handler.setLevel(logging.ERROR)
-        error_handler.setFormatter(detailed_formatter)
+        error_handler.setFormatter(file_formatter)
         root_logger.addHandler(error_handler)
     
     # Log initial message
     logger = logging.getLogger(__name__)
     logger.info(f"Logging initialized for module: {module_name}")
-    logger.info(f"Log level: {log_level} (console), DEBUG (file)")
+    
     if enable_file:
         logger.info(f"Log file: {main_log_file}")
-        logger.info(f"Error log file: {error_log_file}")
     
     return main_log_file if enable_file else None
 

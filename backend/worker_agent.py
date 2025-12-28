@@ -12,8 +12,8 @@ from typing import Dict, Any, Optional, Callable, List
 from datetime import datetime
 import ollama
 
-from models import Task, TaskStatus
-from database import TaskCRUD, TaskStatusEnum
+from models import Task, TaskStatus, AgentMessageType
+from database import TaskCRUD, TaskStatusEnum, AgentMessageCRUD
 from config import settings
 from prompt_manager import get_prompt_manager
 
@@ -244,10 +244,26 @@ class WorkerAgent(abc.ABC):
         """
         logger.info(f"{self.agent_type} requesting assistance: {message}")
         
-        # TODO: Implement inter-agent communication
-        # For now, just log the request
-        
-        return "Assistance request logged. PM will be notified."
+        try:
+            import uuid
+            msg_id = str(uuid.uuid4())
+            
+            message_data = {
+                "id": msg_id,
+                "sender_id": self.agent_type,
+                "recipient_id": "project_manager",  # Default to PM
+                "message_type": AgentMessageType.REQUEST.value,
+                "content": message,
+                "context": context or {},
+                "status": "pending"
+            }
+            
+            AgentMessageCRUD.create(self.db, message_data)
+            return f"Assistance request logged (ID: {msg_id}). PM will be notified."
+            
+        except Exception as e:
+            logger.error(f"Failed to log assistance request: {e}", exc_info=True)
+            return "Failed to log assistance request."
     
     async def execute_with_retry(self, task: Task) -> Dict[str, Any]:
         """

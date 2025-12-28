@@ -68,6 +68,9 @@ class VideoEditor(WorkerAgent):
         
         # Check for required fields
         if "timeline" not in result and "output_file" not in result:
+            # Allow "status" only results (e.g. no_inputs_found)
+            if "status" in result:
+                return True
             logger.warning("Result must have either timeline or output_file")
             return False
             
@@ -111,14 +114,12 @@ class VideoEditor(WorkerAgent):
                 self.update_status(task.id, TaskStatusEnum.COMPLETED, result)
                 return result
 
-            # If no inputs, proceed with planning logic (LLM based)
-            # ... (Existing planning logic would go here, simplified for this step)
-            
-            # For this iteration, we focus on the assembly capability
-            logger.warning("No input files found for video assembly")
-            result = {"status": "no_inputs_found"}
-            self.update_status(task.id, TaskStatusEnum.COMPLETED, result)
-            return result
+            # If no inputs, this is an error - tasks need inputs to execute
+            logger.error(f"VideoEditor task {task.id} has no input files to process")
+            error_msg = "No input files found. Video editing requires input media from dependent tasks."
+            result = {"error": error_msg, "status": "no_inputs_found"}
+            self.update_status(task.id, TaskStatusEnum.FAILED, result)
+            raise ValueError(error_msg)
             
         except Exception as e:
             logger.error(f"VideoEditor failed task {task.id}: {e}", exc_info=True)

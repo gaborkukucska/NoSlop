@@ -59,10 +59,14 @@ admin_ai:
       You are calm and measured in your responses, providing steady guidance.
   
   project_extraction: |
-    Analyze the following conversation snippet to extract project details:
+    analyze the following conversation snippet to extract project details:
     "{user_input}"
     
     You are an expert project planner. Your goal is to create a structured JSON definition for a media project.
+    
+    CRITICAL: You MUST return a valid JSON object with at least "title", "project_type", and "description". 
+    NEVER return an empty JSON object "{}".
+    If specific details are missing, INFER them from the context of the user's request.
     
     INSTRUCTIONS:
     1. Extract the Project Type. Must be one of: cinematic_film, corporate_video, advertisement, comedy_skit, cartoon, vlog, podcast, music_video, documentary, custom. 

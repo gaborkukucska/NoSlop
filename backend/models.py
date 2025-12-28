@@ -144,6 +144,31 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class AgentMessageType(str, Enum):
+    """Type of inter-agent message"""
+    REQUEST = "request"
+    RESPONSE = "response"
+    INFO = "info"
+    ERROR = "error"
+
+
+class AgentMessage(BaseModel):
+    """Inter-agent message data model"""
+    id: str = Field(..., description="Unique message ID")
+    sender_id: str = Field(..., description="ID of sending agent")
+    recipient_id: str = Field(..., description="ID of recipient agent (or 'system')")
+    message_type: AgentMessageType = AgentMessageType.INFO
+    content: str = Field(..., description="Message content")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Context data")
+    status: str = Field(default="pending", description="Message status (pending/processed)")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    processed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+        orm_mode = True
+
+
 class Task(BaseModel):
     """Task data model"""
     id: str = Field(..., description="Unique task ID")

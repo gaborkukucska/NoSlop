@@ -89,11 +89,49 @@ class PostgreSQLInstaller(BaseInstaller):
             self.logger.error(f"Failed to create database: {err}")
             return False
             
-        # Allow password auth (pg_hba.conf) - simplified for now
-        # In a real scenario, we'd need to locate pg_hba.conf and edit it carefully
-        # For now, we assume local connections are trusted or md5 is enabled
+        # Allow remote connections
+        if not self._allow_remote_connections():
+             self.logger.warning("Failed to configure remote connections for PostgreSQL")
         
         return True
+
+    def _allow_remote_connections(self) -> bool:
+        """
+        Configure PostgreSQL to listen on all interfaces and allow password auth.
+        """
+        self.logger.info("Configuring PostgreSQL for remote access...")
+        
+        # 1. Find config directory
+        code, out, err = self.execute_remote("sudo -u postgres psql -t -P format=unaligned -c 'SHOW config_file;'")
+        if code != 0 or not out.strip():
+            self.logger.error(f"Could not find postgresql.conf: {err}")
+            return False
+            
+        conf_path = out.strip()
+        hba_path = conf_path.replace("postgresql.conf", "pg_hba.conf")
+        
+        self.logger.info(f"Found config at: {conf_path}")
+        
+        # 2. Update postgresql.conf (listen_addresses)
+        # Check if already listening on *
+        code, out, _ = self.execute_remote(f"sudo grep \"listen_addresses = '*'\" {conf_path}")
+        if code != 0:
+            # Append to file
+            self.logger.info("Setting listen_addresses = '*'...")
+            self.execute_remote(f"echo \"listen_addresses = '*'\" | sudo tee -a {conf_path}")
+        
+        # 3. Update pg_hba.conf
+        # Allow md5 auth for the user from any IP (simplified for usability)
+        # Ideally we limit to local subnet
+        entry = f"host    {self.db_name}    {self.db_user}    0.0.0.0/0    md5"
+        
+        code, out, _ = self.execute_remote(f"sudo grep \"{entry}\" {hba_path}")
+        if code != 0:
+            self.logger.info(f"Adding pg_hba.conf entry: {entry}")
+            self.execute_remote(f"echo \"{entry}\" | sudo tee -a {hba_path}")
+            
+        # 4. Restart service to apply changes
+        return self.start()
 
     def start(self) -> bool:
         """Start PostgreSQL service."""

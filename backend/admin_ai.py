@@ -300,18 +300,41 @@ class AdminAI:
                         # Fallback title logic if LLM fails
                         title = details.get("title", "New Project")
                         if not title or title.lower() in ["new project", "untitled project", "my project"]:
-                            # Generate a better title from user message
-                            words = message.split()
-                            if len(words) > 0:
-                                # Use first few words of request (max 4 words)
-                                candidate = " ".join(words[:4]).title()
-                                # Clean up punctuation
-                                candidate = "".join(c for c in candidate if c.isalnum() or c.isspace())
-                                title = f"{candidate} Project"
-                            else:
-                                title = f"Project {datetime.utcnow().strftime('%Y%m%d_%H%M')}"
+                            # Try to extract title from quotes first
+                            import re
+                            quote_match = re.search(r'titled\s+["\']([^"\']+)["\']', message, re.IGNORECASE)
+                            if not quote_match:
+                                quote_match = re.search(r'project\s+["\']([^"\']+)["\']', message, re.IGNORECASE)
                             
-                            logger.info(f"Replaced generic title with: {title}")
+                            if quote_match:
+                                title = quote_match.group(1)
+                                logger.info(f"Regex extracted title: {title}")
+                            else:
+                                # Generate a better title from user message
+                                stop_words = {"please", "create", "make", "generate", "want", "would", "like", "a", "an", "the", "for", "to", "project", "video"}
+                                raw_words = message.split()
+                                logger.info(f"Title fallback INPUT: '{message}'")
+                                logger.info(f"Title fallback RAW WORDS: {raw_words}")
+                                
+                                words = []
+                                for w in raw_words:
+                                    is_stop = w.lower() in stop_words
+                                    # logger.info(f"Word '{w}' (lower: '{w.lower()}') is_stop={is_stop}") 
+                                    if not is_stop:
+                                        words.append(w)
+                                        
+                                logger.info(f"Title fallback FILTERED WORDS: {words}")
+                                
+                                if len(words) > 0:
+                                    # Use first few significant words (max 4)
+                                    candidate = " ".join(words[:4]).title()
+                                    # Clean up punctuation
+                                    candidate = "".join(c for c in candidate if c.isalnum() or c.isspace())
+                                    title = f"{candidate} Project"
+                                else:
+                                    title = f"Project {datetime.utcnow().strftime('%Y%m%d_%H%M')}"
+                                
+                                logger.info(f"Replaced generic title with: {title}")
 
                         project_req = ProjectRequest(
                             title=title,

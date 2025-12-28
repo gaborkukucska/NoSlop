@@ -178,8 +178,8 @@ class ConnectionManager:
                 for connection in list(self.active_connections[user_id]):
                     try:
                         await connection.send_json(message)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Failed to send WebSocket message to user {user_id}: {e}")
             return
 
         # Broadcast to all (legacy behavior or system-wide alerts)
@@ -188,8 +188,8 @@ class ConnectionManager:
             for connection in list(user_conns):
                 try:
                     await connection.send_json(message)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to broadcast WebSocket message: {e}")
 
 manager = ConnectionManager()
 
@@ -1048,7 +1048,7 @@ async def create_project(
     logger.info(f"Creating project: {project_request.title}")
     
     try:
-        pm = ProjectManager(db, manager)
+        pm = ProjectManager(db, manager, user_id=current_user.id)
         project = await pm.create_project(project_request)
         
         return project
@@ -1080,7 +1080,7 @@ async def list_projects(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        projects = ProjectCRUD.get_all(db, skip=skip, limit=limit)
+        projects = ProjectCRUD.get_by_user(db, current_user.id, skip=skip, limit=limit)
         return {"projects": [p.to_dict() for p in projects]}
         
     except Exception as e:
@@ -1108,11 +1108,17 @@ async def get_project(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        pm = ProjectManager(db, manager)
-        status = pm.get_project_status(project_id)
+        project = ProjectCRUD.get(db, project_id)
         
-        if not status:
+        if not project:
             raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+        
+        # Verify ownership
+        if project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+        
+        pm = ProjectManager(db, manager, user_id=current_user.id)
+        status = pm.get_project_status(project_id)
         
         return status
         
@@ -1315,7 +1321,14 @@ async def update_task_status(
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     
     try:
-        pm = ProjectManager(db, manager)
+        # Verify ownership
+        project = ProjectCRUD.get(db, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+        if project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+        
+        pm = ProjectManager(db, manager, user_id=current_user.id)
         task = await pm.update_task_status(task_id, status, result)
         
         if not task:
@@ -1612,7 +1625,14 @@ async def start_project(
     logger.info(f"Project start requested: {project_id}")
     
     try:
-        pm = ProjectManager(db, manager)
+        # Verify ownership
+        project = ProjectCRUD.get(db, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project not found: {project_id}")
+        if project.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+        
+        pm = ProjectManager(db, manager, user_id=current_user.id)
         project = await pm.start_project(project_id)
         
         if not project:
@@ -1623,7 +1643,7 @@ async def start_project(
         asyncio.create_task(run_background_project_execution(project_id))
         logger.info(f"Project execution scheduled in background: {project_id}")
         
-        return project
+        return project.to_dict()
         
     except HTTPException:
         raise
@@ -1641,11 +1661,19 @@ async def pause_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project pause requested: {project_id}")
-    pm = ProjectManager(db, manager)
+    
+    # Verify ownership
+    project = ProjectCRUD.get(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+    
+    pm = ProjectManager(db, manager, user_id=current_user.id)
     project = await pm.pause_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    return project.to_dict()
 
 
 @app.post("/api/projects/{project_id}/stop", response_model=Project)
@@ -1657,11 +1685,23 @@ async def stop_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project stop requested: {project_id}")
-    pm = ProjectManager(db, manager)
+    
+    # Verify ownership
+    project = ProjectCRUD.get(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+    
+    pm = ProjectManager(db, manager, user_id=current_user.id)
     project = await pm.stop_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project
+    return project.to_dict()
+
+
+
+
 
 
 @app.get("/health")
@@ -1679,7 +1719,15 @@ async def update_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project update requested: {project_id}")
-    pm = ProjectManager(db, manager)
+    
+    # Verify ownership
+    project = ProjectCRUD.get(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+    
+    pm = ProjectManager(db, manager, user_id=current_user.id)
     project = await pm.update_project(project_id, project_update.dict())
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -1695,7 +1743,15 @@ async def delete_project(
     if not settings.enable_project_manager:
         raise HTTPException(status_code=503, detail="Project Manager is not enabled")
     logger.info(f"Project delete requested: {project_id}")
-    pm = ProjectManager(db, manager)
+    
+    # Verify ownership
+    project = ProjectCRUD.get(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Access denied: You don't own this project")
+    
+    pm = ProjectManager(db, manager, user_id=current_user.id)
     await pm.delete_project(project_id)
     return {"status": "deleted", "project_id": project_id}
 

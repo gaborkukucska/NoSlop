@@ -213,8 +213,8 @@ class Deployer:
         else:
             if plan.master_node:
                 config["NOSLOP_BACKEND_URL"] = f"http://{plan.master_node.device.ip_address}:8000"
-                # Remote workers connect to master's postgresql (future TODO: configure properly)
-                # Currently workers don't need direct DB access, only backend does.
+                # Remote workers connect to master's postgresql
+                config["DATABASE_URL"] = f"postgresql://{DEFAULT_DB_USER}:{DEFAULT_DB_PASS}@{plan.master_node.device.ip_address}:{DEFAULT_DB_PORT}/{DEFAULT_DB_NAME}"
                 config["OLLAMA_HOST"] = f"http://{plan.master_node.device.ip_address}:11434"
         
         # NOTE: NEXT_PUBLIC_NOSLOP_BACKEND_URL will be set later based on external URL configuration

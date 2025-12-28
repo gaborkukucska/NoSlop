@@ -51,14 +51,18 @@ class ProjectTypeEnum(str, enum.Enum):
 
 
 class ProjectStatusEnum(str, enum.Enum):
-    """Project lifecycle status"""
+    """Project lifecycle status - supports iterative workflow"""
     PLANNING = "planning"
+    GATHERING_INPUT = "gathering_input"  # NEW: System needs more info from user
     IN_PROGRESS = "in_progress"
+    REVIEW_PENDING = "review_pending"  # NEW: Waiting for user feedback
+    REFINING = "refining"  # NEW: Incorporating user feedback
     REVIEW = "review"
     COMPLETED = "completed"
     PAUSED = "paused"
     STOPPED = "stopped"
     CANCELLED = "cancelled"
+    FAILED = "failed"  # NEW: Unrecoverable error
 
 
 class TaskStatusEnum(str, enum.Enum):
@@ -84,6 +88,24 @@ class TaskTypeEnum(str, enum.Enum):
     CUSTOM = "custom"
 
 
+class IterationStatusEnum(str, enum.Enum):
+    """Status of a task iteration"""
+    DRAFT = "draft"  # Work in progress
+    SUBMITTED_FOR_REVIEW = "submitted_for_review"  # Ready for user review
+    APPROVED = "approved"  # User approved this iteration
+    REJECTED = "rejected"  # User requested changes
+
+
+class MilestoneTypeEnum(str, enum.Enum):
+    """Types of project milestones"""
+    PROJECT_PLAN = "project_plan"  # Initial plan created
+    SCRIPT_DRAFT = "script_draft"  # Script completed
+    STORYBOARD_DRAFT = "storyboard_draft"  # Storyboard completed
+    MEDIA_GENERATION = "media_generation"  # Media generated
+    FINAL_ASSEMBLY = "final_assembly"  # Final video/product assembled
+    CUSTOM = "custom"  # Custom milestone
+
+
 class UserRoleEnum(str, enum.Enum):
     """User roles"""
     ADMIN = "admin"
@@ -99,6 +121,7 @@ class ProjectModel(Base):
     __tablename__ = "projects"
     
     id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
     project_type = Column(SQLEnum(ProjectTypeEnum), nullable=False)
     description = Column(Text, nullable=False)
@@ -122,28 +145,43 @@ class ProjectModel(Base):
     reference_media = Column(JSON, default=list)  # List of reference media paths
     meta_data = Column(JSON, default=dict)  # Additional metadata
     
+    # NEW: Iterative workflow fields
+    review_required = Column(Boolean, default=False)  # Does project need user review?
+    current_milestone = Column(String, nullable=True)  # Current milestone name
+    user_feedback_summary = Column(Text, nullable=True)  # Summary of all user feedback
+    iteration_count = Column(Integer, default=0)  # Overall project iteration number
+    
     # Relationships
+    owner = relationship("UserModel")
     tasks = relationship("TaskModel", back_populates="project", cascade="all, delete-orphan")
+    milestones = relationship("ProjectMilestoneModel", back_populates="project", cascade="all, delete-orphan")
+    feedback = relationship("UserFeedbackModel", back_populates="project", cascade="all, delete-orphan")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary"""
-        return {
-            "id": self.id,
-            "title": self.title,
-            "project_type": self.project_type.value,
-            "description": self.description,
-            "status": self.status.value,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "duration": self.duration,
-            "style": self.style,
-            "folder_path": self.folder_path,
-            "workflows_count": self.workflows_count,
-            "media_count": self.media_count,
-            "storage_size_mb": self.storage_size_mb,
-            "reference_media": self.reference_media or [],
-            "metadata": self.meta_data or {}
-        }
+        try:
+            return {
+                "id": self.id,
+                "user_id": self.user_id,
+                "title": self.title,
+                "project_type": self.project_type.value,
+                "description": self.description,
+                "status": self.status.value,
+                "created_at": self.created_at.isoformat() if self.created_at else None,
+                "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+                "duration": self.duration,
+                "style": self.style,
+                "folder_path": self.folder_path,
+                "workflows_count": self.workflows_count,
+                "media_count": self.media_count,
+                "storage_size_mb": self.storage_size_mb,
+                "reference_media": self.reference_media or [],
+                "metadata": self.meta_data or {}
+            }
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Error in ProjectModel.to_dict for project {self.id}: {e}", exc_info=True)
+            raise e
 
 
 class ChatSessionModel(Base):
@@ -225,8 +263,16 @@ class TaskModel(Base):
     result = Column(JSON, nullable=True)  # Task execution result
     meta_data = Column(JSON, default=dict)  # Additional metadata
     
+    # NEW: Iteration support
+    iteration_count = Column(Integer, default=0)  # Number of iterations for this task
+    current_iteration_status = Column(SQLEnum(IterationStatusEnum), default=IterationStatusEnum.DRAFT)
+    user_approved = Column(Boolean, default=False)  # Has user approved this task?
+    feedback_requested = Column(Boolean, default=False)  # Is feedback needed?
+    
     # Relationships
     project = relationship("ProjectModel", back_populates="tasks")
+    iterations = relationship("TaskIterationModel", back_populates="task", cascade="all, delete-orphan")
+    feedback = relationship("UserFeedbackModel", back_populates="task", cascade="all, delete-orphan")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert model to dictionary"""
@@ -246,6 +292,167 @@ class TaskModel(Base):
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "dependencies": self.dependencies or [],
             "result": self.result,
+            "metadata": self.meta_data or {}
+        }
+
+
+class AgentMessageModel(Base):
+    """Database model for inter-agent messages"""
+    __tablename__ = "agent_messages"
+    
+    id = Column(String, primary_key=True)
+    sender_id = Column(String, nullable=False)
+    recipient_id = Column(String, nullable=False)
+    message_type = Column(String, nullable=False)  # stored as string for simplicity
+    content = Column(Text, nullable=False)
+    context = Column(JSON, default=dict)
+    status = Column(String, default="pending")
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=True)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "sender_id": self.sender_id,
+            "recipient_id": self.recipient_id,
+            "message_type": self.message_type,
+            "content": self.content,
+            "context": self.context or {},
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "processed_at": self.processed_at.isoformat() if self.processed_at else None
+        }
+
+
+class TaskIterationModel(Base):
+    """Database model for task iterations - supports multiple drafts/revisions"""
+    __tablename__ = "task_iterations"
+    
+    id = Column(String, primary_key=True)
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=False, index=True)
+    iteration_number = Column(Integer, nullable=False)  # 1, 2, 3, etc.
+    status = Column(SQLEnum(IterationStatusEnum), default=IterationStatusEnum.DRAFT)
+    
+    # Result data for this iteration
+    result = Column(JSON, nullable=True)
+    
+    # User feedback for this iteration (if rejected)
+    user_feedback = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    submitted_at = Column(DateTime, nullable=True)  # When submitted for review
+    reviewed_at = Column(DateTime, nullable=True)  # When user reviewed
+    
+    # Metadata
+    meta_data = Column(JSON, default=dict)
+    
+    # Relationships
+    task = relationship("TaskModel", back_populates="iterations")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "task_id": self.task_id,
+            "iteration_number": self.iteration_number,
+            "status": self.status.value,
+            "result": self.result,
+            "user_feedback": self.user_feedback,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "metadata": self.meta_data or {}
+        }
+
+
+class UserFeedbackModel(Base):
+    """Database model for user feedback on projects/tasks"""
+    __tablename__ = "user_feedback"
+    
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    task_id = Column(String, ForeignKey("tasks.id"), nullable=True, index=True)  # Optional - can be project-level
+    milestone = Column(String, nullable=True)  # Which milestone this feedback is for
+    
+    feedback_text = Column(Text, nullable=False)
+    
+    # Classification
+    feedback_type = Column(String, default="general")  # general, approval, rejection, clarification
+    sentiment = Column(String, nullable=True)  # positive, negative, neutral  
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Metadata
+    meta_data = Column(JSON, default=dict)
+    
+    # Relationships
+    user = relationship("UserModel")
+    project = relationship("ProjectModel", back_populates="feedback")
+    task = relationship("TaskModel", back_populates="feedback")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "project_id": self.project_id,
+            "task_id": self.task_id,
+            "milestone": self.milestone,
+            "feedback_text": self.feedback_text,
+            "feedback_type": self.feedback_type,
+            "sentiment": self.sentiment,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "metadata": self.meta_data or {}
+        }
+
+
+class ProjectMilestoneModel(Base):
+    """Database model for project milestones/checkpoints"""
+    __tablename__ = "project_milestones"
+    
+    id = Column(String, primary_key=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    milestone_type = Column(SQLEnum(MilestoneTypeEnum), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    
+    # Status
+    status = Column(String, default="pending")  # pending, awaiting_review, approved, rejected
+    
+    # Associated tasks
+    task_ids = Column(JSON, default=list)  # Tasks that contribute to this milestone
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    
+    # User response
+    user_approved = Column(Boolean, default=False)
+    user_feedback = Column(Text, nullable=True)
+    
+    # Metadata
+    meta_data = Column(JSON, default=dict)
+    
+    # Relationships
+    project = relationship("ProjectModel", back_populates="milestones")
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "project_id": self.project_id,
+            "milestone_type": self.milestone_type.value,
+            "name": self.name,
+            "description": self.description,
+            "status": self.status,
+            "task_ids": self.task_ids or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
+            "user_approved": self.user_approved,
+            "user_feedback": self.user_feedback,
             "metadata": self.meta_data or {}
         }
 
@@ -304,9 +511,19 @@ class ProjectCRUD:
         return db.query(ProjectModel).filter(ProjectModel.id == project_id).first()
     
     @staticmethod
-    def get_all(db: Session, skip: int = 0, limit: int = 100) -> List[ProjectModel]:
-        """Get all projects with pagination"""
-        return db.query(ProjectModel).offset(skip).limit(limit).all()
+    def get_all(db: Session, skip: int = 0, limit: int = 100, user_id: Optional[str] = None) -> List[ProjectModel]:
+        """Get all projects with pagination, optionally filtered by user"""
+        query = db.query(ProjectModel)
+        if user_id:
+            query = query.filter(ProjectModel.user_id == user_id)
+        return query.offset(skip).limit(limit).all()
+    
+    @staticmethod
+    def get_by_user(db: Session, user_id: str, skip: int = 0, limit: int = 100) -> List[ProjectModel]:
+        """Get all projects for a specific user"""
+        return db.query(ProjectModel).filter(
+            ProjectModel.user_id == user_id
+        ).offset(skip).limit(limit).all()
     
     @staticmethod
     def update(db: Session, project_id: str, updates: Dict[str, Any]) -> Optional[ProjectModel]:
@@ -757,3 +974,186 @@ class SystemSettingsCRUD:
         db.commit()
         db.refresh(settings)
         return settings
+
+
+class AgentMessageCRUD:
+    """CRUD operations for agent messages"""
+    
+    @staticmethod
+    def create(db: Session, message_data: Dict[str, Any]) -> AgentMessageModel:
+        """Create a new message"""
+        msg = AgentMessageModel(**message_data)
+        db.add(msg)
+        db.commit()
+        db.refresh(msg)
+        return msg
+        
+    @staticmethod
+    def get_pending(db: Session, recipient_id: str) -> List[AgentMessageModel]:
+        """Get pending messages for a recipient"""
+        return db.query(AgentMessageModel).filter(
+            AgentMessageModel.recipient_id == recipient_id,
+            AgentMessageModel.status == "pending"
+        ).all()
+        
+    @staticmethod
+    def mark_processed(db: Session, message_id: str) -> bool:
+        """Mark message as processed"""
+        msg = db.query(AgentMessageModel).filter(AgentMessageModel.id == message_id).first()
+        if msg:
+            msg.status = "processed"
+            msg.processed_at = datetime.utcnow()
+            db.commit()
+            return True
+        return False
+
+
+# ============================================================================
+# CRUD Operations for Iterative Workflow Models
+# ============================================================================
+
+class TaskIterationCRUD:
+    """CRUD operations for task iterations"""
+    
+    @staticmethod
+    def create(db: Session, iteration_data: Dict[str, Any]) -> TaskIterationModel:
+        """Create a new task iteration"""
+        logger.info(f"Creating iteration {iteration_data.get('iteration_number')} for task {iteration_data.get('task_id')}")
+        
+        iteration = TaskIterationModel(**iteration_data)
+        db.add(iteration)
+        db.commit()
+        db.refresh(iteration)
+        
+        return iteration
+    
+    @staticmethod
+    def get(db: Session, iteration_id: str) -> Optional[TaskIterationModel]:
+        """Get iteration by ID"""
+        return db.query(TaskIterationModel).filter(TaskIterationModel.id == iteration_id).first()
+    
+    @staticmethod
+    def get_by_task(db: Session, task_id: str) -> List[TaskIterationModel]:
+        """Get all iterations for a task"""
+        return db.query(TaskIterationModel).filter(
+            TaskIterationModel.task_id == task_id
+        ).order_by(TaskIterationModel.iteration_number.asc()).all()
+    
+    @staticmethod
+    def get_latest(db: Session, task_id: str) -> Optional[TaskIterationModel]:
+        """Get latest iteration for a task"""
+        return db.query(TaskIterationModel).filter(
+            TaskIterationModel.task_id == task_id
+        ).order_by(TaskIterationModel.iteration_number.desc()).first()
+    
+    @staticmethod
+    def update(db: Session, iteration_id: str, updates: Dict[str, Any]) -> Optional[TaskIterationModel]:
+        """Update iteration"""
+        iteration = TaskIterationCRUD.get(db, iteration_id)
+        if not iteration:
+            return None
+        
+        for key, value in updates.items():
+            if hasattr(iteration, key):
+                setattr(iteration, key, value)
+        
+        db.commit()
+        db.refresh(iteration)
+        
+        return iteration
+
+
+class UserFeedbackCRUD:
+    """CRUD operations for user feedback"""
+    
+    @staticmethod
+    def create(db: Session, feedback_data: Dict[str, Any]) -> UserFeedbackModel:
+        """Create user feedback"""
+        logger.info(f"Creating feedback for project {feedback_data.get('project_id')}")
+        
+        feedback = UserFeedbackModel(**feedback_data)
+        db.add(feedback)
+        db.commit()
+        db.refresh(feedback)
+        
+        return feedback
+    
+    @staticmethod
+    def get(db: Session, feedback_id: str) -> Optional[UserFeedbackModel]:
+        """Get feedback by ID"""
+        return db.query(UserFeedbackModel).filter(UserFeedbackModel.id == feedback_id).first()
+    
+    @staticmethod
+    def get_by_project(db: Session, project_id: str) -> List[UserFeedbackModel]:
+        """Get all feedback for a project"""
+        return db.query(UserFeedbackModel).filter(
+            UserFeedbackModel.project_id == project_id
+        ).order_by(UserFeedbackModel.created_at.desc()).all()
+    
+    @staticmethod
+    def get_by_task(db: Session, task_id: str) -> List[UserFeedbackModel]:
+        """Get all feedback for a task"""
+        return db.query(UserFeedbackModel).filter(
+            UserFeedbackModel.task_id == task_id
+        ).order_by(UserFeedbackModel.created_at.desc()).all()
+    
+    @staticmethod  
+    def get_by_milestone(db: Session, project_id: str, milestone: str) -> List[UserFeedbackModel]:
+        """Get feedback for a specific milestone"""
+        return db.query(UserFeedbackModel).filter(
+            UserFeedbackModel.project_id == project_id,
+            UserFeedbackModel.milestone == milestone
+        ).order_by(UserFeedbackModel.created_at.desc()).all()
+
+
+class ProjectMilestoneCRUD:
+    """CRUD operations for project milestones"""
+    
+    @staticmethod
+    def create(db: Session, milestone_data: Dict[str, Any]) -> ProjectMilestoneModel:
+        """Create a project milestone"""
+        logger.info(f"Creating milestone '{milestone_data.get('name')}' for project {milestone_data.get('project_id')}")
+        
+        milestone = ProjectMilestoneModel(**milestone_data)
+        db.add(milestone)
+        db.commit()
+        db.refresh(milestone)
+        
+        return milestone
+    
+    @staticmethod
+    def get(db: Session, milestone_id: str) -> Optional[ProjectMilestoneModel]:
+        """Get milestone by ID"""
+        return db.query(ProjectMilestoneModel).filter(ProjectMilestoneModel.id == milestone_id).first()
+    
+    @staticmethod
+    def get_by_project(db: Session, project_id: str) -> List[ProjectMilestoneModel]:
+        """Get all milestones for a project"""
+        return db.query(ProjectMilestoneModel).filter(
+            ProjectMilestoneModel.project_id == project_id
+        ).order_by(ProjectMilestoneModel.created_at.asc()).all()
+    
+    @staticmethod
+    def get_pending(db: Session, project_id: str) -> List[ProjectMilestoneModel]:
+        """Get pending milestones for a project"""
+        return db.query(ProjectMilestoneModel).filter(
+            ProjectMilestoneModel.project_id == project_id,
+            ProjectMilestoneModel.status.in_(["pending", "awaiting_review"])
+        ).all()
+    
+    @staticmethod
+    def update(db: Session, milestone_id: str, updates: Dict[str, Any]) -> Optional[ProjectMilestoneModel]:
+        """Update milestone"""
+        milestone = ProjectMilestoneCRUD.get(db, milestone_id)
+        if not milestone:
+            return None
+        
+        for key, value in updates.items():
+            if hasattr(milestone, key):
+                setattr(milestone, key, value)
+        
+        db.commit()
+        db.refresh(milestone)
+        
+        logger.info(f"Milestone updated: {milestone_id}")
+        return milestone

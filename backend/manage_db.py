@@ -134,6 +134,82 @@ def reset_db():
         logger.error(f"Failed to reset database: {e}")
         sys.exit(1)
 
+def check_and_apply_migrations():
+    """
+    Check schema and apply necessary migrations automatically.
+    """
+    try:
+        inspector = inspect(engine)
+        
+        # Check if projects table exists
+        if not inspector.has_table("projects"):
+            logger.info("Projects table not found. Creating schema...")
+            init_db()
+            logger.info("✅ Database schema created successfully")
+            return True
+        
+        # Check for missing columns in projects table
+        existing_columns = {col['name'] for col in inspector.get_columns('projects')}
+        required_columns = {'id', 'user_id', 'title', 'project_type', 'description', 'status', 
+                           'created_at', 'updated_at', 'duration', 'style', 'folder_path',
+                           'workflows_count', 'media_count', 'storage_size_mb', 
+                           'reference_media', 'meta_data'}
+        
+        missing_columns = required_columns - existing_columns
+        
+        if missing_columns:
+            logger.info("="*70)
+            logger.info("SCHEMA MIGRATION REQUIRED")
+            logger.info("="*70)
+            logger.info(f"Missing columns in 'projects' table: {', '.join(missing_columns)}")
+            logger.info("Applying automatic migration...")
+            
+            with engine.connect() as conn:
+                # Apply migrations for missing columns
+                if 'user_id' in missing_columns:
+                    logger.info("  → Adding 'user_id' column...")
+                    conn.execute(text("ALTER TABLE projects ADD COLUMN user_id VARCHAR"))
+                    conn.execute(text("""
+                        ALTER TABLE projects 
+                        ADD CONSTRAINT fk_projects_user 
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                    """))
+                    conn.execute(text("CREATE INDEX idx_projects_user_id ON projects(user_id)"))
+                    
+                    # Check if there are existing projects
+                    result = conn.execute(text("SELECT COUNT(*) FROM projects"))
+                    count = result.scalar()
+                    
+                    if count > 0:
+                        logger.warning(f"  ⚠️  WARNING: {count} existing projects found without user_id")
+                        logger.warning("  → Manual intervention may be required to assign ownership")
+                    else:
+                        # Safe to make NOT NULL since no existing data
+                        conn.execute(text("ALTER TABLE projects ALTER COLUMN user_id SET NOT NULL"))
+                        logger.info("  → Set user_id as NOT NULL")
+                    
+                    conn.commit()
+                    logger.info("  ✅ user_id column added successfully")
+                
+            logger.info("="*70)
+            logger.info("✅ MIGRATION COMPLETED")
+            logger.info("="*70)
+            return True
+        
+        # Check for agent_messages table
+        if not inspector.has_table("agent_messages"):
+            logger.info("agent_messages table missing. Creating...")
+            init_db()
+            logger.info("✅ agent_messages table created")
+        
+        logger.info("✅ Database schema is up to date")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Migration failed: {e}")
+        logger.error("Manual intervention required. Check database state.")
+        return False
+
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "--check-and-upgrade":
         # Check if DB file exists (only for SQLite)
@@ -146,13 +222,20 @@ def main():
         
         if db_exists:
             logger.info("Checking database schema...")
-            if not check_schema():
-                logger.warning("Database schema is incompatible with this version.")
-                logger.info("Performing safety backup before reset...")
-                backup_db()
-                reset_db()
+            
+            # Try automatic migration first
+            if check_and_apply_migrations():
+                logger.info("Database is ready")
             else:
-                logger.info("Database schema is compatible.")
+                # Fall back to old behavior if migration fails
+                logger.info("Attempting schema compatibility check...")
+                if not check_schema():
+                    logger.warning("Database schema is incompatible with this version.")
+                    logger.info("Performing safety backup before reset...")
+                    backup_db()
+                    reset_db()
+                else:
+                    logger.info("Database schema is compatible.")
         else:
             logger.info("No existing database found. Initializing new database...")
             init_db()
