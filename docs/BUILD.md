@@ -14,7 +14,7 @@ To build and run NoSlop locally, ensure your development environment has the fol
     *   `compileSdk = 34`
     *   `minSdk = 26` (Android 8.0 Oreo - required for cryptographic APIs and background networking routines)
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
-*   **Orbot (Optional but Recommended)**: Since NoSlop performs social mesh communications over Tor SOCKS5 proxy (`127.0.0.1:9050`), you should install Orleans' Orbot client from [F-Droid](https://f-droid.org/packages/org.torproject.android/) or the [Google Play Store](https://play.google.com/store/apps/details?id=org.torproject.android) on your testing device. 
+*   **Orbot Fallback (Optional)**: NoSlop includes an embedded Tor client. No separate app is required to connect to the mesh network. However, for power users who prefer external routing, falling back to an external Orbot client (listening on local port 9050) is still optionally supported.
 
 ---
 

@@ -1,4 +1,3 @@
-// FILE: app/src/main/java/com/noslop/app/tor/TorService.kt
 package com.noslop.app.tor
 
 import android.content.Context
@@ -6,7 +5,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -15,6 +20,8 @@ import java.net.Proxy
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
+enum class TorState { STARTING, READY, FAILED }
+
 object TorService {
 
     private const val TAG = "TOR"
@@ -22,11 +29,41 @@ object TorService {
     private const val SOCKS_PORT = 9050
     private const val PROXY_HOST = "127.0.0.1"
 
+    private val _torState = MutableStateFlow(TorState.STARTING)
+    val torState: StateFlow<TorState> = _torState.asStateFlow()
+
     data class OrbotStatus(
         val isInstalled: Boolean,
         val isProxyReady: Boolean,
         val details: String
     )
+
+    /**
+     * Launch embedded Tor service
+     */
+    fun startTor(context: Context) {
+        Logger.info(TAG, "Starting embedded Tor daemon...")
+        _torState.value = TorState.STARTING
+        try {
+            val intent = Intent()
+            intent.setClassName(context, "org.torproject.android.service.TorService")
+            intent.action = "org.torproject.android.intent.action.START"
+            context.startService(intent)
+
+            CoroutineScope(Dispatchers.IO).launch {
+                val isReady = waitForProxy(60)
+                if (isReady) {
+                    _torState.value = TorState.READY
+                } else {
+                    Logger.warn(TAG, "Embedded Tor daemon failed to start within 60s.")
+                    _torState.value = TorState.FAILED
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to start Tor service: ${e.message}")
+            _torState.value = TorState.FAILED
+        }
+    }
 
     /**
      * Checks if Orbot app is installed on the device.
@@ -85,7 +122,7 @@ object TorService {
      * Poll SOCKS5 port (127.0.0.1:9050) to verify if Tor proxy tunnel is active.
      */
     suspend fun waitForProxy(timeoutSeconds: Int = 30): Boolean = withContext(Dispatchers.IO) {
-        Logger.info(TAG, "Polling socket 127.0.0.1:9050 to check if Tor proxy is accepting connections...")
+        Logger.info(TAG, "Polling socket $PROXY_HOST:$SOCKS_PORT to check if Tor proxy is accepting connections...")
         for (attempt in 1..timeoutSeconds) {
             try {
                 Socket().use { socket ->
@@ -96,7 +133,7 @@ object TorService {
             } catch (e: Exception) {
                 Logger.debug(TAG, "SOCKS5 connection polling attempt $attempt of $timeoutSeconds failed: ${e.message}")
             }
-            kotlinx.coroutines.delay(1000)
+            delay(1000)
         }
         Logger.warn(TAG, "Failed to connect to local SOCKS5 proxy within $timeoutSeconds seconds.")
         false
@@ -142,11 +179,11 @@ object TorService {
      */
     suspend fun getStatus(context: Context): OrbotStatus {
         val installed = isOrbotInstalled(context)
-        val ready = if (installed) waitForProxy(2) else false
+        val ready = waitForProxy(2)
         return OrbotStatus(
             isInstalled = installed,
             isProxyReady = ready,
-            details = if (ready) "Connected securely via Tor [127.0.0.1:9050]" else "Tor offline — Orbot not started"
+            details = if (ready) "Connected securely via Tor [127.0.0.1:9050]" else "Tor offline"
         )
     }
 }

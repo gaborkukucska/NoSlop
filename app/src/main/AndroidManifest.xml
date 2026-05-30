@@ -15,11 +15,6 @@
     <!-- For WorkManager reschedule on startup -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- Required to query Orbot's package info (Android 11+ package visibility) -->
-    <queries>
-        <package android:name="org.torproject.android" />
-    </queries>
-
     <application
         android:name=".NoSlopApp"
         android:allowBackup="false"
@@ -40,6 +35,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service android:name="org.torproject.android.service.TorService"
+            android:exported="false"
+            android:process=":tor" />
 
     </application>
 

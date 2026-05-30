@@ -22,14 +22,52 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.app.ui.theme.*
+import com.noslop.app.tor.TorState
+import com.noslop.app.tor.TorService
 
 @Composable
 fun TorWarningPanel(viewModel: NoSlopViewModel) {
+    val daemonState by TorService.torState.collectAsState()
     val torState by viewModel.torReadyState.collectAsState()
     val isTorChecking by viewModel.isTorChecking.collectAsState()
     val context = LocalContext.current
 
-    if (!torState.first) {
+    if (daemonState == TorState.READY && torState.first) {
+        return // Hidden entirely when healthy
+    }
+
+    if (daemonState == TorState.STARTING) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+                .testTag("tor_warning_panel"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Starting Tor...",
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 16.sp
+                )
+            }
+        }
+        return
+    }
+
+    if (daemonState == TorState.FAILED || !torState.first) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -39,7 +77,9 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Row(
@@ -54,7 +94,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Tor SOCKS5 Proxy Port 9050 Offline",
+                        text = "Tor SOCKS5 Proxy Offline",
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         fontSize = 16.sp
@@ -62,7 +102,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 }
 
                 Text(
-                    text = "NoSlop requires Orbot running in order to transport gossip messages, handle handshakes, and route secure DMs serverlessly.",
+                    text = "NoSlop requires the Tor daemon for mesh gossip and secure DMs. Embedded daemon failed to start or connect.",
                     color = TextMuted,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -75,27 +115,19 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
-                        onClick = {
-                            val fdroidIntent = Intent(Intent.ACTION_VIEW, Uri.parse("fdroid://details?id=org.torproject.android")).apply {
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            try {
-                                context.startActivity(fdroidIntent)
-                            } catch (e: Exception) {
-                                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/org.torproject.android/")).apply {
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                context.startActivity(webIntent)
-                            }
-                        },
+                        onClick = { viewModel.startTor() },
+                        enabled = daemonState != TorState.STARTING,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGreen,
                             contentColor = PrimaryBlack
                         ),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().height(42.dp).testTag("install_orbot_btn")
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("retry_tor_btn")
                     ) {
-                        Text("Install Orbot via F-Droid", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Tor failed to start — Retry", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
                     Row(
@@ -110,9 +142,12 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                             ),
                             border = BorderStroke(1.dp, BorderSubtle),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(42.dp).testTag("launch_orbot_btn")
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("launch_orbot_btn")
                         ) {
-                            Text("Open Orbot", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Use Orbot instead", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
 
                         Button(
@@ -124,7 +159,10 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                             ),
                             border = BorderStroke(1.dp, BorderSubtle),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.weight(1f).height(42.dp).testTag("retry_socks_btn")
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .testTag("retry_socks_btn")
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))

@@ -210,7 +210,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Launch or trigger Orbot start sequence
+     * Start Embedded Tor daemon
+     */
+    fun startTor() {
+        Logger.info("VM", "Instructing TorService to start embedded daemon")
+        TorService.startTor(getApplication())
+    }
+
+    /**
+     * Launch or trigger Orbot start sequence (fallback)
      */
     fun startOrbot() {
         Logger.info("VM", "Instructing TorService to launch Orbot app")

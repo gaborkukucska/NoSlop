@@ -43,6 +43,9 @@ class NoSlopApp : Application() {
         Logger.initialize(this)
         Logger.info("APP", "NoSlop initialised. SDK=${android.os.Build.VERSION.SDK_INT}")
 
+        // Start embedded Tor daemon
+        com.noslop.app.tor.TorService.startTor(this)
+
         val db = NoSlopDatabase.getDatabase(this)
         repository = NoSlopRepository(this, db)
         repository.meshTransport.startListening()

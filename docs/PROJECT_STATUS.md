@@ -30,10 +30,13 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 15. **Background Feed Sync (WorkManager)**: Integrated periodic WorkManager `FeedSyncWorker` task to refresh subscribed RSS/Atom feed content every 15 minutes when connected to a network.
 16. **QR Code Pairing (Scan & Share)**: Built `QRScanScreen` using mobile CameraX + Google ML Kit for frictionless live QR companion pairing, paired with `QRShareSheet` to display/share generated thematic contact profiles.
 17. **Worker Repository Leak Fix**: Separated mesh socket initialization (`startListening`) into `NoSlopApp.onCreate()` singleton from `NoSlopRepository.init`, preventing dangerous port rebinding exceptions when `FeedSyncWorker` spins up in the background.
+18. **Embedded Tor daemon (tor-android) — no Orbot dependency**: Replaced external dependency with a native daemon binding.
+
+## In Progress
+- **Tor hidden service auto-registration**: onion address is derived from key but active registration requires connecting onion hostname directly through tor-android controller.
 
 ## Pending Implementations & Limitations
-- **v0.1 real-device testing** — two-device gossip + DM validation over Orbot not yet completed.
-- **Tor hidden service auto-registration**: onion address is derived from key but not yet actively registered with a Tor daemon — peers must manually exchange onion addresses out-of-band.
+- **Two-device real-device test** — gossip + DM validation over embedded Tor not yet completed.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
