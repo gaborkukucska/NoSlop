@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.noslop.app.NoSlopApp
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.*
 import com.noslop.app.debug.Logger
@@ -19,7 +20,7 @@ import java.util.UUID
 
 class NoSlopViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = NoSlopRepository(application, NoSlopDatabase.getDatabase(application))
+    private val repository = NoSlopApp.repository
     val logFilePath: String
 
     init {

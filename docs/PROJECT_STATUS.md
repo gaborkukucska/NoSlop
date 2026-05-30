@@ -1,4 +1,4 @@
-# NoSlop — Project Status
+# NoSlop — Project Status (v0.1)
 
 NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private decentralized social mesh node configured for the **HAI-Net** decentralized initiative.
 
@@ -29,8 +29,10 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 14. **Send Retry with Backoff**: `MeshTransport` retries failed transmissions up to 3 times with a 2-second and 4-second exponential backoff structure.
 15. **Background Feed Sync (WorkManager)**: Integrated periodic WorkManager `FeedSyncWorker` task to refresh subscribed RSS/Atom feed content every 15 minutes when connected to a network.
 16. **QR Code Pairing (Scan & Share)**: Built `QRScanScreen` using mobile CameraX + Google ML Kit for frictionless live QR companion pairing, paired with `QRShareSheet` to display/share generated thematic contact profiles.
+17. **Worker Repository Leak Fix**: Separated mesh socket initialization (`startListening`) into `NoSlopApp.onCreate()` singleton from `NoSlopRepository.init`, preventing dangerous port rebinding exceptions when `FeedSyncWorker` spins up in the background.
 
 ## Pending Implementations & Limitations
+- **v0.1 real-device testing** — two-device gossip + DM validation over Orbot not yet completed.
 - **Tor hidden service auto-registration**: onion address is derived from key but not yet actively registered with a Tor daemon — peers must manually exchange onion addresses out-of-band.
 
 ## Cryptographic Specification Contract

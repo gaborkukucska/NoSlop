@@ -18,7 +18,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
     private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
-    private val peerDao = db.peerDao()
+    val peerDao = db.peerDao()
     private val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
@@ -26,16 +26,6 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
     private val identityRepository = IdentityRepository(context, appSettingDao)
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
-
-    init {
-        meshTransport.startListening()
-        repositoryScope.launch {
-            val identity = getLocalIdentity()
-            if (identity != null) {
-                com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, identity.publicKeyB64)
-            }
-        }
-    }
 
     // --- State Observables ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
