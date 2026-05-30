@@ -27,10 +27,10 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 12. **Signed Handshakes**: `USER_HANDSHAKE` packets are Ed25519-signed before transmission to establish robust trust identity.
 13. **Isolated Server Socket Binding**: `ServerSocket` is bound strictly to loopback `127.0.0.1` to prevent local network exposure, solidifying a Tor hidden service only architecture.
 14. **Send Retry with Backoff**: `MeshTransport` retries failed transmissions up to 3 times with a 2-second and 4-second exponential backoff structure.
+15. **Background Feed Sync (WorkManager)**: Integrated periodic WorkManager `FeedSyncWorker` task to refresh subscribed RSS/Atom feed content every 15 minutes when connected to a network.
+16. **QR Code Pairing (Scan & Share)**: Built `QRScanScreen` using mobile CameraX + Google ML Kit for frictionless live QR companion pairing, paired with `QRShareSheet` to display/share generated thematic contact profiles.
 
 ## Pending Implementations & Limitations
-- **Background Feed Sync (WorkManager)**: **NOT YET IMPLEMENTED** — manual refresh only.
-- **QR Code Peer Add**: **NOT YET IMPLEMENTED** — peer add is manual string input only.
 - **Tor hidden service auto-registration**: onion address is derived from key but not yet actively registered with a Tor daemon — peers must manually exchange onion addresses out-of-band.
 
 ## Cryptographic Specification Contract

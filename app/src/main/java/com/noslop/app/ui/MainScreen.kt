@@ -949,6 +949,63 @@ fun ProfileTab(viewModel: NoSlopViewModel) {
                 )
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            var showShareSheet by remember { mutableStateOf(false) }
+            var showScanScreen by remember { mutableStateOf(false) }
+
+            // "My QR" button -> QRShareSheet
+            Button(
+                onClick = { showShareSheet = true },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                border = BorderStroke(1.dp, AccentGreen)
+            ) {
+                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("My QR ID", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+
+            // "Scan Peer" button -> QRScanScreen
+            Button(
+                onClick = { showScanScreen = true },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+            ) {
+                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Scan Peer", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            }
+
+            // Render dialogs if requested
+            if (showShareSheet && localKeys != null) {
+                QRShareSheet(
+                    handle = handle ?: "anonymous",
+                    localKeys = localKeys!!,
+                    onDismiss = { showShareSheet = false }
+                )
+            }
+
+            if (showScanScreen) {
+                QRScanScreen(
+                    onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
+                        viewModel.addPeer(
+                            handle = scannedHandle,
+                            publicKeyB64 = pubKey,
+                            onionAddress = onion,
+                            encPublicKeyB64 = encPub,
+                            autoTrust = false
+                        )
+                    },
+                    onDismiss = { showScanScreen = false }
+                )
+            }
+        }
     }
 }
 

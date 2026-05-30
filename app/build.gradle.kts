@@ -121,6 +121,13 @@ dependencies {
     implementation(libs.androidx.camera.view)
     implementation(libs.accompanist.permissions)
 
+    // --- WorkManager for Background Feed Sync ---
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // --- QR Scanning and QR Code Generation ---
+    implementation(libs.google.mlkit.barcode.scanning)
+    implementation(libs.zxing.core)
+
     // --- Testing ---
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

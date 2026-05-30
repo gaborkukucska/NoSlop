@@ -2,9 +2,16 @@
 package com.noslop.app
 
 import android.app.Application
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.WorkManager
+import androidx.work.ExistingPeriodicWorkPolicy
 import com.noslop.app.debug.Logger
+import com.noslop.app.feeds.FeedSyncWorker
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
+import java.util.concurrent.TimeUnit
 
 class NoSlopApp : Application() {
     override fun onCreate() {
@@ -21,5 +28,24 @@ class NoSlopApp : Application() {
 
         Logger.initialize(this)
         Logger.info("APP", "NoSlop initialised. SDK=${android.os.Build.VERSION.SDK_INT}")
+
+        // Background WorkManager feed sync registration (Task 1)
+        try {
+            val syncRequest = PeriodicWorkRequestBuilder<FeedSyncWorker>(15, TimeUnit.MINUTES)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "feed_background_sync",
+                ExistingPeriodicWorkPolicy.KEEP,
+                syncRequest
+            )
+            Logger.info("APP", "WorkManager Periodic feed sync registered successfully")
+        } catch (e: Exception) {
+            Logger.error("APP", "Failed to register WorkManager feed sync: ${e.message}")
+        }
     }
 }
