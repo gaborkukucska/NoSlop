@@ -1,25 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Allow clearnet for feed fetching; social layer always goes via Tor SOCKS5 in code -->
+<!-- Strict secure profile; clearnet cleartext traffic completely forbidden. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="false" />
-    <domain-config cleartextTrafficPermitted="true">
-        <!-- Feeds only — social packets NEVER use clearnet, enforced in TorService -->
-        <domain includeSubdomains="true">news.ycombinator.com</domain>
-        <domain includeSubdomains="true">feeds.arstechnica.com</domain>
-        <domain includeSubdomains="true">www.theverge.com</domain>
-        <domain includeSubdomains="true">krebsonsecurity.com</domain>
-        <domain includeSubdomains="true">www.schneier.com</domain>
-        <domain includeSubdomains="true">www.eff.org</domain>
-        <domain includeSubdomains="true">old.reddit.com</domain>
-        <domain includeSubdomains="true">www.nasa.gov</domain>
-        <domain includeSubdomains="true">phys.org</domain>
-        <domain includeSubdomains="true">feeds.apnews.com</domain>
-        <domain includeSubdomains="true">www.aljazeera.com</domain>
-        <domain includeSubdomains="true">www.linuxfoundation.org</domain>
-        <domain includeSubdomains="true">fosspost.org</domain>
-    </domain-config>
-    <!-- Allow HTTPS to check.torproject.org through Tor proxy -->
-    <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">check.torproject.org</domain>
-    </domain-config>
 </network-security-config>

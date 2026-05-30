@@ -51,16 +51,32 @@ object TorService {
         if (launchIntent != null) {
             context.startActivity(launchIntent)
         } else {
-            // Intent fallback: open Play Store to install Orbot
-            Logger.warn(TAG, "Launch intent for Orbot is null, opening Play Store download link")
-            val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$ORBOT_PACKAGE"))
-            playStoreIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // Intent fallback: prefer F-Droid first, Play Store second
+            Logger.warn(TAG, "Launch intent for Orbot is null, opening F-Droid download link")
+            val fdroidIntent = Intent(Intent.ACTION_VIEW, Uri.parse("fdroid://details?id=$ORBOT_PACKAGE")).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             try {
-                context.startActivity(playStoreIntent)
+                context.startActivity(fdroidIntent)
             } catch (e: Exception) {
-                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$ORBOT_PACKAGE"))
-                webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(webIntent)
+                val webFDroidIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/$ORBOT_PACKAGE/")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try {
+                    context.startActivity(webFDroidIntent)
+                } catch (e2: Exception) {
+                    val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$ORBOT_PACKAGE")).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    try {
+                        context.startActivity(playStoreIntent)
+                    } catch (e3: Exception) {
+                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$ORBOT_PACKAGE")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(webIntent)
+                    }
+                }
             }
         }
     }
@@ -68,7 +84,7 @@ object TorService {
     /**
      * Poll SOCKS5 port (127.0.0.1:9050) to verify if Tor proxy tunnel is active.
      */
-    suspend fun waitForProxy(timeoutSeconds: Int = 15): Boolean = withContext(Dispatchers.IO) {
+    suspend fun waitForProxy(timeoutSeconds: Int = 30): Boolean = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Polling socket 127.0.0.1:9050 to check if Tor proxy is accepting connections...")
         for (attempt in 1..timeoutSeconds) {
             try {

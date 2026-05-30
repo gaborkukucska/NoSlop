@@ -34,7 +34,7 @@ NoSlop is a serverless, local-first Jetpack Compose application designed to act 
 
 - **Personal Free Feed Aggregator**: Aggregate and read your standard RSS and Atom feeds completely locally, free of trackers, telemetry, algorithms, and sponsored content.
 - **Dynamic Cryptographic Verification**: Native **Ed25519** signature schemes verify every single inbound mesh post so that malicious actors cannot forge peer handles.
-- **Double-Envelope E2EE**: Standalone **secp256r1 ECDH** key agreements establish secure channels for post-quantum resistant **AES-256-GCM** Direct Messaging.
+- **Double-Envelope E2EE**: Standalone **X25519** key agreements establish secure channels for **ChaCha20-Poly1305** Direct Messaging.
 - **Hardware-Isolated Credential Storage**: Private keys never touch standard databases or unsecure caches; instead, they are compartmented securely inside Android's hardware `EncryptedSharedPreferences`.
 - **Intrusive Firewall**: Incoming packets from unregistered/non-trusted senders are immediately discarded at the socket boundary, shielding the user from SPAM.
 - **Non-Blocking Debug Logger**: Log operations are pushed synchronously to an in-memory queue for immediate visual debugging, while a background coroutine pool flushes log files to disk.
@@ -46,5 +46,4 @@ NoSlop is a serverless, local-first Jetpack Compose application designed to act 
 3. **Local-First Design**: Total absence of centralized servers or backends. Your data stays on your hardware.
 
 ## License
-
-Fully open-source under the MIT License. See [LICENSE.md](LICENSE.md) for details.
+Fully open-source under the GNU Affero General Public License (AGPL-3.0). See [LICENSE.md](LICENSE.md) for details.
