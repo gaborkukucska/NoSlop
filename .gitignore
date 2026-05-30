@@ -1,18 +1,41 @@
-*.iml
-.gradle
-.kotlin
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
+# Gradle files
+.gradle/
+build/
+/*/build/
+
+# Kotlin / KSP
+.kotlin/
+.ksp/
+
+# Local configuration
 local.properties
 .env
-debug.keystore
+.env.*
+
+# Keystores (Avoid committing any generated keystores)
+*.keystore
+*.jks
+debug.keystore.base64
+
+# Platform Specific / AI Studio Build Outputs
+.build-outputs/
+
+# Built artifacts
+bin/
+gen/
+out/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS files
+.DS_Store
+Thumbs.db
+*.bak
+*.log

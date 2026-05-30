@@ -19,18 +19,12 @@ import java.util.UUID
 
 class NoSlopViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: NoSlopRepository
+    private val repository = NoSlopRepository(application, NoSlopDatabase.getDatabase(application))
     val logFilePath: String
 
     init {
         Logger.initialize(application)
-        val database = NoSlopDatabase.getDatabase(application)
-        repository = NoSlopRepository(application, database)
         logFilePath = Logger.getLogFilePath()
-
-        // Load initial states
-        loadIdentityState()
-        refreshTorStatus()
     }
 
     // --- State Observables ---
@@ -81,6 +75,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             else repository.getMessagesWithPeer(pub)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    init {
+        // Load initial states
+        loadIdentityState()
+        refreshTorStatus()
+    }
 
     // --- Actions ---
 
