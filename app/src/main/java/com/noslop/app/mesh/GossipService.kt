@@ -15,6 +15,7 @@ object GossipService {
     private var peerDao: PeerDao? = null
     private var transport: MeshTransport? = null
     private var localPublicKeyB64: String = ""
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun initialize(peerDao: PeerDao, transport: MeshTransport, localPublicKeyB64: String) {
         this.peerDao = peerDao
@@ -128,7 +129,7 @@ object GossipService {
         )
 
         for (peer in peersToForward) {
-            CoroutineScope(Dispatchers.IO).launch {
+            scope.launch {
                 tx.sendPacket(peer.onionAddress, 9999, forwardedPacket)
             }
         }
@@ -151,7 +152,7 @@ object GossipService {
         Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
         
         for (peer in trustedPeers) {
-            CoroutineScope(Dispatchers.IO).launch {
+            scope.launch {
                 tx.sendPacket(peer.onionAddress, 9999, packet)
             }
         }

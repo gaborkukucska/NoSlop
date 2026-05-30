@@ -15,6 +15,7 @@ import java.util.UUID
 
 class NoSlopRepository(private val context: Context, private val db: NoSlopDatabase) {
 
+    private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
     private val peerDao = db.peerDao()
@@ -28,7 +29,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
 
     init {
         meshTransport.startListening()
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        repositoryScope.launch {
             val identity = getLocalIdentity()
             if (identity != null) {
                 com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, identity.publicKeyB64)
@@ -193,6 +194,70 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
         }
 
         when (packet.type) {
+            "SYNC_REQUEST" -> {
+                val syncPay = packet.getSyncRequestPayload() ?: return@withContext false
+                val recentPosts = postDao.getPostsSince(syncPay.since)
+                val postPayloads = recentPosts.map { post ->
+                    com.noslop.app.mesh.PostPayload(
+                        id = post.id,
+                        authorId = post.authorPublicKeyB64,
+                        authorName = post.authorHandle,
+                        authorPublicKey = post.authorPublicKeyB64,
+                        originNode = null,
+                        content = post.content,
+                        timestamp = post.timestamp,
+                        signature = post.signature
+                    )
+                }
+                val syncResp = com.noslop.app.mesh.SyncResponsePayload(posts = postPayloads)
+                val gson = com.google.gson.Gson()
+                val respPacket = com.noslop.app.mesh.NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = gson.toJsonTree(syncResp)
+                )
+                val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
+                if (requestingPeer != null) {
+                    repositoryScope.launch {
+                        meshTransport.sendPacket(requestingPeer.onionAddress, 9999, respPacket)
+                    }
+                }
+                Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts to ${packet.senderId.take(12)}")
+                return@withContext true
+            }
+
+            "SYNC_RESPONSE" -> {
+                val syncPay = packet.getSyncResponsePayload() ?: return@withContext false
+                var stored = 0
+                val gson = com.google.gson.Gson()
+                for (postPay in syncPay.posts) {
+                    val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+                    val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
+                    if (!isValid) {
+                        Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
+                        continue
+                    }
+                    val pubBytes = android.util.Base64.decode(postPay.authorPublicKey, android.util.Base64.DEFAULT)
+                    val tripcode = CryptoService.deriveTripcode(pubBytes)
+                    val post = MeshPost(
+                        id = postPay.id,
+                        authorPublicKeyB64 = postPay.authorPublicKey,
+                        authorHandle = postPay.authorName,
+                        authorTripcode = tripcode,
+                        content = postPay.content,
+                        timestamp = postPay.timestamp,
+                        signature = postPay.signature ?: ""
+                    )
+                    postDao.insertPost(post)
+                    stored++
+                }
+                Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts")
+                return@withContext true
+            }
+
             "POST" -> {
                 val postPay = packet.getPostPayload() ?: return@withContext false
                 val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
@@ -304,17 +369,36 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
                 signature = null
             )
             val gson = com.google.gson.Gson()
+            val handshakeJson = gson.toJson(handshakePay)
+            val handshakeSig = CryptoService.sign(handshakeJson, myKeys.privateKeyB64)
             val payloadJson = gson.toJsonTree(handshakePay)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
                 senderId = myKeys.publicKeyB64,
                 type = "USER_HANDSHAKE",
-                payload = payloadJson
+                payload = payloadJson,
+                signature = handshakeSig
             )
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            Logger.info(TAG, "Sending signed USER_HANDSHAKE to $onionAddress")
+            repositoryScope.launch {
                 meshTransport.sendPacket(onionAddress, 9999, packet)
             }
+
+            val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+            val syncReqPay = com.noslop.app.mesh.SyncRequestPayload(since = sevenDaysAgo)
+            val syncPacket = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = publicKeyB64,
+                type = "SYNC_REQUEST",
+                payload = gson.toJsonTree(syncReqPay)
+            )
+            repositoryScope.launch {
+                meshTransport.sendPacket(onionAddress, 9999, syncPacket)
+            }
+            Logger.info(TAG, "SYNC_REQUEST sent to new peer for posts since 7 days ago")
         }
         true
     }
@@ -366,7 +450,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
             payload = payloadJson
         )
 
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+        repositoryScope.launch {
             meshTransport.sendPacket(peer.onionAddress, 9999, packet)
         }
 

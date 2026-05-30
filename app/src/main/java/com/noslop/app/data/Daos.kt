@@ -74,6 +74,9 @@ interface PostDao {
 
     @Query("SELECT COUNT(*) FROM mesh_posts WHERE id = :id")
     suspend fun hasPost(id: String): Int
+
+    @Query("SELECT * FROM mesh_posts WHERE timestamp > :since ORDER BY timestamp ASC")
+    suspend fun getPostsSince(since: Long): List<MeshPost>
 }
 
 @Dao

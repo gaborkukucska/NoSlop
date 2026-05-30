@@ -28,7 +28,8 @@ class MeshTransport(
         scope.launch {
             try {
                 Logger.info(TAG, "Starting TCP ServerSocket on port $listenPort")
-                serverSocket = ServerSocket(listenPort)
+                serverSocket = ServerSocket(listenPort, 50, java.net.InetAddress.getByName("127.0.0.1"))
+                Logger.info(TAG, "Listening on 127.0.0.1:$listenPort — reachable only via Tor hidden service")
                 while (isActive && isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     scope.launch {
@@ -83,26 +84,24 @@ class MeshTransport(
 
     suspend fun sendPacket(onionAddress: String, port: Int = 9999, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
-        var socket: Socket? = null
-        try {
-            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
-            socket = Socket(proxy)
-            socket.connect(InetSocketAddress(onionAddress, port), 20000)
-            
-            val writer = PrintWriter(socket.getOutputStream(), true)
-            val json = packet.toJson()
-            writer.println(json)
-            Logger.info(TAG, "Successfully sent packet to $onionAddress")
-            true
-        } catch (e: Exception) {
-            Logger.error(TAG, "Failed sending packet to $onionAddress: ${e.message}")
-            false
-        } finally {
+        for (attempt in 1..3) {
+            var socket: Socket? = null
             try {
-                socket?.close()
+                val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
+                socket = Socket(proxy)
+                socket.connect(InetSocketAddress(onionAddress, port), 20000)
+                val writer = PrintWriter(socket.getOutputStream(), true)
+                writer.println(packet.toJson())
+                Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
+                return@withContext true
             } catch (e: Exception) {
-                // ignore
+                Logger.warn(TAG, "Send attempt $attempt/3 to $onionAddress failed: ${e.message}")
+                if (attempt < 3) delay(attempt * 2000L)
+            } finally {
+                try { socket?.close() } catch (_: Exception) {}
             }
         }
+        Logger.error(TAG, "All 3 send attempts failed for $onionAddress")
+        return@withContext false
     }
 }

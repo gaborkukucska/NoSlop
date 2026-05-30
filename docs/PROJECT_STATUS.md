@@ -22,10 +22,16 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 7. **Offline Logging Daemon (`Logger`)**: Developed thread-safe ring-buffer logging combined with non-blocking concurrent async file-write queues to context directory files.
 8. **Cleartext Security Profiles (`network_security_config.xml`)**: Configured strict TLS requirements globally with explicit isolated cleartext exceptions for whitelisted local loopbacks and specific feed nodes.
 9. **F-Droid Orbot Deep Linking, Warnings, and Retries**: Configured a beautiful error warning card (`TorWarningPanel.kt`) paired with deep linking (`fdroid://details?id=org.torproject.android`), browser fallback links, and immediate automatic activities refresh checks (`onResume()`).
+10. **SYNC_REQUEST/SYNC_RESPONSE protocol**: New peers auto-request 7 days of backlogged posts on handshake; nodes respond with verified post history (using post signatures verification).
+11. **Coroutine Lifecycle Management**: All fire-and-forget sends use supervised repository and gossip scopes, not bare `CoroutineScope`.
+12. **Signed Handshakes**: `USER_HANDSHAKE` packets are Ed25519-signed before transmission to establish robust trust identity.
+13. **Isolated Server Socket Binding**: `ServerSocket` is bound strictly to loopback `127.0.0.1` to prevent local network exposure, solidifying a Tor hidden service only architecture.
+14. **Send Retry with Backoff**: `MeshTransport` retries failed transmissions up to 3 times with a 2-second and 4-second exponential backoff structure.
 
 ## Pending Implementations & Limitations
 - **Background Feed Sync (WorkManager)**: **NOT YET IMPLEMENTED** — manual refresh only.
 - **QR Code Peer Add**: **NOT YET IMPLEMENTED** — peer add is manual string input only.
+- **Tor hidden service auto-registration**: onion address is derived from key but not yet actively registered with a Tor daemon — peers must manually exchange onion addresses out-of-band.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
