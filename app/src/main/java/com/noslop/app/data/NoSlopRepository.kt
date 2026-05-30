@@ -211,7 +211,8 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
         ecdhPublicKeyB64: String = "",
         autoTrust: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
-        val tripcode = derivePeerTripcode(publicKeyB64)
+        val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
         val newPeer = Peer(
             publicKeyB64 = publicKeyB64,
             handle = handle,
@@ -261,17 +262,5 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
 
     suspend fun markMessagesAsRead(peerPub: String) = withContext(Dispatchers.IO) {
         messageDao.markAsRead(peerPub)
-    }
-
-    private fun derivePeerTripcode(pubKeyUrlSafe: String): String {
-        return try {
-            val bytes = android.util.Base64.decode(pubKeyUrlSafe, android.util.Base64.DEFAULT)
-            val rawKeyBytes = if (bytes.size == 44) bytes.copyOfRange(12, 44) else bytes
-            val digest = MessageDigest.getInstance("SHA3-256")
-            val hash = digest.digest(rawKeyBytes)
-            hash.joinToString("") { b -> "%02x".format(b) }.take(6)
-        } catch (e: Exception) {
-            "unknown"
-        }
     }
 }

@@ -1,6 +1,0 @@
-{
-  "name": "NoSlop",
-  "description": "A personal feed aggregator and secure serverless social node on the HAI-Net mesh.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

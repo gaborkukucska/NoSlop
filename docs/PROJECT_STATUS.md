@@ -15,6 +15,11 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 5. **Cleartext Security Profiles (`network_security_config.xml`)**: Configured strict TLS requirements globally with explicit isolated cleartext exceptions for whitelisted local loopbacks and specific feed nodes.
 6. **Orbot Tor Tunneling**: Implemented sockets polling and package queries to detect and bind to local Tor SOCKS5 proxies safely (`127.0.0.1:9050`).
 
+## Pending Implementations & Limitations
+- **Background Feed Sync (WorkManager)**: **NOT YET IMPLEMENTED** — manual refresh only.
+- **QR Code Peer Add**: **NOT YET IMPLEMENTED** — peer add is manual string input only.
+- **Networking (Gossip/DM Transport)**: **NOT YET IMPLEMENTED** — local storage only, no actual Tor packet transmission.
+
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
 | :--- | :--- | :--- | :--- |
