@@ -121,7 +121,7 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
-                    3 -> Step3Connection()
+                    3 -> Step3Connection(viewModel)
                 }
             }
 
@@ -401,12 +401,16 @@ fun Step2Feeds(
 }
 
 @Composable
-fun Step3Connection() {
+fun Step3Connection(viewModel: NoSlopViewModel) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        TorWarningPanel(viewModel)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         Text(
             text = "Connect Securely over Tor",
             style = MaterialTheme.typography.titleLarge,

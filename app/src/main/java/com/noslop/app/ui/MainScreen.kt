@@ -592,6 +592,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            TorWarningPanel(viewModel)
+
             if (peers.isEmpty()) {
                 Box(
                     modifier = Modifier.weight(1f).fillMaxWidth(),
@@ -799,8 +801,8 @@ fun ChatThreadScreen(
                 val isSelf = msg.senderPub != peer.publicKeyB64
                 val decryptedText = remember(msg.ciphertext, localKeys) {
                     if (localKeys != null) {
-                        val opponentEcdhPub = if (peer.ecdhPublicKeyB64.isNotEmpty()) peer.ecdhPublicKeyB64 else peer.publicKeyB64
-                        CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEcdhPub, localKeys.ecdhPrivateKeyB64) ?: msg.ciphertext
+                        val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
+                        CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
                     } else {
                         msg.ciphertext
                     }

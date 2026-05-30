@@ -57,7 +57,7 @@ data class Peer(
     val handle: String,
     val tripcode: String,
     val onionAddress: String,
-    val ecdhPublicKeyB64: String = "", // Separate public key for ECDH encryption
+    val encPublicKeyB64: String = "", // Separate public key for X25519 encryption
     val isTrusted: Boolean = false,
     val lastSeenAt: Long = System.currentTimeMillis()
 )

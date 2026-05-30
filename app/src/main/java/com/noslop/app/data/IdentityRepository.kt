@@ -41,13 +41,13 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         // Private keys -> SharedPreferences
         prefs.edit()
             .putString("ed25519_private_key", keys.privateKeyB64)
-            .putString("ecdh_private_key", keys.ecdhPrivateKeyB64)
+            .putString("enc_private_key", keys.encPrivateKeyB64)
             .apply()
 
         // Public data -> Room (safe to query, display, share)
         appSettingDao.insertSetting(AppSetting("local_handle", handle))
         appSettingDao.insertSetting(AppSetting("local_pub_ed25519", keys.publicKeyB64))
-        appSettingDao.insertSetting(AppSetting("local_pub_ecdh", keys.ecdhPublicKeyB64))
+        appSettingDao.insertSetting(AppSetting("local_pub_enc", keys.encPublicKeyB64))
         appSettingDao.insertSetting(AppSetting("local_tripcode", keys.tripcode))
         appSettingDao.insertSetting(AppSetting("local_onion", keys.onionAddress))
         appSettingDao.insertSetting(AppSetting("local_display_name", keys.displayName))
@@ -61,13 +61,13 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
 
     suspend fun loadIdentity(): CryptoService.IdentityKeys? {
         val pubEd = appSettingDao.getSetting("local_pub_ed25519") ?: return null
-        val pubEcdh = appSettingDao.getSetting("local_pub_ecdh") ?: return null
+        val pubEnc = appSettingDao.getSetting("local_pub_enc") ?: return null
         val tripcode = appSettingDao.getSetting("local_tripcode") ?: return null
         val onion = appSettingDao.getSetting("local_onion") ?: return null
         val displayName = appSettingDao.getSetting("local_display_name") ?: return null
 
         val privEd = prefs.getString("ed25519_private_key", null) ?: return null
-        val privEcdh = prefs.getString("ecdh_private_key", null) ?: return null
+        val privEnc = prefs.getString("enc_private_key", null) ?: return null
 
         return CryptoService.IdentityKeys(
             publicKeyB64 = pubEd,
@@ -75,8 +75,8 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             tripcode = tripcode,
             onionAddress = onion,
             displayName = displayName,
-            ecdhPublicKeyB64 = pubEcdh,
-            ecdhPrivateKeyB64 = privEcdh
+            encPublicKeyB64 = pubEnc,
+            encPrivateKeyB64 = privEnc
         )
     }
 

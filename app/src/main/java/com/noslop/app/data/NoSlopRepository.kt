@@ -8,6 +8,7 @@ import com.noslop.app.feeds.FeedParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.UUID
@@ -22,6 +23,18 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
     private val appSettingDao = db.appSettingDao()
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
+
+    val meshTransport = com.noslop.app.mesh.MeshTransport(this)
+
+    init {
+        meshTransport.startListening()
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val identity = getLocalIdentity()
+            if (identity != null) {
+                com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, identity.publicKeyB64)
+            }
+        }
+    }
 
     // --- State Observables ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
@@ -40,6 +53,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys) {
         identityRepository.saveIdentity(handle, keys)
+        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
     }
 
     suspend fun getLocalHandle(): String = identityRepository.getHandle()
@@ -96,109 +110,161 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
 
     // --- Social Mesh & Direct Messages Routing ---
     suspend fun composeAndBroadcastPost(content: String): Boolean = withContext(Dispatchers.IO) {
-        val identity = getLocalIdentity() ?: return@withContext false
+        val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
 
-        // Create Payload
-        val payload = "$id|$handle|${identity.tripcode}|$content|$timestamp"
-        val signature = CryptoService.sign(payload, identity.privateKeyB64)
+        val payload = "$id|${myKeys.publicKeyB64}|$content|$timestamp"
+        val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
-        val post = MeshPost(
+        val postPay = com.noslop.app.mesh.PostPayload(
             id = id,
-            authorPublicKeyB64 = identity.publicKeyB64,
-            authorHandle = handle,
-            authorTripcode = identity.tripcode,
+            authorId = myKeys.publicKeyB64,
+            authorName = handle,
+            authorPublicKey = myKeys.publicKeyB64,
+            originNode = myKeys.onionAddress,
             content = content,
             timestamp = timestamp,
             signature = signature
         )
 
-        // Store locally
-        postDao.insertPost(post)
+        val gson = com.google.gson.Gson()
+        val payloadJson = gson.toJsonTree(postPay)
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "POST",
+            payload = payloadJson,
+            signature = signature
+        )
+
+        val localPost = MeshPost(
+            id = id,
+            authorPublicKeyB64 = myKeys.publicKeyB64,
+            authorHandle = handle,
+            authorTripcode = myKeys.tripcode,
+            content = content,
+            timestamp = timestamp,
+            signature = signature
+        )
+
+        postDao.insertPost(localPost)
         Logger.info(TAG, "Local post created and signed", "postId=${id}")
 
-        // Propagate Gossip
-        propagatePostToPeers(post)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
     private suspend fun propagatePostToPeers(post: MeshPost) {
-        val activePeers = peerDao.getAllPeers().firstOrNull() ?: emptyList()
-        Logger.debug(TAG, "Propagating mesh post ${post.id} to ${activePeers.size} peers via Gossip protocol")
-        for (peer in activePeers) {
-            if (peer.isTrusted) {
-                Logger.info(TAG, "Gossip post relayed to trusted peer: ${peer.handle}.${peer.tripcode}")
-            }
-        }
+        val myKeys = getLocalIdentity() ?: return
+        val postPay = com.noslop.app.mesh.PostPayload(
+            id = post.id,
+            authorId = post.authorPublicKeyB64,
+            authorName = post.authorHandle,
+            authorPublicKey = post.authorPublicKeyB64,
+            originNode = myKeys.onionAddress,
+            content = post.content,
+            timestamp = post.timestamp,
+            signature = post.signature
+        )
+        val gson = com.google.gson.Gson()
+        val payloadJson = gson.toJsonTree(postPay)
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "POST",
+            payload = payloadJson,
+            signature = post.signature
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
     }
 
-    suspend fun receiveGossipPacket(
-        senderPubB64: String,
-        payload: String,
-        signature: String,
-        type: String // "POST", "HANDSHAKE", "DM"
-    ): Boolean = withContext(Dispatchers.IO) {
-
-        // FIREWALL MANDATE: Drop ALL packets from non-trusted senders except CONNECTION_REQUEST/USER_HANDSHAKE
-        val peer = peerDao.getPeerByPublicKey(senderPubB64)
-        val isTrusted = peer?.isTrusted ?: false
-
-        if (!isTrusted && type != "HANDSHAKE" && type != "CONNECTION_REQUEST") {
-            Logger.warn("FIREWALL", "DROP PACKET: Sender key is NOT registered as trusted. Dropping senderPubB64=$senderPubB64")
+    suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+        val localKeys = getLocalIdentity() ?: return@withContext false
+        
+        // Let GossipService decide if this packet needs handling or forwarding
+        val shouldProcessLocally = com.noslop.app.mesh.GossipService.processIncoming(packet)
+        if (!shouldProcessLocally) {
             return@withContext false
         }
 
-        // Verify cryptographic signature
-        val isValid = CryptoService.verify(payload, signature, senderPubB64)
-        if (!isValid) {
-            Logger.warn(TAG, "Rejected gossip packet: Signature verification failed")
-            return@withContext false
-        }
-
-        when (type) {
+        when (packet.type) {
             "POST" -> {
-                // Parse payload -> "id|handle|tripcode|content|timestamp"
-                val parts = payload.split("|")
-                if (parts.size >= 5) {
-                    val id = parts[0]
-                    val handle = parts[1]
-                    val tripcode = parts[2]
-                    val content = parts[3]
-                    val ts = parts[4].toLongOrNull() ?: System.currentTimeMillis()
+                val postPay = packet.getPostPayload() ?: return@withContext false
+                val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+                val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
+                if (!isValid) {
+                    Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
+                    return@withContext false
+                }
 
-                    val meshPost = MeshPost(id, senderPubB64, handle, tripcode, content, ts, signature)
-                    postDao.insertPost(meshPost)
-                    Logger.info(TAG, "Valid signed post accepted and stored under handle=${handle}.${tripcode}")
+                val pubBytes = android.util.Base64.decode(postPay.authorPublicKey, android.util.Base64.DEFAULT)
+                val tripcode = CryptoService.deriveTripcode(pubBytes)
+                val peer = peerDao.getPeerByPublicKey(postPay.authorPublicKey)
+                val handle = peer?.handle ?: postPay.authorName
+
+                val meshPost = MeshPost(
+                    id = postPay.id,
+                    authorPublicKeyB64 = postPay.authorPublicKey,
+                    authorHandle = handle,
+                    authorTripcode = tripcode,
+                    content = postPay.content,
+                    timestamp = postPay.timestamp,
+                    signature = postPay.signature ?: ""
+                )
+                postDao.insertPost(meshPost)
+                Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")
+                return@withContext true
+            }
+            "MESSAGE" -> {
+                if (packet.targetUserId != localKeys.publicKeyB64) {
+                    return@withContext false
+                }
+                val msgPay = packet.getMessagePayload() ?: return@withContext false
+                val peer = peerDao.getPeerByPublicKey(packet.senderId)
+                val opponentEncPub = peer?.encPublicKeyB64 ?: packet.senderId
+
+                val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
+                if (plaintext != null) {
+                    val msg = ChatMessage(
+                        id = msgPay.id,
+                        chatWithPeerPub = packet.senderId,
+                        senderPub = packet.senderId,
+                        ciphertext = msgPay.ciphertext,
+                        nonce = msgPay.nonce,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    messageDao.insertMessage(msg)
+                    Logger.info(TAG, "E2EE Direct Message decrypted and delivered safely")
                     return@withContext true
                 }
             }
-            "DM" -> {
-                // Payload format for DM: "nonce|ciphertext"
-                val parts = payload.split("|")
-                if (parts.size >= 2) {
-                    val nonce = parts[0]
-                    val ciphertext = parts[1]
-                    val myKeys = getLocalIdentity() ?: return@withContext false
-
-                    // Retrieve sender's ECDH key from peer data or senderPubB64 as fallback
-                    val opponentEcdhPub = peer?.ecdhPublicKeyB64 ?: senderPubB64
-                    val plaintext = CryptoService.decryptDM(ciphertext, nonce, opponentEcdhPub, myKeys.ecdhPrivateKeyB64)
-                    if (plaintext != null && peer != null) {
-                        val msg = ChatMessage(
-                            id = UUID.randomUUID().toString(),
-                            chatWithPeerPub = senderPubB64,
-                            senderPub = senderPubB64,
-                            ciphertext = ciphertext,
-                            nonce = nonce,
-                            timestamp = System.currentTimeMillis()
-                        )
-                        messageDao.insertMessage(msg)
-                        Logger.info(TAG, "E2EE Direct Message decrypted and delivered safely")
-                        return@withContext true
-                    }
-                }
+            "CONNECTION_REQUEST" -> {
+                val connPay = packet.getConnectionRequestPayload() ?: return@withContext false
+                addPeerAndHandshake(
+                    handle = connPay.fromUsername,
+                    publicKeyB64 = connPay.fromUserId,
+                    onionAddress = connPay.fromHomeNode,
+                    encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
+                    autoTrust = false
+                )
+                return@withContext true
+            }
+            "USER_HANDSHAKE" -> {
+                val handPay = packet.getUserHandshakePayload() ?: return@withContext false
+                // Add peer as trusted because we completed handshake
+                addPeerAndHandshake(
+                    handle = handPay.fromUsername,
+                    publicKeyB64 = handPay.fromUserId,
+                    onionAddress = handPay.fromHomeNode,
+                    encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+                    autoTrust = true
+                )
+                return@withContext true
             }
         }
         false
@@ -208,7 +274,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        ecdhPublicKeyB64: String = "",
+        encPublicKeyB64: String = "",
         autoTrust: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
@@ -218,12 +284,38 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
             handle = handle,
             tripcode = tripcode,
             onionAddress = onionAddress,
-            ecdhPublicKeyB64 = ecdhPublicKeyB64,
+            encPublicKeyB64 = encPublicKeyB64,
             isTrusted = autoTrust,
             lastSeenAt = System.currentTimeMillis()
         )
         peerDao.insertPeer(newPeer)
         Logger.info(TAG, "Adding new peer node: ${handle}.${tripcode}", "trusted=$autoTrust | onion=$onionAddress")
+
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val handshakePay = com.noslop.app.mesh.UserHandshakePayload(
+                id = UUID.randomUUID().toString(),
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = myKeys.displayName.split(".")[0],
+                fromDisplayName = myKeys.displayName,
+                fromHomeNode = myKeys.onionAddress,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                timestamp = System.currentTimeMillis(),
+                signature = null
+            )
+            val gson = com.google.gson.Gson()
+            val payloadJson = gson.toJsonTree(handshakePay)
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                type = "USER_HANDSHAKE",
+                payload = payloadJson
+            )
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                meshTransport.sendPacket(onionAddress, 9999, packet)
+            }
+        }
         true
     }
 
@@ -236,12 +328,12 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
     suspend fun sendDirectMessage(recipientPubB64: String, messageText: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
-        val recipientEcdhPub = if (peer.ecdhPublicKeyB64.isNotEmpty()) peer.ecdhPublicKeyB64 else recipientPubB64
+        val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
-        val (ciphertext, nonce) = CryptoService.encryptDM(messageText, recipientEcdhPub, myKeys.ecdhPrivateKeyB64)
+        val (ciphertext, nonce) = CryptoService.encryptDM(messageText, recipientEncPub, myKeys.encPrivateKeyB64)
 
         if (ciphertext.isEmpty() || nonce.isEmpty()) {
-            Logger.error(TAG, "ECDH + AES GCM direct message encryption failed")
+            Logger.error(TAG, "X25519 + ChaCha20 direct message encryption failed")
             return@withContext false
         }
 
@@ -256,6 +348,27 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
+
+        // Send to peer onion address if we have it
+        val msgPay = com.noslop.app.mesh.EncryptedPayload(
+            id = localMsg.id,
+            nonce = nonce,
+            ciphertext = ciphertext
+        )
+        val gson = com.google.gson.Gson()
+        val payloadJson = gson.toJsonTree(msgPay)
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = recipientPubB64,
+            type = "MESSAGE",
+            payload = payloadJson
+        )
+
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            meshTransport.sendPacket(peer.onionAddress, 9999, packet)
+        }
 
         true
     }

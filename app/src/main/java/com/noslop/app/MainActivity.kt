@@ -13,16 +13,17 @@ import com.noslop.app.ui.OnboardingScreen
 import com.noslop.app.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
+    private lateinit var viewModel: NoSlopViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        val factory = NoSlopViewModel.Factory(application)
+        viewModel = androidx.lifecycle.ViewModelProvider(this, factory)[NoSlopViewModel::class.java]
+
         setContent {
             MyApplicationTheme {
-                // Instantiate the core NoSlop MVVM ViewModel
-                val factory = NoSlopViewModel.Factory(application)
-                val viewModel: NoSlopViewModel = viewModel(factory = factory)
-
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
 
                 if (isOnboarded) {
@@ -36,6 +37,13 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::viewModel.isInitialized) {
+            viewModel.refreshTorStatus()
         }
     }
 }

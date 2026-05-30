@@ -196,9 +196,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addPeer(handle: String, publicKeyB64: String, onionAddress: String, ecdhPublicKeyB64: String = "", autoTrust: Boolean = false) {
+    fun addPeer(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "", autoTrust: Boolean = false) {
         viewModelScope.launch {
-            repository.addPeerAndHandshake(handle, publicKeyB64, onionAddress, ecdhPublicKeyB64, autoTrust)
+            repository.addPeerAndHandshake(handle, publicKeyB64, onionAddress, encPublicKeyB64, autoTrust)
         }
     }
 

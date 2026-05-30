@@ -45,6 +45,9 @@ interface PeerDao {
     @Query("SELECT * FROM peers ORDER BY lastSeenAt DESC")
     fun getAllPeers(): Flow<List<Peer>>
 
+    @Query("SELECT * FROM peers ORDER BY lastSeenAt DESC")
+    suspend fun getAllPeersList(): List<Peer>
+
     @Query("SELECT * FROM peers WHERE isTrusted = 1")
     fun getTrustedPeers(): Flow<List<Peer>>
 

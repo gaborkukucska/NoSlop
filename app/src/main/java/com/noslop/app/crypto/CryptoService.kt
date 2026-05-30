@@ -28,16 +28,15 @@ object CryptoService {
         val tripcode: String,           // 6-char Base32 from SHA3-256(pubkey)
         val onionAddress: String,       // 56-char Tor v3 .onion (HAI-Net compatible)
         val displayName: String,        // "handle.tripcode"
-        val ecdhPublicKeyB64: String,   // Base64 ECDH public key
-        val ecdhPrivateKeyB64: String   // Base64 ECDH private key - NEVER log raw
+        val encPublicKeyB64: String,    // Base64 X25519 public key
+        val encPrivateKeyB64: String    // Base64 X25519 private key - NEVER log raw
     )
 
     /**
-     * Generate standard P-256 ECDH keypair for encryption.
+     * Generate standard X25519 keypair for encryption.
      */
-    fun generateEcdhKeypair(): Pair<String, String> {
-        val kpg = KeyPairGenerator.getInstance("EC")
-        kpg.initialize(ECGenParameterSpec("secp256r1"), SecureRandom())
+    fun generateX25519Keypair(): Pair<String, String> {
+        val kpg = KeyPairGenerator.getInstance("X25519", BC_PROVIDER)
         val kp = kpg.generateKeyPair()
         return Pair(
             Base64.encodeToString(kp.public.encoded, Base64.NO_WRAP),
@@ -46,11 +45,11 @@ object CryptoService {
     }
 
     /**
-     * Generate a new Ed25519 and ECDH keypair for the given handle.
+     * Generate a new Ed25519 and X25519 keypair for the given handle.
      * Uses Android Keystore on API 33+, Bouncy Castle on API 24-32 fallback.
      */
     fun generateIdentity(handle: String): IdentityKeys {
-        Logger.info(TAG, "Generating Ed25519 and ECDH identity for handle: $handle")
+        Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {
             val kpg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 KeyPairGenerator.getInstance("Ed25519")
@@ -69,10 +68,10 @@ object CryptoService {
             val tripcode = deriveTripcode(pubBytes)
             val onion = deriveOnionAddress(pubBytes)
 
-            val ecdhKeys = generateEcdhKeypair()
+            val encKeys = generateX25519Keypair()
 
             Logger.info(
-                TAG, "Ed25519 and ECDH identity created",
+                TAG, "Ed25519 and X25519 identity created",
                 "tripcode=$tripcode | onion_prefix=${onion.take(16)}... | pubkey_hash=${pubBytes.sha256Hex().take(12)}"
             )
 
@@ -82,8 +81,8 @@ object CryptoService {
                 tripcode = tripcode,
                 onionAddress = onion,
                 displayName = "$handle.$tripcode",
-                ecdhPublicKeyB64 = ecdhKeys.first,
-                ecdhPrivateKeyB64 = ecdhKeys.second
+                encPublicKeyB64 = encKeys.first,
+                encPrivateKeyB64 = encKeys.second
             )
         } catch (e: Exception) {
             Logger.error(TAG, "Key generation failed: ${e.message}")
@@ -200,26 +199,27 @@ object CryptoService {
     }
 
     /**
-     * Encrypt a direct message using ECDH + AES-256-GCM.
+     * Encrypt a direct message using X25519 + ChaCha20-Poly1305.
      */
-    fun encryptDM(plaintext: String, theirEcdhPubB64: String, myEcdhPrivB64: String): Pair<String, String> {
+    fun encryptDM(plaintext: String, theirEncPubB64: String, myEncPrivB64: String): Pair<String, String> {
         return try {
-            val myPriv = decodeEcdhPrivateKey(myEcdhPrivB64)
-            val theirPub = decodeEcdhPublicKey(theirEcdhPubB64)
+            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
+            val theirPub = decodeX25519PublicKey(theirEncPubB64)
 
-            val ka = KeyAgreement.getInstance("ECDH")
+            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
             ka.init(myPriv)
             ka.doPhase(theirPub, true)
             val sharedSecret = ka.generateSecret()
 
-            val aesKey = SecretKeySpec(
-                MessageDigest.getInstance("SHA-256").digest(sharedSecret),
-                "AES"
-            )
+            // Shared secret: X25519 DH output -> SHA3-256 -> 32-byte ChaCha20 key
+            val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
+            val chachaKey = digest.digest(sharedSecret)
+            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
             val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.ENCRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
+            val ivSpec = javax.crypto.spec.IvParameterSpec(iv)
+            cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
             val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
 
             Pair(
@@ -233,29 +233,29 @@ object CryptoService {
     }
 
     /**
-     * Decrypt a direct message. Returns null on any failure — never throws.
+     * Decrypt a direct message using X25519 + ChaCha20-Poly1305. Returns null on any failure — never throws.
      */
     fun decryptDM(
         ciphertextB64: String, nonceB64: String,
-        theirEcdhPubB64: String, myEcdhPrivB64: String
+        theirEncPubB64: String, myEncPrivB64: String
     ): String? {
         return try {
-            val myPriv = decodeEcdhPrivateKey(myEcdhPrivB64)
-            val theirPub = decodeEcdhPublicKey(theirEcdhPubB64)
+            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
+            val theirPub = decodeX25519PublicKey(theirEncPubB64)
 
-            val ka = KeyAgreement.getInstance("ECDH")
+            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
             ka.init(myPriv)
             ka.doPhase(theirPub, true)
             val sharedSecret = ka.generateSecret()
 
-            val aesKey = SecretKeySpec(
-                MessageDigest.getInstance("SHA-256").digest(sharedSecret),
-                "AES"
-            )
+            val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
+            val chachaKey = digest.digest(sharedSecret)
+            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, aesKey, GCMParameterSpec(128, iv))
+            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
+            val ivSpec = javax.crypto.spec.IvParameterSpec(iv)
+            cipher.init(Cipher.DECRYPT_MODE, secureKey, ivSpec)
             val decrypted = cipher.doFinal(Base64.decode(ciphertextB64, Base64.DEFAULT))
             String(decrypted, Charsets.UTF_8)
         } catch (e: Exception) {
@@ -282,14 +282,14 @@ object CryptoService {
         }
     }
 
-    private fun decodeEcdhPublicKey(b64: String): PublicKey {
+    private fun decodeX25519PublicKey(b64: String): PublicKey {
         val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(bytes))
+        return KeyFactory.getInstance("X25519", BC_PROVIDER).generatePublic(X509EncodedKeySpec(bytes))
     }
 
-    private fun decodeEcdhPrivateKey(b64: String): PrivateKey {
+    private fun decodeX25519PrivateKey(b64: String): PrivateKey {
         val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return KeyFactory.getInstance("EC").generatePrivate(PKCS8EncodedKeySpec(bytes))
+        return KeyFactory.getInstance("X25519", BC_PROVIDER).generatePrivate(PKCS8EncodedKeySpec(bytes))
     }
 
     private fun ByteArray.sha256Hex(): String {

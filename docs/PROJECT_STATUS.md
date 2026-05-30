@@ -9,16 +9,23 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 
 ## Completed Milestones
 1. **Package Re-alignment**: Restructured and renamed all packages from original placeholders to `com.noslop.app` dynamically across directories.
-2. **Dynamic E2EE Messaging Routing**: Implemented elliptic-curve keys isolation (Ed25519 for post signatures, P-256 for ECDH key agreements, AES-256-GCM for direct messaging) coupled with on-the-fly dynamic decryption inside the Jetpack Compose layer.
-3. **Hardware Storage Isolation (`IdentityRepository`)**: Migrated raw private keys into secure `EncryptedSharedPreferences` backed by the hardware-backed Android Keystore, keeping Room tables free of target exposure.
-4. **Offline Logging Daemon (`Logger`)**: Developed thread-safe ring-buffer logging combined with non-blocking concurrent async file-write queues to context directory files.
-5. **Cleartext Security Profiles (`network_security_config.xml`)**: Configured strict TLS requirements globally with explicit isolated cleartext exceptions for whitelisted local loopbacks and specific feed nodes.
-6. **Orbot Tor Tunneling**: Implemented sockets polling and package queries to detect and bind to local Tor SOCKS5 proxies safely (`127.0.0.1:9050`).
+2. **Real Mesh Networking (Tor-routed TCP)**: Implemented SOCKS5 proxied TCP sockets (`MeshTransport.kt`) on port `9999` to stream newline-delimited JSON packets to peer onion addresses.
+3. **Rust-Aligned Packet Schema**: Modeled standard, robust JSON packet frames (`Packets.kt`) matching the original `gossip.rs`/`packets.rs` specifications (Post, Encrypted Message, UserHandshake, ConnectionRequest).
+4. **Gossip Protocol Engine (`GossipService.kt`)**: Built fully specification-compliant gossip routing:
+   - TTL verification (drop when remaining hops == 0).
+   - Insertion-ordered `LinkedHashSet` duplicate packer filter (capped at 1000 entries).
+   - Local firewall mapping to drop all packets from untrusted senders except connection/handshake requests.
+   - Decoupled re-stamping of local sender IDs for anonymized hops routing.
+   - Sliding-window rate limiting of 20 packets per sender per 10-second interval.
+5. **HAI-Net Crypto Realignment**: Migrated DM cryptography to Native X25519 (via Bouncy Castle) and ChaCha20-Poly1305, operating on SHA3-256 key derivations.
+6. **Hardware Storage Isolation (`IdentityRepository`)**: Migrated raw private keys into secure `EncryptedSharedPreferences` backed by the hardware-backed Android Keystore, keeping Room tables free of target exposure.
+7. **Offline Logging Daemon (`Logger`)**: Developed thread-safe ring-buffer logging combined with non-blocking concurrent async file-write queues to context directory files.
+8. **Cleartext Security Profiles (`network_security_config.xml`)**: Configured strict TLS requirements globally with explicit isolated cleartext exceptions for whitelisted local loopbacks and specific feed nodes.
+9. **F-Droid Orbot Deep Linking, Warnings, and Retries**: Configured a beautiful error warning card (`TorWarningPanel.kt`) paired with deep linking (`fdroid://details?id=org.torproject.android`), browser fallback links, and immediate automatic activities refresh checks (`onResume()`).
 
 ## Pending Implementations & Limitations
 - **Background Feed Sync (WorkManager)**: **NOT YET IMPLEMENTED** — manual refresh only.
 - **QR Code Peer Add**: **NOT YET IMPLEMENTED** — peer add is manual string input only.
-- **Networking (Gossip/DM Transport)**: **NOT YET IMPLEMENTED** — local storage only, no actual Tor packet transmission.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
@@ -26,5 +33,6 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 | **Post Signatures** | Ed25519 | Base64 strings (X.509/PKCS#8) | Android Keystore / `EncryptedSharedPreferences` |
 | **Tripcode Derivation** | SHA3-256 | 6-char lowercase Base32 sequence | Database / Memory |
 | **Onion Addressing** | SHA3-256 Tor v3 | 56-char `.onion` address | Database / Memory |
-| **Key Agreement** | ECDH (P-256) | secp256r1 | `EncryptedSharedPreferences` |
-| **Direct Message E2EE** | AES-256-GCM | 12-byte random nonce + payload | Local DB (Encrypted) |
+| **Key Agreement** | X25519 | Bouncy Castle | `EncryptedSharedPreferences` |
+| **Direct Message E2EE** | ChaCha20-Poly1305 | 12-byte random nonce + SHA3-256 shared secret derivation | Local DB (Encrypted) |
+

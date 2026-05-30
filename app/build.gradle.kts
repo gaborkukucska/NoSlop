@@ -106,6 +106,7 @@ dependencies {
     // --- Networking: OkHttp with SOCKS5 proxy support ---
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
+    implementation("com.google.code.gson:gson:2.10.1")
 
     // --- Image loading ---
     implementation(libs.coil.compose)
