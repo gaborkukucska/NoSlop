@@ -21,20 +21,25 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
 
     private val TAG = "IDENTITY_REPO"
 
-    // EncryptedSharedPreferences backed by Android Keystore master key
-    private val encryptedPrefs = EncryptedSharedPreferences.create(
-        context,
-        "noslop_identity_secure",
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    // EncryptedSharedPreferences backed by Android Keystore master key with robust fallback to prevent startup/emulator crashes
+    private val prefs: android.content.SharedPreferences = try {
+        EncryptedSharedPreferences.create(
+            context,
+            "noslop_identity_secure",
+            MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    } catch (e: Exception) {
+        Logger.error(TAG, "EncryptedSharedPreferences init failed. Falling back to unencrypted SharedPreferences.", e.message)
+        context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+    }
 
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys) {
-        // Private keys -> EncryptedSharedPreferences only
-        encryptedPrefs.edit()
+        // Private keys -> SharedPreferences
+        prefs.edit()
             .putString("ed25519_private_key", keys.privateKeyB64)
             .putString("ecdh_private_key", keys.ecdhPrivateKeyB64)
             .apply()
@@ -61,8 +66,8 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         val onion = appSettingDao.getSetting("local_onion") ?: return null
         val displayName = appSettingDao.getSetting("local_display_name") ?: return null
 
-        val privEd = encryptedPrefs.getString("ed25519_private_key", null) ?: return null
-        val privEcdh = encryptedPrefs.getString("ecdh_private_key", null) ?: return null
+        val privEd = prefs.getString("ed25519_private_key", null) ?: return null
+        val privEcdh = prefs.getString("ecdh_private_key", null) ?: return null
 
         return CryptoService.IdentityKeys(
             publicKeyB64 = pubEd,
