@@ -174,6 +174,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Message & Social Actions ---
 
+    fun isMeshListening(): Boolean = repository.meshTransport.isListening()
+
+    fun sendTestPost() {
+        viewModelScope.launch {
+            repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}")
+        }
+    }
+
     fun selectChatPeer(peerPub: String?) {
         _selectedPeerPub.value = peerPub
         if (peerPub != null) {

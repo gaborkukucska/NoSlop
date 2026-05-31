@@ -177,7 +177,6 @@ object TorService {
                 } else {
                     Logger.error(TAG, "ADD_ONION response missing ServiceID: $response")
                 }
-                conn.shutdownTor("TERM") // Don't kill Tor — just close the control connection
                 controlSocket.close()
             } catch (e: Exception) {
                 Logger.error(TAG, "Hidden service registration failed: ${e.message}")

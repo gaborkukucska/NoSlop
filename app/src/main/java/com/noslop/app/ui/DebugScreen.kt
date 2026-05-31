@@ -29,20 +29,18 @@ import kotlinx.coroutines.launch
 @Composable
 fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     val torState by TorService.torState.collectAsState()
-    val scope = rememberCoroutineScope()
     val clipboardManager: ClipboardManager = LocalClipboardManager.current
-    val myIdentity by viewModel.myIdentity.collectAsState()
+    val localKeys by viewModel.localKeys.collectAsState()
+    val peers by viewModel.peers.collectAsState()
     
     // Polling for live states
-    var isListening by remember { mutableStateOf(viewModel.repository.meshTransport.isListening()) }
+    var isListening by remember { mutableStateOf(viewModel.isMeshListening()) }
     var recentLogs by remember { mutableStateOf(Logger.getRecentLogs(50)) }
-    var peers by remember { mutableStateOf(viewModel.repository.allPeers) }
 
     LaunchedEffect(Unit) {
         while (true) {
-            isListening = viewModel.repository.meshTransport.isListening()
-            recentLogs = Logger.getRecentLogs(50)
-            peers = viewModel.repository.allPeers
+            isListening = viewModel.isMeshListening()
+            recentLogs = Logger.getLogs().takeLast(50).map { it.toString() }
             delay(1000)
         }
     }
@@ -88,7 +86,7 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         Text(torState.name)
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    val onion = myIdentity?.onionAddress ?: "Unknown"
+                    val onion = localKeys?.onionAddress ?: "Unknown"
                     val displayOnion = if (onion.length > 20) onion.take(20) + "..." else onion
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Onion: $displayOnion", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
@@ -118,11 +116,7 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
             // Send Test Gossip Action
             Button(
-                onClick = {
-                    scope.launch {
-                        viewModel.repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}")
-                    }
-                },
+                onClick = { viewModel.sendTestPost() },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
             ) {
                 Text("Send Test Gossip Post")
@@ -131,10 +125,9 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             // Peers List
             Text("Peers (${peers.size})", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(modifier = Modifier.weight(0.3f).fillMaxWidth()) {
-                items(peers.toList()) { (onion, peer) ->
-                    val displayOnion = if (onion.length > 10) onion.take(10) + "..." else onion
+                items(peers) { peer ->
                     Text(
-                        "${peer.handle}#${peer.tripcode} - $displayOnion (Trusted: ${peer.isTrusted})",
+                        "${peer.handle}#${peer.tripcode} — ${peer.onionAddress.take(12)}... (Trusted: ${peer.isTrusted})",
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.padding(bottom = 4.dp)
