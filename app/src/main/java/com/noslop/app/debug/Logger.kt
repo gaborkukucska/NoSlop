@@ -94,6 +94,7 @@ object Logger {
     fun error(module: String, message: String, details: String? = null) = log(Level.ERROR, module, message, details)
 
     fun getLogs(): List<LogEntry> = ringBuffer.toList()
+    fun getRecentLogs(n: Int): List<String> = ringBuffer.toList().takeLast(n).map { it.toString() }
 
     fun clearLog() {
         ringBuffer.clear()

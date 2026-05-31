@@ -22,6 +22,9 @@ class MeshTransport(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isRunning = false
 
+    @Volatile private var listening = false
+    fun isListening(): Boolean = listening
+
     fun startListening() {
         if (isRunning) return
         isRunning = true
@@ -29,7 +32,8 @@ class MeshTransport(
             try {
                 Logger.info(TAG, "Starting TCP ServerSocket on port $listenPort")
                 serverSocket = ServerSocket(listenPort, 50, java.net.InetAddress.getByName("127.0.0.1"))
-                Logger.info(TAG, "Listening on 127.0.0.1:$listenPort — reachable only via Tor hidden service")
+                listening = true
+                Logger.info(TAG, "TCP listener bound — 127.0.0.1:9999 (hidden service only)")
                 while (isActive && isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     scope.launch {
@@ -37,6 +41,7 @@ class MeshTransport(
                     }
                 }
             } catch (e: Exception) {
+                listening = false
                 Logger.error(TAG, "ServerSocket error: ${e.message}")
             }
         }
@@ -44,6 +49,7 @@ class MeshTransport(
 
     fun stopListening() {
         isRunning = false
+        listening = false
         try {
             serverSocket?.close()
         } catch (e: Exception) {

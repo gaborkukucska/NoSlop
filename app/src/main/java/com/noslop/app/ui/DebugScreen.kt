@@ -1,0 +1,164 @@
+package com.noslop.app.ui
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ClipboardManager
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.noslop.app.debug.Logger
+import com.noslop.app.tor.TorService
+import com.noslop.app.tor.TorState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
+    val torState by TorService.torState.collectAsState()
+    val scope = rememberCoroutineScope()
+    val clipboardManager: ClipboardManager = LocalClipboardManager.current
+    val myIdentity by viewModel.myIdentity.collectAsState()
+    
+    // Polling for live states
+    var isListening by remember { mutableStateOf(viewModel.repository.meshTransport.isListening()) }
+    var recentLogs by remember { mutableStateOf(Logger.getRecentLogs(50)) }
+    var peers by remember { mutableStateOf(viewModel.repository.allPeers) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            isListening = viewModel.repository.meshTransport.isListening()
+            recentLogs = Logger.getRecentLogs(50)
+            peers = viewModel.repository.allPeers
+            delay(1000)
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Debug & Test", fontWeight = FontWeight.Bold) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp)
+        ) {
+            // Tor Status
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Tor Status", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val color = when(torState) {
+                            TorState.STARTING -> androidx.compose.ui.graphics.Color(0xFFFFA000) // Amber
+                            TorState.READY -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // Green
+                            TorState.FAILED -> androidx.compose.ui.graphics.Color(0xFFF44336) // Red
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(12.dp)
+                                .background(color, RoundedCornerShape(50))
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(torState.name)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val onion = myIdentity?.onionAddress ?: "Unknown"
+                    val displayOnion = if (onion.length > 20) onion.take(20) + "..." else onion
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Onion: $displayOnion", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.weight(1f))
+                        Button(
+                            onClick = { clipboardManager.setText(AnnotatedString(onion)) },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(30.dp)
+                        ) {
+                            Text("Copy", fontSize = 10.sp)
+                        }
+                    }
+                }
+            }
+
+            // Mesh Listener Status
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Mesh Listener (Port 9999)", fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(if (isListening) "Bound and accepting connections" else "Not listening")
+                }
+            }
+
+            // Send Test Gossip Action
+            Button(
+                onClick = {
+                    scope.launch {
+                        viewModel.repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}")
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            ) {
+                Text("Send Test Gossip Post")
+            }
+
+            // Peers List
+            Text("Peers (${peers.size})", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+            LazyColumn(modifier = Modifier.weight(0.3f).fillMaxWidth()) {
+                items(peers.toList()) { (onion, peer) ->
+                    val displayOnion = if (onion.length > 10) onion.take(10) + "..." else onion
+                    Text(
+                        "${peer.handle}#${peer.tripcode} - $displayOnion (Trusted: ${peer.isTrusted})",
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Logs
+            Text("Last 50 Logs", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+            LazyColumn(
+                modifier = Modifier.weight(0.5f).fillMaxWidth().background(MaterialTheme.colorScheme.onSurface.copy(alpha=0.05f))
+            ) {
+                items(recentLogs) { logLine ->
+                    Text(
+                        logLine,
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(4.dp)
+                    )
+                }
+            }
+        }
+    }
+}

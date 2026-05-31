@@ -1022,6 +1022,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
     if (selectedSettingsScreen == 1) {
         LogsViewerScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 2) {
+        DebugScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -1122,6 +1124,18 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                 Icon(Icons.Default.PlayArrow, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Open Orbot Application", fontWeight = FontWeight.Bold)
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Button(
+                onClick = { selectedSettingsScreen = 2 },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Icon(Icons.Default.Info, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Pre-flight Debug & Test", fontWeight = FontWeight.Bold)
             }
         }
     }
