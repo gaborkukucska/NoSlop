@@ -41,6 +41,7 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 41. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
 42. **Bouncy Castle bcprov-jdk18on:1.78.1 added as dependency, registered in onCreate()**
 43. **Ed25519 keygen: initialize() removed for API 33+ Conscrypt path**
+44. **SHA3-256 Provider Fix**: Added `BC_PROVIDER` explicitly to `MessageDigest.getInstance("SHA3-256")` calls to resolve `NoSuchAlgorithmException` on devices lacking native SHA3 support.
 ## Pending Implementations & Limitations
 - **Two-device real-device test** — execute `TEST_PROTOCOL.md` (build is ready) to validate Tor service connections, peer QR handshakes, and actual gossip/DM packet routing fully.
 

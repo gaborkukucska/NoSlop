@@ -104,7 +104,7 @@ object CryptoService {
             encodedPubKeyBytes
         }
 
-        val digest = MessageDigest.getInstance("SHA3-256")
+        val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
         val hash = digest.digest(rawKeyBytes)
 
         val base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
@@ -138,7 +138,7 @@ object CryptoService {
         val prefix = ".onion checksum".toByteArray(Charsets.UTF_8)
 
         val checksumInput = prefix + rawKey + version
-        val digest = MessageDigest.getInstance("SHA3-256")
+        val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
         val checksum = digest.digest(checksumInput).copyOfRange(0, 2)
 
         val payload = rawKey + checksum + version
