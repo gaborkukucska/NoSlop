@@ -31,13 +31,9 @@ class NoSlopApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Register Bouncy Castle as a security provider.
-        // Required for Ed25519 support on API 24-32 (Android Keystore only adds Ed25519 in API 33).
-        // Insert at position 1 (highest priority) so it is preferred over the default Android provider
-        // for Ed25519 operations on older devices. On API 33+, Android Keystore takes precedence
-        // because we explicitly request it in CryptoService — BC is only the fallback.
-        if (Security.getProvider("BC") == null) {
-            Security.insertProviderAt(BouncyCastleProvider(), 1)
+        // Must be first — all crypto operations depend on this
+        if (java.security.Security.getProvider("BC") == null) {
+            java.security.Security.addProvider(BouncyCastleProvider())
         }
 
         Logger.initialize(this)

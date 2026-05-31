@@ -52,11 +52,14 @@ object CryptoService {
         Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {
             val kpg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Conscrypt: fixed key size, do NOT call initialize()
                 KeyPairGenerator.getInstance("Ed25519")
             } else {
-                KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)
+                // Bouncy Castle fallback for API 24-32: must specify key size
+                KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
+                    it.initialize(255, SecureRandom())
+                }
             }
-            kpg.initialize(255, SecureRandom())
             val kp = kpg.generateKeyPair()
 
             val pubBytes = kp.public.encoded   // X.509 SubjectPublicKeyInfo format

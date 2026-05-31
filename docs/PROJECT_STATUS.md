@@ -38,8 +38,9 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 22. **Proguard rules hardened**: Added explicit `-keep` and `-dontwarn` rules for `tor-android`, `jtorctl`, and `netcipher` to prevent runtime `ClassNotFoundException` in release builds.
 23. **registerHiddenService() raw implementation**: Refactored `TorService.registerHiddenService()` to use raw `sendAndWaitForResponse` and reflection fallback, making it version-safe across `jtorctl` variations.
 24. **registerHiddenService() ReplyLine extraction hardened with multi-strategy fallback**: Hardened response extraction using active field probing and raw `toString()` fallbacks, ensuring robust ServiceID extraction across any packaged library build.
-25. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
-
+41. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
+42. **Bouncy Castle bcprov-jdk18on:1.78.1 added as dependency, registered in onCreate()**
+43. **Ed25519 keygen: initialize() removed for API 33+ Conscrypt path**
 ## Pending Implementations & Limitations
 - **Two-device real-device test** — execute `TEST_PROTOCOL.md` (build is ready) to validate Tor service connections, peer QR handshakes, and actual gossip/DM packet routing fully.
 
