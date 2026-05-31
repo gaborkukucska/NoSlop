@@ -314,8 +314,7 @@ fun resolveMediaUrl(mediaUrl: String?): String? {
     return mediaUrl
 }
 
-@OptIn(androidx.annotation.OptInMarker::class)
-@androidx.media3.common.util.UnstableApi
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun VideoPlayer(url: String) {
     val context = LocalContext.current
@@ -347,8 +346,7 @@ fun VideoPlayer(url: String) {
     )
 }
 
-@OptIn(androidx.annotation.OptInMarker::class)
-@androidx.media3.common.util.UnstableApi
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun AudioPlayer(url: String) {
     val context = LocalContext.current
@@ -815,8 +813,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 }
             }
         }
-    }
-
     }
 }
 

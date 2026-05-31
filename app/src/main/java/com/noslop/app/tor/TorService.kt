@@ -50,8 +50,8 @@ object TorService {
         _torState.value = TorState.STARTING
 
         try {
-            val intent = android.content.Intent(context, org.torproject.android.service.TorService::class.java)
-            intent.action = "org.torproject.android.intent.action.START"
+            val intent = android.content.Intent(context, org.torproject.jni.TorService::class.java)
+            intent.action = org.torproject.jni.TorService.ACTION_START
             context.startService(intent)
 
             // Poll the SOCKS5 port until ready, up to 90 seconds.
