@@ -20,7 +20,7 @@ import javax.crypto.spec.SecretKeySpec
 object CryptoService {
 
     private const val TAG = "CRYPTO"
-    private const val BC_PROVIDER = "BC"
+    private val BC_PROVIDER = org.bouncycastle.jce.provider.BouncyCastleProvider()
 
     data class IdentityKeys(
         val publicKeyB64: String,       // Base64 Ed25519 public key
@@ -104,8 +104,10 @@ object CryptoService {
             encodedPubKeyBytes
         }
 
-        val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
-        val hash = digest.digest(rawKeyBytes)
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val hash = ByteArray(digest.digestSize)
+        digest.update(rawKeyBytes, 0, rawKeyBytes.size)
+        digest.doFinal(hash, 0)
 
         val base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
         val sb = StringBuilder()
@@ -138,8 +140,11 @@ object CryptoService {
         val prefix = ".onion checksum".toByteArray(Charsets.UTF_8)
 
         val checksumInput = prefix + rawKey + version
-        val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
-        val checksum = digest.digest(checksumInput).copyOfRange(0, 2)
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val hash = ByteArray(digest.digestSize)
+        digest.update(checksumInput, 0, checksumInput.size)
+        digest.doFinal(hash, 0)
+        val checksum = hash.copyOfRange(0, 2)
 
         val payload = rawKey + checksum + version
 
@@ -215,8 +220,10 @@ object CryptoService {
             val sharedSecret = ka.generateSecret()
 
             // Shared secret: X25519 DH output -> SHA3-256 -> 32-byte ChaCha20 key
-            val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
-            val chachaKey = digest.digest(sharedSecret)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            val chachaKey = ByteArray(digest.digestSize)
+            digest.update(sharedSecret, 0, sharedSecret.size)
+            digest.doFinal(chachaKey, 0)
             val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
             val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
@@ -251,8 +258,10 @@ object CryptoService {
             ka.doPhase(theirPub, true)
             val sharedSecret = ka.generateSecret()
 
-            val digest = MessageDigest.getInstance("SHA3-256", BC_PROVIDER)
-            val chachaKey = digest.digest(sharedSecret)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            val chachaKey = ByteArray(digest.digestSize)
+            digest.update(sharedSecret, 0, sharedSecret.size)
+            digest.doFinal(chachaKey, 0)
             val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
