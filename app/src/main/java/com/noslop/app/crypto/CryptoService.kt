@@ -56,7 +56,7 @@ object CryptoService {
             } else {
                 KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)
             }
-            kpg.initialize(256, SecureRandom())
+            kpg.initialize(255, SecureRandom())
             val kp = kpg.generateKeyPair()
 
             val pubBytes = kp.public.encoded   // X.509 SubjectPublicKeyInfo format
