@@ -39,3 +39,6 @@ captures/
 Thumbs.db
 *.bak
 *.log
+
+# other
+_workspace/
