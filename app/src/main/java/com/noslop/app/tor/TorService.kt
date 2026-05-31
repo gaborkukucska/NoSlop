@@ -180,19 +180,33 @@ object TorService {
                     "ADD_ONION NEW:ED25519-V3 Port=9999,127.0.0.1:9999\r\n",
                     "250"
                 )
+                Logger.debug(TAG, "ADD_ONION raw response: ${responseLines.size} lines")
 
                 val serviceId = responseLines.asSequence().mapNotNull { lineObj ->
-                    try {
-                        val msgField = lineObj.javaClass.getDeclaredField("msg")
-                        msgField.isAccessible = true
-                        msgField.get(lineObj) as? String
-                    } catch (e: Exception) {
-                        null
+                    // Strategy 1: direct field access (works on most jtorctl builds)
+                    val fieldNames = listOf("msg", "message", "line", "reply")
+                    var extracted: String? = null
+                    for (name in fieldNames) {
+                        try {
+                            val f = lineObj.javaClass.getDeclaredField(name)
+                            f.isAccessible = true
+                            extracted = f.get(lineObj) as? String
+                            if (extracted != null) break
+                        } catch (_: Exception) {}
                     }
+                    // Strategy 2: toString() — last resort, format varies by version
+                    if (extracted == null) {
+                        val str = lineObj.toString()
+                        // ReplyLine.toString() sometimes includes the raw line content
+                        extracted = if (str.contains("ServiceID=")) str else null
+                    }
+                    extracted
                 }
-                .firstOrNull { it.startsWith("ServiceID=") }
-                ?.substringAfter("ServiceID=")
-                ?.trim()
+                .firstOrNull { it.contains("ServiceID=") }
+                ?.let { line ->
+                    // Handle both "ServiceID=xyz" and "250-ServiceID=xyz"
+                    line.substringAfter("ServiceID=").trim().split(" ").first()
+                }
 
                 if (serviceId != null) {
                     val onionAddress = "$serviceId.onion"
