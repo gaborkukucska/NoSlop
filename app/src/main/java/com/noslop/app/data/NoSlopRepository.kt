@@ -41,6 +41,7 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
 
     // --- Identity Delegation ---
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
+    suspend fun updateOnionAddress(address: String) = identityRepository.updateOnionAddress(address)
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys) {
         identityRepository.saveIdentity(handle, keys)

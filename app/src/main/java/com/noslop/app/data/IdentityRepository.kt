@@ -86,4 +86,9 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
     suspend fun setOnboardingComplete(complete: Boolean) {
         appSettingDao.insertSetting(AppSetting("onboarding_complete", complete.toString()))
     }
+    
+    suspend fun updateOnionAddress(address: String) {
+        appSettingDao.insertSetting(AppSetting("local_onion", address))
+        Logger.info(TAG, "Onion address dynamically updated in Room: $address")
+    }
 }

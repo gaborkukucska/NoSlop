@@ -221,8 +221,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * Launch or trigger Orbot start sequence (fallback)
      */
     fun startOrbot() {
-        Logger.info("VM", "Instructing TorService to launch Orbot app")
-        TorService.launchOrbot(getApplication())
+        Logger.info("VM", "Requesting external Orbot start as fallback")
+        info.guardianproject.netcipher.proxy.OrbotHelper
+            .get(getApplication())
+            .requestOrbotStart(getApplication())
     }
 
     fun refreshTorStatus() {

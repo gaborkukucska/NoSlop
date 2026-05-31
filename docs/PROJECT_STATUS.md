@@ -32,11 +32,10 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 17. **Worker Repository Leak Fix**: Separated mesh socket initialization (`startListening`) into `NoSlopApp.onCreate()` singleton from `NoSlopRepository.init`, preventing dangerous port rebinding exceptions when `FeedSyncWorker` spins up in the background.
 18. **Embedded Tor daemon (tor-android) — no Orbot dependency**: Replaced external dependency with a native daemon binding.
 
-## In Progress
-- **Tor hidden service auto-registration**: onion address is derived from key but active registration requires connecting onion hostname directly through tor-android controller.
+19. **Tor hidden service auto-registration**: Onion address is now automatically requested via `jtorctl` (ADD_ONION) on Tor daemon start, providing a listening endpoint for peer connections.
 
 ## Pending Implementations & Limitations
-- **Two-device real-device test** — gossip + DM validation over embedded Tor not yet completed.
+- **Two-device real-device test** — gossip post + DM validation over embedded Tor not yet completed.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |

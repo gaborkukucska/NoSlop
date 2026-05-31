@@ -43,11 +43,23 @@ class NoSlopApp : Application() {
         Logger.initialize(this)
         Logger.info("APP", "NoSlop initialised. SDK=${android.os.Build.VERSION.SDK_INT}")
 
+        val db = NoSlopDatabase.getDatabase(this)
+        repository = NoSlopRepository(this, db)
+
+        // Register Tor hidden service callback
+        com.noslop.app.tor.TorService.onAddressCallback = { onionAddress ->
+            repositoryScope.launch {
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    repository.updateOnionAddress(onionAddress)
+                    Logger.info("APP", "Onion address dynamically updated in App layer: $onionAddress")
+                }
+            }
+        }
+
         // Start embedded Tor daemon
         com.noslop.app.tor.TorService.startTor(this)
 
-        val db = NoSlopDatabase.getDatabase(this)
-        repository = NoSlopRepository(this, db)
         repository.meshTransport.startListening()
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()

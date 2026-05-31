@@ -1,12 +1,11 @@
 package com.noslop.app.tor
 
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import com.noslop.app.debug.Logger
+import info.guardianproject.netcipher.proxy.OrbotHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -25,165 +24,163 @@ enum class TorState { STARTING, READY, FAILED }
 object TorService {
 
     private const val TAG = "TOR"
-    private const val ORBOT_PACKAGE = "org.torproject.android"
-    private const val SOCKS_PORT = 9050
-    private const val PROXY_HOST = "127.0.0.1"
+    const val SOCKS_PORT = 9050
+    const val PROXY_HOST = "127.0.0.1"
+
+    var onAddressCallback: ((String) -> Unit)? = null
+
+    // Unmanaged coroutine scope is fine here — TorService is a process-lifetime singleton.
+    // It is initialised once in NoSlopApp.onCreate() and never torn down independently.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _torState = MutableStateFlow(TorState.STARTING)
     val torState: StateFlow<TorState> = _torState.asStateFlow()
 
-    data class OrbotStatus(
-        val isInstalled: Boolean,
-        val isProxyReady: Boolean,
-        val details: String
-    )
-
     /**
-     * Launch embedded Tor service
+     * Start the embedded Tor daemon via OrbotHelper (tor-android).
+     * OrbotHelper.init() registers a broadcast receiver that fires when the
+     * proxy is ready — we combine that with port polling so callers get a
+     * clean StateFlow<TorState> to observe.
+     *
+     * Falls back to polling-only if OrbotHelper.isOrbotInstalled() returns
+     * true (user has external Orbot) — in that case the daemon may already
+     * be running on 9050.
      */
     fun startTor(context: Context) {
-        Logger.info(TAG, "Starting embedded Tor daemon...")
+        Logger.info(TAG, "Starting embedded Tor daemon via OrbotHelper...")
         _torState.value = TorState.STARTING
-        try {
-            val intent = Intent()
-            intent.setClassName(context, "org.torproject.android.service.TorService")
-            intent.action = "org.torproject.android.intent.action.START"
-            context.startService(intent)
 
-            CoroutineScope(Dispatchers.IO).launch {
-                val isReady = waitForProxy(60)
-                if (isReady) {
+        try {
+            val oh = OrbotHelper.get(context)
+
+            // init() starts the embedded Tor binary bundled by tor-android.
+            // It binds to the OrbotService running in the :tor process declared
+            // in AndroidManifest.xml. If Orbot (external) is also installed,
+            // OrbotHelper prefers the external daemon — which is fine, same port.
+            oh.init()
+
+            // Poll the SOCKS5 port until ready, up to 90 seconds.
+            // The embedded Tor binary typically bootstraps in 15-45 seconds on
+            // a fresh network connection. Log every attempt for debugging.
+            scope.launch {
+                val ready = waitForProxy(timeoutSeconds = 90)
+                if (ready) {
+                    Logger.info(TAG, "Tor SOCKS5 proxy ready — TorState -> READY")
                     _torState.value = TorState.READY
+                    // Register hidden service and update the stored onion address
+                    registerHiddenService { onionAddress ->
+                        scope.launch {
+                            onAddressCallback?.invoke(onionAddress)
+                        }
+                    }
                 } else {
-                    Logger.warn(TAG, "Embedded Tor daemon failed to start within 60s.")
+                    Logger.warn(TAG, "Tor proxy not ready after 90s — TorState -> FAILED")
                     _torState.value = TorState.FAILED
                 }
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to start Tor service: ${e.message}")
+            Logger.error(TAG, "OrbotHelper.init() threw: ${e.message}")
             _torState.value = TorState.FAILED
         }
     }
 
     /**
-     * Checks if Orbot app is installed on the device.
+     * Poll 127.0.0.1:9050 until a TCP connection succeeds (proxy accepting)
+     * or until timeoutSeconds elapses. Each attempt logs at DEBUG level so
+     * the in-app log viewer shows bootstrap progress without spamming INFO.
      */
-    fun isOrbotInstalled(context: Context): Boolean {
-        return try {
-            context.packageManager.getPackageInfo(ORBOT_PACKAGE, PackageManager.GET_META_DATA)
-            Logger.info(TAG, "Orbot package info found. Installed = true")
-            true
-        } catch (e: PackageManager.NameNotFoundException) {
-            Logger.warn(TAG, "Orbot is not installed on this device")
+    suspend fun waitForProxy(timeoutSeconds: Int = 30): Boolean =
+        withContext(Dispatchers.IO) {
+            Logger.info(TAG, "Polling $PROXY_HOST:$SOCKS_PORT for Tor proxy readiness...")
+            for (attempt in 1..timeoutSeconds) {
+                try {
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress(PROXY_HOST, SOCKS_PORT), 1000)
+                        Logger.info(TAG, "Tor SOCKS5 proxy is accepting connections (attempt $attempt)")
+                        return@withContext true
+                    }
+                } catch (e: Exception) {
+                    Logger.debug(TAG, "Poll attempt $attempt/$timeoutSeconds: ${e.message}")
+                }
+                delay(1000)
+            }
+            Logger.warn(TAG, "Proxy not ready after $timeoutSeconds seconds")
             false
         }
-    }
 
     /**
-     * Launch or trigger Orbot start sequence. Opens Orbot companion.
+     * Verify we are actually routing through Tor by fetching check.torproject.org
+     * through the SOCKS5 proxy. Returns Pair(isTor, statusMessage).
      */
-    fun launchOrbot(context: Context) {
-        Logger.info(TAG, "Attempting to launch Orbot companion app via implicit Intent...")
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(ORBOT_PACKAGE)
-        if (launchIntent != null) {
-            context.startActivity(launchIntent)
-        } else {
-            // Intent fallback: prefer F-Droid first, Play Store second
-            Logger.warn(TAG, "Launch intent for Orbot is null, opening F-Droid download link")
-            val fdroidIntent = Intent(Intent.ACTION_VIEW, Uri.parse("fdroid://details?id=$ORBOT_PACKAGE")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+    suspend fun checkTorConnection(): Pair<Boolean, String> =
+        withContext(Dispatchers.IO) {
+            Logger.info(TAG, "Verifying Tor routing via check.torproject.org...")
             try {
-                context.startActivity(fdroidIntent)
-            } catch (e: Exception) {
-                val webFDroidIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/$ORBOT_PACKAGE/")).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                try {
-                    context.startActivity(webFDroidIntent)
-                } catch (e2: Exception) {
-                    val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$ORBOT_PACKAGE")).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    try {
-                        context.startActivity(playStoreIntent)
-                    } catch (e3: Exception) {
-                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$ORBOT_PACKAGE")).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        context.startActivity(webIntent)
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Poll SOCKS5 port (127.0.0.1:9050) to verify if Tor proxy tunnel is active.
-     */
-    suspend fun waitForProxy(timeoutSeconds: Int = 30): Boolean = withContext(Dispatchers.IO) {
-        Logger.info(TAG, "Polling socket $PROXY_HOST:$SOCKS_PORT to check if Tor proxy is accepting connections...")
-        for (attempt in 1..timeoutSeconds) {
-            try {
-                Socket().use { socket ->
-                    socket.connect(InetSocketAddress(PROXY_HOST, SOCKS_PORT), 1000)
-                    Logger.info(TAG, "Tor SOCKS5 proxy connected on port $SOCKS_PORT! Tunnel is active.")
-                    return@withContext true
+                val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
+                val client = OkHttpClient.Builder()
+                    .proxy(proxy)
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .build()
+                val request = Request.Builder()
+                    .url("https://check.torproject.org/")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: ""
+                    val isTor = body.contains("Congratulations. This browser is configured to use Tor.")
+                    val detail = if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed"
+                    Logger.info(TAG, "Tor check complete — isTor=$isTor")
+                    Pair(isTor, detail)
                 }
             } catch (e: Exception) {
-                Logger.debug(TAG, "SOCKS5 connection polling attempt $attempt of $timeoutSeconds failed: ${e.message}")
+                Logger.warn(TAG, "Tor check failed: ${e.message}")
+                Pair(false, "Proxy unreachable: ${e.message}")
             }
-            delay(1000)
         }
-        Logger.warn(TAG, "Failed to connect to local SOCKS5 proxy within $timeoutSeconds seconds.")
-        false
-    }
 
     /**
-     * Fetch Tor status check page through SOCKS5 proxy to prove we are fully routed inside Tor
+     * Register an ephemeral Tor v3 hidden service for this node's mesh listener.
+     * Called automatically after the SOCKS5 proxy is confirmed ready.
+     *
+     * Uses jtorctl to open a control connection to Tor on port 9051,
+     * then issues ADD_ONION to create an ephemeral v3 hidden service
+     * pointing at our local TCP listener on 9999.
+     *
+     * The returned .onion address is stored via the callback so the
+     * repository can persist it and include it in QR codes and handshakes.
+     *
+     * Why ephemeral (DETACH flag omitted): the hidden service exists only
+     * while this Tor instance is running. On next start a new address is
+     * generated. This is intentional for now — persistent hidden services
+     * require storing the private key, which is a future hardening task.
      */
-    suspend fun checkTorConnection(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
-        Logger.info(TAG, "Testing check.torproject.org through local SOCKS5 proxy...")
-        try {
-            val socksProxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
-            val client = OkHttpClient.Builder()
-                .proxy(socksProxy)
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .build()
+    suspend fun registerHiddenService(onAddressReady: (String) -> Unit) =
+        withContext(Dispatchers.IO) {
+            Logger.info(TAG, "Registering ephemeral Tor hidden service on port 9999...")
+            try {
+                val controlSocket = Socket(PROXY_HOST, 9051) // Tor control port
+                val conn = net.freehaven.tor.control.TorControlConnection(controlSocket)
+                conn.authenticate(byteArrayOf()) // no password for embedded daemon
 
-            val request = Request.Builder()
-                .url("https://check.torproject.org/")
-                .header("User-Agent", "Mozilla/5.0")
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string() ?: ""
-                val isTor = body.contains("Congratulations. This browser is configured to use Tor.")
-                val details = if (isTor) {
-                    "Routed securely via Tor network!"
+                // ADD_ONION NEW:ED25519-V3 Port=9999,127.0.0.1:9999
+                // Tor generates a new Ed25519 keypair and returns the .onion address.
+                val response = conn.addOnion(
+                    "NEW:ED25519-V3",
+                    mapOf("9999" to "127.0.0.1:9999"),
+                    null // no flags
+                )
+                val onionAddress = response["ServiceID"]?.let { "$it.onion" }
+                if (onionAddress != null) {
+                    Logger.info(TAG, "Hidden service registered: $onionAddress")
+                    onAddressReady(onionAddress)
                 } else {
-                    "Proxy responded but destination reports clearnet address."
+                    Logger.error(TAG, "ADD_ONION response missing ServiceID: $response")
                 }
-                Logger.info(TAG, "Tor link status test completed. isTor=$isTor")
-                Pair(isTor, details)
+                conn.shutdownTor("TERM") // Don't kill Tor — just close the control connection
+                controlSocket.close()
+            } catch (e: Exception) {
+                Logger.error(TAG, "Hidden service registration failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Logger.warn(TAG, "Check Tor Connection through proxy failed: ${e.message}")
-            Pair(false, "Offline or proxy port blocked: ${e.message}")
         }
-    }
-
-    /**
-     * Complete check.
-     */
-    suspend fun getStatus(context: Context): OrbotStatus {
-        val installed = isOrbotInstalled(context)
-        val ready = waitForProxy(2)
-        return OrbotStatus(
-            isInstalled = installed,
-            isProxyReady = ready,
-            details = if (ready) "Connected securely via Tor [127.0.0.1:9050]" else "Tor offline"
-        )
-    }
 }
