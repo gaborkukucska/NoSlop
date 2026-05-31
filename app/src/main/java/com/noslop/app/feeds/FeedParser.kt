@@ -102,6 +102,16 @@ object FeedParser {
         return list
     }
 
+    private fun getMediaType(url: String, mimeType: String?): String? {
+        val type = mimeType?.lowercase(Locale.US) ?: ""
+        return when {
+            type.contains("video") || url.endsWith(".mp4") || url.endsWith(".mkv") -> "video"
+            type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".wav") -> "audio"
+            type.contains("image") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".png") || url.endsWith(".webp") -> "image"
+            else -> null
+        }
+    }
+
     private fun parseRssItem(parser: XmlPullParser, sourceId: String): FeedItem {
         var title = ""
         var link = ""
@@ -109,6 +119,8 @@ object FeedParser {
         var description = ""
         var pubDateStr = ""
         var guid = ""
+        var mediaUrl: String? = null
+        var mediaType: String? = null
 
         var eventType = parser.next()
         while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("item", ignoreCase = true))) {
@@ -121,6 +133,15 @@ object FeedParser {
                     "pubdate" -> pubDateStr = readText(parser)
                     "guid" -> guid = readText(parser)
                     "creator", "author" -> author = readText(parser)
+                    "enclosure", "media:content" -> {
+                        val encUrl = parser.getAttributeValue(null, "url")
+                        val encType = parser.getAttributeValue(null, "type")
+                        if (!encUrl.isNullOrBlank()) {
+                            mediaUrl = encUrl
+                            mediaType = getMediaType(encUrl, encType)
+                        }
+                        skip(parser)
+                    }
                     else -> skip(parser)
                 }
             }
@@ -139,7 +160,9 @@ object FeedParser {
             author = author,
             excerpt = cleanedDesc,
             publishedAt = parseDate(pubDateStr),
-            fullContent = description
+            fullContent = description,
+            mediaUrl = mediaUrl,
+            mediaType = mediaType
         )
     }
 
@@ -150,6 +173,8 @@ object FeedParser {
         var summary = ""
         var updatedStr = ""
         var idStr = ""
+        var mediaUrl: String? = null
+        var mediaType: String? = null
 
         var eventType = parser.next()
         while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("entry", ignoreCase = true))) {
@@ -160,15 +185,28 @@ object FeedParser {
                     "link" -> {
                         val rel = parser.getAttributeValue(null, "rel")
                         val href = parser.getAttributeValue(null, "href")
-                        if (rel == null || rel == "alternate") {
+                        val type = parser.getAttributeValue(null, "type")
+                        if (rel == "enclosure" && !href.isNullOrBlank()) {
+                            mediaUrl = href
+                            mediaType = getMediaType(href, type)
+                        } else if (rel == null || rel == "alternate") {
                             link = href ?: ""
                         }
-                        parser.nextTag()
+                        skip(parser)
                     }
                     "summary", "content" -> summary = readText(parser)
                     "updated", "published" -> updatedStr = readText(parser)
                     "id" -> idStr = readText(parser)
                     "author" -> authorStr = readAuthor(parser)
+                    "media:content" -> {
+                        val encUrl = parser.getAttributeValue(null, "url")
+                        val encType = parser.getAttributeValue(null, "type")
+                        if (!encUrl.isNullOrBlank()) {
+                            mediaUrl = encUrl
+                            mediaType = getMediaType(encUrl, encType)
+                        }
+                        skip(parser)
+                    }
                     else -> skip(parser)
                 }
             }
@@ -186,7 +224,9 @@ object FeedParser {
             author = authorStr,
             excerpt = cleanedDesc,
             publishedAt = parseDate(updatedStr),
-            fullContent = summary
+            fullContent = summary,
+            mediaUrl = mediaUrl,
+            mediaType = mediaType
         )
     }
 

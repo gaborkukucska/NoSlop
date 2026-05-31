@@ -130,47 +130,27 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                         Text("Tor failed to start — Retry", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
+                    Button(
+                        onClick = { viewModel.refreshTorStatus() },
+                        enabled = !isTorChecking,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SurfaceDark,
+                            contentColor = TextLight
+                        ),
+                        border = BorderStroke(1.dp, BorderSubtle),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp)
+                            .testTag("retry_socks_btn")
                     ) {
-                        Button(
-                            onClick = { viewModel.startOrbot() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SurfaceDark,
-                                contentColor = TextLight
-                            ),
-                            border = BorderStroke(1.dp, BorderSubtle),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .testTag("launch_orbot_btn")
-                        ) {
-                            Text("Use Orbot instead", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                        }
-
-                        Button(
-                            onClick = { viewModel.refreshTorStatus() },
-                            enabled = !isTorChecking,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SurfaceDark,
-                                contentColor = TextLight
-                            ),
-                            border = BorderStroke(1.dp, BorderSubtle),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(42.dp)
-                                .testTag("retry_socks_btn")
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Retry Proxy", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                            }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Retry Proxy", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
+
                 }
             }
         }

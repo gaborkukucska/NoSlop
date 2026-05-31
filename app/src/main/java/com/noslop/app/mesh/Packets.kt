@@ -21,7 +21,9 @@ data class PostPayload(
     val timestamp: Long,
     val privacy: String = "public", // "public", "friends", "private"
     val hashtags: List<String>? = null,
-    val signature: String? = null
+    val signature: String? = null,
+    @SerializedName("media_url") val mediaUrl: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null
 )
 
 data class ConnectionRequestPayload(

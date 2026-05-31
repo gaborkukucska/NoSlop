@@ -56,6 +56,9 @@ class NoSlopApp : Application() {
         // Start embedded Tor daemon
         com.noslop.app.tor.TorService.startTor(this)
 
+        // Start media HTTP-to-Tor proxy service
+        com.noslop.app.mesh.MediaProxyService.start()
+
         repository.meshTransport.startListening()
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()

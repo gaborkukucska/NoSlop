@@ -33,6 +33,10 @@ import com.noslop.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel) {
@@ -53,7 +57,7 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.List, contentDescription = "Feed") },
+                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Feed") },
                     label = { Text("Feed") },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
@@ -66,19 +70,6 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Share, contentDescription = "Mesh Gossip") },
-                    label = { Text("Mesh") },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = AccentGreen,
-                        selectedTextColor = AccentGreen,
-                        unselectedIconColor = TextMuted,
-                        unselectedTextColor = TextMuted,
-                        indicatorColor = PrimaryBlack
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.Email, contentDescription = "DMs") },
                     label = { Text("DMs") },
                     colors = NavigationBarItemDefaults.colors(
@@ -90,8 +81,8 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                     )
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     icon = { Icon(Icons.Default.Face, contentDescription = "Profile") },
                     label = { Text("Profile") },
                     colors = NavigationBarItemDefaults.colors(
@@ -103,8 +94,8 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                     )
                 )
                 NavigationBarItem(
-                    selected = selectedTab == 4,
-                    onClick = { selectedTab = 4 },
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
                     label = { Text("Settings") },
                     colors = NavigationBarItemDefaults.colors(
@@ -124,411 +115,580 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> FeedTab(viewModel)
-                1 -> MeshTab(viewModel)
-                2 -> DMsTab(viewModel)
-                3 -> ProfileTab(viewModel)
-                4 -> SettingsTab(viewModel)
+                0 -> UnifiedFeedTab(viewModel)
+                1 -> DMsTab(viewModel)
+                2 -> ProfileTab(viewModel)
+                3 -> SettingsTab(viewModel)
             }
         }
     }
 }
 
 // ==========================================
-// FEED TAB
+// UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
+
+/**
+ * A sealed class representing a single item in the unified feed,
+ * which can be either an RSS FeedItem or a MeshPost.
+ */
+sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
+    data class Feed(val item: FeedItem) : UnifiedItem(item.publishedAt, false)
+    data class Mesh(val post: MeshPost) : UnifiedItem(post.timestamp, true)
+}
+
 @Composable
-fun FeedTab(viewModel: NoSlopViewModel) {
-    val items by viewModel.feedItems.collectAsState()
+fun UnifiedFeedTab(viewModel: NoSlopViewModel) {
+    val feedItems by viewModel.feedItems.collectAsState()
+    val meshPosts by viewModel.meshPosts.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
-    var selectedItemForReading by remember { mutableStateOf<FeedItem?>(null) }
-    var filterCategory by remember { mutableStateOf<String?>(null) }
 
-    val filteredItems = if (filterCategory == null) items else items.filter { it.sourceId.contains(filterCategory!!, ignoreCase = true) }
+    var filterMode by remember { mutableStateOf(0) } // 0=All, 1=Mesh Only
+    var showComposeDialog by remember { mutableStateOf(false) }
+    var showShareDialog by remember { mutableStateOf<FeedItem?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "My Feed",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = TextLight
-            )
-
-            IconButton(
-                onClick = { viewModel.refreshFeeds() },
-                enabled = !isRefreshing
-            ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentGreen, strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = AccentGreen)
-                }
-            }
+    // Build unified list sorted by timestamp descending
+    val unifiedItems = remember(feedItems, meshPosts, filterMode) {
+        val all = mutableListOf<UnifiedItem>()
+        if (filterMode == 0) {
+            all.addAll(feedItems.map { UnifiedItem.Feed(it) })
         }
+        all.addAll(meshPosts.map { UnifiedItem.Mesh(it) })
+        all.sortedByDescending { it.timestamp }
+    }
 
-        // Horizontal Category filter list
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            val filterChips = listOf("All", "Tech", "Security", "Science")
-            filterChips.forEach { chipName ->
-                val associatedValue = when (chipName) {
-                    "All" -> null
-                    "Tech" -> "rss"
-                    "Security" -> "security"
-                    else -> "nasa"
-                }
-
-                val isSelected = filterCategory == associatedValue
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(if (isSelected) AccentGreen else SurfaceDark)
-                        .clickable { filterCategory = associatedValue }
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Text(
-                        text = chipName,
-                        color = if (isSelected) PrimaryBlack else TextLight,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-
-        if (filteredItems.isEmpty()) {
-            Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = Alignment.Center
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Top bar with filter chips
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceDark)
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        imageVector = Icons.Default.List,
-                        contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text("No feed items found.", color = TextMuted)
-                    Text("Tap Refresh above to sync active streams.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                }
-            }
-        } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth()
-            ) {
-                items(filteredItems) { item ->
-                    FeedCard(
-                        item = item,
-                        onRead = {
-                            viewModel.markItemReadState(item.id, true)
-                            selectedItemForReading = item
-                        },
-                        onToggleSave = {
-                            viewModel.toggleItemSavedState(item.id, !item.isSaved)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("All" to 0, "Mesh" to 1).forEach { (label, mode) ->
+                        val selected = filterMode == mode
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (selected) AccentGreen else PrimaryBlack)
+                                .clickable { filterMode = mode }
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                        ) {
+                            Text(label, color = if (selected) PrimaryBlack else TextLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
-                    )
+                    }
+                }
+
+                IconButton(onClick = { viewModel.refreshFeeds() }, enabled = !isRefreshing) {
+                    if (isRefreshing) CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
+                    else Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = AccentGreen)
                 }
             }
+
+            if (unifiedItems.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            } else {
+                // Full-screen vertical pager (TikTok-style)
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(unifiedItems.size) { index ->
+                        val item = unifiedItems[index]
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillParentMaxHeight()
+                                .background(PrimaryBlack)
+                        ) {
+                            when (item) {
+                                is UnifiedItem.Feed -> FullScreenFeedCard(
+                                    item = item.item,
+                                    onShareToMesh = { showShareDialog = item.item }
+                                )
+                                is UnifiedItem.Mesh -> FullScreenMeshCard(post = item.post)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Compose Mesh Post FAB
+        FloatingActionButton(
+            onClick = { showComposeDialog = true },
+            containerColor = AccentGreen,
+            contentColor = PrimaryBlack,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(24.dp)
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
         }
     }
 
-    // Modal In-App Reader Overlay
-    selectedItemForReading?.let { item ->
-        ArticleReaderOverlay(
-            item = item,
-            onClose = { selectedItemForReading = null }
+    // Compose Mesh Post Dialog
+    if (showComposeDialog) {
+        var postContent by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showComposeDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
+            text = {
+                OutlinedTextField(
+                    value = postContent,
+                    onValueChange = { postContent = it },
+                    placeholder = { Text("What's on your mind?") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(120.dp)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.composeAndBroadcastPost(postContent); showComposeDialog = false },
+                    enabled = postContent.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showComposeDialog = false }) { Text("Cancel", color = TextMuted) }
+            }
+        )
+    }
+
+    // Share to Mesh Dialog
+    showShareDialog?.let { feedItem ->
+        AlertDialog(
+            onDismissRequest = { showShareDialog = null },
+            containerColor = SurfaceDark,
+            title = { Text("Share to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Share this content to your decentralized mesh peers?", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(feedItem.title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(feedItem.author ?: "", color = AccentGreen, style = MaterialTheme.typography.labelSmall)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val shareText = "\uD83D\uDD17 ${feedItem.title}\n${feedItem.url ?: ""}\n— via NoSlop"
+                        viewModel.composeAndBroadcastPost(shareText)
+                        showShareDialog = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) { Text("Share", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShareDialog = null }) { Text("Cancel", color = TextMuted) }
+            }
         )
     }
 }
 
+fun resolveMediaUrl(mediaUrl: String?): String? {
+    if (mediaUrl == null) return null
+    if (mediaUrl.startsWith("noslop://")) {
+        val uri = mediaUrl.substringAfter("noslop://")
+        val parts = uri.split("/")
+        if (parts.size >= 2) {
+            val onion = parts[0]
+            val mediaId = parts[1]
+            return com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, mediaId)
+        }
+    }
+    return mediaUrl
+}
+
+@OptIn(androidx.annotation.OptInMarker::class)
+@androidx.media3.common.util.UnstableApi
 @Composable
-fun FeedCard(
-    item: FeedItem,
-    onRead: () -> Unit,
-    onToggleSave: () -> Unit
-) {
-    Card(
+fun VideoPlayer(url: String) {
+    val context = LocalContext.current
+    val exoPlayer = remember {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            exoPlayer.release()
+        }
+    }
+
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { ctx ->
+            androidx.media3.ui.PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = true
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@OptIn(androidx.annotation.OptInMarker::class)
+@androidx.media3.common.util.UnstableApi
+@Composable
+fun AudioPlayer(url: String) {
+    val context = LocalContext.current
+    var isPlaying by remember { mutableStateOf(false) }
+    var progress by remember { mutableStateOf(0f) }
+
+    val exoPlayer = remember {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+            setMediaItem(mediaItem)
+            prepare()
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+        }
+    }
+
+    DisposableEffect(Unit) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
+    }
+
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            val duration = exoPlayer.duration
+            if (duration > 0) {
+                progress = exoPlayer.currentPosition.toFloat() / duration
+            }
+            kotlinx.coroutines.delay(200)
+        }
+    }
+
+    Column(
         modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onRead() },
-        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, if (item.isRead) BorderSubtle else AccentGreen.copy(alpha = 0.5f))
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+        Icon(
+            imageVector = if (isPlaying) Icons.Default.PlayArrow else Icons.Default.PlayArrow, // Fallback icons
+            contentDescription = null,
+            tint = AccentGreen,
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Waveform preview
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(100.dp)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val waveBars = 35
+            for (i in 0 until waveBars) {
+                val heightPercent = remember(i) { (20..95).random() / 100f }
+                val isPlayed = progress > (i.toFloat() / waveBars)
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .fillMaxHeight(heightPercent)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (isPlayed) AccentGreen else BorderSubtle)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = {
+                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+            },
+            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+        ) {
+            Text(if (isPlaying) "Pause Audio" else "Play Audio", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun FullScreenImage(url: String) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        coil.compose.AsyncImage(
+            model = url,
+            contentDescription = null,
+            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+        )
+    }
+}
+
+fun paginateText(text: String, chunkSize: Int = 500): List<String> {
+    if (text.length <= chunkSize) return listOf(text)
+    val pages = mutableListOf<String>()
+    var start = 0
+    while (start < text.length) {
+        var end = (start + chunkSize).coerceAtMost(text.length)
+        if (end < text.length) {
+            val nextSpace = text.indexOf(' ', end - 40)
+            if (nextSpace in (end - 40)..end) {
+                end = nextSpace
+            }
+        }
+        pages.add(text.substring(start, end).trim())
+        start = end
+    }
+    return pages
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun PaginatedTextReader(text: String) {
+    val pages = remember(text) { paginateText(text) }
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f)
+        ) { pageIndex ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = item.title,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
+                    text = pages[pageIndex],
+                    style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp),
                     color = TextLight,
-                    modifier = Modifier.weight(1f)
+                    fontWeight = FontWeight.Medium
                 )
+            }
+        }
 
-                IconButton(onClick = onToggleSave) {
-                    Icon(
-                        imageVector = if (item.isSaved) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Save Item",
-                        tint = if (item.isSaved) AccentGreen else TextMuted
+        if (pages.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 24.dp),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                for (i in 0 until pages.size) {
+                    val active = pagerState.currentPage == i
+                    Box(
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .size(if (active) 8.dp else 6.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (active) AccentGreen else BorderSubtle)
                     )
                 }
-            }
-
-            Text(
-                text = item.excerpt ?: "No preview content available.",
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall,
-                color = TextLight.copy(alpha = 0.8f),
-                modifier = Modifier.padding(vertical = 8.dp)
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = item.author ?: "Unknown Source",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AccentGreen
-                )
-
-                Text(
-                    text = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()).format(Date(item.publishedAt)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted
-                )
             }
         }
     }
 }
 
 @Composable
-fun ArticleReaderOverlay(
-    item: FeedItem,
-    onClose: () -> Unit
-) {
+fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
+    val content = item.fullContent ?: item.excerpt ?: "No content available."
+    val resolvedUrl = resolveMediaUrl(item.mediaUrl)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(PrimaryBlack.copy(alpha = 0.95f))
-            .clickable { /* Block clicks */ }
-            .padding(16.dp)
+            .background(PrimaryBlack)
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = AccentGreen)
+        // 1. Media or paginated text content
+        if (resolvedUrl != null) {
+            when {
+                item.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
+                    VideoPlayer(url = resolvedUrl)
                 }
+                item.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
+                    AudioPlayer(url = resolvedUrl)
+                }
+                item.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
+                    FullScreenImage(url = resolvedUrl)
+                }
+                else -> {
+                    PaginatedTextReader(text = content)
+                }
+            }
+        } else {
+            PaginatedTextReader(text = content)
+        }
+
+        // 2. Overlaid description and user badge
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
+                    )
+                )
+                .padding(horizontal = 24.dp, vertical = 32.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(AccentGreen.copy(alpha = 0.15f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("RSS", color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(item.author ?: "Unknown Source", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "IN-APP READER",
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 2.sp),
-                    color = TextMuted
+                    text = item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = TextLight,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.width(48.dp)) // Equalizer space
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = SimpleDateFormat("MMM dd, yyyy · HH:mm", Locale.getDefault()).format(Date(item.publishedAt)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted
+                )
             }
+        }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                item {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TextLight
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "By ${item.author ?: "Unknown"}",
-                            color = AccentGreen,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(item.publishedAt)),
-                            color = TextMuted,
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Text(
-                        text = item.fullContent ?: item.excerpt ?: "No readable body text parsed.",
-                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 24.sp),
-                        color = TextLight
-                    )
-
-                    Spacer(modifier = Modifier.height(48.dp))
-                }
-            }
+        // 3. Share to Mesh floating button overlay
+        IconButton(
+            onClick = onShareToMesh,
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 16.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceDark.copy(alpha = 0.7f))
+                .size(50.dp)
+        ) {
+            Icon(Icons.Default.Share, contentDescription = "Share to Mesh", tint = AccentGreen, modifier = Modifier.size(24.dp))
         }
     }
 }
 
-// ==========================================
-// MESH SOCIAL TAB
-// ==========================================
 @Composable
-fun MeshTab(viewModel: NoSlopViewModel) {
-    val posts by viewModel.meshPosts.collectAsState()
-    var postContent by remember { mutableStateOf("") }
+fun FullScreenMeshCard(post: MeshPost) {
+    val resolvedUrl = resolveMediaUrl(post.mediaUrl)
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text(
-            text = "HAI-Net Mesh Gossip",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = TextLight
-        )
-
-        Text(
-            text = "Decentralized community feed. All items are verified cryptographically via peer signatures.",
-            style = MaterialTheme.typography.bodySmall,
-            color = TextMuted,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .background(SurfaceDark)
-                .padding(12.dp)
-        ) {
-            OutlinedTextField(
-                value = postContent,
-                onValueChange = { postContent = it },
-                placeholder = { Text("What's on your mind? Broadcast to the local mesh...") },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentGreen,
-                    unfocusedBorderColor = BorderSubtle,
-                    focusedTextColor = TextLight,
-                    unfocusedTextColor = TextLight
-                ),
-                modifier = Modifier.fillMaxWidth().height(80.dp)
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Button(
-                onClick = {
-                    viewModel.composeAndBroadcastPost(postContent)
-                    postContent = ""
-                },
-                enabled = postContent.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentGreen,
-                    contentColor = PrimaryBlack
-                ),
-                shape = RoundedCornerShape(4.dp),
-                modifier = Modifier.align(Alignment.End)
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Sign and Gossip", modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Sign & Gossip", fontWeight = FontWeight.Bold)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (posts.isEmpty()) {
-            Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("No gossip posts seen yet. Compose the first!", color = TextMuted)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PrimaryBlack)
+    ) {
+        // 1. Media or paginated text content
+        if (resolvedUrl != null) {
+            when {
+                post.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
+                    VideoPlayer(url = resolvedUrl)
+                }
+                post.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
+                    AudioPlayer(url = resolvedUrl)
+                }
+                post.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
+                    FullScreenImage(url = resolvedUrl)
+                }
+                else -> {
+                    PaginatedTextReader(text = post.content)
+                }
             }
         } else {
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth()
-            ) {
-                items(posts) { post ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                        border = BorderStroke(1.dp, BorderSubtle)
+            PaginatedTextReader(text = post.content)
+        }
+
+        // 2. Overlaid author details and timestamp
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
+                    )
+                )
+                .padding(horizontal = 24.dp, vertical = 32.dp)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF6C3BF5).copy(alpha = 0.2f))
+                            .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "${post.authorHandle}.${post.authorTripcode}",
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentGreen
-                                    )
-                                )
-
-                                Text(
-                                    text = "v3 Sig [✓ verified]",
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = TextMuted
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = post.content,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextLight
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "Id: ${post.id.take(8)}...",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = TextMuted
-                                )
-
-                                Text(
-                                    text = "Hops: ${post.gossipCount}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = AccentGreen
-                                )
-                            }
-                        }
+                        Text("MESH", color = Color(0xFFB388FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "${post.authorHandle}.${post.authorTripcode}",
+                        color = AccentGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = SimpleDateFormat("MMM dd · HH:mm", Locale.getDefault()).format(Date(post.timestamp)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted
+                    )
+                    Text(
+                        text = "v3 Sig [✓] · Hops: ${post.gossipCount}",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = TextMuted
+                    )
                 }
             }
         }
@@ -545,13 +705,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
     val activeChatMessages by viewModel.chatMessages.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
-
-    var showPairDialog by remember { mutableStateOf(false) }
-
-    // State form Pair dialog
-    var peerHandle by remember { mutableStateOf("") }
-    var peerPubB64 by remember { mutableStateOf("") }
-    var peerOnion by remember { mutableStateOf("") }
 
     if (selectedPeerPub != null) {
         // Individual thread screen
@@ -579,10 +732,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     fontWeight = FontWeight.Bold,
                     color = TextLight
                 )
-
-                IconButton(onClick = { showPairDialog = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Companion Peer", tint = AccentGreen)
-                }
             }
 
             Text(
@@ -602,12 +751,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("No companion peers registered.", color = TextMuted)
                         Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = { showPairDialog = true },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
-                        ) {
-                            Text("Pair First Companion", color = PrimaryBlack, fontWeight = FontWeight.Bold)
-                        }
+                        Text("Go to your Profile to scan a friend's QR code.", color = AccentGreen, fontWeight = FontWeight.Bold)
                     }
                 }
             } else {
@@ -673,73 +817,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         }
     }
 
-    if (showPairDialog) {
-        AlertDialog(
-            onDismissRequest = { showPairDialog = false },
-            containerColor = SurfaceDark,
-            title = { Text("Pair Companion Peak", color = TextLight, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = peerHandle,
-                        onValueChange = { peerHandle = it },
-                        label = { Text("Peer Handle") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen,
-                            focusedLabelColor = AccentGreen,
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight
-                        )
-                    )
-
-                    OutlinedTextField(
-                        value = peerPubB64,
-                        onValueChange = { peerPubB64 = it },
-                        label = { Text("Peer Public Key Base64") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen,
-                            focusedLabelColor = AccentGreen,
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight
-                        )
-                    )
-
-                    OutlinedTextField(
-                        value = peerOnion,
-                        onValueChange = { peerOnion = it },
-                        label = { Text("DMs Onion Address") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen,
-                            focusedLabelColor = AccentGreen,
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (peerHandle.isNotBlank() && peerPubB64.isNotBlank()) {
-                            viewModel.addPeer(peerHandle, peerPubB64, peerOnion, autoTrust = true)
-                            showPairDialog = false
-                            // Clear inputs
-                            peerHandle = ""
-                            peerPubB64 = ""
-                            peerOnion = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) {
-                    Text("Register & Handshake", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPairDialog = false }) {
-                    Text("Cancel", color = TextMuted)
-                }
-            }
-        )
     }
 }
 
@@ -928,13 +1005,21 @@ fun ProfileTab(viewModel: NoSlopViewModel) {
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text("LOCAL ONION CLIENT SERVICE", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 12.sp)
+                Text("MESH NODE IDENTITY", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 12.sp)
+                val rawOnion = localKeys?.onionAddress ?: "Not derived"
+                val maskedOnion = if (rawOnion.length > 16) rawOnion.take(8) + "••••••" + rawOnion.takeLast(6) else rawOnion
                 Text(
-                    text = localKeys?.onionAddress ?: "Not derived",
+                    text = maskedOnion,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = TextLight.copy(alpha = 0.9f),
-                    modifier = Modifier.padding(top = 4.dp, bottom = 16.dp)
+                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+                )
+                Text(
+                    text = "⚠ Onion address hidden for security. Share via QR only.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextMuted,
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
 
                 Text("RAW SIGNING PUBLIC KEY", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 12.sp)
@@ -1041,7 +1126,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "TOR / ORBOT ROUTING STATUS",
+                        text = "TOR ROUTING STATUS",
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold
@@ -1064,7 +1149,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = if (torState.first) "Active Tor Proxy" else "Offline Proxy",
+                                    text = if (torState.first) "Active Tor Proxy" else "Tor Disconnected",
                                     fontWeight = FontWeight.Bold,
                                     color = TextLight
                                 )
@@ -1114,20 +1199,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+            
 
-            Button(
-                onClick = { viewModel.startOrbot() },
-                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = TextLight),
-                border = BorderStroke(1.dp, BorderSubtle),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Open Orbot Application", fontWeight = FontWeight.Bold)
-            }
-            
-            Spacer(modifier = Modifier.height(16.dp))
-            
             Button(
                 onClick = { selectedSettingsScreen = 2 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),

@@ -111,6 +111,10 @@ dependencies {
     // --- Image loading ---
     implementation(libs.coil.compose)
 
+    // --- Media (ExoPlayer) ---
+    implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-ui:1.3.1")
+
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
 

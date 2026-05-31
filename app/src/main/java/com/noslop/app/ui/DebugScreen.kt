@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,12 +36,12 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     
     // Polling for live states
     var isListening by remember { mutableStateOf(viewModel.isMeshListening()) }
-    var recentLogs by remember { mutableStateOf(Logger.getRecentLogs(50)) }
+    var recentLogs by remember { mutableStateOf(Logger.getRecentLogs(200)) }
 
     LaunchedEffect(Unit) {
         while (true) {
             isListening = viewModel.isMeshListening()
-            recentLogs = Logger.getLogs().takeLast(50).map { it.toString() }
+            recentLogs = Logger.getLogs().takeLast(200).map { it.toString() }
             delay(1000)
         }
     }
@@ -138,7 +139,20 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             
             // Logs
-            Text("Last 50 Logs", fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Last 200 Logs", fontWeight = FontWeight.Bold)
+                IconButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(recentLogs.joinToString("\n")))
+                    }
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Logs", tint = androidx.compose.ui.graphics.Color(0xFF4CAF50))
+                }
+            }
             LazyColumn(
                 modifier = Modifier.weight(0.5f).fillMaxWidth().background(MaterialTheme.colorScheme.onSurface.copy(alpha=0.05f))
             ) {

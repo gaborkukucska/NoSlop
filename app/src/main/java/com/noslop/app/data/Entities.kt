@@ -48,6 +48,8 @@ data class FeedItem(
     val isRead: Boolean = false,
     val isSaved: Boolean = false,
     val fullContent: String? = null,
+    val mediaUrl: String? = null,
+    val mediaType: String? = null, // "video", "audio", "image"
     val createdAt: Long = System.currentTimeMillis()
 )
 
@@ -71,6 +73,8 @@ data class MeshPost(
     val content: String,
     val timestamp: Long,
     val signature: String,
+    val mediaUrl: String? = null,
+    val mediaType: String? = null,
     val gossipCount: Int = 1
 )
 

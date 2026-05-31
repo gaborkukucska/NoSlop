@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 import java.util.UUID
 
-class NoSlopRepository(private val context: Context, private val db: NoSlopDatabase) {
+class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val TAG = "REPOSITORY"
@@ -101,7 +101,11 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
     }
 
     // --- Social Mesh & Direct Messages Routing ---
-    suspend fun composeAndBroadcastPost(content: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun composeAndBroadcastPost(
+        content: String,
+        mediaUrl: String? = null,
+        mediaType: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
@@ -118,7 +122,9 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
             originNode = myKeys.onionAddress,
             content = content,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            mediaUrl = mediaUrl,
+            mediaType = mediaType
         )
 
         val gson = com.google.gson.Gson()
@@ -140,7 +146,9 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
             authorTripcode = myKeys.tripcode,
             content = content,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            mediaUrl = mediaUrl,
+            mediaType = mediaType
         )
 
         postDao.insertPost(localPost)
@@ -240,7 +248,9 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
                         authorTripcode = tripcode,
                         content = postPay.content,
                         timestamp = postPay.timestamp,
-                        signature = postPay.signature ?: ""
+                        signature = postPay.signature ?: "",
+                        mediaUrl = postPay.mediaUrl,
+                        mediaType = postPay.mediaType
                     )
                     postDao.insertPost(post)
                     stored++
@@ -270,7 +280,9 @@ class NoSlopRepository(private val context: Context, private val db: NoSlopDatab
                     authorTripcode = tripcode,
                     content = postPay.content,
                     timestamp = postPay.timestamp,
-                    signature = postPay.signature ?: ""
+                    signature = postPay.signature ?: "",
+                    mediaUrl = postPay.mediaUrl,
+                    mediaType = postPay.mediaType
                 )
                 postDao.insertPost(meshPost)
                 Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")

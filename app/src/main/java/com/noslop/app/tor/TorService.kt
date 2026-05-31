@@ -2,7 +2,6 @@ package com.noslop.app.tor
 
 import android.content.Context
 import com.noslop.app.debug.Logger
-import info.guardianproject.netcipher.proxy.OrbotHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,17 +46,13 @@ object TorService {
      * be running on 9050.
      */
     fun startTor(context: Context) {
-        Logger.info(TAG, "Starting embedded Tor daemon via OrbotHelper...")
+        Logger.info(TAG, "Starting embedded Tor daemon via native Intent...")
         _torState.value = TorState.STARTING
 
         try {
-            val oh = OrbotHelper.get(context)
-
-            // init() starts the embedded Tor binary bundled by tor-android.
-            // It binds to the OrbotService running in the :tor process declared
-            // in AndroidManifest.xml. If Orbot (external) is also installed,
-            // OrbotHelper prefers the external daemon — which is fine, same port.
-            oh.init()
+            val intent = android.content.Intent(context, org.torproject.android.service.TorService::class.java)
+            intent.action = "org.torproject.android.intent.action.START"
+            context.startService(intent)
 
             // Poll the SOCKS5 port until ready, up to 90 seconds.
             // The embedded Tor binary typically bootstraps in 15-45 seconds on
@@ -79,7 +74,7 @@ object TorService {
                 }
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "OrbotHelper.init() threw: ${e.message}")
+            Logger.error(TAG, "Failed to start TorService intent: ${e.message}")
             _torState.value = TorState.FAILED
         }
     }
