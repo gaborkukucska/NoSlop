@@ -232,7 +232,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         Logger.info("VM", "Requesting external Orbot start as fallback")
         info.guardianproject.netcipher.proxy.OrbotHelper
             .get(getApplication())
-            .requestOrbotStart(getApplication())
+            .requestStart(getApplication())
     }
 
     fun refreshTorStatus() {

@@ -12,3 +12,11 @@
 
 # Keep source file line numbers for crash debugging
 -keepattributes SourceFile,LineNumberTable
+
+# tor-android + jtorctl + netcipher — required for embedded Tor daemon
+-keep class net.freehaven.tor.control.** { *; }
+-keep class org.torproject.android.** { *; }
+-keep class info.guardianproject.netcipher.** { *; }
+-dontwarn net.freehaven.tor.control.**
+-dontwarn org.torproject.android.**
+-dontwarn info.guardianproject.**

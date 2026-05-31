@@ -117,7 +117,7 @@ dependencies {
     // --- Tor ---
     implementation("info.guardianproject:tor-android:0.4.8.16")
     implementation("info.guardianproject:jtorctl:0.4.5.7")
-    implementation("info.guardianproject:netcipher:2.1.0")
+    implementation("info.guardianproject.netcipher:netcipher:2.1.0")
 
     // --- CameraX / Accompanist permissions for QR code / scanning support if needed ---
     implementation(libs.androidx.camera.core)

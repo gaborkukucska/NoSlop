@@ -159,24 +159,49 @@ object TorService {
         withContext(Dispatchers.IO) {
             Logger.info(TAG, "Registering ephemeral Tor hidden service on port 9999...")
             try {
-                val controlSocket = Socket(PROXY_HOST, 9051) // Tor control port
-                val conn = net.freehaven.tor.control.TorControlConnection(controlSocket)
-                conn.authenticate(byteArrayOf()) // no password for embedded daemon
+                // Raw TCP socket — bypasses OkHttp and network_security_config.
+                // Port 9051 is Tor's control port (localhost only, not a network call).
+                val controlSocket = Socket(PROXY_HOST, 9051)
+                
+                // Workaround to access protected sendAndWaitForResponse
+                val conn = object : net.freehaven.tor.control.TorControlConnection(controlSocket) {
+                    @Throws(Exception::class)
+                    fun sendRaw(cmd: String, expectedResp: String): List<net.freehaven.tor.control.TorControlConnection.ReplyLine> {
+                        return this.sendAndWaitForResponse(cmd, expectedResp)
+                    }
+                }
+                conn.authenticate(byteArrayOf())
 
-                // ADD_ONION NEW:ED25519-V3 Port=9999,127.0.0.1:9999
-                // Tor generates a new Ed25519 keypair and returns the .onion address.
-                val response = conn.addOnion(
-                    "NEW:ED25519-V3",
-                    mapOf("9999" to "127.0.0.1:9999"),
-                    null // no flags
+                // Raw ADD_ONION command — works across all jtorctl versions
+                // Response lines look like:
+                //   250-ServiceID=<base32hostname>
+                //   250 OK
+                val responseLines = conn.sendRaw(
+                    "ADD_ONION NEW:ED25519-V3 Port=9999,127.0.0.1:9999\r\n",
+                    "250"
                 )
-                val onionAddress = response["ServiceID"]?.let { "$it.onion" }
-                if (onionAddress != null) {
+
+                val serviceId = responseLines.asSequence().mapNotNull { lineObj ->
+                    try {
+                        val msgField = lineObj.javaClass.getDeclaredField("msg")
+                        msgField.isAccessible = true
+                        msgField.get(lineObj) as? String
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                .firstOrNull { it.startsWith("ServiceID=") }
+                ?.substringAfter("ServiceID=")
+                ?.trim()
+
+                if (serviceId != null) {
+                    val onionAddress = "$serviceId.onion"
                     Logger.info(TAG, "Hidden service registered: $onionAddress")
                     onAddressReady(onionAddress)
                 } else {
-                    Logger.error(TAG, "ADD_ONION response missing ServiceID: $response")
+                    Logger.error(TAG, "ADD_ONION response missing ServiceID. Raw response: $responseLines")
                 }
+
                 controlSocket.close()
             } catch (e: Exception) {
                 Logger.error(TAG, "Hidden service registration failed: ${e.message}")

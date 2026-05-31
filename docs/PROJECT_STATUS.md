@@ -35,9 +35,11 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 19. **Tor hidden service auto-registration**: Onion address is now automatically requested via `jtorctl` (ADD_ONION) on Tor daemon start, providing a listening endpoint for peer connections.
 20. **Debug screen for two-device test visibility**: Created a unified Debug/Test screen to monitor Tor routing, listener state, active peer lists, and recent diagnostic logs cleanly.
 21. **DebugScreen type bugs fixed**: Fixed state flows and collection mappings in `DebugScreen` to unblock the final two-device tests.
+22. **Proguard rules hardened**: Added explicit `-keep` and `-dontwarn` rules for `tor-android`, `jtorctl`, and `netcipher` to prevent runtime `ClassNotFoundException` in release builds.
+23. **registerHiddenService() raw implementation**: Refactored `TorService.registerHiddenService()` to use raw `sendAndWaitForResponse` and reflection fallback, making it version-safe across `jtorctl` variations.
 
 ## Pending Implementations & Limitations
-- **Two-device real-device test** — execute `TEST_PROTOCOL.md` to validate Tor service connections, peer QR handshakes, and actual gossip/DM packet routing fully.
+- **Two-device real-device test** — execute `TEST_PROTOCOL.md` (build is ready) to validate Tor service connections, peer QR handshakes, and actual gossip/DM packet routing fully.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
