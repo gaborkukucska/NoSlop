@@ -98,7 +98,7 @@ object MediaProxyService {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(SOCKS_HOST, SOCKS_PORT))
             torSocket = Socket(proxy)
             torSocket.soTimeout = 30000 
-            torSocket.connect(InetSocketAddress(targetOnion, 9999), 15000)
+            torSocket.connect(InetSocketAddress.createUnresolved(targetOnion, 9999), 15000)
 
             val reqPayload = """{"type":"MEDIA_REQUEST","mediaId":"$mediaId"}"""
             val reqBytes = reqPayload.toByteArray(Charsets.UTF_8)

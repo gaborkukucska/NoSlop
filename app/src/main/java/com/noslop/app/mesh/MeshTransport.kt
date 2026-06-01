@@ -128,7 +128,7 @@ class MeshTransport(
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
                 socket = Socket(proxy)
                 // Onion connections can take time to establish (v3 circuits)
-                socket.connect(InetSocketAddress(onionAddress, port), 30000) 
+                socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000) 
                 val writer = PrintWriter(socket.getOutputStream(), true)
                 writer.println(packet.toJson())
                 Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")

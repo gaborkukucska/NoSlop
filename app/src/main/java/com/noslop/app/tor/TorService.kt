@@ -282,11 +282,11 @@ object TorService {
                     "NEW:ED25519-V3"
                 }
 
-                // Executing ADD_ONION
-                // Standard syntax: ADD_ONION [KeyParam] Port=VirtPort,TargetPort
-                val cmd = "ADD_ONION $keyParam Port=9999,127.0.0.1:9999"
+                // Standard syntax: ADD_ONION [KeyParam] Port=VirtPort[,Target]
+                // Omitting Target defaults to 127.0.0.1:VirtPort
+                val cmd = "ADD_ONION $keyParam Port=9999"
                 
-                Logger.info(TAG, "Executing HS registration: ADD_ONION *** Port=9999,127.0.0.1:9999")
+                Logger.info(TAG, "Executing HS registration: ADD_ONION *** Port=9999")
                 
                 val responseLines = conn.sendRaw(cmd, "250")
                 Logger.debug(TAG, "ADD_ONION response: ${responseLines.joinToString { it.toString() }}")

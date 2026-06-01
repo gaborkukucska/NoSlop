@@ -125,7 +125,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.3.1")
 
     // --- Bouncy Castle ---
-    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")
 
     // --- Tor ---
     implementation("info.guardianproject:tor-android:0.4.8.16")
