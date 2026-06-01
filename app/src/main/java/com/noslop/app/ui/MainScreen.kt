@@ -703,6 +703,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
     val activeChatMessages by viewModel.chatMessages.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
+    val handle by viewModel.localHandle.collectAsState()
+
+    var showShareSheet by remember { mutableStateOf(false) }
+    var showScanScreen by remember { mutableStateOf(false) }
 
     if (selectedPeerPub != null) {
         // Individual thread screen
@@ -717,7 +721,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             )
         }
     } else {
-        // Conversation List view
+        // Conversation/Contacts List view
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -725,91 +729,200 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Secure Direct Messages",
+                    text = "DMs & Contacts",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = TextLight
                 )
             }
 
-            Text(
-                text = "End-to-End Encrypted direct communication. Handshake with contacts by pairing public keys over Tor SOCKS5.",
-                style = MaterialTheme.typography.bodySmall,
-                color = TextMuted,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Quick Actions Card
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                border = BorderStroke(1.dp, BorderSubtle)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { showShareSheet = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                        border = BorderStroke(1.dp, AccentGreen),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("My ID", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = { showScanScreen = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Peer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
 
             TorWarningPanel(viewModel)
 
-            if (peers.isEmpty()) {
-                Box(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("No companion peers registered.", color = TextMuted)
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Text("Go to your Profile to scan a friend's QR code.", color = AccentGreen, fontWeight = FontWeight.Bold)
+            val pendingRequests = peers.filter { !it.isTrusted }
+            val contacts = peers.filter { it.isTrusted }
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            ) {
+                if (pendingRequests.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "PENDING REQUESTS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(pendingRequests) { peer ->
+                        PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
                     }
                 }
-            } else {
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.weight(1f).fillMaxWidth()
-                ) {
-                    items(peers) { peer ->
-                        val lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.selectChatPeer(peer.publicKeyB64) },
-                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                            border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.5f) else BorderSubtle)
+
+                if (contacts.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "MY CONTACTS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    items(contacts) { peer ->
+                        PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
+                    }
+                }
+
+                if (peers.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillParentMaxHeight(0.7f).fillMaxWidth(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                                    Icon(Icons.Default.Lock, contentDescription = "E2EE", tint = AccentGreen, modifier = Modifier.size(20.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Column {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = "${peer.handle}.${peer.tripcode}",
-                                                fontWeight = FontWeight.Bold,
-                                                color = TextLight,
-                                                fontFamily = FontFamily.Monospace
-                                            )
-                                            if (peer.isTrusted) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(4.dp))
-                                                        .background(AccentGreen)
-                                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                                ) {
-                                                    Text("TRUSTED", fontSize = 8.sp, color = PrimaryBlack, fontWeight = FontWeight.Bold)
-                                                }
-                                            }
-                                        }
-
-                                        Text(
-                                            text = lastMsg?.ciphertext?.take(36)?.plus("...") ?: "Open E2EE thread",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            color = TextMuted,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
-                                }
-
-                                Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("No contacts yet.", color = TextMuted)
+                                Text("Scan a friend's QR card to connect.", color = AccentGreen, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Render dialogs
+        if (showShareSheet && localKeys != null) {
+            QRShareSheet(
+                handle = handle ?: "anonymous",
+                localKeys = localKeys!!,
+                onDismiss = { showShareSheet = false }
+            )
+        }
+
+        if (showScanScreen) {
+            QRScanScreen(
+                onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
+                    viewModel.addPeer(
+                        handle = scannedHandle,
+                        publicKeyB64 = pubKey,
+                        onionAddress = onion,
+                        encPublicKeyB64 = encPub,
+                        autoTrust = false
+                    )
+                },
+                onDismiss = { showScanScreen = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { viewModel.selectChatPeer(peer.publicKeyB64) },
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.3f) else DestructiveRed.copy(alpha = 0.3f))
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Avatar Placeholder
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(PrimaryBlack),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = peer.handle.take(1).uppercase(),
+                    color = if (peer.isTrusted) AccentGreen else TextMuted,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${peer.handle}.${peer.tripcode}",
+                        fontWeight = FontWeight.Bold,
+                        color = TextLight,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    )
+                    if (peer.isTrusted) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted", tint = AccentGreen, modifier = Modifier.size(14.dp))
+                    }
+                }
+
+                Text(
+                    text = lastMsg?.ciphertext?.take(32)?.plus("...") ?: "No messages yet",
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = TextMuted,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            // Actions
+            Row {
+                if (!peer.isTrusted) {
+                    IconButton(onClick = { viewModel.togglePeerTrust(peer) }) {
+                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer", tint = AccentGreen)
+                    }
+                }
+                IconButton(onClick = { viewModel.removePeer(peer.publicKeyB64) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Remove Peer", tint = TextMuted)
                 }
             }
         }

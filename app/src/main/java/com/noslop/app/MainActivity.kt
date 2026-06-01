@@ -6,7 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
 import com.noslop.app.ui.MainScreen
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val factory = NoSlopViewModel.Factory(application)
-        viewModel = androidx.lifecycle.ViewModelProvider(this, factory)[NoSlopViewModel::class.java]
+        viewModel = ViewModelProvider(this, factory).get(NoSlopViewModel::class.java)
 
         setContent {
             MyApplicationTheme {
@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::viewModel.isInitialized) {
+        if (this::viewModel.isInitialized) {
             viewModel.refreshTorStatus()
         }
     }

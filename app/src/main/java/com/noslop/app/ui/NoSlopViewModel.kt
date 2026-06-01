@@ -14,7 +14,14 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.BuiltInSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.tor.TorService
-import kotlinx.coroutines.flow.*
+import com.noslop.app.tor.TorState
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -29,11 +36,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     // --- State Observables ---
-    private val _localKeys = MutableStateFlow<CryptoService.IdentityKeys?>(null)
-    val localKeys: StateFlow<CryptoService.IdentityKeys?> = _localKeys.asStateFlow()
+    // Reactive identity: Observes database for any changes to local identity/onion address
+    val localKeys: StateFlow<CryptoService.IdentityKeys?> = repository.identityUpdateFlow
+        .flatMapLatest {
+            kotlinx.coroutines.flow.flow {
+                emit(repository.getLocalIdentity())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    private val _localHandle = MutableStateFlow("Anonymous")
-    val localHandle: StateFlow<String> = _localHandle.asStateFlow()
+    val localHandle: StateFlow<String> = localKeys
+        .flatMapLatest {
+            kotlinx.coroutines.flow.flow {
+                emit(repository.getLocalHandle())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Anonymous")
 
     private val _isOnboardingComplete = MutableStateFlow(false)
     val isOnboardingComplete: StateFlow<Boolean> = _isOnboardingComplete.asStateFlow()
@@ -78,28 +96,33 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        // Load initial states
-        loadIdentityState()
-        refreshTorStatus()
+        // Trigger initial identity load
+        viewModelScope.launch {
+            repository.updateOnionAddress(repository.getLocalIdentity()?.onionAddress ?: "")
+        }
+
+        // Load initial onboarding state
+        viewModelScope.launch {
+            _isOnboardingComplete.value = repository.isOnboardingComplete()
+        }
+
+        // Automatically refresh Tor status when daemon state transitions to READY or PROXY_READY
+        viewModelScope.launch {
+            TorService.torState.collect { state ->
+                if (state == TorState.READY || state == TorState.PROXY_READY) {
+                    refreshTorStatus()
+                }
+            }
+        }
     }
 
     // --- Actions ---
-
-    private fun loadIdentityState() {
-        viewModelScope.launch {
-            _localKeys.value = repository.getLocalIdentity()
-            _localHandle.value = repository.getLocalHandle()
-            _isOnboardingComplete.value = repository.isOnboardingComplete()
-        }
-    }
 
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>) {
         viewModelScope.launch {
             // 1. Generate identity cryptographically (Ed25519 & ECDH)
             val keys = CryptoService.generateIdentity(handle)
             repository.saveLocalIdentity(handle, keys)
-            _localKeys.value = keys
-            _localHandle.value = handle
 
             // 2. Save chosen feed sources from SourceLibrary
             for (bs in selectedSources) {
@@ -214,6 +237,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun togglePeerTrust(peer: Peer) {
         viewModelScope.launch {
             repository.togglePeerTrust(peer)
+        }
+    }
+
+    fun removePeer(peerPub: String) {
+        viewModelScope.launch {
+            repository.deletePeer(peerPub)
         }
     }
 

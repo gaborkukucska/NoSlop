@@ -36,7 +36,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
         return // Hidden entirely when healthy
     }
 
-    if (daemonState == TorState.STARTING) {
+    if (daemonState == TorState.STARTING || daemonState == TorState.PROXY_READY) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -57,11 +57,19 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Starting Tor...",
+                    text = if (daemonState == TorState.STARTING) "Starting Tor..." else "Building Circuits...",
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 16.sp
                 )
+                if (daemonState == TorState.PROXY_READY) {
+                    Text(
+                        text = "Proxy ready, waiting for consensus.",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
         return

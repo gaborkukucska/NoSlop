@@ -276,6 +276,43 @@ object CryptoService {
         }
     }
 
+    /**
+     * Extracts the raw 32-byte Ed25519 seed from a PKCS#8 encoded private key.
+     * Required by Tor's ADD_ONION ED25519-V3 command.
+     * Uses robust ASN.1 parsing via Bouncy Castle.
+     */
+    fun getRawEd25519Seed(privKeyB64: String?): String? {
+        if (privKeyB64 == null) return null
+        return try {
+            val bytes = Base64.decode(privKeyB64, Base64.DEFAULT)
+            
+            // 1. Parse PrivateKeyInfo (PKCS#8 structure)
+            val pki = org.bouncycastle.asn1.pkcs.PrivateKeyInfo.getInstance(bytes)
+            
+            // 2. The octet string inside PrivateKeyInfo contains the actual private key bytes.
+            // For Ed25519, these bytes are themselves an ASN.1 OCTET STRING containing the 32-byte seed.
+            val innerOctets = org.bouncycastle.asn1.ASN1OctetString.getInstance(pki.parsePrivateKey())
+            val seed = innerOctets.octets
+            
+            if (seed.size == 32) {
+                Base64.encodeToString(seed, Base64.NO_WRAP)
+            } else {
+                Logger.error(TAG, "Extracted seed size is incorrect: ${seed.size}")
+                null
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Robust extraction failed: ${e.message}. Falling back to simple slice.")
+            // Fallback: If ASN.1 parsing fails, try simple slicing as a last resort
+            try {
+                val bytes = Base64.decode(privKeyB64, Base64.DEFAULT)
+                if (bytes.size >= 32) {
+                    val seed = bytes.takeLast(32).toByteArray()
+                    Base64.encodeToString(seed, Base64.NO_WRAP)
+                } else null
+            } catch (e2: Exception) { null }
+        }
+    }
+
     private fun decodePublicKey(b64: String): PublicKey {
         val bytes = Base64.decode(b64, Base64.DEFAULT)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

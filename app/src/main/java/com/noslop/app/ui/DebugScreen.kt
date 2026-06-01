@@ -75,6 +75,7 @@ fun DebugScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val color = when(torState) {
                             TorState.STARTING -> androidx.compose.ui.graphics.Color(0xFFFFA000) // Amber
+                            TorState.PROXY_READY -> androidx.compose.ui.graphics.Color(0xFF2196F3) // Blue
                             TorState.READY -> androidx.compose.ui.graphics.Color(0xFF4CAF50) // Green
                             TorState.FAILED -> androidx.compose.ui.graphics.Color(0xFFF44336) // Red
                         }

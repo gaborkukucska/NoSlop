@@ -37,6 +37,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     NoSlopDatabase::class.java,
                     "noslop_app_database"
                 )
+                .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
                 .fallbackToDestructiveMigration() // Facilitate updates during prototyping
                 .build()
                 INSTANCE = instance

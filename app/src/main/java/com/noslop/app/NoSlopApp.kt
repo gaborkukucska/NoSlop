@@ -6,6 +6,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.WorkManager
+import androidx.work.Configuration
 import androidx.work.ExistingPeriodicWorkPolicy
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedSyncWorker
@@ -20,7 +21,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
 import java.security.Security
 import java.util.concurrent.TimeUnit
 
-class NoSlopApp : Application() {
+class NoSlopApp : Application(), Configuration.Provider {
     companion object {
         lateinit var repository: NoSlopRepository
             private set
@@ -28,12 +29,17 @@ class NoSlopApp : Application() {
 
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setMinimumLoggingLevel(android.util.Log.INFO)
+            .build()
+
     override fun onCreate() {
         super.onCreate()
 
         // Must be first — all crypto operations depend on this
-        if (java.security.Security.getProvider("BC") == null) {
-            java.security.Security.addProvider(BouncyCastleProvider())
+        if (Security.getProvider("BC") == null) {
+            Security.addProvider(BouncyCastleProvider())
         }
 
         Logger.initialize(this)
@@ -42,19 +48,11 @@ class NoSlopApp : Application() {
         val db = NoSlopDatabase.getDatabase(this)
         repository = NoSlopRepository(this, db)
 
-        // Register Tor hidden service callback
-        com.noslop.app.tor.TorService.onAddressCallback = { onionAddress ->
-            repositoryScope.launch {
-                val identity = repository.getLocalIdentity()
-                if (identity != null) {
-                    repository.updateOnionAddress(onionAddress)
-                    Logger.info("APP", "Onion address dynamically updated in App layer: $onionAddress")
-                }
-            }
+        // Start embedded Tor daemon (Identity loaded first for persistence)
+        repositoryScope.launch {
+            val identity = repository.getLocalIdentity()
+            com.noslop.app.tor.TorService.startTor(this@NoSlopApp, identity?.privateKeyB64)
         }
-
-        // Start embedded Tor daemon
-        com.noslop.app.tor.TorService.startTor(this)
 
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()

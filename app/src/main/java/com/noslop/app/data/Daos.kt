@@ -96,6 +96,9 @@ interface MessageDao {
 
     @Query("UPDATE chat_messages SET isRead = 1 WHERE chatWithPeerPub = :peerPub")
     suspend fun markAsRead(peerPub: String)
+
+    @Query("DELETE FROM chat_messages WHERE chatWithPeerPub = :peerPub")
+    suspend fun deleteMessagesWithPeer(peerPub: String)
 }
 
 @Dao

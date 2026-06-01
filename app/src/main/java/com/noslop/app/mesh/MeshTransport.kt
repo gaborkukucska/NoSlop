@@ -114,24 +114,33 @@ class MeshTransport(
 
     suspend fun sendPacket(onionAddress: String, port: Int = 9999, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
-        for (attempt in 1..3) {
+        
+        // Ensure Tor proxy is ready before attempting send
+        val torReady = com.noslop.app.tor.TorService.waitForProxy(timeoutSeconds = 5)
+        if (!torReady) {
+            Logger.error(TAG, "Cannot send packet: Tor proxy not responding on $socksPort")
+            return@withContext false
+        }
+
+        for (attempt in 1..5) { // Increased retries
             var socket: Socket? = null
             try {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
                 socket = Socket(proxy)
-                socket.connect(InetSocketAddress(onionAddress, port), 20000)
+                // Onion connections can take time to establish (v3 circuits)
+                socket.connect(InetSocketAddress(onionAddress, port), 30000) 
                 val writer = PrintWriter(socket.getOutputStream(), true)
                 writer.println(packet.toJson())
                 Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
                 return@withContext true
             } catch (e: Exception) {
-                Logger.warn(TAG, "Send attempt $attempt/3 to $onionAddress failed: ${e.message}")
-                if (attempt < 3) delay(attempt * 2000L)
+                Logger.warn(TAG, "Send attempt $attempt/5 to $onionAddress failed: ${e.message}")
+                if (attempt < 5) delay(attempt * 3000L) // Exponential-ish backoff
             } finally {
                 try { socket?.close() } catch (_: Exception) {}
             }
         }
-        Logger.error(TAG, "All 3 send attempts failed for $onionAddress")
+        Logger.error(TAG, "All send attempts failed for $onionAddress")
         return@withContext false
     }
 }

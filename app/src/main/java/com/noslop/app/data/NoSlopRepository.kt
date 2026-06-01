@@ -7,6 +7,7 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,6 +26,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
 
+    // Reactive flow for local identity updates (keys, onion address, etc)
+    private val _identityUpdateFlow = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1)
+    val identityUpdateFlow = _identityUpdateFlow.asSharedFlow()
+
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
     // --- State Observables ---
@@ -41,11 +46,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     // --- Identity Delegation ---
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
-    suspend fun updateOnionAddress(address: String) = identityRepository.updateOnionAddress(address)
+    suspend fun updateOnionAddress(address: String) {
+        identityRepository.updateOnionAddress(address)
+        _identityUpdateFlow.emit(Unit)
+    }
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys) {
         identityRepository.saveIdentity(handle, keys)
         com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
+        
+        // Notify Tor to re-register with the persistent key
+        com.noslop.app.tor.TorService.updateKeyAndRegister(keys.privateKeyB64)
+
+        _identityUpdateFlow.emit(Unit)
     }
 
     suspend fun getLocalHandle(): String = identityRepository.getHandle()
@@ -345,11 +358,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         encPublicKeyB64: String = "",
         autoTrust: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
+        // Strip any existing tripcode from the handle to prevent doubling up (e.g. Tabby.abc.abc)
+        val cleanHandle = handle.split(".")[0]
+        
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         val newPeer = Peer(
             publicKeyB64 = publicKeyB64,
-            handle = handle,
+            handle = cleanHandle,
             tripcode = tripcode,
             onionAddress = onionAddress,
             encPublicKeyB64 = encPublicKeyB64,
@@ -357,7 +373,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             lastSeenAt = System.currentTimeMillis()
         )
         peerDao.insertPeer(newPeer)
-        Logger.info(TAG, "Adding new peer node: ${handle}.${tripcode}", "trusted=$autoTrust | onion=$onionAddress")
+        Logger.info(TAG, "Adding new peer node: ${cleanHandle}.${tripcode}", "trusted=$autoTrust | onion=$onionAddress")
 
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
@@ -410,6 +426,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val updated = peer.copy(isTrusted = !peer.isTrusted)
         peerDao.insertPeer(updated)
         Logger.info(TAG, "Toggled peer trust state for ${peer.handle}", "trusted=${updated.isTrusted}")
+    }
+
+    suspend fun deletePeer(publicKeyB64: String) = withContext(Dispatchers.IO) {
+        val peer = peerDao.getPeerByPublicKey(publicKeyB64)
+        if (peer != null) {
+            peerDao.deletePeer(peer)
+            // Also clean up messages
+            messageDao.deleteMessagesWithPeer(publicKeyB64)
+            Logger.info(TAG, "Deleted peer and all associated messages: ${peer.handle}")
+        }
     }
 
     suspend fun sendDirectMessage(recipientPubB64: String, messageText: String): Boolean = withContext(Dispatchers.IO) {

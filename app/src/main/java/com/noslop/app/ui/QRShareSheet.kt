@@ -45,9 +45,9 @@ fun QRShareSheet(
     val context = LocalContext.current
 
     // Prepare JSON payload for the QR code
-    val qrPayload = remember(handle, localKeys) {
+    val qrPayload = remember(localKeys) {
         val payloadMap = mapOf(
-            "handle" to "$handle.${localKeys.tripcode}",
+            "handle" to localKeys.displayName,
             "publicKey" to localKeys.publicKeyB64,
             "encPublicKey" to localKeys.encPublicKeyB64,
             "onionAddress" to localKeys.onionAddress
