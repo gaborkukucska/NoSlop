@@ -277,9 +277,11 @@ object CryptoService {
     }
 
     /**
-     * Extracts the raw 32-byte Ed25519 seed from a PKCS#8 encoded private key.
-     * Required by Tor's ADD_ONION ED25519-V3 command.
-     * Uses robust ASN.1 parsing via Bouncy Castle.
+     * Extracts the raw 32-byte Ed25519 seed from a PKCS#8 encoded private key,
+     * then expands it into the 64-byte format required by Tor's ADD_ONION ED25519-V3.
+     *
+     * Tor expects: base64(expanded_secret_scalar[32] + prf_secret[32])
+     * where expanded = SHA-512(seed), first 32 bytes clamped per Ed25519 spec.
      */
     fun getRawEd25519Seed(privKeyB64: String?): String? {
         if (privKeyB64 == null) return null
@@ -289,27 +291,29 @@ object CryptoService {
             // 1. Parse PrivateKeyInfo (PKCS#8 structure)
             val pki = org.bouncycastle.asn1.pkcs.PrivateKeyInfo.getInstance(bytes)
             
-            // 2. The octet string inside PrivateKeyInfo contains the actual private key bytes.
-            // For Ed25519, these bytes are themselves an ASN.1 OCTET STRING containing the 32-byte seed.
+            // 2. Extract the 32-byte seed from the inner OCTET STRING
             val innerOctets = org.bouncycastle.asn1.ASN1OctetString.getInstance(pki.parsePrivateKey())
             val seed = innerOctets.octets
             
-            if (seed.size == 32) {
-                Base64.encodeToString(seed, Base64.NO_WRAP)
-            } else {
+            if (seed.size != 32) {
                 Logger.error(TAG, "Extracted seed size is incorrect: ${seed.size}")
-                null
+                return null
             }
+            
+            // 3. Expand seed to 64 bytes using SHA-512
+            val sha512 = java.security.MessageDigest.getInstance("SHA-512")
+            val expanded = sha512.digest(seed)  // 64 bytes
+            
+            // 4. Clamp the first 32 bytes (secret scalar) per Ed25519 spec
+            expanded[0] = (expanded[0].toInt() and 248).toByte()
+            expanded[31] = (expanded[31].toInt() and 127).toByte()
+            expanded[31] = (expanded[31].toInt() or 64).toByte()
+            
+            // 5. The full 64 bytes is what Tor wants
+            Base64.encodeToString(expanded, Base64.NO_WRAP)
         } catch (e: Exception) {
-            Logger.error(TAG, "Robust extraction failed: ${e.message}. Falling back to simple slice.")
-            // Fallback: If ASN.1 parsing fails, try simple slicing as a last resort
-            try {
-                val bytes = Base64.decode(privKeyB64, Base64.DEFAULT)
-                if (bytes.size >= 32) {
-                    val seed = bytes.takeLast(32).toByteArray()
-                    Base64.encodeToString(seed, Base64.NO_WRAP)
-                } else null
-            } catch (e2: Exception) { null }
+            Logger.error(TAG, "ED25519-V3 key expansion failed: ${e.message}")
+            null
         }
     }
 

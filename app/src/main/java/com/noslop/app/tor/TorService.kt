@@ -259,17 +259,21 @@ object TorService {
                 waitForControlPort(timeoutSeconds = 10)
 
                 val controlSocket = Socket(PROXY_HOST, 9051)
-                
-                // Workaround to access protected sendAndWaitForResponse
-                val conn = object : net.freehaven.tor.control.TorControlConnection(controlSocket) {
-                    @Throws(Exception::class)
-                    fun sendRaw(cmd: String, expectedResp: String): List<net.freehaven.tor.control.TorControlConnection.ReplyLine> {
-                        return this.sendAndWaitForResponse(cmd, expectedResp)
-                    }
-                }
-                conn.authenticate(byteArrayOf())
+                val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
+                val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
 
-                // ADD_ONION <KeyType>:<KeyBlob> Port=9999,127.0.0.1:9999
+                // Authenticate (CookieAuthentication 0 means empty password)
+                writer.print("AUTHENTICATE\r\n")
+                writer.flush()
+                val authResp = reader.readLine()
+                Logger.info(TAG, "Control AUTHENTICATE response: $authResp")
+                if (authResp == null || !authResp.startsWith("250")) {
+                    Logger.error(TAG, "Control port authentication failed: $authResp")
+                    controlSocket.close()
+                    return@withContext
+                }
+
+                // Build key parameter
                 val keyParam = if (privateKeyB64 != null) {
                     val rawSeed = com.noslop.app.crypto.CryptoService.getRawEd25519Seed(privateKeyB64)
                     if (rawSeed != null) {
@@ -282,40 +286,31 @@ object TorService {
                     "NEW:ED25519-V3"
                 }
 
-                // Standard syntax: ADD_ONION [KeyParam] Port=VirtPort[,Target]
-                // Omitting Target defaults to 127.0.0.1:VirtPort
-                val cmd = "ADD_ONION $keyParam Port=9999"
-                
-                Logger.info(TAG, "Executing HS registration: ADD_ONION *** Port=9999")
-                
-                val responseLines = conn.sendRaw(cmd, "250")
-                Logger.debug(TAG, "ADD_ONION response: ${responseLines.joinToString { it.toString() }}")
+                // Build and send ADD_ONION command as raw text
+                // Syntax: ADD_ONION KeyType:KeyBlob [Flags=Detach] Port=VirtPort[,Target]
+                val cmd = "ADD_ONION $keyParam Flags=Detach Port=9999,127.0.0.1:9999"
+                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=9999,127.0.0.1:9999")
+                writer.print("$cmd\r\n")
+                writer.flush()
 
-                val serviceId = responseLines.asSequence().mapNotNull { lineObj ->
-                    // Strategy 1: direct field access (works on most jtorctl builds)
-                    val fieldNames = listOf("msg", "message", "line", "reply")
-                    var extracted: String? = null
-                    for (name in fieldNames) {
-                        try {
-                            val f = lineObj.javaClass.getDeclaredField(name)
-                            f.isAccessible = true
-                            extracted = f.get(lineObj) as? String
-                            if (extracted != null) break
-                        } catch (_: Exception) {}
-                    }
-                    // Strategy 2: toString() — last resort, format varies by version
-                    if (extracted == null) {
-                        val str = lineObj.toString()
-                        // ReplyLine.toString() sometimes includes the raw line content
-                        extracted = if (str.contains("ServiceID=")) str else null
-                    }
-                    extracted
+                // Read all response lines (multi-line responses use "250-" prefix, final line is "250 OK")
+                val responseLines = mutableListOf<String>()
+                var line: String?
+                while (reader.readLine().also { line = it } != null) {
+                    responseLines.add(line!!)
+                    Logger.debug(TAG, "ADD_ONION response line: $line")
+                    // Stop on final success (250 OK) or any error (5xx)
+                    if (line!!.startsWith("250 ") || line!!.startsWith("5")) break
                 }
-                .firstOrNull { it.contains("ServiceID=") }
-                ?.let { line ->
-                    // Handle both "ServiceID=xyz" and "250-ServiceID=xyz"
-                    line.substringAfter("ServiceID=").trim().split(" ").first()
-                }
+
+                Logger.info(TAG, "ADD_ONION full response: $responseLines")
+
+                // Extract ServiceID from response lines like "250-ServiceID=xxxxx"
+                val serviceId = responseLines
+                    .firstOrNull { it.contains("ServiceID=") }
+                    ?.substringAfter("ServiceID=")
+                    ?.trim()
+                    ?.split(" ")?.first()
 
                 if (serviceId != null) {
                     val onionAddress = "$serviceId.onion"

@@ -44,6 +44,7 @@ fun MainScreen(viewModel: NoSlopViewModel) {
 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
+    val incomingRequest by viewModel.incomingRequest.collectAsState()
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("main_scaffold"),
@@ -121,6 +122,53 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 3 -> SettingsTab(viewModel)
             }
         }
+    }
+
+    // Incoming Handshake Request Dialog
+    incomingRequest?.let { peer ->
+        AlertDialog(
+            onDismissRequest = { viewModel.rejectHandshake() },
+            containerColor = SurfaceDark,
+            title = {
+                Text(
+                    text = "Accept Handshake?",
+                    color = TextLight,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "Incoming mesh connection request from:",
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "${peer.handle}.${peer.tripcode}",
+                        color = AccentGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 16.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { viewModel.acceptHandshake(peer) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Text("Accept", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.rejectHandshake() }
+                ) {
+                    Text("Reject", color = DestructiveRed)
+                }
+            }
+        )
     }
 }
 
@@ -844,12 +892,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         if (showScanScreen) {
             QRScanScreen(
                 onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
-                    viewModel.addPeer(
+                    viewModel.requestConnection(
                         handle = scannedHandle,
                         publicKeyB64 = pubKey,
                         onionAddress = onion,
-                        encPublicKeyB64 = encPub,
-                        autoTrust = false
+                        encPublicKeyB64 = encPub
                     )
                 },
                 onDismiss = { showScanScreen = false }
@@ -1188,12 +1235,11 @@ fun ProfileTab(viewModel: NoSlopViewModel) {
             if (showScanScreen) {
                 QRScanScreen(
                     onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
-                        viewModel.addPeer(
+                        viewModel.requestConnection(
                             handle = scannedHandle,
                             publicKeyB64 = pubKey,
                             onionAddress = onion,
-                            encPublicKeyB64 = encPub,
-                            autoTrust = false
+                            encPublicKeyB64 = encPub
                         )
                     },
                     onDismiss = { showScanScreen = false }
@@ -1349,7 +1395,7 @@ fun LogsViewerScreen(
 
             Row {
                 IconButton(onClick = { viewModel.copyLogToClipboard(context) }) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Copy logs", tint = AccentGreen)
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", tint = AccentGreen)
                 }
                 IconButton(onClick = { viewModel.clearLogFile() }) {
                     Icon(Icons.Default.Delete, contentDescription = "Clear logs", tint = DestructiveRed)

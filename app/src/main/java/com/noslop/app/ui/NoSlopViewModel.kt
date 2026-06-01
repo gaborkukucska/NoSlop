@@ -65,6 +65,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isTorChecking = MutableStateFlow(false)
     val isTorChecking: StateFlow<Boolean> = _isTorChecking.asStateFlow()
 
+    val incomingRequest: StateFlow<Peer?> = repository.incomingRequestFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     // Database Flows
     val sources: StateFlow<List<FeedSource>> = repository.allSources
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -228,9 +231,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun addPeer(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "", autoTrust: Boolean = false) {
+    fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "") {
         viewModelScope.launch {
-            repository.addPeerAndHandshake(handle, publicKeyB64, onionAddress, encPublicKeyB64, autoTrust)
+            repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64)
+        }
+    }
+
+    fun acceptHandshake(peer: Peer) {
+        viewModelScope.launch {
+            repository.acceptConnectionRequest(peer)
+        }
+    }
+
+    fun rejectHandshake() {
+        viewModelScope.launch {
+            repository.clearIncomingRequest()
         }
     }
 

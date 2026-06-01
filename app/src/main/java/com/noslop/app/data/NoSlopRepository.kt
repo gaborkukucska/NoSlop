@@ -8,6 +8,7 @@ import com.noslop.app.feeds.FeedParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,6 +30,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // Reactive flow for local identity updates (keys, onion address, etc)
     private val _identityUpdateFlow = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1)
     val identityUpdateFlow = _identityUpdateFlow.asSharedFlow()
+    
+    private val _incomingRequestFlow = kotlinx.coroutines.flow.MutableStateFlow<Peer?>(null)
+    val incomingRequestFlow = _incomingRequestFlow.asStateFlow()
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -326,25 +330,42 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             }
             "CONNECTION_REQUEST" -> {
                 val connPay = packet.getConnectionRequestPayload() ?: return@withContext false
-                addPeerAndHandshake(
-                    handle = connPay.fromUsername,
+                
+                val pubBytes = android.util.Base64.decode(connPay.fromUserId, android.util.Base64.DEFAULT)
+                val tripcode = CryptoService.deriveTripcode(pubBytes)
+                val peer = Peer(
                     publicKeyB64 = connPay.fromUserId,
+                    handle = connPay.fromUsername.split(".")[0],
+                    tripcode = tripcode,
                     onionAddress = connPay.fromHomeNode,
                     encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
-                    autoTrust = false
+                    isTrusted = false,
+                    lastSeenAt = System.currentTimeMillis()
                 )
+                peerDao.insertPeer(peer)
+                _incomingRequestFlow.value = peer
                 return@withContext true
             }
             "USER_HANDSHAKE" -> {
                 val handPay = packet.getUserHandshakePayload() ?: return@withContext false
-                // Add peer as trusted because we completed handshake
-                addPeerAndHandshake(
-                    handle = handPay.fromUsername,
-                    publicKeyB64 = handPay.fromUserId,
-                    onionAddress = handPay.fromHomeNode,
-                    encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
-                    autoTrust = true
-                )
+                val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
+                if (peer != null) {
+                    peerDao.insertPeer(peer.copy(isTrusted = true, lastSeenAt = System.currentTimeMillis()))
+                } else {
+                    val pubBytes = android.util.Base64.decode(handPay.fromUserId, android.util.Base64.DEFAULT)
+                    val tripcode = CryptoService.deriveTripcode(pubBytes)
+                    val newPeer = Peer(
+                        publicKeyB64 = handPay.fromUserId,
+                        handle = handPay.fromUsername.split(".")[0],
+                        tripcode = tripcode,
+                        onionAddress = handPay.fromHomeNode,
+                        encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
+                        isTrusted = true,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                    peerDao.insertPeer(newPeer)
+                }
+                // Do not send another USER_HANDSHAKE back to prevent loop
                 return@withContext true
             }
         }
@@ -358,23 +379,70 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         encPublicKeyB64: String = "",
         autoTrust: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
-        // Strip any existing tripcode from the handle to prevent doubling up (e.g. Tabby.abc.abc)
+        // Legacy method kept for fallback
+        true
+    }
+    
+    suspend fun clearIncomingRequest() {
+        _incomingRequestFlow.value = null
+    }
+
+    suspend fun sendConnectionRequest(
+        handle: String,
+        publicKeyB64: String,
+        onionAddress: String,
+        encPublicKeyB64: String = ""
+    ): Boolean = withContext(Dispatchers.IO) {
         val cleanHandle = handle.split(".")[0]
-        
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
+        
         val newPeer = Peer(
             publicKeyB64 = publicKeyB64,
             handle = cleanHandle,
             tripcode = tripcode,
             onionAddress = onionAddress,
             encPublicKeyB64 = encPublicKeyB64,
-            isTrusted = autoTrust,
+            isTrusted = false, // We requested them, they are pending until they accept
             lastSeenAt = System.currentTimeMillis()
         )
         peerDao.insertPeer(newPeer)
-        Logger.info(TAG, "Adding new peer node: ${cleanHandle}.${tripcode}", "trusted=$autoTrust | onion=$onionAddress")
 
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val reqPay = com.noslop.app.mesh.ConnectionRequestPayload(
+                id = UUID.randomUUID().toString(),
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = myKeys.displayName.split(".")[0],
+                fromDisplayName = myKeys.displayName,
+                fromHomeNode = myKeys.onionAddress,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                timestamp = System.currentTimeMillis(),
+                signature = null
+            )
+            val gson = com.google.gson.Gson()
+            val reqJson = gson.toJson(reqPay)
+            val reqSig = CryptoService.sign(reqJson, myKeys.privateKeyB64)
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = publicKeyB64,
+                type = "CONNECTION_REQUEST",
+                payload = gson.toJsonTree(reqPay),
+                signature = reqSig
+            )
+            repositoryScope.launch {
+                meshTransport.sendPacket(onionAddress, 9999, packet)
+            }
+        }
+        true
+    }
+
+    suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
+        peerDao.insertPeer(peer.copy(isTrusted = true))
+        _incomingRequestFlow.value = null
+        
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
             val handshakePay = com.noslop.app.mesh.UserHandshakePayload(
@@ -390,34 +458,33 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val gson = com.google.gson.Gson()
             val handshakeJson = gson.toJson(handshakePay)
             val handshakeSig = CryptoService.sign(handshakeJson, myKeys.privateKeyB64)
-            val payloadJson = gson.toJsonTree(handshakePay)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
                 senderId = myKeys.publicKeyB64,
+                targetUserId = peer.publicKeyB64,
                 type = "USER_HANDSHAKE",
-                payload = payloadJson,
+                payload = gson.toJsonTree(handshakePay),
                 signature = handshakeSig
             )
-            Logger.info(TAG, "Sending signed USER_HANDSHAKE to $onionAddress")
             repositoryScope.launch {
-                meshTransport.sendPacket(onionAddress, 9999, packet)
+                meshTransport.sendPacket(peer.onionAddress, 9999, packet)
             }
 
+            // Also send SYNC_REQUEST
             val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
             val syncReqPay = com.noslop.app.mesh.SyncRequestPayload(since = sevenDaysAgo)
             val syncPacket = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
                 senderId = myKeys.publicKeyB64,
-                targetUserId = publicKeyB64,
+                targetUserId = peer.publicKeyB64,
                 type = "SYNC_REQUEST",
                 payload = gson.toJsonTree(syncReqPay)
             )
             repositoryScope.launch {
-                meshTransport.sendPacket(onionAddress, 9999, syncPacket)
+                meshTransport.sendPacket(peer.onionAddress, 9999, syncPacket)
             }
-            Logger.info(TAG, "SYNC_REQUEST sent to new peer for posts since 7 days ago")
         }
         true
     }

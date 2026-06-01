@@ -225,7 +225,7 @@ fun QRScanScreen(
                             containerColor = SurfaceDark,
                             title = {
                                 Text(
-                                    text = "Connect with Peer?",
+                                    text = "Send Connection Request?",
                                     color = TextLight,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -269,7 +269,7 @@ fun QRScanScreen(
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
-                                        text = "Accepting this scanned peer starts a network handshake over Tor. You can review and trust the connection manually later.",
+                                        text = "Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted,
                                         modifier = Modifier.padding(top = 12.dp)
@@ -285,14 +285,14 @@ fun QRScanScreen(
                                             peer.onionAddress,
                                             peer.encPublicKey ?: ""
                                         )
-                                        Logger.info("ONBOARDING", "Peer added via QR scan: ${peer.handle}")
-                                        Toast.makeText(context, "Peer pairing initiated!", Toast.LENGTH_LONG).show()
+                                        Logger.info("ONBOARDING", "Connection request initiated for peer via QR scan: ${peer.handle}")
+                                        Toast.makeText(context, "Connection request sent!", Toast.LENGTH_LONG).show()
                                         showConfirmDialog = false
                                         onDismiss()
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                 ) {
-                                    Text("Accept & Handshake", fontWeight = FontWeight.Bold)
+                                    Text("Send Request", fontWeight = FontWeight.Bold)
                                 }
                             },
                             dismissButton = {
