@@ -15,7 +15,7 @@ import androidx.room.RoomDatabase
         ChatMessage::class,
         AppSetting::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {

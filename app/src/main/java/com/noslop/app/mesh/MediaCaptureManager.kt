@@ -57,7 +57,7 @@ class MediaCaptureManager(private val context: Context) {
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+            val cameraSelector = if (isFrontCamera) CameraSelector.DEFAULT_FRONT_CAMERA else CameraSelector.DEFAULT_BACK_CAMERA
 
             try {
                 cameraProvider.unbindAll()
@@ -70,6 +70,18 @@ class MediaCaptureManager(private val context: Context) {
             }
 
         }, ContextCompat.getMainExecutor(context))
+    }
+    
+    var isFrontCamera = false
+        private set
+
+    fun flipCamera(
+        lifecycleOwner: LifecycleOwner,
+        previewView: androidx.camera.view.PreviewView,
+        onReady: () -> Unit
+    ) {
+        isFrontCamera = !isFrontCamera
+        startCamera(lifecycleOwner, previewView, onReady)
     }
 
     /**
@@ -115,10 +127,13 @@ class MediaCaptureManager(private val context: Context) {
 
         val outputOptions = FileOutputOptions.Builder(videoFile).build()
 
-        recording = videoCapture.output
-            .prepareRecording(context, outputOptions)
-            .withAudioEnabled()
-            .start(ContextCompat.getMainExecutor(context)) { recordEvent ->
+        var pendingRecording = videoCapture.output.prepareRecording(context, outputOptions)
+        
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pendingRecording = pendingRecording.withAudioEnabled()
+        }
+
+        recording = pendingRecording.start(ContextCompat.getMainExecutor(context)) { recordEvent ->
                 when (recordEvent) {
                     is VideoRecordEvent.Finalize -> {
                         if (!recordEvent.hasError()) {

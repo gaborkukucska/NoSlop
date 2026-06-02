@@ -1,14 +1,22 @@
 // FILE: app/src/main/java/com/noslop/app/ui/MainScreen.kt
 package com.noslop.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -25,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.*
 import com.noslop.app.debug.Logger
@@ -56,8 +65,7 @@ fun MainScreen(viewModel: NoSlopViewModel) {
         bottomBar = {
             NavigationBar(
                 containerColor = SurfaceDark,
-                tonalElevation = 8.dp,
-                modifier = Modifier.height(64.dp).navigationBarsPadding()
+                tonalElevation = 8.dp
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
@@ -225,17 +233,47 @@ fun UnifiedFeedTab(
     val meshPosts by viewModel.meshPosts.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
 
-    var filterMode by remember { mutableStateOf(0) } // 0=All, 1=Mesh Only
+    var filterMode by remember { mutableStateOf("All") }
     var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
 
     // Build unified list sorted by timestamp descending
     val unifiedItems = remember(feedItems, meshPosts, filterMode) {
         val all = mutableListOf<UnifiedItem>()
-        if (filterMode == 0) {
-            all.addAll(feedItems.map { UnifiedItem.Feed(it) })
+        
+        feedItems.forEach {
+            val matchesFilter = when (filterMode) {
+                "All" -> true
+                "Videos" -> it.mediaType == "video"
+                "Images" -> it.mediaType == "image"
+                "Audio" -> it.mediaType == "audio"
+                "Articles" -> it.mediaType == null
+                "Mesh" -> false
+                else -> true
+            }
+            if (matchesFilter) all.add(UnifiedItem.Feed(it))
         }
-        all.addAll(meshPosts.map { UnifiedItem.Mesh(it) })
-        all.sortedByDescending { it.timestamp }
+
+        meshPosts.forEach {
+            val matchesFilter = when (filterMode) {
+                "All" -> true
+                "Videos" -> it.mediaType == "video"
+                "Images" -> it.mediaType == "image"
+                "Audio" -> it.mediaType == "audio"
+                "Articles" -> it.mediaType == null
+                "Mesh" -> true
+                else -> true
+            }
+            if (matchesFilter) all.add(UnifiedItem.Mesh(it))
+        }
+
+        all.sortedByDescending { 
+            if (it is UnifiedItem.Mesh) {
+                // Boost mesh posts by 7 days to prioritize organic P2P gossip over clearnet aggregator
+                it.timestamp + (1000L * 60 * 60 * 24 * 7)
+            } else {
+                it.timestamp
+            }
+        }
     }
 
     val pagerState = rememberPagerState { unifiedItems.size }
@@ -253,8 +291,12 @@ fun UnifiedFeedTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("All" to 0, "Mesh" to 1).forEach { (label, mode) ->
+                LazyRow(
+                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val filters = listOf("All", "Mesh", "Videos", "Images", "Articles", "Audio")
+                    items(filters) { mode ->
                         val selected = filterMode == mode
                         Box(
                             modifier = Modifier
@@ -263,7 +305,7 @@ fun UnifiedFeedTab(
                                 .clickable { filterMode = mode }
                                 .padding(horizontal = 16.dp, vertical = 6.dp)
                         ) {
-                            Text(label, color = if (selected) PrimaryBlack else TextLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text(mode, color = if (selected) PrimaryBlack else TextLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -286,9 +328,11 @@ fun UnifiedFeedTab(
             } else {
                 VerticalPager(
                     state = pagerState,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    beyondViewportPageCount = 1
                 ) { index ->
                     val item = unifiedItems[index]
+                    val isVisible = pagerState.currentPage == index
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -297,10 +341,12 @@ fun UnifiedFeedTab(
                         when (item) {
                             is UnifiedItem.Feed -> FullScreenFeedCard(
                                 item = item.item,
+                                isVisible = isVisible,
                                 onShareToMesh = { showShareDialog = item }
                             )
                             is UnifiedItem.Mesh -> FullScreenMeshCard(
                                 post = item.post,
+                                isVisible = isVisible,
                                 onComment = { 
                                     viewModel.selectChatPeer(item.post.authorPublicKeyB64)
                                     onTabChange(1) // Switch to DMs tab
@@ -322,6 +368,27 @@ fun UnifiedFeedTab(
         val contextWrapper = LocalContext.current
         val captureManager = remember { com.noslop.app.mesh.MediaCaptureManager(contextWrapper) }
         var showCamera by remember { mutableStateOf(false) }
+        var isRecordingVideo by remember { mutableStateOf(false) }
+
+        val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri != null) {
+                // Copy selected file to private storage
+                try {
+                    val contentResolver = contextWrapper.contentResolver
+                    val mimeType = contentResolver.getType(uri)
+                    val ext = if (mimeType?.contains("video") == true) ".mp4" else ".jpg"
+                    val tempFile = java.io.File(contextWrapper.cacheDir, "mesh_attach_${System.currentTimeMillis()}$ext")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    attachedFile = tempFile
+                } catch (e: Exception) {
+                    Logger.error("MAIN", "Failed to copy attached file", e.message)
+                }
+            }
+        }
 
         if (showCamera) {
             Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
@@ -336,7 +403,8 @@ fun UnifiedFeedTab(
 
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp)
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = { 
@@ -349,102 +417,143 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack)
                     }
-                    
+
                     IconButton(
-                        onClick = { showCamera = false },
-                        modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
+                        onClick = {
+                            if (isRecordingVideo) {
+                                captureManager.stopVideoRecording()
+                                isRecordingVideo = false
+                                showCamera = false
+                            } else {
+                                captureManager.startVideoRecording { file ->
+                                    attachedFile = file
+                                }
+                                isRecordingVideo = true
+                            }
+                        },
+                        modifier = Modifier.size(70.dp).background(if (isRecordingVideo) DestructiveRed else SurfaceDark, RoundedCornerShape(50))
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                        Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) PrimaryBlack else TextLight)
+                    }
+                    
+                    if (!isRecordingVideo) {
+                        IconButton(
+                            onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} },
+                            modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
+                        ) {
+                            Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight)
+                        }
+                        
+                        IconButton(
+                            onClick = { showCamera = false },
+                            modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                        }
                     }
                 }
             }
         }
 
-        AlertDialog(
-            onDismissRequest = onComposeDismiss,
-            containerColor = SurfaceDark,
-            title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = postContent,
-                        onValueChange = { postContent = it },
-                        placeholder = { Text("What's on your mind?") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                            focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                        ),
-                        modifier = Modifier.fillMaxWidth().height(120.dp)
-                    )
-                    
-                    if (attachedFile != null) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp)
-                            IconButton(onClick = { attachedFile = null }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed)
+        if (!showCamera) {
+            AlertDialog(
+                onDismissRequest = onComposeDismiss,
+                containerColor = SurfaceDark,
+                title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = postContent,
+                            onValueChange = { postContent = it },
+                            placeholder = { Text("What's on your mind?") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                            ),
+                            modifier = Modifier.fillMaxWidth().height(120.dp)
+                        )
+                        
+                        if (attachedFile != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp)
+                                IconButton(onClick = { attachedFile = null }) {
+                                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+                                if (results[Manifest.permission.CAMERA] == true) {
+                                    showCamera = true
+                                }
+                            }
+                            
+                            IconButton(onClick = { 
+                                if (ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                    showCamera = true
+                                } else {
+                                    permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                                }
+                            }) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen)
+                            }
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
+                                Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen)
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Text("Privacy", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("public", "friends").forEach { priv ->
+                                FilterChip(
+                                    selected = selectedPrivacy == priv,
+                                    onClick = { selectedPrivacy = priv },
+                                    label = { Text(priv.replaceFirstChar { it.uppercase() }) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = AccentGreen,
+                                        selectedLabelColor = PrimaryBlack,
+                                        labelColor = TextMuted
+                                    )
+                                )
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(onClick = { showCamera = true }) {
-                            Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen)
-                        }
-                        IconButton(onClick = { /* File picker */ }) {
-                            Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen)
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Privacy", color = TextMuted, style = MaterialTheme.typography.labelSmall)
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("public", "friends").forEach { priv ->
-                            FilterChip(
-                                selected = selectedPrivacy == priv,
-                                onClick = { selectedPrivacy = priv },
-                                label = { Text(priv.replaceFirstChar { it.uppercase() }) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = AccentGreen,
-                                    selectedLabelColor = PrimaryBlack,
-                                    labelColor = TextMuted
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val mediaMetadata = attachedFile?.let { file ->
+                                com.noslop.app.mesh.MediaMetadata(
+                                    id = file.name,
+                                    type = if (file.name.endsWith(".jpg")) "image" else "video",
+                                    mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
+                                    size = file.length(),
+                                    chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
+                                    originNode = viewModel.localKeys.value?.onionAddress,
+                                    ownerId = viewModel.localKeys.value?.publicKeyB64
                                 )
-                            )
-                        }
-                    }
+                            }
+                            viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
+                            onComposeDismiss()
+                        },
+                        enabled = postContent.isNotBlank() || attachedFile != null,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) }
                 }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val mediaMetadata = attachedFile?.let { file ->
-                            com.noslop.app.mesh.MediaMetadata(
-                                id = file.name,
-                                type = if (file.name.endsWith(".jpg")) "image" else "video",
-                                mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
-                                size = file.length(),
-                                chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
-                                originNode = viewModel.localKeys.value?.onionAddress,
-                                ownerId = viewModel.localKeys.value?.publicKeyB64
-                            )
-                        }
-                        viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
-                        onComposeDismiss()
-                    },
-                    enabled = postContent.isNotBlank() || attachedFile != null,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = {
-                TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) }
-            }
-        )
+            )
+        }
     }
 
     // Share to Mesh Dialog
@@ -495,7 +604,7 @@ fun UnifiedFeedTab(
     }
 }
 
-fun resolveMediaUrl(mediaUrl: String?): String? {
+fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String? {
     if (mediaUrl == null) return null
     if (mediaUrl.startsWith("noslop://")) {
         val uri = mediaUrl.substringAfter("noslop://")
@@ -503,6 +612,22 @@ fun resolveMediaUrl(mediaUrl: String?): String? {
         if (parts.size >= 2) {
             val onion = parts[0]
             val mediaId = parts[1]
+            
+            // Check local cache first
+            val possibleDirs = listOf(
+                android.os.Environment.DIRECTORY_PICTURES,
+                android.os.Environment.DIRECTORY_MOVIES,
+                android.os.Environment.DIRECTORY_MUSIC,
+                android.os.Environment.DIRECTORY_DOWNLOADS
+            )
+            for (dirType in possibleDirs) {
+                val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                val candidate = java.io.File(java.io.File(baseDir, "NoSlop"), mediaId)
+                if (candidate.exists()) {
+                    return candidate.toURI().toString()
+                }
+            }
+            
             return com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, mediaId)
         }
     }
@@ -511,12 +636,12 @@ fun resolveMediaUrl(mediaUrl: String?): String? {
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun VideoPlayer(url: String) {
+fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = null) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     
-    if (url.contains("youtube") || url.contains("embed")) {
+    if (url.contains("youtube") || url.contains("embed") || url.contains("vimeo")) {
         AndroidView(
             factory = { ctx ->
                 android.webkit.WebView(ctx).apply {
@@ -524,13 +649,17 @@ fun VideoPlayer(url: String) {
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.domStorageEnabled = true
                     webViewClient = android.webkit.WebViewClient()
-                    loadUrl(url)
+                    webChromeClient = android.webkit.WebChromeClient()
+                    val finalUrl = if (url.contains("youtube") && !url.contains("autoplay")) {
+                        if (url.contains("?")) "$url&autoplay=1" else "$url?autoplay=1"
+                    } else url
+                    loadUrl(finalUrl)
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
     } else {
-        val exoPlayer = remember {
+        val exoPlayer = remember(url) {
             androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
                 val mediaItem = androidx.media3.common.MediaItem.Builder()
                     .setUri(url)
@@ -538,18 +667,35 @@ fun VideoPlayer(url: String) {
                     .build()
                 setMediaItem(mediaItem)
                 prepare()
-                playWhenReady = true
+                playWhenReady = isVisible
                 repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
             }
         }
 
-        DisposableEffect(Unit) {
+        LaunchedEffect(isVisible) {
+            exoPlayer.playWhenReady = isVisible
+            if (isVisible) {
+                exoPlayer.play()
+            } else {
+                exoPlayer.pause()
+            }
+        }
+
+        DisposableEffect(exoPlayer) {
             onDispose {
                 exoPlayer.release()
             }
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
+            if (thumbnailUrl != null) {
+                coil.compose.AsyncImage(
+                    model = thumbnailUrl,
+                    contentDescription = "Video Thumbnail",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                )
+            }
             AndroidView(
                 factory = { ctx ->
                     androidx.media3.ui.PlayerView(ctx).apply {
@@ -677,9 +823,10 @@ fun FullScreenImage(url: String) {
 }
 
 @Composable
-fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
+fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh: () -> Unit) {
     val content = item.fullContent ?: item.excerpt ?: "No content available."
-    val resolvedUrl = resolveMediaUrl(item.mediaUrl)
+    val context = LocalContext.current
+    val resolvedUrl = resolveMediaUrl(item.mediaUrl, context)
 
     Box(
         modifier = Modifier
@@ -690,7 +837,7 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
         if (resolvedUrl != null) {
             when {
                 item.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
-                    VideoPlayer(url = resolvedUrl)
+                    VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl)
                 }
                 item.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
                     AudioPlayer(url = resolvedUrl)
@@ -726,7 +873,19 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
                             .background(AccentGreen.copy(alpha = 0.15f))
                             .padding(horizontal = 8.dp, vertical = 2.dp)
                     ) {
-                        Text("RSS", color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        val badgeText = when (item.apiSource) {
+                            "youtube" -> "YouTube"
+                            "reddit" -> "Reddit"
+                            "pexels" -> "Pexels"
+                            "internet_archive" -> "Archive.org"
+                            "podcast_index" -> "Podcast"
+                            "newsapi" -> "News"
+                            "guardian" -> "Guardian"
+                            "nasa" -> "NASA"
+                            "vimeo" -> "Vimeo"
+                            else -> "RSS"
+                        }
+                        Text(badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(item.author ?: "Unknown Source", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -764,8 +923,9 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
 }
 
 @Composable
-fun FullScreenMeshCard(post: MeshPost, onComment: () -> Unit) {
-    val resolvedUrl = resolveMediaUrl(post.mediaUrl)
+fun FullScreenMeshCard(post: MeshPost, isVisible: Boolean = true, onComment: () -> Unit) {
+    val context = LocalContext.current
+    val resolvedUrl = resolveMediaUrl(post.mediaUrl, context)
 
     Box(
         modifier = Modifier
@@ -776,7 +936,7 @@ fun FullScreenMeshCard(post: MeshPost, onComment: () -> Unit) {
         if (resolvedUrl != null) {
             when {
                 post.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
-                    VideoPlayer(url = resolvedUrl)
+                    VideoPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
                 post.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
                     AudioPlayer(url = resolvedUrl)
@@ -878,15 +1038,32 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     if (selectedPeerPub != null) {
         // Individual thread screen
         val recipientPeer = peers.find { it.publicKeyB64 == selectedPeerPub }
-        recipientPeer?.let { peer ->
+        if (recipientPeer != null) {
             ChatThreadScreen(
-                peer = peer,
+                peer = recipientPeer,
                 messages = activeChatMessages,
                 localKeys = localKeys,
                 viewModel = viewModel,
-                onSendMessage = { txt, media -> viewModel.sendDirectMessage(peer.publicKeyB64, txt, media) },
+                onSendMessage = { txt, media -> viewModel.sendDirectMessage(recipientPeer.publicKeyB64, txt, media) },
                 onBack = { viewModel.selectChatPeer(null) }
             )
+        } else {
+            Box(modifier = Modifier.fillMaxSize().background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                    Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Contact Not Found", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("You can only chat with trusted peers. Add this user by scanning their QR code to establish a P2P connection.", color = TextMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = { viewModel.selectChatPeer(null) },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Back to Feed", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     } else {
         // Conversation/Contacts List view
@@ -1443,8 +1620,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
     if (selectedSettingsScreen == 1) {
         LogsViewerScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
-    } else if (selectedSettingsScreen == 2) {
-        DebugScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 3) {
+        ApiKeysScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -1585,6 +1762,72 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                 }
 
                 item {
+                    Text(
+                        text = "CONTENT AGGREGATOR",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val isAggregatorEnabled by viewModel.isAggregatorEnabled.collectAsState()
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Clearnet Aggregator", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Automatically fetch content from RSS feeds and public APIs to mix with your mesh timeline.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isAggregatorEnabled,
+                                    onCheckedChange = { viewModel.toggleAggregator() },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 3 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.VpnKey, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("API Keys", fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "DEVELOPER",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1610,18 +1853,124 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(24.dp))
-            
+@Composable
+fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val apiKeyRepo = remember { com.noslop.app.data.ApiKeyRepository(context) }
+    
+    // Track keys to refresh UI when changed
+    var keysUpdateTrigger by remember { mutableStateOf(0) }
 
-            Button(
-                onClick = { selectedSettingsScreen = 2 },
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                modifier = Modifier.fillMaxWidth().height(50.dp)
-            ) {
-                Icon(Icons.Default.Info, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Pre-flight Debug & Test", fontWeight = FontWeight.Bold)
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+            }
+            Text("API Keys", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "Some content sources require API keys to function. Keys are stored securely in EncryptedSharedPreferences.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(com.noslop.app.data.ApiKeyRepository.SERVICES) { service ->
+                val currentKey = remember(keysUpdateTrigger) { apiKeyRepo.getKey(service.id) }
+                var isEditing by remember { mutableStateOf(false) }
+                var draftKey by remember { mutableStateOf(currentKey ?: "") }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, BorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            Text(service.displayName, fontWeight = FontWeight.Bold, color = TextLight)
+                            if (!service.requiresUserKey) {
+                                Box(modifier = Modifier.background(AccentGreen.copy(alpha=0.2f), RoundedCornerShape(4.dp)).padding(horizontal=6.dp, vertical=2.dp)) {
+                                    Text("Optional", color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Get key: ${service.signupUrl}", fontSize = 10.sp, color = TextMuted)
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (isEditing) {
+                            OutlinedTextField(
+                                value = draftKey,
+                                onValueChange = { draftKey = it },
+                                placeholder = { Text("Enter API Key") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                TextButton(onClick = { isEditing = false; draftKey = currentKey ?: "" }) {
+                                    Text("Cancel", color = TextMuted)
+                                }
+                                Button(
+                                    onClick = {
+                                        if (draftKey.isBlank()) {
+                                            apiKeyRepo.removeKey(service.id)
+                                        } else {
+                                            apiKeyRepo.setKey(service.id, draftKey)
+                                        }
+                                        keysUpdateTrigger++
+                                        isEditing = false
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                ) {
+                                    Text("Save", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            if (currentKey.isNullOrBlank()) {
+                                Button(
+                                    onClick = { isEditing = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                                    border = BorderStroke(1.dp, AccentGreen)
+                                ) {
+                                    Text("Configure Key")
+                                }
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                                    val masked = currentKey.take(4) + "••••••••" + currentKey.takeLast(4)
+                                    Text(masked, fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextLight)
+                                    
+                                    Row {
+                                        IconButton(onClick = { isEditing = true }, modifier = Modifier.size(32.dp)) {
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = AccentGreen, modifier = Modifier.size(16.dp))
+                                        }
+                                        IconButton(
+                                            onClick = { 
+                                                apiKeyRepo.removeKey(service.id)
+                                                keysUpdateTrigger++ 
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

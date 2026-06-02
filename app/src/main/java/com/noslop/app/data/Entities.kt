@@ -50,6 +50,7 @@ data class FeedItem(
     val fullContent: String? = null,
     val mediaUrl: String? = null,
     val mediaType: String? = null, // "video", "audio", "image"
+    val apiSource: String? = null, // "youtube", "reddit", "pexels", "nasa", etc.
     val createdAt: Long = System.currentTimeMillis()
 )
 

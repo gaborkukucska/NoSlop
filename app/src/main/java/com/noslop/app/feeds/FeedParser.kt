@@ -43,30 +43,25 @@ object FeedParser {
      * Performs an HTTP GET request to fetch feed content, then parses the stream.
      */
     fun fetchAndParse(feedUrl: String, sourceId: String): List<FeedItem> {
-        var connection: HttpURLConnection? = null
         return try {
             Logger.info(TAG, "Fetching feed contents from: $feedUrl")
-            val url = URL(feedUrl)
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 10000
-            connection.readTimeout = 10000
-            connection.requestMethod = "GET"
-            connection.setRequestProperty("User-Agent", "NoSlop-Android-Node/1.0")
+            val request = okhttp3.Request.Builder()
+                .url(feedUrl)
+                .header("User-Agent", "NoSlop-Android-Node/1.0")
+                .build()
 
-            val responseCode = connection.responseCode
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                connection.inputStream.use { stream ->
+            val response = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute()
+            if (response.isSuccessful && response.body != null) {
+                response.body!!.byteStream().use { stream ->
                     parseStream(stream, sourceId)
                 }
             } else {
-                Logger.warn(TAG, "HTTP error fetching feed: response code $responseCode")
+                Logger.warn(TAG, "Server returned HTTP ${response.code} for $feedUrl")
                 emptyList()
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Network exception fetching feed $feedUrl", e.message)
             emptyList()
-        } finally {
-            connection?.disconnect()
         }
     }
 

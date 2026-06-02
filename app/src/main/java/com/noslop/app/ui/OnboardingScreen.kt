@@ -141,7 +141,7 @@ fun OnboardingScreen(
                         }
                     )
                     5 -> Step5Connection(viewModel)
-                    6 -> Step6Finalize(viewModel, handleText, selectedSources, mnemonic)
+                    6 -> Step6Finalize(viewModel, handleText, selectedSources, selectedInterests, mnemonic)
                 }
             }
 
@@ -208,7 +208,7 @@ fun OnboardingScreen(
                 } else {
                     Button(
                         onClick = {
-                            viewModel.completeOnboarding(handleText, selectedSources, mnemonic!!)
+                            viewModel.completeOnboarding(handleText, selectedSources, selectedInterests, mnemonic!!)
                             onComplete()
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -584,6 +584,7 @@ fun Step6Finalize(
     viewModel: NoSlopViewModel,
     handle: String,
     selectedSources: List<BuiltInSource>,
+    selectedInterests: List<String>,
     mnemonic: String?
 ) {
     Column(

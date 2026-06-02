@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -72,7 +73,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val sources: StateFlow<List<FeedSource>> = repository.allSources
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private val _isAggregatorEnabled = MutableStateFlow(true)
+    val isAggregatorEnabled: StateFlow<Boolean> = _isAggregatorEnabled.asStateFlow()
+
+    // Derived feed items that hides them if aggregator is disabled
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val feedItems: StateFlow<List<FeedItem>> = repository.allFeedItems
+        .combine(_isAggregatorEnabled) { items, enabled ->
+            if (enabled) items else emptyList()
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val savedItems: StateFlow<List<FeedItem>> = repository.savedFeedItems
@@ -128,6 +137,24 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         }
+
+        // Load aggregator setting
+        viewModelScope.launch {
+            _isAggregatorEnabled.value = repository.isAggregatorEnabled()
+        }
+    }
+
+    // --- State ---
+
+    fun toggleAggregator() {
+        viewModelScope.launch {
+            val newState = !_isAggregatorEnabled.value
+            repository.setAggregatorEnabled(newState)
+            _isAggregatorEnabled.value = newState
+            if (newState) {
+                refreshFeeds()
+            }
+        }
     }
 
     // --- Actions ---
@@ -139,7 +166,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
     }
 
-    fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, mnemonic: String) {
+    fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, mnemonic: String) {
         viewModelScope.launch {
             // 1. Generate identity cryptographically (Ed25519 & ECDH)
             val keys = CryptoService.generateIdentity(handle)
@@ -159,7 +186,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
 
-            // 3. Mark Onboarding complete
+            // 3. Save selected categories for API pipeline inference
+            repository.saveSelectedCategories(selectedCategories)
+
+            // 4. Mark Onboarding complete
             repository.setOnboardingComplete(true)
             _isOnboardingComplete.value = true
 

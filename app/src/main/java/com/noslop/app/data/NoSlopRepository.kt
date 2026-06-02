@@ -124,9 +124,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     /**
-     * Loops over active feed sources and parses them, storing items in Room database
+     * Loops over active feed sources and parses them, storing items in Room database.
+     * Then runs the public API pipeline for content enrichment.
      */
     suspend fun refreshFeeds() = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) {
+            Logger.info(TAG, "Aggregator is disabled via settings. Skipping feed fetch.")
+            return@withContext
+        }
+
         Logger.info(TAG, "Starting feed synchronization...")
         val activeSources = feedDao.getActiveSourcesList()
         if (activeSources.isEmpty()) {
@@ -134,7 +140,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             return@withContext
         }
 
+        // --- RSS/Atom pipeline (skip API-type sources) ---
         for (source in activeSources) {
+            if (source.feedType == "api") continue // Handled by API pipeline below
+
             try {
                 Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
                 val items = FeedParser.fetchAndParse(source.url, source.id)
@@ -148,6 +157,109 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
             }
         }
+
+        // --- Public API pipeline ---
+        try {
+            val apiKeyRepo = ApiKeyRepository(context)
+            // Derive active categories from all active sources
+            val activeCategories = activeSources.mapNotNull { it.category }.distinct()
+            // Load user keywords
+            for (category in activeCategories) {
+                try {
+                    val keywords = getUserKeywordsForCategory(category)
+                    val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
+                        category = category,
+                        userKeywords = keywords,
+                        apiKeyRepo = apiKeyRepo
+                    )
+                    if (apiItems.isNotEmpty()) {
+                        val apiSources = apiItems.map { it.sourceId }.distinct().map { sId ->
+                            com.noslop.app.data.FeedSource(
+                                id = sId,
+                                url = "api://$sId",
+                                title = "API: $sId",
+                                feedType = "api",
+                                category = category,
+                                isActive = true
+                            )
+                        }
+                        for (source in apiSources) {
+                            feedDao.insertSource(source)
+                        }
+                        feedDao.insertItems(apiItems)
+                        Logger.info(TAG, "API pipeline: fetched ${apiItems.size} items for $category")
+                    }
+                } catch (e: Exception) {
+                    Logger.error(TAG, "API pipeline failed for $category", e.message)
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "API pipeline initialization failed", e.message)
+        }
+    }
+
+    // --- User Preferences for API Pipeline ---
+
+    /**
+     * Save the user's selected categories during onboarding.
+     */
+    suspend fun saveSelectedCategories(categories: List<String>) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(categories)
+        appSettingDao.insertSetting(AppSetting("selected_categories", json))
+        Logger.info(TAG, "Saved ${categories.size} user categories")
+    }
+
+    /**
+     * Get the user's selected categories.
+     * Falls back to deriving from active feed sources if not explicitly stored.
+     */
+    suspend fun getUserSelectedCategories(): List<String> = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("selected_categories")
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
+                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+            } catch (_: Exception) {}
+        }
+        // Fallback: derive from active sources
+        feedDao.getActiveSourcesList().mapNotNull { it.category }.distinct()
+    }
+
+    /**
+     * Save user keywords for a specific category (for targeted API searches).
+     */
+    suspend fun saveKeywordsForCategory(category: String, keywords: List<String>) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(keywords)
+        appSettingDao.insertSetting(AppSetting("keywords_$category", json))
+    }
+
+    /**
+     * Get user keywords for a category. Returns empty list if none set.
+     */
+    suspend fun getUserKeywordsForCategory(category: String): List<String> = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("keywords_$category")
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
+                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+            } catch (_: Exception) {}
+        }
+        emptyList()
+    }
+
+    /**
+     * Check if the clearnet aggregator is enabled (true by default).
+     */
+    suspend fun isAggregatorEnabled(): Boolean = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("enable_aggregator")
+        return@withContext setting == null || setting == "true"
+    }
+
+    /**
+     * Enable or disable the clearnet aggregator.
+     */
+    suspend fun setAggregatorEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("enable_aggregator", enabled.toString()))
     }
 
     // --- Social Mesh & Direct Messages Routing ---
@@ -198,7 +310,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             content = content,
             timestamp = timestamp,
             signature = signature,
-            mediaUrl = mediaMetadata?.id,
+            mediaUrl = mediaMetadata?.id?.let { "noslop://${myKeys.onionAddress}/$it" },
             mediaType = mediaMetadata?.type,
             privacy = privacy
         )
@@ -309,7 +421,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         content = postPay.content,
                         timestamp = postPay.timestamp,
                         signature = postPay.signature ?: "",
-                        mediaUrl = postPay.mediaId,
+                        mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode}/$it" },
                         mediaType = postPay.mediaMetadata?.type
                     )
                     postDao.insertPost(post)
@@ -341,7 +453,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     content = postPay.content,
                     timestamp = postPay.timestamp,
                     signature = postPay.signature ?: "",
-                    mediaUrl = postPay.mediaId,
+                    mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode}/$it" },
                     mediaType = postPay.mediaMetadata?.type,
                     gossipCount = 1,
                     privacy = postPay.privacy

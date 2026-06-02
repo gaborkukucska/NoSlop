@@ -5,7 +5,7 @@ data class BuiltInSource(
     val id: String,
     val title: String,
     val url: String,
-    val feedType: String, // "rss" or "atom"
+    val feedType: String, // "rss", "atom", or "api"
     val category: String
 )
 
@@ -122,7 +122,25 @@ object SourceLibrary {
         // Music
         BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/rss/all/", "rss", "Music"),
         BuiltInSource("rolling-stone", "Rolling Stone", "https://www.rollingstone.com/feed/", "rss", "Music"),
-        BuiltInSource("nme", "NME", "https://www.nme.com/feed", "rss", "Music")
+        BuiltInSource("nme", "NME", "https://www.nme.com/feed", "rss", "Music"),
+
+        // ──── API-backed sources (feedType = "api") ────
+        // url field = API service identifier, not a URL
+        // No-auth: Reddit, Internet Archive, NASA (work immediately)
+        // Optional-auth: YouTube, Pexels, NewsAPI, Guardian, Vimeo, Podcast Index (user configures own key)
+        BuiltInSource("api-yt-trending", "YouTube Trending", "youtube:trending", "api", "Video Platforms"),
+        BuiltInSource("api-yt-search", "YouTube Search", "youtube:search", "api", "Video Platforms"),
+        BuiltInSource("api-reddit-hot", "Reddit Hot Posts", "reddit:multi", "api", "Reddit"),
+        BuiltInSource("api-pexels-photo", "Pexels Photos", "pexels:photos", "api", "Art"),
+        BuiltInSource("api-pexels-video", "Pexels Videos", "pexels:videos", "api", "Video Platforms"),
+        BuiltInSource("api-archive-video", "Internet Archive Video", "archive:video", "api", "Video Platforms"),
+        BuiltInSource("api-archive-audio", "Internet Archive Audio", "archive:audio", "api", "Music"),
+        BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
+        BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
+        BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),
+        BuiltInSource("api-nasa-apod", "NASA Picture of the Day", "nasa:apod", "api", "Science"),
+        BuiltInSource("api-nasa-library", "NASA Image Library", "nasa:library", "api", "Science"),
+        BuiltInSource("api-vimeo-featured", "Vimeo Featured", "vimeo:featured", "api", "Video Platforms")
     )
 
     fun getSourcesForCategory(category: String): List<BuiltInSource> {
