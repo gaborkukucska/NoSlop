@@ -38,6 +38,27 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 22. **Proguard rules hardened**: Added explicit `-keep` and `-dontwarn` rules for `tor-android`, `jtorctl`, and `netcipher` to prevent runtime `ClassNotFoundException` in release builds.
 23. **registerHiddenService() raw implementation**: Refactored `TorService.registerHiddenService()` to use raw `sendAndWaitForResponse` and reflection fallback, making it version-safe across `jtorctl` variations.
 24. **registerHiddenService() ReplyLine extraction hardened with multi-strategy fallback**: Hardened response extraction using active field probing and raw `toString()` fallbacks, ensuring robust ServiceID extraction across any packaged library build.
+25. **BIP39 Word Cloud Password**: Implemented `MnemonicGenerator.kt` for 12-word mnemonic generation and seed derivation, replacing raw key display with a human-readable recovery phrase.
+26. **Secure Data Portability**: Developed `BackupManager.kt` providing AES-256 encrypted export/import of SQLite databases and secure preferences, keyed by the mnemonic seed.
+27. **Session Locking**: Added `logout()` and `unlock(mnemonic)` capabilities to `IdentityRepository.kt`, enabling secure session management without clearing hardware keys.
+28. **Real Media Capture Engine**: Integrated CameraX and MediaRecorder in `MediaCaptureManager.kt` for native photo, video, and audio capture.
+29. **Advanced Onboarding Flow**: Refactored `OnboardingScreen.kt` into a 6-step journey including interest-based filtering and background content pre-loading (50+ items).
+30. **Snapping Full-Screen Feed**: Refactored `MainScreen.kt` to use `VerticalPager` (TikTok-style) for immersive, focused content viewing.
+31. **Sophisticated Media Rendering**:
+    - **Blurred Backgrounds**: `BlurredImageBackground` Composable for uncropped images with aesthetic fill.
+    - **Segmented Articles**: `SegmentedArticleReader` for horizontal pagination of long text content within the vertical feed.
+32. **Interaction Overlays**: Integrated floating Reaction (Like), Share, and Comment buttons with context-aware logic for mesh vs. clearnet content.
+33. **YouTube RSS Integration**: Enhanced `FeedParser.kt` to support YouTube's `media:group` RSS schema for high-quality video extraction without sign-in.
+34. **Mnemonic Clipboard Support**: Added tap-to-copy functionality for the word cloud during onboarding.
+35. **Sanitized Feed Content**: Enhanced `FeedParser.kt` to strip `<code>` and `<pre>` blocks from articles, ensuring a clean reading experience free of technical "slop".
+36. **Rich Article Previews**: Articles now extract and display the first relevant image from their content within the `SegmentedArticleReader`.
+37. **Video Playback Fix**: Optimized `VideoPlayer` with explicit MIME type detection (including HLS/m3u8 support) and automatic `playWhenReady` for clearnet streams.
+38. **Massive Source Library Expansion**: Added 14 interest categories (Lifestyle, Gaming, Music, etc.) and dozens of tracker-free sources to `SourceLibrary.kt`.
+39. **Creator Search**: Integrated a real-time search bar in the onboarding flow to allow users to find specific channels, creators, or topics.
+40. **UI UX Overhaul**: 
+    - Repositioned the **Compose FAB** to the bottom-middle for better thumb accessibility.
+    - Compacted the **Main Navigation Menu** by 20% to maximize vertical screen real estate.
+
 41. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
 42. **Bouncy Castle bcprov-jdk18on:1.78.1 added as dependency, registered in onCreate()**
 43. **Ed25519 keygen: initialize() removed for API 33+ Conscrypt path**

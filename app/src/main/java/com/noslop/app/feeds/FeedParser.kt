@@ -142,6 +142,14 @@ object FeedParser {
                         }
                         skip(parser)
                     }
+                    "media:group" -> {
+                        // YouTube style
+                        val groupResult = parseMediaGroup(parser)
+                        if (mediaUrl == null && groupResult.first != null) {
+                            mediaUrl = groupResult.first
+                            mediaType = groupResult.second
+                        }
+                    }
                     else -> skip(parser)
                 }
             }
@@ -149,8 +157,13 @@ object FeedParser {
         }
 
         // Clean up formatting
-        val cleanedDesc = stripHtml(description).take(300)
+        val cleanedDesc = stripHtml(description).take(600)
         val id = guid.ifBlank { link.ifBlank { title + pubDateStr } }
+
+        if (mediaUrl == null) {
+            mediaUrl = extractFirstImage(description)
+            if (mediaUrl != null) mediaType = "image"
+        }
 
         return FeedItem(
             id = "rss_${sourceId}_${id.hashCode()}",
@@ -207,14 +220,26 @@ object FeedParser {
                         }
                         skip(parser)
                     }
+                    "media:group" -> {
+                        val groupResult = parseMediaGroup(parser)
+                        if (mediaUrl == null && groupResult.first != null) {
+                            mediaUrl = groupResult.first
+                            mediaType = groupResult.second
+                        }
+                    }
                     else -> skip(parser)
                 }
             }
             eventType = parser.next()
         }
 
-        val cleanedDesc = stripHtml(summary).take(300)
+        val cleanedDesc = stripHtml(summary).take(600)
         val id = idStr.ifBlank { link.ifBlank { title + updatedStr } }
+
+        if (mediaUrl == null) {
+            mediaUrl = extractFirstImage(summary)
+            if (mediaUrl != null) mediaType = "image"
+        }
 
         return FeedItem(
             id = "atom_${sourceId}_${id.hashCode()}",
@@ -228,6 +253,33 @@ object FeedParser {
             mediaUrl = mediaUrl,
             mediaType = mediaType
         )
+    }
+
+    private fun parseMediaGroup(parser: XmlPullParser): Pair<String?, String?> {
+        var url: String? = null
+        var type: String? = null
+        var eventType = parser.next()
+        while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("media:group", ignoreCase = true))) {
+            if (eventType == XmlPullParser.START_TAG) {
+                when (parser.name.lowercase(Locale.US)) {
+                    "media:content" -> {
+                        url = parser.getAttributeValue(null, "url")
+                        type = getMediaType(url ?: "", parser.getAttributeValue(null, "type"))
+                        skip(parser)
+                    }
+                    "media:thumbnail" -> {
+                        if (url == null) {
+                            url = parser.getAttributeValue(null, "url")
+                            type = "image"
+                        }
+                        skip(parser)
+                    }
+                    else -> skip(parser)
+                }
+            }
+            eventType = parser.next()
+        }
+        return Pair(url, type)
     }
 
     private fun readAuthor(parser: XmlPullParser): String? {
@@ -267,8 +319,20 @@ object FeedParser {
     }
 
     private fun stripHtml(html: String): String {
-        return html.replace(Regex("<[^>]*>"), " ")
+        // First remove code and pre blocks entirely
+        val noCode = html.replace(Regex("<code[^>]*>.*?</code>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+            .replace(Regex("<pre[^>]*>.*?</pre>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+        
+        // Then remove other tags
+        return noCode.replace(Regex("<[^>]*>"), " ")
+            .replace(Regex("&nbsp;", RegexOption.IGNORE_CASE), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+    }
+
+    private fun extractFirstImage(html: String): String? {
+        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+        val match = pattern.find(html)
+        return match?.groupValues?.get(1)
     }
 }

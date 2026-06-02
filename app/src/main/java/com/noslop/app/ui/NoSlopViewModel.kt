@@ -87,6 +87,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val conversations: StateFlow<List<ChatMessage>> = repository.conversations
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
+
+    val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     // Direct Messages Chat
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
@@ -109,6 +115,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isOnboardingComplete.value = repository.isOnboardingComplete()
         }
 
+        // Load media settings
+        viewModelScope.launch {
+            repository.getMediaSettings()
+        }
+
         // Automatically refresh Tor status when daemon state transitions to READY or PROXY_READY
         viewModelScope.launch {
             TorService.torState.collect { state ->
@@ -121,11 +132,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     // --- Actions ---
 
-    fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>) {
+    private val _mnemonic = MutableStateFlow<String?>(null)
+    val mnemonic: StateFlow<String?> = _mnemonic.asStateFlow()
+
+    fun generateMnemonic() {
+        _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
+    }
+
+    fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, mnemonic: String) {
         viewModelScope.launch {
             // 1. Generate identity cryptographically (Ed25519 & ECDH)
             val keys = CryptoService.generateIdentity(handle)
-            repository.saveLocalIdentity(handle, keys)
+            repository.saveLocalIdentity(handle, keys, mnemonic)
 
             // 2. Save chosen feed sources from SourceLibrary
             for (bs in selectedSources) {
@@ -147,6 +165,44 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
             // Trigger fetch in background
             refreshFeeds()
+        }
+    }
+
+    fun logout() {
+        viewModelScope.launch {
+            repository.logout()
+            _isLocked.value = true
+        }
+    }
+
+    fun unlock(mnemonic: String) {
+        viewModelScope.launch {
+            if (repository.unlock(mnemonic)) {
+                _isLocked.value = false
+            }
+        }
+    }
+
+    private val _isLocked = MutableStateFlow(false)
+    val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
+
+    fun checkLockStatus() {
+        viewModelScope.launch {
+            _isLocked.value = repository.isLocked()
+        }
+    }
+
+    fun exportBackup(context: Context, mnemonic: String, file: java.io.File) {
+        viewModelScope.launch {
+            com.noslop.app.data.BackupManager.exportData(context, mnemonic, file)
+        }
+    }
+
+    fun importBackup(context: Context, mnemonic: String, file: java.io.File) {
+        viewModelScope.launch {
+            if (com.noslop.app.data.BackupManager.importData(context, mnemonic, file)) {
+                // Restart app or reload state
+            }
         }
     }
 
@@ -202,6 +258,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun isMeshListening(): Boolean = repository.meshTransport.isListening()
 
+    fun updateMediaSettings(settings: MediaSettings) {
+        viewModelScope.launch {
+            repository.updateMediaSettings(settings)
+        }
+    }
+
     fun sendTestPost() {
         viewModelScope.launch {
             repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}")
@@ -217,17 +279,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendDirectMessage(recipientPubB64: String, messageText: String) {
-        if (messageText.isBlank()) return
+    fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null) {
+        if (messageText.isBlank() && mediaMetadata == null) return
         viewModelScope.launch {
-            repository.sendDirectMessage(recipientPubB64, messageText)
+            repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata)
         }
     }
 
-    fun composeAndBroadcastPost(content: String) {
-        if (content.isBlank()) return
+    fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public") {
+        if (content.isBlank() && mediaMetadata == null) return
         viewModelScope.launch {
-            repository.composeAndBroadcastPost(content)
+            repository.composeAndBroadcastPost(content, mediaMetadata, privacy)
         }
     }
 

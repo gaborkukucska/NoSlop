@@ -33,14 +33,18 @@ import com.noslop.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.foundation.pager.HorizontalPager
+import java.util.UUID
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
+    var showComposeDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
@@ -53,13 +57,13 @@ fun MainScreen(viewModel: NoSlopViewModel) {
             NavigationBar(
                 containerColor = SurfaceDark,
                 tonalElevation = 8.dp,
-                modifier = Modifier.navigationBarsPadding()
+                modifier = Modifier.height(64.dp).navigationBarsPadding()
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Feed") },
-                    label = { Text("Feed") },
+                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Feed", modifier = Modifier.size(20.dp)) },
+                    label = { Text("Feed", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -71,8 +75,8 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Email, contentDescription = "DMs") },
-                    label = { Text("DMs") },
+                    icon = { Icon(Icons.Default.Email, contentDescription = "DMs", modifier = Modifier.size(20.dp)) },
+                    label = { Text("DMs", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -81,11 +85,15 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                         indicatorColor = PrimaryBlack
                     )
                 )
+                
+                // Spacer for the middle FAB
+                Spacer(modifier = Modifier.weight(1f))
+
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Face, contentDescription = "Profile") },
-                    label = { Text("Profile") },
+                    icon = { Icon(Icons.Default.Face, contentDescription = "Profile", modifier = Modifier.size(20.dp)) },
+                    label = { Text("Profile", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -97,8 +105,8 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                    label = { Text("Settings") },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", modifier = Modifier.size(20.dp)) },
+                    label = { Text("Settings", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -116,10 +124,26 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> UnifiedFeedTab(viewModel)
+                0 -> UnifiedFeedTab(viewModel, showComposeDialog, { showComposeDialog = false })
                 1 -> DMsTab(viewModel)
                 2 -> ProfileTab(viewModel)
                 3 -> SettingsTab(viewModel)
+            }
+            
+            if (selectedTab == 0) {
+                // FAB overlay in the bottom middle
+                FloatingActionButton(
+                    onClick = { showComposeDialog = true },
+                    containerColor = AccentGreen,
+                    contentColor = PrimaryBlack,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .offset(y = (-32).dp)
+                        .size(56.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
+                }
             }
         }
     }
@@ -186,14 +210,13 @@ sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
 }
 
 @Composable
-fun UnifiedFeedTab(viewModel: NoSlopViewModel) {
+fun UnifiedFeedTab(viewModel: NoSlopViewModel, showComposeDialog: Boolean, onComposeDismiss: () -> Unit) {
     val feedItems by viewModel.feedItems.collectAsState()
     val meshPosts by viewModel.meshPosts.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
 
     var filterMode by remember { mutableStateOf(0) } // 0=All, 1=Mesh Only
-    var showComposeDialog by remember { mutableStateOf(false) }
-    var showShareDialog by remember { mutableStateOf<FeedItem?>(null) }
+    var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
 
     // Build unified list sorted by timestamp descending
     val unifiedItems = remember(feedItems, meshPosts, filterMode) {
@@ -205,14 +228,18 @@ fun UnifiedFeedTab(viewModel: NoSlopViewModel) {
         all.sortedByDescending { it.timestamp }
     }
 
+    val pagerState = rememberPagerState { unifiedItems.size }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top bar with filter chips
+            // Top bar with filter chips (floating or fixed?)
+            // We'll keep it simple for now
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(SurfaceDark)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .background(SurfaceDark.copy(alpha = 0.8f))
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .zIndex(5f),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -247,78 +274,181 @@ fun UnifiedFeedTab(viewModel: NoSlopViewModel) {
                     }
                 }
             } else {
-                // Full-screen vertical pager (TikTok-style)
-                LazyColumn(
+                VerticalPager(
+                    state = pagerState,
                     modifier = Modifier.fillMaxSize()
-                ) {
-                    items(unifiedItems.size) { index ->
-                        val item = unifiedItems[index]
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .fillParentMaxHeight()
-                                .background(PrimaryBlack)
-                        ) {
-                            when (item) {
-                                is UnifiedItem.Feed -> FullScreenFeedCard(
-                                    item = item.item,
-                                    onShareToMesh = { showShareDialog = item.item }
-                                )
-                                is UnifiedItem.Mesh -> FullScreenMeshCard(post = item.post)
-                            }
+                ) { index ->
+                    val item = unifiedItems[index]
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(PrimaryBlack)
+                    ) {
+                        when (item) {
+                            is UnifiedItem.Feed -> FullScreenFeedCard(
+                                item = item.item,
+                                onShareToMesh = { showShareDialog = item }
+                            )
+                            is UnifiedItem.Mesh -> FullScreenMeshCard(
+                                post = item.post,
+                                onComment = { /* Open mesh chat thread? */ }
+                            )
                         }
                     }
                 }
             }
-        }
-
-        // Compose Mesh Post FAB
-        FloatingActionButton(
-            onClick = { showComposeDialog = true },
-            containerColor = AccentGreen,
-            contentColor = PrimaryBlack,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(24.dp)
-        ) {
-            Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
         }
     }
 
     // Compose Mesh Post Dialog
     if (showComposeDialog) {
         var postContent by remember { mutableStateOf("") }
+        var selectedPrivacy by remember { mutableStateOf("public") }
+        var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
+        
+        val contextWrapper = LocalContext.current
+        val captureManager = remember { com.noslop.app.mesh.MediaCaptureManager(contextWrapper) }
+        var showCamera by remember { mutableStateOf(false) }
+
+        if (showCamera) {
+            Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
+                val previewView = remember { androidx.camera.view.PreviewView(contextWrapper) }
+                val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                
+                AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+                
+                LaunchedEffect(Unit) {
+                    captureManager.startCamera(lifecycleOwner, previewView) {}
+                }
+
+                Row(
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
+                    horizontalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    IconButton(
+                        onClick = { 
+                            captureManager.takePhoto { file -> 
+                                attachedFile = file
+                                showCamera = false
+                            }
+                        },
+                        modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))
+                    ) {
+                        Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack)
+                    }
+                    
+                    IconButton(
+                        onClick = { showCamera = false },
+                        modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                    }
+                }
+            }
+        }
+
         AlertDialog(
-            onDismissRequest = { showComposeDialog = false },
+            onDismissRequest = onComposeDismiss,
             containerColor = SurfaceDark,
             title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
             text = {
-                OutlinedTextField(
-                    value = postContent,
-                    onValueChange = { postContent = it },
-                    placeholder = { Text("What's on your mind?") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth().height(120.dp)
-                )
+                Column {
+                    OutlinedTextField(
+                        value = postContent,
+                        onValueChange = { postContent = it },
+                        placeholder = { Text("What's on your mind?") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                            focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(120.dp)
+                    )
+                    
+                    if (attachedFile != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp)
+                            IconButton(onClick = { attachedFile = null }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        IconButton(onClick = { showCamera = true }) {
+                            Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen)
+                        }
+                        IconButton(onClick = { /* File picker */ }) {
+                            Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen)
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text("Privacy", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("public", "friends").forEach { priv ->
+                            FilterChip(
+                                selected = selectedPrivacy == priv,
+                                onClick = { selectedPrivacy = priv },
+                                label = { Text(priv.replaceFirstChar { it.uppercase() }) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = AccentGreen,
+                                    selectedLabelColor = PrimaryBlack,
+                                    labelColor = TextMuted
+                                )
+                            )
+                        }
+                    }
+                }
             },
             confirmButton = {
                 Button(
-                    onClick = { viewModel.composeAndBroadcastPost(postContent); showComposeDialog = false },
-                    enabled = postContent.isNotBlank(),
+                    onClick = {
+                        val mediaMetadata = attachedFile?.let { file ->
+                            com.noslop.app.mesh.MediaMetadata(
+                                id = file.name,
+                                type = if (file.name.endsWith(".jpg")) "image" else "video",
+                                mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
+                                size = file.length(),
+                                chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
+                                originNode = viewModel.localKeys.value?.onionAddress,
+                                ownerId = viewModel.localKeys.value?.publicKeyB64
+                            )
+                        }
+                        viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
+                        onComposeDismiss()
+                    },
+                    enabled = postContent.isNotBlank() || attachedFile != null,
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { showComposeDialog = false }) { Text("Cancel", color = TextMuted) }
+                TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) }
             }
         )
     }
 
     // Share to Mesh Dialog
-    showShareDialog?.let { feedItem ->
+    showShareDialog?.let { unified ->
+        val title = when(unified) {
+            is UnifiedItem.Feed -> unified.item.title
+            is UnifiedItem.Mesh -> "Mesh Post by ${unified.post.authorHandle}"
+        }
+        val author = when(unified) {
+            is UnifiedItem.Feed -> unified.item.author ?: "Unknown"
+            is UnifiedItem.Mesh -> "${unified.post.authorHandle}.${unified.post.authorTripcode}"
+        }
+        val url = when(unified) {
+            is UnifiedItem.Feed -> unified.item.url ?: ""
+            is UnifiedItem.Mesh -> ""
+        }
+
         AlertDialog(
             onDismissRequest = { showShareDialog = null },
             containerColor = SurfaceDark,
@@ -327,14 +457,18 @@ fun UnifiedFeedTab(viewModel: NoSlopViewModel) {
                 Column {
                     Text("Share this content to your decentralized mesh peers?", color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(12.dp))
-                    Text(feedItem.title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(feedItem.author ?: "", color = AccentGreen, style = MaterialTheme.typography.labelSmall)
+                    Text(title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(author, color = AccentGreen, style = MaterialTheme.typography.labelSmall)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        val shareText = "\uD83D\uDD17 ${feedItem.title}\n${feedItem.url ?: ""}\n— via NoSlop"
+                        val shareText = if (url.isNotEmpty()) {
+                            "\uD83D\uDD17 $title\n$url\n— via NoSlop"
+                        } else {
+                            "\uD83D\uDCE2 Shared Mesh Post:\n$title\n— via NoSlop"
+                        }
                         viewModel.composeAndBroadcastPost(shareText)
                         showShareDialog = null
                     },
@@ -368,7 +502,10 @@ fun VideoPlayer(url: String) {
     val context = LocalContext.current
     val exoPlayer = remember {
         androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+            val mediaItem = androidx.media3.common.MediaItem.Builder()
+                .setUri(url)
+                .setMimeType(if (url.contains(".m3u8")) "application/x-mpegURL" else "video/mp4")
+                .build()
             setMediaItem(mediaItem)
             prepare()
             playWhenReady = true
@@ -499,72 +636,6 @@ fun FullScreenImage(url: String) {
     }
 }
 
-fun paginateText(text: String, chunkSize: Int = 500): List<String> {
-    if (text.length <= chunkSize) return listOf(text)
-    val pages = mutableListOf<String>()
-    var start = 0
-    while (start < text.length) {
-        var end = (start + chunkSize).coerceAtMost(text.length)
-        if (end < text.length) {
-            val nextSpace = text.indexOf(' ', end - 40)
-            if (nextSpace in (end - 40)..end) {
-                end = nextSpace
-            }
-        }
-        pages.add(text.substring(start, end).trim())
-        start = end
-    }
-    return pages
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-fun PaginatedTextReader(text: String) {
-    val pages = remember(text) { paginateText(text) }
-    val pagerState = androidx.compose.foundation.pager.rememberPagerState { pages.size }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        androidx.compose.foundation.pager.HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.weight(1f)
-        ) { pageIndex ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = pages[pageIndex],
-                    style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 28.sp),
-                    color = TextLight,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        if (pages.size > 1) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                for (i in 0 until pages.size) {
-                    val active = pagerState.currentPage == i
-                    Box(
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .size(if (active) 8.dp else 6.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (active) AccentGreen else BorderSubtle)
-                    )
-                }
-            }
-        }
-    }
-}
-
 @Composable
 fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
     val content = item.fullContent ?: item.excerpt ?: "No content available."
@@ -585,14 +656,14 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
                     AudioPlayer(url = resolvedUrl)
                 }
                 item.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
-                    FullScreenImage(url = resolvedUrl)
+                    BlurredImageBackground(url = resolvedUrl)
                 }
                 else -> {
-                    PaginatedTextReader(text = content)
+                    SegmentedArticleReader(content = content, imageUrl = resolvedUrl)
                 }
             }
         } else {
-            PaginatedTextReader(text = content)
+            SegmentedArticleReader(content = content)
         }
 
         // 2. Overlaid description and user badge
@@ -601,13 +672,13 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
                 .fillMaxWidth()
                 .align(Alignment.BottomStart)
                 .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                    Brush.verticalGradient(
                         colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
                     )
                 )
                 .padding(horizontal = 24.dp, vertical = 32.dp)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth(0.8f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -628,7 +699,7 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = TextLight,
-                    maxLines = 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
 
@@ -642,23 +713,18 @@ fun FullScreenFeedCard(item: FeedItem, onShareToMesh: () -> Unit) {
             }
         }
 
-        // 3. Share to Mesh floating button overlay
-        IconButton(
-            onClick = onShareToMesh,
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 16.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(SurfaceDark.copy(alpha = 0.7f))
-                .size(50.dp)
-        ) {
-            Icon(Icons.Default.Share, contentDescription = "Share to Mesh", tint = AccentGreen, modifier = Modifier.size(24.dp))
-        }
+        // 3. Interactions Overlay
+        OverlayInteractions(
+            isMesh = false,
+            onLike = { /* local feedback */ },
+            onShare = onShareToMesh,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
     }
 }
 
 @Composable
-fun FullScreenMeshCard(post: MeshPost) {
+fun FullScreenMeshCard(post: MeshPost, onComment: () -> Unit) {
     val resolvedUrl = resolveMediaUrl(post.mediaUrl)
 
     Box(
@@ -676,14 +742,14 @@ fun FullScreenMeshCard(post: MeshPost) {
                     AudioPlayer(url = resolvedUrl)
                 }
                 post.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
-                    FullScreenImage(url = resolvedUrl)
+                    BlurredImageBackground(url = resolvedUrl)
                 }
                 else -> {
-                    PaginatedTextReader(text = post.content)
+                    SegmentedArticleReader(content = post.content, imageUrl = resolvedUrl)
                 }
             }
         } else {
-            PaginatedTextReader(text = post.content)
+            SegmentedArticleReader(content = post.content)
         }
 
         // 2. Overlaid author details and timestamp
@@ -692,13 +758,13 @@ fun FullScreenMeshCard(post: MeshPost) {
                 .fillMaxWidth()
                 .align(Alignment.BottomStart)
                 .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                    Brush.verticalGradient(
                         colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
                     )
                 )
                 .padding(horizontal = 24.dp, vertical = 32.dp)
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.fillMaxWidth(0.8f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -716,6 +782,10 @@ fun FullScreenMeshCard(post: MeshPost) {
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     )
+                    if (post.privacy == "friends") {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(Icons.Default.Lock, contentDescription = "Friends Only", tint = Color(0xFFB388FF), modifier = Modifier.size(14.dp))
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -738,6 +808,15 @@ fun FullScreenMeshCard(post: MeshPost) {
                 }
             }
         }
+
+        // 3. Interactions Overlay
+        OverlayInteractions(
+            isMesh = true,
+            onLike = { /* gossip like? */ },
+            onShare = { /* re-gossip */ },
+            onComment = onComment,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
     }
 }
 
@@ -764,7 +843,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 peer = peer,
                 messages = activeChatMessages,
                 localKeys = localKeys,
-                onSendMessage = { txt -> viewModel.sendDirectMessage(peer.publicKeyB64, txt) },
+                viewModel = viewModel,
+                onSendMessage = { txt, media -> viewModel.sendDirectMessage(peer.publicKeyB64, txt, media) },
                 onBack = { viewModel.selectChatPeer(null) }
             )
         }
@@ -981,7 +1061,8 @@ fun ChatThreadScreen(
     peer: Peer,
     messages: List<ChatMessage>,
     localKeys: CryptoService.IdentityKeys?,
-    onSendMessage: (String) -> Unit,
+    viewModel: NoSlopViewModel,
+    onSendMessage: (String, com.noslop.app.mesh.MediaMetadata?) -> Unit,
     onBack: () -> Unit
 ) {
     var rawText by remember { mutableStateOf("") }
@@ -1022,53 +1103,90 @@ fun ChatThreadScreen(
             }
         }
 
-        // Message Thread list
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(messages) { msg ->
-                val isSelf = msg.senderPub != peer.publicKeyB64
-                val decryptedText = remember(msg.ciphertext, localKeys) {
-                    if (localKeys != null) {
-                        val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
-                        CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
-                    } else {
-                        msg.ciphertext
-                    }
-                }
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
+                // Message Thread list
+                val downloadProgress by viewModel.downloadProgress.collectAsState()
+                
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSelf) AccentGreen else SurfaceDark)
-                            .padding(12.dp)
-                            .widthIn(max = 260.dp)
-                    ) {
-                        Column {
-                            Text(
-                                text = decryptedText, 
-                                color = if (isSelf) PrimaryBlack else TextLight,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
+                    items(messages) { msg ->
+                        val isSelf = msg.senderPub != peer.publicKeyB64
+                        val decryptedText = remember(msg.ciphertext, localKeys) {
+                            if (localKeys != null) {
+                                val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
+                                CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
+                            } else {
+                                msg.ciphertext
+                            }
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelf) AccentGreen else SurfaceDark)
+                                    .padding(12.dp)
+                                    .widthIn(max = 260.dp)
+                            ) {
+                                Column {
+                                    if (decryptedText.isNotEmpty()) {
+                                        Text(
+                                            text = decryptedText, 
+                                            color = if (isSelf) PrimaryBlack else TextLight,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
 
-                            Text(
-                                text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
-                                color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
-                                fontSize = 9.sp,
-                                modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
-                            )
+                                    msg.mediaId?.let { mid ->
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        val progress = downloadProgress[mid] ?: 0
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(60.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(PrimaryBlack.copy(alpha = 0.3f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(
+                                                    if (progress == 100) Icons.Default.CheckCircle else Icons.Default.PlayArrow, 
+                                                    contentDescription = null, 
+                                                    tint = if (isSelf) PrimaryBlack else AccentGreen
+                                                )
+                                                if (progress in 1..99) {
+                                                    LinearProgressIndicator(
+                                                        progress = progress / 100f,
+                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                                        color = if (isSelf) PrimaryBlack else AccentGreen
+                                                    )
+                                                }
+                                                Text(
+                                                    if (progress == 100) "Media Ready" else if (progress > 0) "Downloading $progress%" else "Tap to Download",
+                                                    fontSize = 10.sp,
+                                                    color = if (isSelf) PrimaryBlack else TextMuted
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
+                                        color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
-            }
-        }
 
         // Chat Input box
         Row(
@@ -1078,6 +1196,16 @@ fun ChatThreadScreen(
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            var attachedMediaId by remember { mutableStateOf<String?>(null) }
+            
+            IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
+                Icon(
+                    if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.Add, 
+                    contentDescription = "Attach", 
+                    tint = if (attachedMediaId != null) AccentGreen else TextMuted
+                )
+            }
+            
             OutlinedTextField(
                 value = rawText,
                 onValueChange = { rawText = it },
@@ -1095,8 +1223,20 @@ fun ChatThreadScreen(
 
             IconButton(
                 onClick = {
-                    onSendMessage(rawText)
+                    val mediaMetadata = attachedMediaId?.let { id ->
+                        com.noslop.app.mesh.MediaMetadata(
+                            id = id,
+                            type = "image",
+                            mimeType = "image/jpeg",
+                            size = 512 * 1024,
+                            chunkCount = 2,
+                            originNode = localKeys?.onionAddress,
+                            ownerId = localKeys?.publicKeyB64
+                        )
+                    }
+                    onSendMessage(rawText, mediaMetadata)
                     rawText = ""
+                    attachedMediaId = null
                 },
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
@@ -1256,6 +1396,7 @@ fun ProfileTab(viewModel: NoSlopViewModel) {
 fun SettingsTab(viewModel: NoSlopViewModel) {
     val torState by viewModel.torReadyState.collectAsState()
     val isTorChecking by viewModel.isTorChecking.collectAsState()
+    val mediaSettings by viewModel.mediaSettings.collectAsState()
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
@@ -1274,82 +1415,159 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
-            Card(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                border = BorderStroke(1.dp, BorderSubtle)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "TOR ROUTING STATUS",
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
-                        color = TextMuted,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
                     ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(if (torState.first) AccentGreen else DestructiveRed)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (torState.first) "Active Tor Proxy" else "Tor Disconnected",
-                                    fontWeight = FontWeight.Bold,
-                                    color = TextLight
-                                )
-                            }
+                        Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = torState.second,
-                                style = MaterialTheme.typography.bodySmall,
+                                text = "TOR ROUTING STATUS",
+                                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                                 color = TextMuted,
-                                modifier = Modifier.padding(top = 4.dp)
+                                fontWeight = FontWeight.Bold
                             )
-                        }
 
-                        Button(
-                            onClick = { viewModel.refreshTorStatus() },
-                            enabled = !isTorChecking,
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            shape = RoundedCornerShape(4.dp)
-                        ) {
-                            Text("Test Tor", fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clip(RoundedCornerShape(50))
+                                                .background(if (torState.first) AccentGreen else DestructiveRed)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = if (torState.first) "Active Tor Proxy" else "Tor Disconnected",
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextLight
+                                        )
+                                    }
+                                    Text(
+                                        text = torState.second,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    )
+                                }
+
+                                Button(
+                                    onClick = { viewModel.refreshTorStatus() },
+                                    enabled = !isTorChecking,
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text("Test Tor", fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
                     }
                 }
-            }
 
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { selectedSettingsScreen = 1 },
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                border = BorderStroke(1.dp, BorderSubtle)
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Build, contentDescription = null, tint = AccentGreen)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text("Structured Debug Logs", fontWeight = FontWeight.Bold, color = TextLight)
-                            Text("Examine packet drops, network, parser info.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                item {
+                    Text(
+                        text = "MEDIA & PRIVACY",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Enable Media", color = TextLight, fontWeight = FontWeight.Bold)
+                                Switch(
+                                    checked = mediaSettings.enabled,
+                                    onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(enabled = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            if (mediaSettings.enabled) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    "Max File Size: ${mediaSettings.maxFileSizeMB} MB",
+                                    color = TextLight,
+                                    fontSize = 14.sp
+                                )
+                                Slider(
+                                    value = mediaSettings.maxFileSizeMB.toFloat(),
+                                    onValueChange = { viewModel.updateMediaSettings(mediaSettings.copy(maxFileSizeMB = it.toInt())) },
+                                    valueRange = 1f..100f,
+                                    colors = SliderDefaults.colors(thumbColor = AccentGreen, activeTrackColor = AccentGreen)
+                                )
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Auto-download Friends", color = TextMuted, fontSize = 14.sp)
+                                    Switch(
+                                        checked = mediaSettings.autoDownloadFriends,
+                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadFriends = it)) },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Auto-download Private", color = TextMuted, fontSize = 14.sp)
+                                    Switch(
+                                        checked = mediaSettings.autoDownloadPrivate,
+                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPrivate = it)) },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                    )
+                                }
+                            }
                         }
                     }
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
+                }
+
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { selectedSettingsScreen = 1 },
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Build, contentDescription = null, tint = AccentGreen)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("Structured Debug Logs", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Examine packet drops, network, parser info.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                }
+                            }
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
+                        }
+                    }
                 }
             }
 

@@ -12,7 +12,7 @@ import java.net.ServerSocket
 import java.net.Socket
 
 class MeshTransport(
-    private val repository: NoSlopRepository,
+    val repository: NoSlopRepository,
     private val listenPort: Int = 9999,
     private val socksHost: String = "127.0.0.1",
     private val socksPort: Int = 9050
@@ -66,31 +66,6 @@ class MeshTransport(
             var line: String?
             while (reader.readLine().also { line = it } != null) {
                 val packetStr = line ?: break
-                if (packetStr.contains("MEDIA_REQUEST")) {
-                    try {
-                        val obj = com.google.gson.Gson().fromJson(packetStr, com.google.gson.JsonObject::class.java)
-                        val mediaId = obj.get("mediaId")?.asString
-                        if (mediaId != null) {
-                            Logger.info(TAG, "Handling incoming MEDIA_REQUEST for $mediaId")
-                            val mediaDir = java.io.File(repository.context.filesDir, "media")
-                            if (!mediaDir.exists()) mediaDir.mkdirs()
-                            val mediaFile = java.io.File(mediaDir, mediaId)
-                            if (mediaFile.exists()) {
-                                val output = socket.getOutputStream()
-                                mediaFile.inputStream().use { input ->
-                                    input.copyTo(output)
-                                }
-                                output.flush()
-                                Logger.info(TAG, "Sent media $mediaId successfully to $clientIp")
-                            } else {
-                                Logger.warn(TAG, "Requested media file $mediaId does not exist")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Logger.error(TAG, "Failed serving media request: ${e.message}")
-                    }
-                    break
-                }
                 
                 try {
                     val packet = NetworkPacket.fromJson(packetStr)

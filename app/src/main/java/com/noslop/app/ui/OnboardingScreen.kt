@@ -1,6 +1,10 @@
 // FILE: app/src/main/java/com/noslop/app/ui/OnboardingScreen.kt
 package com.noslop.app.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -37,10 +41,12 @@ fun OnboardingScreen(
 ) {
     var currentStep by remember { mutableStateOf(1) }
     var handleText by remember { mutableStateOf("") }
+    val selectedInterests = remember { mutableStateListOf<String>() }
     val selectedSources = remember { mutableStateListOf<BuiltInSource>() }
-
-    // State derived from step 1 identity generation
+    
+    val mnemonic by viewModel.mnemonic.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("onboarding_scaffold"),
@@ -79,13 +85,13 @@ fun OnboardingScreen(
                     modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                 )
 
-                // 3-dot step indicators
+                // 6-dot step indicators
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(3) { index ->
+                    repeat(6) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -106,22 +112,36 @@ fun OnboardingScreen(
                 contentAlignment = Alignment.Center
             ) {
                 when (currentStep) {
-                    1 -> Step1Identity(
+                    1 -> Step1Welcome()
+                    2 -> Step2Identity(
                         handle = handleText,
                         onHandleChange = { handleText = it },
-                        localKeys = localKeys,
-                        onGenerate = {
-                            viewModel.completeOnboarding(handleText, selectedSources)
+                        mnemonic = mnemonic,
+                        onGenerateMnemonic = { viewModel.generateMnemonic() },
+                        onCopyMnemonic = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText("NoSlop Mnemonic", it)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "Mnemonic copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                     )
-                    2 -> Step2Feeds(
+                    3 -> Step3Interests(
+                        selectedInterests = selectedInterests,
+                        onToggleInterest = { interest ->
+                            if (selectedInterests.contains(interest)) selectedInterests.remove(interest)
+                            else selectedInterests.add(interest)
+                        }
+                    )
+                    4 -> Step4Feeds(
+                        interests = selectedInterests,
                         selectedSources = selectedSources,
                         onToggleSource = { src ->
                             if (selectedSources.contains(src)) selectedSources.remove(src)
                             else selectedSources.add(src)
                         }
                     )
-                    3 -> Step3Connection(viewModel)
+                    5 -> Step5Connection(viewModel)
+                    6 -> Step6Finalize(viewModel, handleText, selectedSources, mnemonic)
                 }
             }
 
@@ -131,7 +151,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1) {
+                if (currentStep > 1 && currentStep < 6) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -153,43 +173,442 @@ fun OnboardingScreen(
                 }
 
                 val canProceed = when (currentStep) {
-                    1 -> localKeys != null
-                    2 -> selectedSources.isNotEmpty()
-                    3 -> true
+                    1 -> true
+                    2 -> handleText.isNotBlank() && mnemonic != null
+                    3 -> selectedInterests.isNotEmpty()
+                    4 -> selectedSources.isNotEmpty()
+                    5 -> true
+                    6 -> true
                     else -> false
                 }
 
-                Button(
-                    onClick = {
-                        if (currentStep < 3) {
-                            currentStep++
-                        } else {
-                            viewModel.completeOnboarding(handleText, selectedSources)
+                if (currentStep < 6) {
+                    Button(
+                        onClick = { currentStep++ },
+                        enabled = canProceed,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGreen,
+                            contentColor = PrimaryBlack,
+                            disabledContainerColor = SurfaceDark,
+                            disabledContentColor = TextMuted
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .height(50.dp)
+                            .testTag("onboarding_next_button")
+                    ) {
+                        Text(
+                            text = "Continue",
+                            fontWeight = FontWeight.Bold,
+                            color = if (canProceed) PrimaryBlack else TextMuted
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Default.ArrowForward, contentDescription = "Next")
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            viewModel.completeOnboarding(handleText, selectedSources, mnemonic!!)
                             onComplete()
-                        }
-                    },
-                    enabled = canProceed,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentGreen,
-                        contentColor = PrimaryBlack,
-                        disabledContainerColor = SurfaceDark,
-                        disabledContentColor = TextMuted
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier
-                        .height(50.dp)
-                        .testTag("onboarding_next_button")
-                ) {
-                    Text(
-                        text = if (currentStep == 3) "Enter App" else "Continue",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canProceed) PrimaryBlack else TextMuted
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Icon(Icons.Default.ArrowForward, contentDescription = "Next")
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AccentGreen,
+                            contentColor = PrimaryBlack
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .height(50.dp)
+                            .testTag("onboarding_finish_button")
+                    ) {
+                        Text("Enter NoSlop", fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(Icons.Default.Check, contentDescription = "Finish")
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun Step1Welcome() {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Info,
+            contentDescription = null,
+            tint = AccentGreen,
+            modifier = Modifier.size(80.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Welcome to NoSlop",
+            style = MaterialTheme.typography.headlineMedium,
+            color = TextLight,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "The serverless, unfilterable feed reader and social mesh node.\n\n" +
+                   "• No algorithms\n" +
+                   "• No central servers\n" +
+                   "• End-to-end encrypted DMs\n" +
+                   "• P2P Gossip Mesh",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun Step2Identity(
+    handle: String,
+    onHandleChange: (String) -> Unit,
+    mnemonic: String?,
+    onGenerateMnemonic: () -> Unit,
+    onCopyMnemonic: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Your Identity Card",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "Choose a handle and generate your 'Word Cloud' password.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
+        )
+
+        OutlinedTextField(
+            value = handle,
+            onValueChange = { if (it.length <= 20) onHandleChange(it) },
+            label = { Text("Handle (e.g., satoshi)") },
+            singleLine = true,
+            shape = RoundedCornerShape(8.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentGreen,
+                unfocusedBorderColor = BorderSubtle,
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight
+            ),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        if (mnemonic == null) {
+            Button(
+                onClick = onGenerateMnemonic,
+                enabled = handle.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            ) {
+                Text("Generate Word Cloud", fontWeight = FontWeight.Bold)
+            }
+        } else {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                border = BorderStroke(1.dp, AccentGreen),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .clickable { onCopyMnemonic(mnemonic) }
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "Word Cloud Password (BIP39):",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AccentGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = mnemonic,
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            fontFamily = FontFamily.Monospace,
+                            color = TextLight,
+                            lineHeight = 24.sp
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Tap to Copy",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGreen
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "⚠ Write this down! It is the ONLY way to recover your account.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = DestructiveRed
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Step3Interests(
+    selectedInterests: List<String>,
+    onToggleInterest: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "What interests you?",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "Select your favorite categories to help us suggest initial feeds.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        ) {
+            items(SourceLibrary.categories) { category ->
+                val isSelected = selectedInterests.contains(category)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(80.dp)
+                        .clickable { onToggleInterest(category) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) SurfaceDark else PrimaryBlack
+                    ),
+                    border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = category,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (isSelected) AccentGreen else TextLight,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(8.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Step4Feeds(
+    interests: List<String>,
+    selectedSources: List<BuiltInSource>,
+    onToggleSource: (BuiltInSource) -> Unit
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    
+    val suggestedSources = remember(interests, searchQuery) {
+        SourceLibrary.sources.filter { 
+            (interests.contains(it.category) || searchQuery.isNotBlank()) &&
+            (it.title.contains(searchQuery, ignoreCase = true) || 
+             it.category.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Suggested Clearnet Feeds",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            placeholder = { Text("Search creators, channels, names...") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+            singleLine = true,
+            shape = RoundedCornerShape(24.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentGreen,
+                unfocusedBorderColor = BorderSubtle,
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+        )
+
+        Text(
+            text = if (searchQuery.isBlank()) "Based on your interests, we recommend these sources." else "Search results:",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(1),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp)
+        ) {
+            items(suggestedSources) { src: BuiltInSource ->
+                val isSelected = selectedSources.contains(src)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onToggleSource(src) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) SurfaceDark else PrimaryBlack
+                    ),
+                    border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = src.title,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = TextLight,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = src.category,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentGreen
+                            )
+                        }
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onToggleSource(src) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = AccentGreen,
+                                checkmarkColor = PrimaryBlack,
+                                uncheckedColor = TextMuted
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Step5Connection(viewModel: NoSlopViewModel) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        TorWarningPanel(viewModel)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "Mesh Network Connectivity",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = "NoSlop routes all traffic through Tor. Scanning a QR code connects you directly to a peer.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(16.dp)
+        )
+        
+        var showScan by remember { mutableStateOf(false) }
+        Button(
+            onClick = { showScan = true },
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+            border = BorderStroke(1.dp, AccentGreen)
+        ) {
+            Icon(Icons.Default.CameraAlt, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Scan Friend's QR")
+        }
+
+        if (showScan) {
+            QRScanScreen(
+                onPeerScannedAndAccepted = { h, p, o, e ->
+                    viewModel.requestConnection(h, p, o, e)
+                    showScan = false
+                },
+                onDismiss = { showScan = false }
+            )
+        }
+    }
+}
+
+@Composable
+fun Step6Finalize(
+    viewModel: NoSlopViewModel,
+    handle: String,
+    selectedSources: List<BuiltInSource>,
+    mnemonic: String?
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(80.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Ready to Launch",
+            style = MaterialTheme.typography.headlineMedium,
+            color = TextLight,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = "We're setting up your identity and pre-loading 50+ pieces of content from your chosen feeds.",
+            style = MaterialTheme.typography.bodyLarge,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 24.dp)
+        )
+        Spacer(modifier = Modifier.height(32.dp))
+        LinearProgressIndicator(color = AccentGreen, trackColor = SurfaceDark, modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp))
     }
 }
 

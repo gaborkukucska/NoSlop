@@ -75,7 +75,8 @@ data class MeshPost(
     val signature: String,
     val mediaUrl: String? = null,
     val mediaType: String? = null,
-    val gossipCount: Int = 1
+    val gossipCount: Int = 1,
+    val privacy: String = "public" // "public", "friends"
 )
 
 @Entity(
@@ -89,7 +90,9 @@ data class ChatMessage(
     val ciphertext: String,
     val nonce: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val isRead: Boolean = false
+    val isRead: Boolean = false,
+    val mediaId: String? = null,
+    val mediaType: String? = null
 )
 
 @Entity(tableName = "app_settings")

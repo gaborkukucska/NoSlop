@@ -22,8 +22,56 @@ data class PostPayload(
     val privacy: String = "public", // "public", "friends", "private"
     val hashtags: List<String>? = null,
     val signature: String? = null,
-    @SerializedName("media_url") val mediaUrl: String? = null,
-    @SerializedName("media_type") val mediaType: String? = null
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
+)
+
+data class MediaMetadata(
+    val id: String,
+    val type: String, // "audio", "video", "file", "image"
+    @SerializedName("mime_type") val mimeType: String,
+    val size: Long,
+    @SerializedName("chunk_count") val chunkCount: Int,
+    @SerializedName("access_key") val accessKey: String? = null,
+    val filename: String? = null,
+    @SerializedName("origin_node") val originNode: String? = null,
+    @SerializedName("owner_id") val ownerId: String? = null
+)
+
+data class MediaRequestPayload(
+    @SerializedName("media_id") val mediaId: String,
+    @SerializedName("chunk_index") val chunkIndex: Int,
+    @SerializedName("chunk_size") val chunkSize: Int,
+    @SerializedName("access_key") val accessKey: String? = null,
+    @SerializedName("hls_file") val hlsFile: String? = null
+)
+
+data class MediaChunkPayload(
+    @SerializedName("media_id") val mediaId: String,
+    @SerializedName("chunk_index") val chunkIndex: Int,
+    @SerializedName("total_chunks") val totalChunks: Int,
+    val data: String // Base64 encoded
+)
+
+data class MediaRelayRequestPayload(
+    @SerializedName("media_id") val mediaId: String,
+    @SerializedName("origin_node") val originNode: String? = null,
+    @SerializedName("owner_id") val ownerId: String? = null,
+    @SerializedName("access_key") val accessKey: String? = null,
+    val metadata: MediaMetadata? = null
+)
+
+data class MediaRecoveryFoundPayload(
+    @SerializedName("media_id") val mediaId: String
+)
+
+data class MediaPendingPayload(
+    @SerializedName("media_id") val mediaId: String,
+    @SerializedName("chunk_index") val chunkIndex: Int
+)
+
+data class MediaTransferAckPayload(
+    @SerializedName("media_id") val mediaId: String
 )
 
 data class ConnectionRequestPayload(
@@ -94,5 +142,29 @@ data class NetworkPacket(
 
     fun getSyncResponsePayload(): SyncResponsePayload? = if (type == "SYNC_RESPONSE" && payload != null) {
         Gson().fromJson(payload, SyncResponsePayload::class.java)
+    } else null
+
+    fun getMediaRequestPayload(): MediaRequestPayload? = if (type == "MEDIA_REQUEST" && payload != null) {
+        Gson().fromJson(payload, MediaRequestPayload::class.java)
+    } else null
+
+    fun getMediaChunkPayload(): MediaChunkPayload? = if (type == "MEDIA_CHUNK" && payload != null) {
+        Gson().fromJson(payload, MediaChunkPayload::class.java)
+    } else null
+
+    fun getMediaRelayRequestPayload(): MediaRelayRequestPayload? = if (type == "MEDIA_RELAY_REQUEST" && payload != null) {
+        Gson().fromJson(payload, MediaRelayRequestPayload::class.java)
+    } else null
+
+    fun getMediaRecoveryFoundPayload(): MediaRecoveryFoundPayload? = if (type == "MEDIA_RECOVERY_FOUND" && payload != null) {
+        Gson().fromJson(payload, MediaRecoveryFoundPayload::class.java)
+    } else null
+
+    fun getMediaPendingPayload(): MediaPendingPayload? = if (type == "MEDIA_PENDING" && payload != null) {
+        Gson().fromJson(payload, MediaPendingPayload::class.java)
+    } else null
+
+    fun getMediaTransferAckPayload(): MediaTransferAckPayload? = if (type == "MEDIA_TRANSFER_ACK" && payload != null) {
+        Gson().fromJson(payload, MediaTransferAckPayload::class.java)
     } else null
 }

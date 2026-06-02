@@ -37,11 +37,12 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
     }
 
-    suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys) {
+    suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         // Private keys -> SharedPreferences
         prefs.edit()
             .putString("ed25519_private_key", keys.privateKeyB64)
             .putString("enc_private_key", keys.encPrivateKeyB64)
+            .putString("mnemonic", mnemonic)
             .apply()
 
         // Public data -> Room (safe to query, display, share)
@@ -78,6 +79,28 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             encPublicKeyB64 = pubEnc,
             encPrivateKeyB64 = privEnc
         )
+    }
+
+    suspend fun getMnemonic(): String? = prefs.getString("mnemonic", null)
+
+    suspend fun logout() {
+        // We don't necessarily clear the prefs, but we can set a flag that the session is locked
+        appSettingDao.insertSetting(AppSetting("session_locked", "true"))
+        Logger.info(TAG, "User logged out / Session locked")
+    }
+
+    suspend fun isLocked(): Boolean = appSettingDao.getSetting("session_locked") == "true"
+
+    suspend fun unlock(mnemonic: String): Boolean {
+        val savedMnemonic = prefs.getString("mnemonic", null)
+        return if (savedMnemonic == mnemonic) {
+            appSettingDao.insertSetting(AppSetting("session_locked", "false"))
+            Logger.info(TAG, "Session unlocked")
+            true
+        } else {
+            Logger.warn(TAG, "Unlock failed: Mnemonic mismatch")
+            false
+        }
     }
 
     suspend fun getHandle(): String = appSettingDao.getSetting("local_handle") ?: "Anonymous"

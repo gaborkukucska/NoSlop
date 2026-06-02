@@ -3,6 +3,8 @@ package com.noslop.app.mesh
 import com.noslop.app.data.PeerDao
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.*
+import java.io.File
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
 object GossipService {
@@ -11,6 +13,15 @@ object GossipService {
 
     private val processedPacketIds = LinkedHashSet<String>()
     private val senderRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
+
+    private val relayStates = ConcurrentHashMap<String, RelayState>()
+
+    data class RelayState(
+        val mediaId: String,
+        val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
+        var sourceNode: String? = null,
+        val metadata: MediaMetadata? = null
+    )
 
     private var peerDao: PeerDao? = null
     private var transport: MeshTransport? = null
@@ -68,9 +79,11 @@ object GossipService {
             limitList.add(now)
         }
 
-        // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake
+        // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
-        if (!isConnectionPacket) {
+        val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND"
+        
+        if (!isConnectionPacket && !isMediaRelayPacket) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
@@ -88,12 +101,80 @@ object GossipService {
                 forwardPacket(packet)
                 return false
             }
+        } else if (packet.type == "MEDIA_RELAY_REQUEST") {
+            handleRelayRequest(senderId, packet)
+            forwardPacket(packet) // Also forward to others
+            return false
+        } else if (packet.type == "MEDIA_RECOVERY_FOUND") {
+            handleRecoveryFound(senderId, packet)
+            // Do not automatically forward RECOVERY_FOUND, it follows the chain back
+            return true
         } else {
             // Public message/post, process locally AND forward to other peers
             forwardPacket(packet)
         }
 
         return true
+    }
+
+    private fun handleRelayRequest(senderId: String, packet: NetworkPacket) {
+        val payload = packet.getMediaRelayRequestPayload() ?: return
+        val mediaId = payload.mediaId
+
+        // 1. Do we have it?
+        val mediaDir = File(transport?.repository?.context?.filesDir, "media")
+        if (File(mediaDir, mediaId).exists()) {
+            Logger.info(TAG, "Relay: We have media $mediaId. Responding to $senderId")
+            scope.launch {
+                val foundPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localPublicKeyB64,
+                    targetUserId = senderId,
+                    type = "MEDIA_RECOVERY_FOUND",
+                    payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
+                )
+                transport?.sendPacket(senderId, 9999, foundPacket)
+            }
+            return
+        }
+
+        // 2. We don't have it, register as a listener for this media
+        val state = relayStates.getOrPut(mediaId) { RelayState(mediaId, metadata = payload.metadata) }
+        state.listeners.add(senderId)
+        Logger.info(TAG, "Relay: Registered $senderId as listener for $mediaId")
+    }
+
+    private fun handleRecoveryFound(senderId: String, packet: NetworkPacket) {
+        val payload = packet.getMediaRecoveryFoundPayload() ?: return
+        val mediaId = payload.mediaId
+
+        val state = relayStates[mediaId] ?: return
+        state.sourceNode = senderId
+
+        Logger.info(TAG, "Relay: Found source $senderId for $mediaId. Notifying ${state.listeners.size} listeners.")
+
+        // Notify all listeners
+        state.listeners.forEach { listenerId ->
+            if (listenerId != localPublicKeyB64) {
+                scope.launch {
+                    val foundPacket = NetworkPacket(
+                        id = UUID.randomUUID().toString(),
+                        hops = 1,
+                        senderId = localPublicKeyB64,
+                        targetUserId = listenerId,
+                        type = "MEDIA_RECOVERY_FOUND",
+                        payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
+                    )
+                    // We need onion address for sending. 
+                    // This assumes listeners are our connected peers.
+                    val peer = peerDao?.getPeerByPublicKey(listenerId)
+                    if (peer != null) {
+                        transport?.sendPacket(peer.onionAddress, 9999, foundPacket)
+                    }
+                }
+            }
+        }
     }
 
     /**

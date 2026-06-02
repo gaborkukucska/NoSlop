@@ -100,8 +100,21 @@ object MediaProxyService {
             torSocket.soTimeout = 30000 
             torSocket.connect(InetSocketAddress.createUnresolved(targetOnion, 9999), 15000)
 
-            val reqPayload = """{"type":"MEDIA_REQUEST","mediaId":"$mediaId"}"""
-            val reqBytes = reqPayload.toByteArray(Charsets.UTF_8)
+            val payload = MediaRequestPayload(
+                mediaId = mediaId,
+                chunkIndex = 0,
+                chunkSize = 0 // Header request
+            )
+            
+            val packet = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = "", // Placeholder
+                type = "MEDIA_REQUEST",
+                payload = com.google.gson.Gson().toJsonTree(payload)
+            )
+            
+            val reqBytes = packet.toJson().toByteArray(Charsets.UTF_8)
             val torOutput = torSocket.getOutputStream()
             torOutput.write(reqBytes)
             torOutput.write('\n'.code)

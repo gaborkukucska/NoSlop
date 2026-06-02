@@ -34,6 +34,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val _incomingRequestFlow = kotlinx.coroutines.flow.MutableStateFlow<Peer?>(null)
     val incomingRequestFlow = _incomingRequestFlow.asStateFlow()
 
+    private val _mediaSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(MediaSettings())
+    val mediaSettingsFlow = _mediaSettingsFlow.asStateFlow()
+
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
     // --- State Observables ---
@@ -48,6 +51,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         messageDao.getMessagesWithPeer(peerPub)
 
+    fun getDownloadProgress(): Flow<Map<String, Int>> =
+        com.noslop.app.mesh.MediaManager.downloadProgress
+
     // --- Identity Delegation ---
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
     suspend fun updateOnionAddress(address: String) {
@@ -55,14 +61,28 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         _identityUpdateFlow.emit(Unit)
     }
 
-    suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys) {
-        identityRepository.saveIdentity(handle, keys)
+    suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
+        identityRepository.saveIdentity(handle, keys, mnemonic)
         com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
+        com.noslop.app.mesh.MediaManager.initialize(this)
         
         // Notify Tor to re-register with the persistent key
         com.noslop.app.tor.TorService.updateKeyAndRegister(keys.privateKeyB64)
 
         _identityUpdateFlow.emit(Unit)
+    }
+
+    suspend fun logout() {
+        identityRepository.logout()
+        _identityUpdateFlow.emit(Unit)
+    }
+
+    suspend fun isLocked(): Boolean = identityRepository.isLocked()
+
+    suspend fun unlock(mnemonic: String): Boolean {
+        val success = identityRepository.unlock(mnemonic)
+        if (success) _identityUpdateFlow.emit(Unit)
+        return success
     }
 
     suspend fun getLocalHandle(): String = identityRepository.getHandle()
@@ -71,6 +91,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun setOnboardingComplete(complete: Boolean) {
         identityRepository.setOnboardingComplete(complete)
+    }
+
+    // --- Media Settings ---
+    suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("media_settings")
+        val settings = MediaSettings.fromJson(json)
+        _mediaSettingsFlow.value = settings
+        settings
+    }
+
+    suspend fun updateMediaSettings(settings: MediaSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("media_settings", settings.toJson()))
+        _mediaSettingsFlow.value = settings
     }
 
     // --- Feed Methods ---
@@ -120,8 +153,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // --- Social Mesh & Direct Messages Routing ---
     suspend fun composeAndBroadcastPost(
         content: String,
-        mediaUrl: String? = null,
-        mediaType: String? = null
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public"
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
@@ -140,8 +173,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             content = content,
             timestamp = timestamp,
             signature = signature,
-            mediaUrl = mediaUrl,
-            mediaType = mediaType
+            privacy = privacy,
+            mediaId = mediaMetadata?.id,
+            mediaMetadata = mediaMetadata
         )
 
         val gson = com.google.gson.Gson()
@@ -164,8 +198,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             content = content,
             timestamp = timestamp,
             signature = signature,
-            mediaUrl = mediaUrl,
-            mediaType = mediaType
+            mediaUrl = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type,
+            privacy = privacy
         )
 
         postDao.insertPost(localPost)
@@ -222,7 +257,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         originNode = null,
                         content = post.content,
                         timestamp = post.timestamp,
-                        signature = post.signature
+                        signature = post.signature,
+                        mediaId = post.mediaUrl,
+                        mediaMetadata = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
+                            id = post.mediaUrl,
+                            type = post.mediaType ?: "image",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 0
+                        ) else null
                     )
                 }
                 val syncResp = com.noslop.app.mesh.SyncResponsePayload(posts = postPayloads)
@@ -266,8 +309,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         content = postPay.content,
                         timestamp = postPay.timestamp,
                         signature = postPay.signature ?: "",
-                        mediaUrl = postPay.mediaUrl,
-                        mediaType = postPay.mediaType
+                        mediaUrl = postPay.mediaId,
+                        mediaType = postPay.mediaMetadata?.type
                     )
                     postDao.insertPost(post)
                     stored++
@@ -298,11 +341,39 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     content = postPay.content,
                     timestamp = postPay.timestamp,
                     signature = postPay.signature ?: "",
-                    mediaUrl = postPay.mediaUrl,
-                    mediaType = postPay.mediaType
+                    mediaUrl = postPay.mediaId,
+                    mediaType = postPay.mediaMetadata?.type,
+                    gossipCount = 1,
+                    privacy = postPay.privacy
                 )
                 postDao.insertPost(meshPost)
+                
+                // If post has media, consider auto-downloading if trusted
+                if (postPay.mediaMetadata != null) {
+                    com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
+                        postPay.mediaMetadata,
+                        "friends", // Mesh posts are either public or friends
+                        postPay.authorId,
+                        packet.senderId
+                    )
+                }
+
                 Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")
+                return@withContext true
+            }
+            "MEDIA_REQUEST" -> {
+                val mediaReq = packet.getMediaRequestPayload() ?: return@withContext false
+                com.noslop.app.mesh.MediaManager.handleMediaRequest(packet.senderId, mediaReq)
+                return@withContext true
+            }
+            "MEDIA_CHUNK" -> {
+                val chunk = packet.getMediaChunkPayload() ?: return@withContext false
+                com.noslop.app.mesh.MediaManager.handleMediaChunk(packet.senderId, chunk)
+                return@withContext true
+            }
+            "MEDIA_RECOVERY_FOUND" -> {
+                val found = packet.getMediaRecoveryFoundPayload() ?: return@withContext false
+                com.noslop.app.mesh.MediaManager.handleRecoveryFound(packet.senderId, found.mediaId)
                 return@withContext true
             }
             "MESSAGE" -> {
@@ -315,15 +386,47 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
                 val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
                 if (plaintext != null) {
+                    var finalContent = plaintext
+                    var mediaId: String? = null
+                    var mediaType: String? = null
+                    var mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+
+                    try {
+                        val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                        if (obj.has("content")) {
+                            finalContent = obj.get("content").asString
+                            if (obj.has("media")) {
+                                mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), com.noslop.app.mesh.MediaMetadata::class.java)
+                                mediaId = mediaMetadata.id
+                                mediaType = mediaMetadata.type
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Not JSON, use raw plaintext
+                    }
+
                     val msg = ChatMessage(
                         id = msgPay.id,
                         chatWithPeerPub = packet.senderId,
                         senderPub = packet.senderId,
                         ciphertext = msgPay.ciphertext,
                         nonce = msgPay.nonce,
-                        timestamp = System.currentTimeMillis()
+                        timestamp = System.currentTimeMillis(),
+                        mediaId = mediaId,
+                        mediaType = mediaType
                     )
                     messageDao.insertMessage(msg)
+                    
+                    if (mediaMetadata != null) {
+                        val onion = peer?.onionAddress ?: packet.senderId
+                        com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
+                            mediaMetadata,
+                            "private",
+                            packet.senderId,
+                            onion
+                        )
+                    }
+
                     Logger.info(TAG, "E2EE Direct Message decrypted and delivered safely")
                     return@withContext true
                 }
@@ -505,12 +608,27 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    suspend fun sendDirectMessage(recipientPubB64: String, messageText: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun sendDirectMessage(
+        recipientPubB64: String,
+        messageText: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+    ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
-        val (ciphertext, nonce) = CryptoService.encryptDM(messageText, recipientEncPub, myKeys.encPrivateKeyB64)
+        // Wrap content with media metadata if present
+        val contentToSend = if (mediaMetadata != null) {
+            val map = mapOf(
+                "content" to messageText,
+                "media" to mediaMetadata
+            )
+            com.google.gson.Gson().toJson(map)
+        } else {
+            messageText
+        }
+
+        val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, recipientEncPub, myKeys.encPrivateKeyB64)
 
         if (ciphertext.isEmpty() || nonce.isEmpty()) {
             Logger.error(TAG, "X25519 + ChaCha20 direct message encryption failed")
@@ -524,7 +642,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             senderPub = myKeys.publicKeyB64,
             ciphertext = ciphertext,
             nonce = nonce,
-            timestamp = System.currentTimeMillis()
+            timestamp = System.currentTimeMillis(),
+            mediaId = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
