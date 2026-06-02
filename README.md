@@ -25,7 +25,7 @@ It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok
 
 ### Immersive Snapping Feed
 
-A TikTok-style vertical feed purpose-built for signal-to-noise ratio.
+A vertical feed purpose-built for signal-to-noise ratio.
 
 - **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
 - **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
