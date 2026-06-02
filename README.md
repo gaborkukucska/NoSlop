@@ -1,7 +1,7 @@
 # 🚫 NoSlop — The Unfiltered Pulse of the Mesh 🕸️
 
 <p align="center">
-  <em>"Your feed. Your identity. Zero Slop. Zero Algorithms. 100% Freedom."</em>
+  <em>"Your feed. Your identity. Zero algorithms. 100% freedom."</em>
 </p>
 
 <p align="center">
@@ -13,76 +13,91 @@
 
 ---
 
-## 🌪️ What is NoSlop?
+## What is NoSlop?
 
-**NoSlop** is more than just an app; it's your **personal sovereign wedge** into the [HAI-Net](https://hai-net.com) ecosystem. It's a serverless, local-first powerhouse designed to strip away the algorithmic "slop" of the modern internet and put you back in the driver's seat.
+**NoSlop** is a privacy-first Android app for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
 
-Imagine a world where your feed isn't manipulated by billionaires, where your data never touches a central server, and where your identity is a mathematical fortress. **That world is NoSlop.** 🚀
-
----
-
-## ✨ Killer Features
-
-### 📺 Immersive Snapping Feed (TikTok-Style!)
-Experience content like never before. Vertical snapping navigation ensures you focus on one piece of high-quality content at a time.
-- **🖼️ Blurred Media Fill**: Uncropped images with beautiful blurred backgrounds. No more ugly black bars!
-- **📖 Segmented Article Reader**: Long-form articles are automatically broken into bite-sized segments. Side-swipe to page through like a digital book.
-- **🎬 Pro Video Playback**: Seamless HLS/m3u8 and MP4 streaming from clearnet sources (YouTube, etc.) without the tracking.
-
-### 🕸️ Serverless Social Mesh
-Connect directly to your peers on the **HAI-Net** gossip network. 
-- **🔐 E2EE DMs**: Secure, peer-to-peer direct messaging that stays between you and your contact.
-- **📣 Signed Mesh Posts**: Broadcast your voice globally without a central authority. Every post is cryptographically signed.
-- **🤝 QR Pairing**: Frictionless companion node pairing. Scan, handshake, and join the trust web.
-
-### 🎭 Sovereign Identity
-- **☁️ BIP39 Word Cloud**: Your identity is secured by a 12-word recovery phrase. Tap to copy, write it down, and own your digital life forever.
-- **🛡️ Hardware Isolation**: Private keys are locked inside Android's hardware-backed Keystore. Even NoSlop can't "see" them raw.
-- **📦 Data Portability**: Export your entire local existence into an AES-encrypted backup. Move your data, your way.
-
-### 🕵️ Tracker-Free Aggregator
-Follow your favorite creators from YouTube, TikTok, and across the clearnet without ever signing in.
-- **🔍 Smart Search**: Find channels and creators directly during onboarding.
-- **📂 Interest-Based Filtering**: Choose from 14+ categories (Gaming, Science, Art, etc.) and let NoSlop suggest the best tracker-free feeds.
+It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by the [HAI-Net](https://hai-net.com) gossip mesh. All network traffic is routed through **Tor by default**. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
 
 ---
 
-## 🛠️ Under the Hood
+## Features
 
-NoSlop is built on a brutalist, high-performance stack:
-- **UI**: Jetpack Compose (Modern, Reactive, Beautiful)
-- **Networking**: Tor SOCKS5 (Onion-routed privacy by default)
-- **Crypto**: Ed25519 (Signatures), X25519 (Key Exchange), ChaCha20-Poly1305 (DMs)
-- **Storage**: Room SQLite (Public data) + EncryptedSharedPreferences (Hardware keys)
+### Immersive Snapping Feed
+
+A TikTok-style vertical feed purpose-built for signal-to-noise ratio.
+
+- **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
+- **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
+- **Video playback** — seamless HLS/m3u8 and MP4 streaming from clearnet sources (YouTube and others) without signing in or being tracked.
+- **Interest-based curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) during onboarding. NoSlop pre-loads curated RSS/Atom feeds from sources like Hacker News, BBC World, NASA, EFF Deeplinks, and Krebs on Security — no account required.
+
+### Serverless Social Mesh
+
+Direct peer-to-peer communication over the HAI-Net gossip network. No central server is ever involved.
+
+- **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
+- **End-to-end encrypted DMs** — direct messages use ECDH (X25519) key agreement into AES-256-GCM. Only you and your contact can read them.
+- **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
+- **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
+
+### Sovereign Identity
+
+Your identity is generated locally and never leaves your device unless you export it yourself.
+
+- **Ed25519 + X25519 keypair** — one key for signing, one for encryption. Generated on-device using Android Keystore (API 33+) or Bouncy Castle (API 24–32 fallback).
+- **Tor v3 onion address** — your identity includes a native `.onion` address derived from your Ed25519 key, making you directly reachable over Tor without a relay.
+- **BIP39 Word Cloud** — your identity is backed up by a 12-word mnemonic phrase. Tap to copy, write it down, and you own your digital life permanently.
+- **Tripcode** — a 6-character Base32 shortcode derived from SHA3-256 of your public key. A human-readable fingerprint that others can verify at a glance.
+- **Hardware key isolation** — private keys are stored in Android's hardware-backed Keystore and never exposed in plaintext, even to NoSlop itself.
+- **AES-encrypted backup** — export your entire identity and database into an encrypted archive. The encryption key is derived from your Word Cloud mnemonic. Move to a new device without losing anything.
+
+### Tor-Routed Networking
+
+All outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy running locally on port 9050.
+
+- Tor circuits are built before any data is sent. The app surfaces a clear status indicator so you always know if Tor is connected.
+- Your real IP address is never exposed to feed servers, peers, or anyone on the network.
+- Hidden service registration gives your node a stable `.onion` address for inbound peer connections.
 
 ---
 
-## 🚀 Getting Started
+## Tech Stack
 
-1. **Download & Install**: Build from source using [docs/BUILD.md](docs/BUILD.md).
-2. **Onboarding**: Launch the 6-step tutorial. Generate your Word Cloud, pick your interests, and scan a friend's QR.
-3. **Enjoy the Silence**: No ads. No trackers. No slop. Just the content you chose.
-
----
-
-## 📚 Documentation Deep Dive
-
-- 🏗️ **[BUILD.md](docs/BUILD.md)**: Compile and run NoSlop on your device.
-- 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)**: See the latest technical milestones.
-- 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)**: Deep dive into the HAI-Net wire protocol.
-- 🧪 **[TEST_PROTOCOL.md](docs/TEST_PROTOCOL.md)**: How we verify the mesh.
-- 🐞 **[DEBUG.md](docs/DEBUG.md)**: How to extract and read system logs.
+| Layer | Technology |
+|---|---|
+| UI | Jetpack Compose |
+| Networking | Tor SOCKS5 (embedded, onion-routed) |
+| Signing | Ed25519 (Android Keystore / Bouncy Castle) |
+| Key exchange | X25519 |
+| Encryption | AES-256-GCM (DMs), AES-CBC (backup) |
+| Storage | Room SQLite (WAL mode) + EncryptedSharedPreferences |
+| Background sync | WorkManager |
 
 ---
 
-## 🌟 Join the Revolution
+## Getting Started
 
-NoSlop is part of the [People Power Initiative](https://pplpwr.me). We are building a future where AI works for humanity, not corporations.
+1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md).
+2. **Run the onboarding flow** — 6 steps: generate your Word Cloud, pick your interests, optionally scan a friend's QR to add your first contact.
+3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
+
+---
+
+## Documentation
+
+- 🏗️ **[BUILD.md](docs/BUILD.md)** — how to compile and install NoSlop.
+- 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
+- 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)** — HAI-Net wire protocol reference.
+- 🧪 **[TEST_PROTOCOL.md](docs/TEST_PROTOCOL.md)** — mesh verification procedures.
+- 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
+
+---
+
+## About
+
+NoSlop is part of the [People Power Initiative](https://pplpwr.me) — building tools where AI and open networks work for people, not corporations.
+
+Licensed under **AGPL-3.0**. Fork it. Run it. Own it.
 
 > *"The galley is on top, but the water flows below. The water is the master."* 🌊
-
----
-
-<p align="center">
-  <strong>NoSlop is open-source (AGPL-3.0). Fork it. Run it. Be free.</strong>
-</p>
