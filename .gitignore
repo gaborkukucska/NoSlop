@@ -40,6 +40,17 @@ Thumbs.db
 *.bak
 *.log
 
+# Binary library artifacts (use dependency management instead)
+*.aar
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+cls/
+
+# Temp / debug files
+out.txt
+test_bc.kts
+noslop-debug.log
+
 # other
 _workspace/
 tests/
