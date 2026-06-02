@@ -58,8 +58,15 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 40. **UI UX Overhaul**: 
     - Repositioned the **Compose FAB** to the bottom-middle for better thumb accessibility.
     - Compacted the **Main Navigation Menu** by 20% to maximize vertical screen real estate.
+41. **Social Clearnet Expansion**: Added native RSS bridge support for **Reddit**, **Mastodon**, and **TikTok** (via ProxiTok), allowing users to follow their favorite social creators without sign-in or tracking.
+42. **Immersive Video Tilt**: Implemented automatic full-screen expansion for horizontal videos when the device is tilted to landscape mode.
+43. **Connected Mesh Chat**: The "Chat" button on mesh feed posts now directly opens the encrypted DM thread with the post's author.
+44. **Polished Article Paging**: Refined `SegmentedArticleReader` to break content at natural paragraph and sentence boundaries for a superior digital reading experience.
+45. **Feed Crash Resolution**: Fixed a critical `StringIndexOutOfBoundsException` in the article segmentation engine by implementing robust boundary checking and fallback constraints.
+46. **YouTube & HLS Video Reliability**: Integrated `media3-exoplayer-hls` and `media3-exoplayer-dash` for industrial-grade clearnet video streaming. Implemented a privacy-preserving `WebView` embed for YouTube content to ensure playback compatibility without data leaks.
+47. **Onion Collision Self-Healing**: Hardened `TorService.kt` to handle `550 Onion address collision` errors by intelligently verifying existing registrations and re-triggering UI state updates.
 
-41. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
+48. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
 42. **Bouncy Castle bcprov-jdk18on:1.78.1 added as dependency, registered in onCreate()**
 43. **Ed25519 keygen: initialize() removed for API 33+ Conscrypt path**
 44. **SHA3-256 Provider Fix**: Added `BC_PROVIDER` explicitly to `MessageDigest.getInstance("SHA3-256")` calls to resolve `NoSuchAlgorithmException` on devices lacking native SHA3 support.

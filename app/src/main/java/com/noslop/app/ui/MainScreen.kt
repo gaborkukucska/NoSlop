@@ -124,7 +124,12 @@ fun MainScreen(viewModel: NoSlopViewModel) {
                 .padding(innerPadding)
         ) {
             when (selectedTab) {
-                0 -> UnifiedFeedTab(viewModel, showComposeDialog, { showComposeDialog = false })
+                0 -> UnifiedFeedTab(
+                    viewModel, 
+                    showComposeDialog, 
+                    { showComposeDialog = false },
+                    { selectedTab = it }
+                )
                 1 -> DMsTab(viewModel)
                 2 -> ProfileTab(viewModel)
                 3 -> SettingsTab(viewModel)
@@ -210,7 +215,12 @@ sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
 }
 
 @Composable
-fun UnifiedFeedTab(viewModel: NoSlopViewModel, showComposeDialog: Boolean, onComposeDismiss: () -> Unit) {
+fun UnifiedFeedTab(
+    viewModel: NoSlopViewModel, 
+    showComposeDialog: Boolean, 
+    onComposeDismiss: () -> Unit,
+    onTabChange: (Int) -> Unit
+) {
     val feedItems by viewModel.feedItems.collectAsState()
     val meshPosts by viewModel.meshPosts.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
@@ -291,7 +301,10 @@ fun UnifiedFeedTab(viewModel: NoSlopViewModel, showComposeDialog: Boolean, onCom
                             )
                             is UnifiedItem.Mesh -> FullScreenMeshCard(
                                 post = item.post,
-                                onComment = { /* Open mesh chat thread? */ }
+                                onComment = { 
+                                    viewModel.selectChatPeer(item.post.authorPublicKeyB64)
+                                    onTabChange(1) // Switch to DMs tab
+                                }
                             )
                         }
                     }
@@ -500,35 +513,62 @@ fun resolveMediaUrl(mediaUrl: String?): String? {
 @Composable
 fun VideoPlayer(url: String) {
     val context = LocalContext.current
-    val exoPlayer = remember {
-        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            val mediaItem = androidx.media3.common.MediaItem.Builder()
-                .setUri(url)
-                .setMimeType(if (url.contains(".m3u8")) "application/x-mpegURL" else "video/mp4")
-                .build()
-            setMediaItem(mediaItem)
-            prepare()
-            playWhenReady = true
-            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            exoPlayer.release()
-        }
-    }
-
-    androidx.compose.ui.viewinterop.AndroidView(
-        factory = { ctx ->
-            androidx.media3.ui.PlayerView(ctx).apply {
-                player = exoPlayer
-                useController = true
-                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    
+    if (url.contains("youtube") || url.contains("embed")) {
+        AndroidView(
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.mediaPlaybackRequiresUserGesture = false
+                    settings.domStorageEnabled = true
+                    webViewClient = android.webkit.WebViewClient()
+                    loadUrl(url)
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    } else {
+        val exoPlayer = remember {
+            androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+                val mediaItem = androidx.media3.common.MediaItem.Builder()
+                    .setUri(url)
+                    .setMimeType(if (url.contains(".m3u8")) "application/x-mpegURL" else "video/mp4")
+                    .build()
+                setMediaItem(mediaItem)
+                prepare()
+                playWhenReady = true
+                repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
             }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
+        }
+
+        DisposableEffect(Unit) {
+            onDispose {
+                exoPlayer.release()
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    androidx.media3.ui.PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = true
+                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                update = { view ->
+                    view.resizeMode = if (isLandscape) {
+                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    } else {
+                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)

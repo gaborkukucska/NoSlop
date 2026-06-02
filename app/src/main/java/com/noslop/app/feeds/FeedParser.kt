@@ -129,7 +129,10 @@ object FeedParser {
                 when (name.lowercase(Locale.US)) {
                     "title" -> title = readText(parser)
                     "link" -> link = readText(parser)
-                    "description" -> description = readText(parser)
+                    "description", "content:encoded", "encoded" -> {
+                        val raw = readText(parser)
+                        if (raw.length > description.length) description = raw
+                    }
                     "pubdate" -> pubDateStr = readText(parser)
                     "guid" -> guid = readText(parser)
                     "creator", "author" -> author = readText(parser)
@@ -139,6 +142,14 @@ object FeedParser {
                         if (!encUrl.isNullOrBlank()) {
                             mediaUrl = encUrl
                             mediaType = getMediaType(encUrl, encType)
+                        }
+                        skip(parser)
+                    }
+                    "media:thumbnail" -> {
+                        val thumbUrl = parser.getAttributeValue(null, "url")
+                        if (mediaUrl == null && !thumbUrl.isNullOrBlank()) {
+                            mediaUrl = thumbUrl
+                            mediaType = "image"
                         }
                         skip(parser)
                     }
@@ -211,6 +222,11 @@ object FeedParser {
                     "updated", "published" -> updatedStr = readText(parser)
                     "id" -> idStr = readText(parser)
                     "author" -> authorStr = readAuthor(parser)
+                    "yt:videoid" -> {
+                        val videoId = readText(parser)
+                        mediaUrl = "https://www.youtube-nocookie.com/embed/$videoId"
+                        mediaType = "video"
+                    }
                     "media:content" -> {
                         val encUrl = parser.getAttributeValue(null, "url")
                         val encType = parser.getAttributeValue(null, "type")
@@ -331,7 +347,8 @@ object FeedParser {
     }
 
     private fun extractFirstImage(html: String): String? {
-        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+        // Look for common image formats in src attributes
+        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+\\.(jpg|jpeg|png|webp|gif)[^'\"]*)['\"]", RegexOption.IGNORE_CASE)
         val match = pattern.find(html)
         return match?.groupValues?.get(1)
     }

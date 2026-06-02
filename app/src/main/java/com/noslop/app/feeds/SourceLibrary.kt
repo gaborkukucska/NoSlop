@@ -25,7 +25,10 @@ object SourceLibrary {
         "Health",
         "Automotive",
         "Art",
-        "Music"
+        "Music",
+        "TikTok (Bridges)",
+        "Reddit",
+        "Mastodon"
     )
 
     val sources = listOf(
@@ -73,6 +76,22 @@ object SourceLibrary {
         BuiltInSource("hackaday", "Hackaday", "https://hackaday.com/blog/feed/", "rss", "Social Clearnet"),
         BuiltInSource("wired", "Wired", "https://www.wired.com/feed/rss", "rss", "Social Clearnet"),
         BuiltInSource("slashdot", "Slashdot", "https://rss.slashdot.org/Slashdot/slashdotMain", "rss", "Social Clearnet"),
+
+        // TikTok (Bridges - using public ProxiTok instances)
+        BuiltInSource("tt-khaby", "Khaby Lame (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@khaby.lame", "rss", "TikTok (Bridges)"),
+        BuiltInSource("tt-zachking", "Zach King (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@zachking", "rss", "TikTok (Bridges)"),
+        BuiltInSource("tt-mrbeast", "MrBeast (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@mrbeast", "rss", "TikTok (Bridges)"),
+
+        // Reddit
+        BuiltInSource("r-technology", "r/technology", "https://www.reddit.com/r/technology.rss", "rss", "Reddit"),
+        BuiltInSource("r-worldnews", "r/worldnews", "https://www.reddit.com/r/worldnews.rss", "rss", "Reddit"),
+        BuiltInSource("r-futurism", "r/futurism", "https://www.reddit.com/r/futurism.rss", "rss", "Reddit"),
+        BuiltInSource("r-android", "r/android", "https://www.reddit.com/r/android.rss", "rss", "Reddit"),
+
+        // Mastodon
+        BuiltInSource("m-mastodon", "Mastodon Project", "https://mastodon.social/@mastodon.rss", "rss", "Mastodon"),
+        BuiltInSource("m-eff", "EFF (Mastodon)", "https://mastodon.social/@eff.rss", "rss", "Mastodon"),
+        BuiltInSource("m-feditips", "FediTips", "https://mstdn.social/@feditips.rss", "rss", "Mastodon"),
 
         // Lifestyle
         BuiltInSource("lifehacker", "Lifehacker", "https://lifehacker.com/rss", "rss", "Lifestyle"),

@@ -123,10 +123,19 @@ private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
     while (start < text.length) {
         var end = (start + chunkSize).coerceAtMost(text.length)
         if (end < text.length) {
-            val lastSpace = text.lastIndexOf(' ', end)
-            if (lastSpace > start + (chunkSize / 2)) {
-                end = lastSpace
+            // Try to break at a paragraph or sentence end first
+            val searchRange = text.substring(start, end)
+            val lastParagraph = searchRange.lastIndexOf("\n\n")
+            val lastSentence = searchRange.lastIndexOf(". ")
+            val lastSpace = searchRange.lastIndexOf(' ')
+            
+            val breakPoint = when {
+                lastParagraph > chunkSize / 2 -> lastParagraph + 2
+                lastSentence > chunkSize / 2 -> lastSentence + 2
+                lastSpace > chunkSize / 2 -> lastSpace + 1
+                else -> chunkSize
             }
+            end = (start + breakPoint).coerceAtMost(text.length)
         }
         pages.add(text.substring(start, end).trim())
         start = end
