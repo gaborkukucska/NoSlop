@@ -43,3 +43,5 @@ Thumbs.db
 # other
 _workspace/
 tests/
+.artifacts/
+tcls/
