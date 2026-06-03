@@ -47,20 +47,21 @@ object FeedParser {
             Logger.info(TAG, "Fetching feed contents from: $feedUrl")
             val request = okhttp3.Request.Builder()
                 .url(feedUrl)
-                .header("User-Agent", "NoSlop-Android-Node/1.0")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
 
             val response = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute()
             if (response.isSuccessful && response.body != null) {
+                Logger.info(TAG, "Successfully fetched feed: $feedUrl (HTTP ${response.code})")
                 response.body!!.byteStream().use { stream ->
                     parseStream(stream, sourceId)
                 }
             } else {
-                Logger.warn(TAG, "Server returned HTTP ${response.code} for $feedUrl")
+                Logger.warn(TAG, "Server returned HTTP ${response.code} for $feedUrl. Response: ${response.message}")
                 emptyList()
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "Network exception fetching feed $feedUrl", e.message)
+            Logger.error(TAG, "Network exception fetching feed $feedUrl: ${e.message}")
             emptyList()
         }
     }
@@ -116,6 +117,7 @@ object FeedParser {
         var guid = ""
         var mediaUrl: String? = null
         var mediaType: String? = null
+        var thumbnailUrl: String? = null
 
         var eventType = parser.next()
         while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("item", ignoreCase = true))) {
@@ -142,18 +144,24 @@ object FeedParser {
                     }
                     "media:thumbnail" -> {
                         val thumbUrl = parser.getAttributeValue(null, "url")
-                        if (mediaUrl == null && !thumbUrl.isNullOrBlank()) {
-                            mediaUrl = thumbUrl
-                            mediaType = "image"
+                        if (!thumbUrl.isNullOrBlank()) {
+                            thumbnailUrl = thumbUrl
+                            if (mediaUrl == null) {
+                                mediaUrl = thumbUrl
+                                mediaType = "image"
+                            }
                         }
                         skip(parser)
                     }
                     "media:group" -> {
                         // YouTube style
                         val groupResult = parseMediaGroup(parser)
-                        if (mediaUrl == null && groupResult.first != null) {
-                            mediaUrl = groupResult.first
-                            mediaType = groupResult.second
+                        if (groupResult.first != null) {
+                            if (mediaUrl == null) {
+                                mediaUrl = groupResult.first
+                                mediaType = groupResult.second
+                            }
+                            thumbnailUrl = groupResult.first // Use video URL as thumb fallback or thumbnail from group
                         }
                     }
                     else -> skip(parser)
@@ -168,7 +176,10 @@ object FeedParser {
 
         if (mediaUrl == null) {
             mediaUrl = extractFirstImage(description)
-            if (mediaUrl != null) mediaType = "image"
+            if (mediaUrl != null) {
+                mediaType = "image"
+                thumbnailUrl = mediaUrl
+            }
         }
 
         return FeedItem(
@@ -181,7 +192,8 @@ object FeedParser {
             publishedAt = parseDate(pubDateStr),
             fullContent = description,
             mediaUrl = mediaUrl,
-            mediaType = mediaType
+            mediaType = mediaType,
+            thumbnailUrl = thumbnailUrl
         )
     }
 
@@ -194,6 +206,7 @@ object FeedParser {
         var idStr = ""
         var mediaUrl: String? = null
         var mediaType: String? = null
+        var thumbnailUrl: String? = null
 
         var eventType = parser.next()
         while (!(eventType == XmlPullParser.END_TAG && parser.name.equals("entry", ignoreCase = true))) {
@@ -221,6 +234,7 @@ object FeedParser {
                         val videoId = readText(parser)
                         mediaUrl = "https://www.youtube-nocookie.com/embed/$videoId"
                         mediaType = "video"
+                        thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
                     }
                     "media:content" -> {
                         val encUrl = parser.getAttributeValue(null, "url")
@@ -233,10 +247,24 @@ object FeedParser {
                     }
                     "media:group" -> {
                         val groupResult = parseMediaGroup(parser)
-                        if (mediaUrl == null && groupResult.first != null) {
-                            mediaUrl = groupResult.first
-                            mediaType = groupResult.second
+                        if (groupResult.first != null) {
+                            if (mediaUrl == null) {
+                                mediaUrl = groupResult.first
+                                mediaType = groupResult.second
+                            }
+                            thumbnailUrl = groupResult.first
                         }
+                    }
+                    "media:thumbnail" -> {
+                        val thumbUrl = parser.getAttributeValue(null, "url")
+                        if (!thumbUrl.isNullOrBlank()) {
+                            thumbnailUrl = thumbUrl
+                            if (mediaUrl == null) {
+                                mediaUrl = thumbUrl
+                                mediaType = "image"
+                            }
+                        }
+                        skip(parser)
                     }
                     else -> skip(parser)
                 }
@@ -249,7 +277,10 @@ object FeedParser {
 
         if (mediaUrl == null) {
             mediaUrl = extractFirstImage(summary)
-            if (mediaUrl != null) mediaType = "image"
+            if (mediaUrl != null) {
+                mediaType = "image"
+                thumbnailUrl = mediaUrl
+            }
         }
 
         return FeedItem(
@@ -262,7 +293,8 @@ object FeedParser {
             publishedAt = parseDate(updatedStr),
             fullContent = summary,
             mediaUrl = mediaUrl,
-            mediaType = mediaType
+            mediaType = mediaType,
+            thumbnailUrl = thumbnailUrl
         )
     }
 
@@ -329,22 +361,38 @@ object FeedParser {
         }
     }
 
-    private fun stripHtml(html: String): String {
+    fun stripHtml(html: String): String {
         // First remove code and pre blocks entirely
         val noCode = html.replace(Regex("<code[^>]*>.*?</code>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
             .replace(Regex("<pre[^>]*>.*?</pre>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
         
-        // Then remove other tags
-        return noCode.replace(Regex("<[^>]*>"), " ")
+        // Then remove other common noise tags
+        val noStyle = noCode.replace(Regex("<style[^>]*>.*?</style>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+            .replace(Regex("<script[^>]*>.*?</script>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
+
+        // Then remove all other tags
+        return noStyle.replace(Regex("<[^>]*>"), " ")
             .replace(Regex("&nbsp;", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("&amp;", RegexOption.IGNORE_CASE), "&")
+            .replace(Regex("&lt;", RegexOption.IGNORE_CASE), "<")
+            .replace(Regex("&gt;", RegexOption.IGNORE_CASE), ">")
+            .replace(Regex("&quot;", RegexOption.IGNORE_CASE), "\"")
             .replace(Regex("\\s+"), " ")
             .trim()
     }
 
     private fun extractFirstImage(html: String): String? {
-        // Look for common image formats in src attributes
-        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+\\.(jpg|jpeg|png|webp|gif)[^'\"]*)['\"]", RegexOption.IGNORE_CASE)
+        // Broad search for images in typical RSS/Atom content
+        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+(?:\\.(jpg|jpeg|png|webp|gif|svg)|/image|/photo|attachment|proxy|file)[^'\"]*)['\"]", RegexOption.IGNORE_CASE)
         val match = pattern.find(html)
-        return match?.groupValues?.get(1)
+        var url = match?.groupValues?.get(1)
+        
+        // Also look for og:image or twitter:image in meta tags if the input is a full page (rare in parseStream but possible)
+        if (url == null) {
+            val metaPattern = Regex("<meta[^>]+(?:property|name)=['\"](?:og|twitter):image['\"][^>]+content=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+            url = metaPattern.find(html)?.groupValues?.get(1)
+        }
+
+        return url
     }
 }

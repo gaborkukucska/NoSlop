@@ -62,7 +62,7 @@ object PublicApiService {
                     items += safeCall { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                     items += safeCall { InternetArchiveClient.searchAudio(query) }
                 }
-                "Art" -> {
+                "Art", "Photography" -> {
                     items += safeCall { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     items += safeCall { NasaApiClient.searchImageLibrary(query) }
                     items += safeCall { VimeoApiClient.fetchFeatured(apiKeyRepo) }

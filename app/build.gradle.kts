@@ -115,6 +115,7 @@ dependencies {
     // --- Networking: OkHttp with SOCKS5 proxy support ---
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     implementation("com.google.code.gson:gson:2.10.1")
 
     // --- Image loading ---
@@ -125,6 +126,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
+    implementation("androidx.media3:media3-datasource-okhttp:1.3.1")
 
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")
@@ -143,6 +145,9 @@ dependencies {
 
     // --- WorkManager for Background Feed Sync ---
     implementation(libs.androidx.work.runtime.ktx)
+
+    // --- WebView Proxy Support ---
+    implementation("androidx.webkit:webkit:1.11.0")
 
     // --- QR Scanning and QR Code Generation ---
     implementation(libs.google.mlkit.barcode.scanning)

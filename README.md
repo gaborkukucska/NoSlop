@@ -89,7 +89,6 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 - 🏗️ **[BUILD.md](docs/BUILD.md)** — how to compile and install NoSlop.
 - 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
 - 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)** — HAI-Net wire protocol reference.
-- 🧪 **[TEST_PROTOCOL.md](docs/TEST_PROTOCOL.md)** — mesh verification procedures.
 - 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
 
 ---

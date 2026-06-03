@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (this::viewModel.isInitialized) {
+            viewModel.startTor()
             viewModel.refreshTorStatus()
         }
     }

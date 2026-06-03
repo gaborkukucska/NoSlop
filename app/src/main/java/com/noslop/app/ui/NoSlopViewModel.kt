@@ -15,14 +15,7 @@ import com.noslop.app.feeds.BuiltInSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.tor.TorService
 import com.noslop.app.tor.TorState
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -98,6 +91,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
+
+    fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
+        repository.getCommentsForPost(postId)
 
     val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -323,6 +319,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun composeAndBroadcastComment(postId: String, content: String, parentCommentId: String? = null) {
+        if (content.isBlank()) return
+        viewModelScope.launch {
+            repository.composeAndBroadcastComment(postId, content, parentCommentId)
+        }
+    }
+
     fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "") {
         viewModelScope.launch {
             repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64)
@@ -358,7 +361,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      */
     fun startTor() {
         Logger.info("VM", "Instructing TorService to start embedded daemon")
-        TorService.startTor(getApplication())
+        viewModelScope.launch {
+            val identity = repository.getLocalIdentity()
+            TorService.startTor(getApplication(), identity?.privateKeyB64)
+        }
     }
 
 

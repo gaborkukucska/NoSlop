@@ -24,6 +24,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
+    private val commentDao = db.commentDao()
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
 
@@ -50,6 +51,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         messageDao.getMessagesWithPeer(peerPub)
+
+    fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
+        commentDao.getCommentsForPost(postId)
 
     fun getDownloadProgress(): Flow<Map<String, Int>> =
         com.noslop.app.mesh.MediaManager.downloadProgress
@@ -312,7 +316,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             signature = signature,
             mediaUrl = mediaMetadata?.id?.let { "noslop://${myKeys.onionAddress}/$it" },
             mediaType = mediaMetadata?.type,
-            privacy = privacy
+            privacy = privacy,
+            thumbnailB64 = mediaMetadata?.thumbnailB64
         )
 
         postDao.insertPost(localPost)
@@ -421,8 +426,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         content = postPay.content,
                         timestamp = postPay.timestamp,
                         signature = postPay.signature ?: "",
-                        mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode}/$it" },
-                        mediaType = postPay.mediaMetadata?.type
+                        mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
+                        mediaType = postPay.mediaMetadata?.type,
+                        thumbnailB64 = postPay.mediaMetadata?.thumbnailB64
                     )
                     postDao.insertPost(post)
                     stored++
@@ -453,10 +459,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     content = postPay.content,
                     timestamp = postPay.timestamp,
                     signature = postPay.signature ?: "",
-                    mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode}/$it" },
+                    mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
                     mediaType = postPay.mediaMetadata?.type,
                     gossipCount = 1,
-                    privacy = postPay.privacy
+                    privacy = postPay.privacy,
+                    thumbnailB64 = postPay.mediaMetadata?.thumbnailB64
                 )
                 postDao.insertPost(meshPost)
                 
@@ -471,6 +478,28 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 }
 
                 Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")
+                return@withContext true
+            }
+            "COMMENT" -> {
+                val commPay = packet.getCommentPayload() ?: return@withContext false
+                val payloadToVerify = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
+                val isValid = CryptoService.verify(payloadToVerify, commPay.comment.signature, commPay.comment.authorId)
+                if (!isValid) {
+                    Logger.warn(TAG, "Rejected gossip comment: Signature verification failed")
+                    return@withContext false
+                }
+                val meshComment = MeshComment(
+                    id = commPay.comment.id,
+                    postId = commPay.postId,
+                    authorPublicKeyB64 = commPay.comment.authorId,
+                    authorHandle = commPay.comment.authorName,
+                    content = commPay.comment.content,
+                    timestamp = commPay.comment.timestamp,
+                    signature = commPay.comment.signature,
+                    parentCommentId = commPay.parentCommentId
+                )
+                commentDao.insertComment(meshComment)
+                Logger.info(TAG, "Valid signed comment accepted and stored: from=${commPay.comment.authorName}")
                 return@withContext true
             }
             "MEDIA_REQUEST" -> {
@@ -787,5 +816,58 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun markMessagesAsRead(peerPub: String) = withContext(Dispatchers.IO) {
         messageDao.markAsRead(peerPub)
+    }
+
+    suspend fun composeAndBroadcastComment(
+        postId: String,
+        content: String,
+        parentCommentId: String? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val handle = getLocalHandle()
+        val timestamp = System.currentTimeMillis()
+        val commentId = UUID.randomUUID().toString()
+
+        val payloadToSign = "$postId|$commentId|$content|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val commentData = com.noslop.app.mesh.CommentData(
+            id = commentId,
+            authorId = myKeys.publicKeyB64,
+            authorName = handle,
+            content = content,
+            timestamp = timestamp,
+            signature = signature
+        )
+
+        val commentPayload = com.noslop.app.mesh.CommentPayload(
+            postId = postId,
+            comment = commentData,
+            parentCommentId = parentCommentId
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(commentPayload),
+            signature = signature
+        )
+
+        val localComment = MeshComment(
+            id = commentId,
+            postId = postId,
+            authorPublicKeyB64 = myKeys.publicKeyB64,
+            authorHandle = handle,
+            content = content,
+            timestamp = timestamp,
+            signature = signature,
+            parentCommentId = parentCommentId
+        )
+
+        commentDao.insertComment(localComment)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
     }
 }

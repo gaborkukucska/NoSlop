@@ -133,6 +133,12 @@ object InternetArchiveClient {
                         else -> defaultMediaType
                     }
 
+                    val archiveMediaUrl = when (resolvedMediaType) {
+                        "video" -> "https://archive.org/embed/$identifier"
+                        "audio" -> "https://archive.org/download/$identifier/${identifier}_vbr.mp3"
+                        else -> "https://archive.org/download/$identifier"
+                    }
+
                     items.add(FeedItem(
                         id = "archive_$identifier",
                         sourceId = sourceId,
@@ -142,7 +148,7 @@ object InternetArchiveClient {
                         excerpt = description,
                         thumbnailUrl = "https://archive.org/services/img/$identifier",
                         publishedAt = FeedParser.parseDate(dateStr),
-                        mediaUrl = "https://archive.org/download/$identifier",
+                        mediaUrl = archiveMediaUrl,
                         mediaType = resolvedMediaType,
                         apiSource = "internet_archive"
                     ))

@@ -77,7 +77,8 @@ data class MeshPost(
     val mediaUrl: String? = null,
     val mediaType: String? = null,
     val gossipCount: Int = 1,
-    val privacy: String = "public" // "public", "friends"
+    val privacy: String = "public", // "public", "friends"
+    val thumbnailB64: String? = null
 )
 
 @Entity(
@@ -94,6 +95,29 @@ data class ChatMessage(
     val isRead: Boolean = false,
     val mediaId: String? = null,
     val mediaType: String? = null
+)
+
+@Entity(
+    tableName = "mesh_comments",
+    foreignKeys = [
+        ForeignKey(
+            entity = MeshPost::class,
+            parentColumns = ["id"],
+            childColumns = ["postId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [Index(value = ["postId"])]
+)
+data class MeshComment(
+    @PrimaryKey val id: String,
+    val postId: String,
+    val authorPublicKeyB64: String,
+    val authorHandle: String,
+    val content: String,
+    val timestamp: Long,
+    val signature: String,
+    val parentCommentId: String? = null
 )
 
 @Entity(tableName = "app_settings")

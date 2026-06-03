@@ -67,11 +67,29 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 47. **Onion Collision Self-Healing**: Hardened `TorService.kt` to handle `550 Onion address collision` errors by intelligently verifying existing registrations and re-triggering UI state updates.
 
 48. **Key size corrected to 255**: Corrected Ed25519 key size to 255 for compatibility with Android's Conscrypt cryptographic provider to prevent onboarding page crashes on actual devices.
-42. **Bouncy Castle bcprov-jdk18on:1.78.1 added as dependency, registered in onCreate()**
-43. **Ed25519 keygen: initialize() removed for API 33+ Conscrypt path**
-44. **SHA3-256 Provider Fix**: Added `BC_PROVIDER` explicitly to `MessageDigest.getInstance("SHA3-256")` calls to resolve `NoSuchAlgorithmException` on devices lacking native SHA3 support.
+
+49. **Instant Mesh Previews**: Implemented automatic generation of tiny, high-compression thumbnails for mesh posts. These are included in the `MediaMetadata` gossip packet, allowing peers to see a visual preview immediately while the full file downloads over Tor.
+
+50. **Industrial-Grade Playback**: Enhanced `ExoPlayer` with custom load controls (3s start buffer) and broader MIME type detection (HLS, DASH, diverse MP4/MKV containers) to handle high-latency mesh and clearnet streams reliably.
+
+51. **Secure DNS-over-HTTPS (DoH)**: Integrated `okhttp-dnsoverhttps` and configured Cloudflare (1.1.1.1) as a secure fallback. This resolves `Unable to resolve host` and SSL verification errors without routing all traffic through the slower Tor network.
+
+52. **TikTok-Style Feed Auto-play**: Configured `WebView` and `ExoPlayer` components to automatically start media playback on scroll, creating a seamless, immersive vertical feed experience for Archive.org and YouTube content.
+
+53. **Clean Article Engine**: Implemented robust HTML sanitization in `FeedParser.stripHtml` to remove tags, styles, and scripts from full-length articles, providing a distraction-free text reading experience.
+
+54. **Hardened Media Proxy**: Improved `MediaProxyService` with larger connection backlogs and extended timeouts (120s) to better accommodate deep-mesh synchronization latencies.
+
+55. **Visual-First Curation**: Added a dedicated "Photography" category with high-quality sources (500px, Flickr) and updated the UI to prioritize displaying media over text segments for art and photography feeds.
+
 ## Pending Implementations & Limitations
-- **Two-device real-device test** — execute `TEST_PROTOCOL.md` (build is ready) to validate Tor service connections, peer QR handshakes, and actual gossip/DM packet routing fully.
+- **Audio Playback Failure**: Audio content pieces currently do not play despite proxy and codec updates; requires investigation into direct file extraction vs. landing pages.
+- **Clearnet Video Compatibility**: Currently, only Archive.org and YouTube (via WebView) playback is verified; other clearnet video sources may still trigger format errors.
+- **Article Pagination Gestures**: Swiping between segments in `SegmentedArticleReader` is currently not working or is being consumed by the vertical pager; needs gesture prioritization fix.
+- **Zoomable Media**: Images in the feed are static; needs implementation of a tap-to-zoom full-screen modal.
+- **RSS Subscription Logic**: Need to enable manual subscription to RSS feeds for sources that provide them in their landing page metadata.
+- **Feed Pre-loading & Hybrid Mixing**: The current feed loading mechanism needs a rethink to pre-buffer next items and intelligently mix aggregated (clearnet) and broadcasted (mesh) content without stalling or overloading Tor circuits.
+- **Comment Module UI**: The comment module currently lacks a user-facing way to actually post/leave a new comment within the unified feed UI.
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |

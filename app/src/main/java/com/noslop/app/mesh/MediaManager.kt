@@ -25,6 +25,23 @@ object MediaManager {
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val downloadProgress = _downloadProgress.asStateFlow()
 
+    private val chunkListeners = ConcurrentHashMap<String, MutableSet<(Int, ByteArray) -> Unit>>()
+
+    fun subscribeToChunks(mediaId: String, listener: (Int, ByteArray) -> Unit): List<ByteArray?> {
+        // Add listener first to ensure we don't miss chunks arriving during snapshots
+        chunkListeners.getOrPut(mediaId) { ConcurrentHashMap.newKeySet() }.add(listener)
+        
+        val dl = activeDownloads[mediaId]
+        val existing = dl?.chunks?.toList() ?: emptyList()
+        
+        Logger.info(TAG, "Media $mediaId: Client subscribed. Returning ${existing.filterNotNull().size} existing chunks.")
+        return existing
+    }
+
+    fun unsubscribeFromChunks(mediaId: String, listener: (Int, ByteArray) -> Unit) {
+        chunkListeners[mediaId]?.remove(listener)
+    }
+
     fun initialize(repo: NoSlopRepository) {
         this.repository = repo
         // Start maintenance loop
@@ -157,8 +174,18 @@ object MediaManager {
     }
 
     suspend fun startDownload(metadata: MediaMetadata, peerOnion: String?) {
-        if (activeDownloads.containsKey(metadata.id)) return
+        if (activeDownloads.containsKey(metadata.id)) {
+            val dl = activeDownloads[metadata.id]
+            if (dl?.peerOnion == null && peerOnion != null) {
+                Logger.info(TAG, "Media ${metadata.id}: Updating source node to $peerOnion")
+                dl?.peerOnion = peerOnion
+                dl?.status = ActiveDownload.Status.ACTIVE
+                requestNextChunks(dl!!)
+            }
+            return
+        }
         
+        Logger.info(TAG, "Media ${metadata.id}: Starting download from $peerOnion. Total chunks: ${metadata.chunkCount}")
         val dl = ActiveDownload(
             metadata = metadata,
             peerOnion = peerOnion,
@@ -186,6 +213,10 @@ object MediaManager {
             dl.receivedCount++
             dl.inflight.remove(payload.chunkIndex)
             
+            Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks})")
+            
+            chunkListeners[payload.mediaId]?.forEach { it(payload.chunkIndex, chunkData) }
+
             val progress = (dl.receivedCount * 100) / dl.totalChunks
             updateProgress(payload.mediaId, progress)
             
@@ -269,26 +300,32 @@ object MediaManager {
     suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {
         val repo = repository ?: return
         
-        // 1. Check if we have it locally
-        // We don't have the type in the request payload, so we might need to check all directories
-        // or just use the ID. Since we use getMediaDirectory(type), let's find the file.
-        val possibleDirs = listOf(
-            Environment.DIRECTORY_PICTURES,
-            Environment.DIRECTORY_MOVIES,
-            Environment.DIRECTORY_MUSIC,
-            Environment.DIRECTORY_DOWNLOADS
-        )
-        
-        var file: File? = null
-        for (dirType in possibleDirs) {
-            val baseDir = repo.context.getExternalFilesDir(dirType) ?: repo.context.filesDir
-            val noSlopDir = File(baseDir, "NoSlop")
-            val candidate = File(noSlopDir, payload.mediaId)
-            if (candidate.exists()) {
-                file = candidate
-                break
+        // 0. If it's a metadata request (chunkSize == 0)
+        if (payload.chunkSize == 0) {
+            val file = findLocalFile(repo, payload.mediaId)
+            if (file != null) {
+                val metadata = MediaMetadata(
+                    id = payload.mediaId,
+                    type = if (file.name.endsWith(".jpg") || file.name.endsWith(".png")) "image" else "video",
+                    mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
+                    size = file.length(),
+                    chunkCount = (file.length() / CHUNK_SIZE).toInt() + 1,
+                    originNode = repo.getLocalIdentity()?.onionAddress
+                )
+                val packet = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    type = "MEDIA_METADATA_RESPONSE", // Add new type
+                    payload = com.google.gson.Gson().toJsonTree(metadata)
+                )
+                repo.meshTransport.sendPacket(senderId, 9999, packet)
+                return
             }
         }
+
+        // 1. Check if we have it locally
+        val file = findLocalFile(repo, payload.mediaId)
         
         if (file != null && file.exists()) {
             val totalSize = file.length()
@@ -332,5 +369,83 @@ object MediaManager {
         val current = _downloadProgress.value.toMutableMap()
         current[id] = progress
         _downloadProgress.value = current
+    }
+
+    private fun findLocalFile(repo: NoSlopRepository, mediaId: String): File? {
+        val possibleDirs = listOf(
+            Environment.DIRECTORY_PICTURES,
+            Environment.DIRECTORY_MOVIES,
+            Environment.DIRECTORY_MUSIC,
+            Environment.DIRECTORY_DOWNLOADS
+        )
+        for (dirType in possibleDirs) {
+            val baseDir = repo.context.getExternalFilesDir(dirType) ?: repo.context.filesDir
+            val noSlopDir = File(baseDir, "NoSlop")
+            val candidate = File(noSlopDir, mediaId)
+            if (candidate.exists()) return candidate
+        }
+        return null
+    }
+
+    fun getMetadataSync(mediaId: String): MediaMetadata? {
+        val repo = repository ?: return null
+        val file = findLocalFile(repo, mediaId)
+        val ext = mediaId.substringAfterLast('.', "").lowercase()
+        
+        val mimeType = when (ext) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "webp" -> "image/webp"
+            "gif" -> "image/gif"
+            "mp4" -> "video/mp4"
+            "mkv" -> "video/x-matroska"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            else -> "application/octet-stream"
+        }
+
+        return MediaMetadata(
+            id = mediaId,
+            type = if (mimeType.startsWith("image")) "image" else if (mimeType.startsWith("video")) "video" else "file",
+            mimeType = mimeType,
+            size = file?.length() ?: 0,
+            chunkCount = if (file != null) (file.length() / CHUNK_SIZE).toInt() + 1 else 0
+        )
+    }
+
+    fun getLocalFile(mediaId: String): File? {
+        return findLocalFile(repository ?: return null, mediaId)
+    }
+
+    /**
+     * Generates a tiny Base64 thumbnail for a video or image file.
+     */
+    fun generateTinyThumbnail(file: File, type: String?): String? {
+        return try {
+            val bitmap = if (type?.startsWith("video") == true) {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(file.absolutePath)
+                val frame = retriever.getFrameAtTime(1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                retriever.release()
+                frame
+            } else if (type?.startsWith("image") == true) {
+                android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+            } else {
+                null
+            }
+
+            if (bitmap != null) {
+                // Scale down to a tiny size (e.g., 90x90) for inline transmission
+                val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, 90, (90 * bitmap.height / bitmap.width), true)
+                val out = java.io.ByteArrayOutputStream()
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
+                Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Thumbnail generation failed: ${e.message}")
+            null
+        }
     }
 }

@@ -102,6 +102,18 @@ interface MessageDao {
 }
 
 @Dao
+interface CommentDao {
+    @Query("SELECT * FROM mesh_comments WHERE postId = :postId ORDER BY timestamp ASC")
+    fun getCommentsForPost(postId: String): Flow<List<MeshComment>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertComment(comment: MeshComment)
+
+    @Query("DELETE FROM mesh_comments WHERE postId = :postId")
+    suspend fun deleteCommentsForPost(postId: String)
+}
+
+@Dao
 interface AppSettingDao {
     @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
     suspend fun getSetting(key: String): String?

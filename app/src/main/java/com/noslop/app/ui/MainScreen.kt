@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -49,9 +50,47 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.runtime.CompositionLocalProvider
+import coil.ImageLoader
+import coil.compose.LocalImageLoader
+import coil.intercept.Interceptor
+import com.noslop.app.net.HttpClientProvider
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.Dispatchers
 
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel) {
+    val context = LocalContext.current
+    val imageLoader = remember {
+        ImageLoader.Builder(context)
+            .okHttpClient { HttpClientProvider.clearnetClient }
+            .interceptorDispatcher(Dispatchers.IO)
+            .components {
+                add(object : Interceptor {
+                    override suspend fun intercept(chain: Interceptor.Chain): coil.request.ImageResult {
+                        val request = chain.request
+                        val url = request.data.toString()
+                        if (url.startsWith("noslop://")) {
+                            val resolved = resolveMediaUrl(url, context)
+                            if (resolved != null) {
+                                return chain.proceed(request.newBuilder().data(resolved).build())
+                            }
+                        }
+                        return chain.proceed(request)
+                    }
+                })
+            }
+            .build()
+    }
+
+    CompositionLocalProvider(LocalImageLoader provides imageLoader) {
+        MainScreenContent(viewModel)
+    }
+}
+
+@Composable
+fun MainScreenContent(viewModel: NoSlopViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
     var showComposeDialog by remember { mutableStateOf(false) }
 
@@ -338,21 +377,19 @@ fun UnifiedFeedTab(
                             .fillMaxSize()
                             .background(PrimaryBlack)
                     ) {
-                        when (item) {
-                            is UnifiedItem.Feed -> FullScreenFeedCard(
-                                item = item.item,
-                                isVisible = isVisible,
-                                onShareToMesh = { showShareDialog = item }
-                            )
-                            is UnifiedItem.Mesh -> FullScreenMeshCard(
-                                post = item.post,
-                                isVisible = isVisible,
-                                onComment = { 
-                                    viewModel.selectChatPeer(item.post.authorPublicKeyB64)
-                                    onTabChange(1) // Switch to DMs tab
-                                }
-                            )
-                        }
+                    when (item) {
+                        is UnifiedItem.Feed -> FullScreenFeedCard(
+                            item = item.item,
+                            isVisible = isVisible,
+                            onShareToMesh = { showShareDialog = item },
+                            viewModel = viewModel
+                        )
+                        is UnifiedItem.Mesh -> FullScreenMeshCard(
+                            post = item.post,
+                            isVisible = isVisible,
+                            viewModel = viewModel
+                        )
+                    }
                     }
                 }
             }
@@ -539,7 +576,8 @@ fun UnifiedFeedTab(
                                     size = file.length(),
                                     chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
                                     originNode = viewModel.localKeys.value?.onionAddress,
-                                    ownerId = viewModel.localKeys.value?.publicKeyB64
+                                    ownerId = viewModel.localKeys.value?.publicKeyB64,
+                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, if (file.name.endsWith(".jpg")) "image" else "video")
                                 )
                             }
                             viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
@@ -606,6 +644,7 @@ fun UnifiedFeedTab(
 
 fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String? {
     if (mediaUrl == null) return null
+    Logger.debug("MEDIA_RESOLVE", "Resolving URL: $mediaUrl")
     if (mediaUrl.startsWith("noslop://")) {
         val uri = mediaUrl.substringAfter("noslop://")
         val parts = uri.split("/")
@@ -624,11 +663,15 @@ fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String
                 val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
                 val candidate = java.io.File(java.io.File(baseDir, "NoSlop"), mediaId)
                 if (candidate.exists()) {
-                    return candidate.toURI().toString()
+                    val path = candidate.absolutePath
+                    Logger.info("MEDIA_RESOLVE", "Found local cache: $path")
+                    return path
                 }
             }
             
-            return com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, mediaId)
+            val proxyUrl = com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, mediaId)
+            Logger.info("MEDIA_RESOLVE", "Using proxy URL: $proxyUrl")
+            return proxyUrl
         }
     }
     return mediaUrl
@@ -636,40 +679,134 @@ fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = null) {
+fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = null, thumbnailB64: String? = null) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     
-    if (url.contains("youtube") || url.contains("embed") || url.contains("vimeo")) {
+    // Check if it's a web-based video that needs WebView
+    val isWebVideo = (url.contains("youtube") || url.contains("embed") || url.contains("vimeo") || url.contains("dailymotion") || url.contains("archive.org/details"))
+                     && !url.contains("127.0.0.1")
+
+    if (isWebVideo) {
+        Logger.info("VIDEO", "Loading video in WebView: $url")
         AndroidView(
             factory = { ctx ->
                 android.webkit.WebView(ctx).apply {
                     settings.javaScriptEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.domStorageEnabled = true
-                    webViewClient = android.webkit.WebViewClient()
+                    settings.databaseEnabled = true
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+                    
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                            Logger.info("VIDEO", "WebView page finished: $url")
+                            // Stronger auto-play injection
+                            val playJs = """
+                                (function() {
+                                    var v = document.querySelector('video');
+                                    if (v) {
+                                        v.play();
+                                        v.muted = false;
+                                    }
+                                    var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label="Play"]');
+                                    if (btn) btn.click();
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(playJs, null)
+                        }
+                        override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                            Logger.error("VIDEO", "WebView error: ${error?.description} for ${request?.url}")
+                        }
+                    }
                     webChromeClient = android.webkit.WebChromeClient()
-                    val finalUrl = if (url.contains("youtube") && !url.contains("autoplay")) {
-                        if (url.contains("?")) "$url&autoplay=1" else "$url?autoplay=1"
-                    } else url
+                    val finalUrl = when {
+                        url.contains("youtube.com") || url.contains("youtu.be") -> {
+                            val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
+                                         else url.substringAfterLast("/")
+                            val baseUrl = "https://www.youtube-nocookie.com/embed/$videoId"
+                            if (baseUrl.contains("?")) "$baseUrl&autoplay=1&mute=0" else "$baseUrl?autoplay=1&mute=0"
+                        }
+                        url.contains("archive.org/embed") && !url.contains("autoplay=1") -> {
+                            if (url.contains("?")) "$url&autoplay=1" else "$url?autoplay=1"
+                        }
+                        else -> url
+                    }
                     loadUrl(finalUrl)
                 }
             },
-            modifier = Modifier.fillMaxSize()
+            update = { view ->
+                if (!isVisible) {
+                    view.onPause()
+                    view.pauseTimers()
+                } else {
+                    view.onResume()
+                    view.resumeTimers()
+                    // Re-trigger auto-play on update
+                    view.evaluateJavascript("(function() { var v = document.querySelector('video'); if (v) v.play(); })();", null)
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+            onRelease = { view ->
+                view.stopLoading()
+                view.loadUrl("about:blank")
+                view.destroy()
+            }
         )
     } else {
+        Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
         val exoPlayer = remember(url) {
-            androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-                val mediaItem = androidx.media3.common.MediaItem.Builder()
-                    .setUri(url)
-                    .setMimeType(if (url.contains(".m3u8")) "application/x-mpegURL" else "video/mp4")
-                    .build()
-                setMediaItem(mediaItem)
-                prepare()
-                playWhenReady = isVisible
-                repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            val dataSourceFactory = OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+
+            val mimeType = when {
+                url.contains(".m3u8") || url.contains("m3u8") -> "application/x-mpegURL"
+                url.contains(".mpd") || url.contains("mpd") -> "application/dash+xml"
+                url.contains(".mp4") || url.contains("mp4") -> "video/mp4"
+                url.contains(".mkv") || url.contains("mkv") -> "video/x-matroska"
+                url.contains("/stream") -> "video/mp4" // Mesh videos proxied via LOCAL_PORT
+                else -> null // Let ExoPlayer guess
             }
+
+            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
+                .setLoadControl(
+                    androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                        .setBufferDurationsMs(3000, 10000, 1000, 1500)
+                        .build()
+                )
+                .build().apply {
+                    val mediaItem = androidx.media3.common.MediaItem.Builder()
+                        .setUri(url)
+                        .setMimeType(mimeType)
+                        .build()
+                    setMediaItem(mediaItem)
+
+                    addListener(object : androidx.media3.common.Player.Listener {
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                        }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            val stateStr = when(state) {
+                                androidx.media3.common.Player.STATE_READY -> "READY"
+                                androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                                androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                                androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                                else -> "UNKNOWN"
+                            }
+                            Logger.info("VIDEO", "ExoPlayer state changed: $stateStr for $url")
+                        }
+                    })
+
+                    prepare()
+                    playWhenReady = isVisible
+                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                }
         }
 
         LaunchedEffect(isVisible) {
@@ -688,12 +825,18 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            if (thumbnailUrl != null) {
+            if (thumbnailUrl != null || thumbnailB64 != null) {
                 coil.compose.AsyncImage(
-                    model = thumbnailUrl,
+                    model = thumbnailUrl ?: thumbnailB64?.let {
+                        try {
+                            val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        } catch (e: Exception) { null }
+                    },
                     contentDescription = "Video Thumbnail",
                     modifier = Modifier.fillMaxSize(),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    alpha = if (isVisible) 0.5f else 1.0f
                 )
             }
             AndroidView(
@@ -719,24 +862,34 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun AudioPlayer(url: String) {
+fun AudioPlayer(url: String, isVisible: Boolean = true) {
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(0f) }
+    var duration by remember { mutableStateOf(0L) }
+    var currentPos by remember { mutableStateOf(0L) }
 
-    val exoPlayer = remember {
-        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
-            setMediaItem(mediaItem)
-            prepare()
-            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
-        }
+    val exoPlayer = remember(url) {
+        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+        androidx.media3.exoplayer.ExoPlayer.Builder(context)
+            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
+            .build().apply {
+                val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+                setMediaItem(mediaItem)
+                prepare()
+                repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
         val listener = object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+            }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == androidx.media3.common.Player.STATE_READY) {
+                    duration = exoPlayer.duration
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -746,11 +899,22 @@ fun AudioPlayer(url: String) {
         }
     }
 
+    LaunchedEffect(isVisible) {
+        exoPlayer.playWhenReady = isVisible
+        if (isVisible) {
+            exoPlayer.play()
+        } else {
+            exoPlayer.pause()
+        }
+    }
+
     LaunchedEffect(isPlaying) {
         while (isPlaying) {
-            val duration = exoPlayer.duration
-            if (duration > 0) {
-                progress = exoPlayer.currentPosition.toFloat() / duration
+            currentPos = exoPlayer.currentPosition
+            val d = exoPlayer.duration
+            if (d > 0) {
+                progress = currentPos.toFloat() / d
+                duration = d
             }
             kotlinx.coroutines.delay(200)
         }
@@ -763,46 +927,71 @@ fun AudioPlayer(url: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Icon(
-            imageVector = if (isPlaying) Icons.Default.PlayArrow else Icons.Default.PlayArrow, // Fallback icons
-            contentDescription = null,
-            tint = AccentGreen,
-            modifier = Modifier.size(64.dp)
-        )
-        Spacer(modifier = Modifier.height(24.dp))
+        IconButton(
+            onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
+            modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = PrimaryBlack,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+        
+        Spacer(modifier = Modifier.height(32.dp))
 
-        // Waveform preview
+        // Waveform preview (animated when playing)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(100.dp)
+                .height(120.dp)
                 .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            val waveBars = 35
+            val waveBars = 40
             for (i in 0 until waveBars) {
-                val heightPercent = remember(i) { (20..95).random() / 100f }
+                val heightPercent = remember(i, isPlaying) { 
+                    if (isPlaying) (20..95).random() / 100f 
+                    else (30..40).random() / 100f 
+                }
                 val isPlayed = progress > (i.toFloat() / waveBars)
                 Box(
                     modifier = Modifier
                         .width(4.dp)
                         .fillMaxHeight(heightPercent)
                         .clip(RoundedCornerShape(2.dp))
-                        .background(if (isPlayed) AccentGreen else BorderSubtle)
+                        .background(if (isPlayed) AccentGreen else BorderSubtle.copy(alpha = 0.5f))
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(
-            onClick = {
-                if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+        // Draggable Timeline
+        Slider(
+            value = progress,
+            onValueChange = { 
+                progress = it
+                exoPlayer.seekTo((it * duration).toLong())
             },
-            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = AccentGreen,
+                activeTrackColor = AccentGreen,
+                inactiveTrackColor = BorderSubtle
+            )
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(if (isPlaying) "Pause Audio" else "Play Audio", fontWeight = FontWeight.Bold)
+            val currentStr = String.format("%02d:%02d", (currentPos/1000)/60, (currentPos/1000)%60)
+            val durationStr = String.format("%02d:%02d", (duration/1000)/60, (duration/1000)%60)
+            Text(currentStr, color = TextMuted, fontSize = 12.sp)
+            Text(durationStr, color = TextMuted, fontSize = 12.sp)
         }
     }
 }
@@ -823,10 +1012,19 @@ fun FullScreenImage(url: String) {
 }
 
 @Composable
-fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh: () -> Unit) {
-    val content = item.fullContent ?: item.excerpt ?: "No content available."
+fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh: () -> Unit, viewModel: NoSlopViewModel? = null) {
+    val rawContent = item.fullContent ?: item.excerpt ?: "No content available."
+    val content = remember(rawContent) { com.noslop.app.feeds.FeedParser.stripHtml(rawContent) }
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(item.mediaUrl, context)
+    
+    Logger.debug("FEED_CARD", "Rendering item: ${item.id} | mediaType: ${item.mediaType} | resolvedUrl: $resolvedUrl")
+
+    // Categorize visual-first categories
+    val isVisualCategory = item.apiSource in listOf("pexels", "nasa") || item.sourceId in listOf("hi-fructose", "juxtapoz", "colossal", "500px-popular", "flickr-explore", "petapixel")
+    val hasVisualMedia = item.mediaType == "image" || (resolvedUrl?.let { url -> 
+        url.contains(".jpg") || url.contains(".jpeg") || url.contains(".png") || url.contains(".webp")
+    } ?: false)
 
     Box(
         modifier = Modifier
@@ -836,16 +1034,36 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
         // 1. Media or paginated text content
         if (resolvedUrl != null) {
             when {
-                item.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
+                item.mediaType == "video" || 
+                resolvedUrl.contains(".mp4") || 
+                resolvedUrl.contains(".mkv") || 
+                resolvedUrl.contains(".m3u8") ||
+                resolvedUrl.contains("youtube") ||
+                resolvedUrl.contains("vimeo") ||
+                resolvedUrl.contains("archive.org/embed") -> {
                     VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl)
                 }
-                item.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
-                    AudioPlayer(url = resolvedUrl)
+                item.mediaType == "audio" || 
+                resolvedUrl.contains(".mp3") || 
+                resolvedUrl.contains(".wav") ||
+                resolvedUrl.contains(".m4a") ||
+                resolvedUrl.contains(".aac") ||
+                resolvedUrl.contains("archive.org/download") -> {
+                    AudioPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
-                item.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
+                isVisualCategory && hasVisualMedia -> {
+                    BlurredImageBackground(url = resolvedUrl)
+                }
+                item.mediaType == "image" || 
+                resolvedUrl.contains(".jpg") || 
+                resolvedUrl.contains(".jpeg") || 
+                resolvedUrl.contains(".png") || 
+                resolvedUrl.contains(".webp") ||
+                resolvedUrl.contains(".gif") -> {
                     BlurredImageBackground(url = resolvedUrl)
                 }
                 else -> {
+                    Logger.info("FEED_CARD", "Falling back to article reader for ${item.id}")
                     SegmentedArticleReader(content = content, imageUrl = resolvedUrl)
                 }
             }
@@ -913,36 +1131,53 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
         }
 
         // 3. Interactions Overlay
+        var showComments by remember { mutableStateOf(false) }
         OverlayInteractions(
             isMesh = false,
             onLike = { /* local feedback */ },
             onShare = onShareToMesh,
+            onComment = { showComments = true },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
+
+        if (showComments && viewModel != null) {
+            CommentsBottomSheet(
+                postId = item.id,
+                viewModel = viewModel,
+                onDismiss = { showComments = false }
+            )
+        }
     }
 }
 
 @Composable
-fun FullScreenMeshCard(post: MeshPost, isVisible: Boolean = true, onComment: () -> Unit) {
+fun FullScreenMeshCard(
+    post: MeshPost, 
+    isVisible: Boolean = true, 
+    onComment: () -> Unit = {}, 
+    viewModel: NoSlopViewModel? = null
+) {
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context)
+    var showComments by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(PrimaryBlack)
     ) {
+        // ... (existing media rendering code)
         // 1. Media or paginated text content
         if (resolvedUrl != null) {
             when {
-                post.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") -> {
-                    VideoPlayer(url = resolvedUrl, isVisible = isVisible)
+                post.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") || resolvedUrl.contains("/stream") -> {
+                    VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailB64 = post.thumbnailB64)
                 }
                 post.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
-                    AudioPlayer(url = resolvedUrl)
+                    AudioPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
                 post.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
-                    BlurredImageBackground(url = resolvedUrl)
+                    BlurredImageBackground(url = resolvedUrl, thumbnailB64 = post.thumbnailB64)
                 }
                 else -> {
                     SegmentedArticleReader(content = post.content, imageUrl = resolvedUrl)
@@ -1014,9 +1249,128 @@ fun FullScreenMeshCard(post: MeshPost, isVisible: Boolean = true, onComment: () 
             isMesh = true,
             onLike = { /* gossip like? */ },
             onShare = { /* re-gossip */ },
-            onComment = onComment,
+            onComment = { showComments = true },
             modifier = Modifier.align(Alignment.CenterEnd)
         )
+    }
+
+    if (showComments && viewModel != null) {
+        CommentsBottomSheet(
+            postId = post.id,
+            viewModel = viewModel,
+            onDismiss = { showComments = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CommentsBottomSheet(
+    postId: String,
+    viewModel: NoSlopViewModel,
+    onDismiss: () -> Unit
+) {
+    val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
+    var commentText by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f)
+                .padding(16.dp)
+        ) {
+            Text(
+                "Mesh Comments",
+                style = MaterialTheme.typography.titleLarge,
+                color = TextLight,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (comments.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("No comments yet. Be the first to gossip!", color = TextMuted)
+                        }
+                    }
+                }
+                items(comments) { comment ->
+                    CommentItem(comment)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = commentText,
+                    onValueChange = { commentText = it },
+                    placeholder = { Text("Add a comment...") },
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen,
+                        unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight
+                    )
+                )
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                IconButton(
+                    onClick = {
+                        viewModel.composeAndBroadcastComment(postId, commentText)
+                        commentText = ""
+                    },
+                    enabled = commentText.isNotBlank(),
+                    modifier = Modifier.background(AccentGreen, CircleShape)
+                ) {
+                    Icon(Icons.Default.Send, contentDescription = "Post", tint = PrimaryBlack)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CommentItem(comment: MeshComment) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PrimaryBlack.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                comment.authorHandle,
+                fontWeight = FontWeight.Bold,
+                color = AccentGreen,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(comment.timestamp)),
+                color = TextMuted,
+                fontSize = 10.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(comment.content, color = TextLight, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

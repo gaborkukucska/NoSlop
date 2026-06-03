@@ -1,11 +1,14 @@
 package com.noslop.app.ui
 
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -15,11 +18,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.noslop.app.ui.theme.AccentGreen
 import com.noslop.app.ui.theme.SurfaceDark
@@ -27,8 +37,19 @@ import com.noslop.app.ui.theme.TextLight
 import com.noslop.app.ui.theme.TextMuted
 
 @Composable
-fun BlurredImageBackground(url: String, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null) {
+    var showZoom by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val thumbBitmap = remember(thumbnailB64) {
+        thumbnailB64?.let {
+            try {
+                val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            } catch (e: Exception) { null }
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
         // Background blurred layer
         AsyncImage(
             model = url,
@@ -37,7 +58,8 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier) {
                 .fillMaxSize()
                 .blur(20.dp),
             contentScale = ContentScale.Crop,
-            alpha = 0.5f
+            alpha = 0.5f,
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
         
         // Foreground uncropped layer
@@ -47,8 +69,60 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.Center),
-            contentScale = ContentScale.Fit
+            contentScale = ContentScale.Fit,
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
+    }
+
+    if (showZoom) {
+        ZoomableImageDialog(url = url, onDismiss = { showZoom = false })
+    }
+}
+
+@Composable
+fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            var scale by remember { mutableStateOf(1f) }
+            var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
+            val state = rememberTransformableState { zoomChange, offsetChange, _ ->
+                scale *= zoomChange
+                offset += offsetChange
+            }
+
+            AsyncImage(
+                model = url,
+                contentDescription = "Zoomable View",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale.coerceIn(1f, 5f),
+                        scaleY = scale.coerceIn(1f, 5f),
+                        translationX = offset.x,
+                        translationY = offset.y
+                    )
+                    .transformable(state = state),
+                contentScale = ContentScale.Fit
+            )
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+            ) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+            }
+        }
     }
 }
 
@@ -56,11 +130,17 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier) {
 fun SegmentedArticleReader(content: String, modifier: Modifier = Modifier, imageUrl: String? = null) {
     val segments: List<String> = remember(content) { splitIntoSegments(content, 600) }
     val pagerState = rememberPagerState(pageCount = { segments.size })
+    
+    if (imageUrl != null) {
+        com.noslop.app.debug.Logger.debug("ARTICLE", "Loading image: $imageUrl")
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
             state = pagerState,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).testTag("article_horizontal_pager"),
+            userScrollEnabled = true, // Explicitly enable scrolling
+            beyondViewportPageCount = 1
         ) { pageIndex ->
             Box(
                 modifier = Modifier
@@ -146,7 +226,7 @@ private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
 @Composable
 fun OverlayInteractions(
     modifier: Modifier = Modifier,
-    isMesh: Boolean,
+    isMesh: Boolean = false,
     onLike: () -> Unit,
     onShare: () -> Unit,
     onComment: (() -> Unit)? = null
@@ -169,7 +249,7 @@ fun OverlayInteractions(
             onClick = onShare
         )
 
-        if (isMesh && onComment != null) {
+        if (onComment != null) {
             InteractionButton(
                 icon = Icons.Default.Chat,
                 label = "Chat",

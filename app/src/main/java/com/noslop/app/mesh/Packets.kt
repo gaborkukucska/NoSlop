@@ -26,6 +26,21 @@ data class PostPayload(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
+data class CommentPayload(
+    @SerializedName("post_id") val postId: String,
+    val comment: CommentData,
+    @SerializedName("parent_comment_id") val parentCommentId: String? = null
+)
+
+data class CommentData(
+    val id: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_name") val authorName: String,
+    val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class MediaMetadata(
     val id: String,
     val type: String, // "audio", "video", "file", "image"
@@ -35,7 +50,8 @@ data class MediaMetadata(
     @SerializedName("access_key") val accessKey: String? = null,
     val filename: String? = null,
     @SerializedName("origin_node") val originNode: String? = null,
-    @SerializedName("owner_id") val ownerId: String? = null
+    @SerializedName("owner_id") val ownerId: String? = null,
+    @SerializedName("thumbnail_b64") val thumbnailB64: String? = null
 )
 
 data class MediaRequestPayload(
@@ -110,7 +126,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -166,5 +182,9 @@ data class NetworkPacket(
 
     fun getMediaTransferAckPayload(): MediaTransferAckPayload? = if (type == "MEDIA_TRANSFER_ACK" && payload != null) {
         Gson().fromJson(payload, MediaTransferAckPayload::class.java)
+    } else null
+
+    fun getCommentPayload(): CommentPayload? = if (type == "COMMENT" && payload != null) {
+        Gson().fromJson(payload, CommentPayload::class.java)
     } else null
 }

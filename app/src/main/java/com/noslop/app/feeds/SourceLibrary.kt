@@ -25,6 +25,7 @@ object SourceLibrary {
         "Health",
         "Automotive",
         "Art",
+        "Photography",
         "Music",
         "TikTok (Bridges)",
         "Reddit",
@@ -118,6 +119,11 @@ object SourceLibrary {
         BuiltInSource("hi-fructose", "Hi-Fructose", "https://hifructose.com/feed/", "rss", "Art"),
         BuiltInSource("juxtapoz", "Juxtapoz", "https://www.juxtapoz.com/feed/", "rss", "Art"),
         BuiltInSource("colossal", "Colossal", "https://www.thisiscolossal.com/feed/", "rss", "Art"),
+
+        // Photography
+        BuiltInSource("500px-popular", "500px Popular", "https://500px.com/popular.rss", "rss", "Photography"),
+        BuiltInSource("flickr-explore", "Flickr Explore", "https://www.flickr.com/services/feeds/explore/", "rss", "Photography"),
+        BuiltInSource("petapixel", "PetaPixel", "https://petapixel.com/feed/", "rss", "Photography"),
 
         // Music
         BuiltInSource("pitchfork", "Pitchfork", "https://pitchfork.com/rss/all/", "rss", "Music"),
