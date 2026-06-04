@@ -44,12 +44,7 @@ Thumbs.db
 *.aar
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
-cls/
 
-# Temp / debug files
-out.txt
-test_bc.kts
-noslop-debug.log
 
 # other
 _workspace/
