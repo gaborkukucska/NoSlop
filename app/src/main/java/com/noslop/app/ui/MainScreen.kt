@@ -354,7 +354,7 @@ fun UnifiedFeedTab(
                 VerticalPager(
                     state = pagerState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    beyondViewportPageCount = 1,
+                    beyondViewportPageCount = 2,
                     key = { index -> unifiedItems[index].id }
                 ) { index ->
                     // Trigger infinite load when nearing the end
@@ -364,25 +364,27 @@ fun UnifiedFeedTab(
                         }
                     }
                     val item = unifiedItems[index]
-                    val isVisible = pagerState.currentPage == index || pagerState.targetPage == index
+                    val isVisible = pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(PrimaryBlack)
+                            .background(PrimaryBlack),
+                        contentAlignment = Alignment.Center
                     ) {
-                    when (item) {
-                        is UnifiedItem.Feed -> FullScreenFeedCard(
-                            item = item.item,
-                            isVisible = isVisible,
-                            onShareToMesh = { showShareDialog = item },
-                            viewModel = viewModel
-                        )
-                        is UnifiedItem.Mesh -> FullScreenMeshCard(
-                            post = item.post,
-                            isVisible = isVisible,
-                            viewModel = viewModel
-                        )
-                    }
+                        Text("Loading...", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                        when (item) {
+                            is UnifiedItem.Feed -> FullScreenFeedCard(
+                                item = item.item,
+                                isVisible = isVisible,
+                                onShareToMesh = { showShareDialog = item },
+                                viewModel = viewModel
+                            )
+                            is UnifiedItem.Mesh -> FullScreenMeshCard(
+                                post = item.post,
+                                isVisible = isVisible,
+                                viewModel = viewModel
+                            )
+                        }
                     }
                 }
             }
@@ -686,88 +688,107 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                      url.contains("archive.org/embed") || url.contains("archive.org/details"))
 
     if (isWebVideo) {
-        Logger.info("VIDEO", "Loading video in WebView: $url")
-        AndroidView(
-            factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
-                    layoutParams = android.view.ViewGroup.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    settings.javaScriptEnabled = true
-                    settings.mediaPlaybackRequiresUserGesture = false
-                    settings.domStorageEnabled = true
-                    settings.databaseEnabled = true
-                    settings.allowFileAccess = true
-                    settings.allowContentAccess = true
-                    settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
-                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
-                    
-                    webViewClient = object : android.webkit.WebViewClient() {
-                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
-                            Logger.info("VIDEO", "WebView page finished: $url")
-                            // Stronger auto-play injection & black background
-                            val playJs = """
-                                (function() {
-                                    document.body.style.backgroundColor = 'black';
-                                    var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label="Play"]');
-                                    if (btn) btn.click();
-                                })();
-                            """.trimIndent()
-                            view?.evaluateJavascript(playJs, null)
-                        }
-                        override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
-                            Logger.error("VIDEO", "WebView error: ${error?.description} for ${request?.url}")
-                            if (request?.isForMainFrame == true) {
-                                val errorHtml = "<html><body style='background-color:black;color:#777;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;'>Video unavailable</body></html>"
-                                view?.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null)
-                            }
-                        }
-                    }
-                    webChromeClient = android.webkit.WebChromeClient()
-                    val finalUrl = when {
-                        url.contains("youtube.com") || url.contains("youtu.be") -> {
-                            val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
-                                         else url.substringAfterLast("/")
-                            val baseUrl = "https://www.youtube-nocookie.com/embed/$videoId"
-                            if (baseUrl.contains("?")) "$baseUrl&autoplay=1" else "$baseUrl?autoplay=1"
-                        }
-                        url.contains("vimeo.com") -> {
-                            val videoId = url.substringAfterLast("/")
-                            "https://player.vimeo.com/video/$videoId?autoplay=1"
-                        }
-                        else -> url
-                    }
-                    loadUrl(finalUrl)
-                }
-            },
-            update = { view ->
-                if (!isVisible) {
-                    view.onPause()
-                } else {
-                    view.onResume()
-                    view.evaluateJavascript("(function() { var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label=\"Play\"]'); if (btn) btn.click(); })();", null)
-                }
-            },
-            modifier = Modifier.fillMaxSize(),
-            onRelease = { view ->
-                view.stopLoading()
-                view.loadUrl("about:blank")
-                view.destroy()
+        Logger.info("VIDEO", "Loading video in WebView: $url (isVisible=$isVisible)")
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            // Always show the thumbnail to keep the feed looking populated and smooth
+            if (thumbnailUrl != null || thumbnailB64 != null) {
+                coil.compose.AsyncImage(
+                    model = thumbnailUrl ?: thumbnailB64?.let {
+                        try {
+                            val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        } catch (e: Exception) { null }
+                    },
+                    contentDescription = "Video Thumbnail",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    alpha = if (isVisible) 0.5f else 1.0f
+                )
             }
-        )
+            
+            // Only mount the heavy WebView when the slide is actually visible
+            if (isVisible) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setBackgroundColor(android.graphics.Color.BLACK)
+                            settings.javaScriptEnabled = true
+                            settings.mediaPlaybackRequiresUserGesture = false
+                            settings.domStorageEnabled = true
+                            settings.databaseEnabled = true
+                            settings.allowFileAccess = true
+                            settings.allowContentAccess = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
+                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+                            
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                    Logger.info("VIDEO", "WebView page finished: $url")
+                                    // Stronger auto-play injection & black background
+                                    val playJs = """
+                                        (function() {
+                                            document.body.style.backgroundColor = 'black';
+                                            var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label="Play"]');
+                                            if (btn) btn.click();
+                                        })();
+                                    """.trimIndent()
+                                    view?.evaluateJavascript(playJs, null)
+                                }
+                                override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
+                                    Logger.error("VIDEO", "WebView error: ${error?.description} for ${request?.url}")
+                                    if (request?.isForMainFrame == true) {
+                                        val errorHtml = "<html><body style='background-color:black;color:#777;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;'><div style='text-align:center;'><h2 style='color:#fff;'>Video unavailable</h2><p>${error?.description ?: "Unknown error"}</p></div></body></html>"
+                                        view?.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null)
+                                    }
+                                }
+                            }
+                            webChromeClient = android.webkit.WebChromeClient()
+                            val finalUrl = when {
+                                url.contains("youtube.com") || url.contains("youtu.be") -> {
+                                    val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
+                                                 else url.substringAfterLast("/")
+                                    val baseUrl = "https://www.youtube-nocookie.com/embed/$videoId"
+                                    if (baseUrl.contains("?")) "$baseUrl&autoplay=1" else "$baseUrl?autoplay=1"
+                                }
+                                url.contains("vimeo.com") -> {
+                                    val videoId = url.substringAfterLast("/")
+                                    "https://player.vimeo.com/video/$videoId?autoplay=1"
+                                }
+                                else -> url
+                            }
+                            loadUrl(finalUrl)
+                        }
+                    },
+                    update = { view ->
+                        // evaluateJavascript inside update to re-trigger autoplay if needed
+                        view.evaluateJavascript("(function() { var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label=\"Play\"]'); if (btn) btn.click(); })();", null)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    onRelease = { view ->
+                        view.stopLoading()
+                        view.loadUrl("about:blank")
+                        view.destroy()
+                    }
+                )
+            }
+        }
     } else {
         var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+        var hasError by remember { mutableStateOf(false) }
+        var errorMessage by remember { mutableStateOf("") }
 
         DisposableEffect(url, isVisible) {
             if (isVisible) {
                 Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
+                hasError = false
                 
-                val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-                    .setUserAgent("NoSlop-Android/1.0")
+                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
                 val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
                 val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
@@ -785,6 +806,8 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                         
                         addListener(object : androidx.media3.common.Player.Listener {
                             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                hasError = true
+                                errorMessage = error.message ?: "Playback failed"
                                 Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
                             }
                         })
@@ -800,7 +823,7 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
             }
         }
 
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             if (thumbnailUrl != null || thumbnailB64 != null) {
                 coil.compose.AsyncImage(
                     model = thumbnailUrl ?: thumbnailB64?.let {
@@ -812,34 +835,43 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                     contentDescription = "Video Thumbnail",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    alpha = if (isVisible) 0.5f else 1.0f
+                    alpha = if (isVisible && !hasError) 0.5f else 1.0f
                 )
             }
-            AndroidView(
-                factory = { ctx ->
-                    androidx.media3.ui.PlayerView(ctx).apply {
-                        layoutParams = android.view.ViewGroup.LayoutParams(
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        player = exoPlayer
-                        useController = true
-                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
-                },
-                update = { view ->
-                    view.player = exoPlayer
-                    view.resizeMode = if (isLandscape) {
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    } else {
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
-                },
-                onRelease = { view ->
-                    view.player = null
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+            if (!hasError) {
+                AndroidView(
+                    factory = { ctx ->
+                        androidx.media3.ui.PlayerView(ctx).apply {
+                            layoutParams = android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            player = exoPlayer
+                            useController = true
+                            resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
+                    },
+                    update = { view ->
+                        view.player = exoPlayer
+                        view.resizeMode = if (isLandscape) {
+                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        } else {
+                            androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
+                    },
+                    onRelease = { view ->
+                        view.player = null
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.background(PrimaryBlack.copy(alpha=0.7f)).padding(16.dp)) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Video unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+                    Text(errorMessage, color = TextMuted, style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+                }
+            }
         }
     }
 }

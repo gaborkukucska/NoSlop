@@ -198,7 +198,32 @@ object InternetArchiveClient {
                                     Logger.warn(TAG, "Failed to resolve media file for $identifier: ${e.message}")
                                 }
                             }
-                            Logger.debug(TAG, "Final mediaUrl for $identifier ($resolvedMediaType): $archiveMediaUrl")
+                            // Validate the resolved URL
+                            var finalMediaUrl: String? = archiveMediaUrl
+                            var finalMediaType = resolvedMediaType
+                            try {
+                                val headReq = Request.Builder().url(archiveMediaUrl).head().build()
+                                val headRes = client.newCall(headReq).execute()
+                                val code = headRes.code
+                                headRes.close()
+                                
+                                if (code == 401 || code == 403) {
+                                    Logger.warn(TAG, "Download URL requires auth ($identifier), using embed fallback")
+                                    finalMediaUrl = "https://archive.org/embed/$identifier"
+                                    finalMediaType = "video" // Embeds are handled via WebView
+                                } else if (code == 404) {
+                                    Logger.warn(TAG, "Download URL not found ($identifier), skipping")
+                                    finalMediaUrl = null
+                                }
+                            } catch (e: Exception) {
+                                Logger.warn(TAG, "Failed to validate URL for $identifier: ${e.message}")
+                            }
+
+                            if (finalMediaUrl == null) {
+                                return@async null // Skip this item as it has no valid playable URL
+                            }
+
+                            Logger.debug(TAG, "Final mediaUrl for $identifier ($finalMediaType): $finalMediaUrl")
 
                             FeedItem(
                                 id = "archive_$identifier",
@@ -209,8 +234,8 @@ object InternetArchiveClient {
                                 excerpt = description,
                                 thumbnailUrl = "https://archive.org/services/img/$identifier",
                                 publishedAt = FeedParser.parseDate(dateStr),
-                                mediaUrl = archiveMediaUrl,
-                                mediaType = resolvedMediaType,
+                                mediaUrl = finalMediaUrl,
+                                mediaType = finalMediaType,
                                 apiSource = "internet_archive"
                             )
                         } catch (e: Exception) {
