@@ -64,6 +64,10 @@ object NasaApiClient {
                     val copyright = try { apod.get("copyright")?.asString } catch (_: Exception) { null }
                     val thumbnailUrl = apod.get("thumbnail_url")?.asString
 
+                    // APOD videos are typically YouTube/Vimeo embeds — the `url` field IS the embed URL
+                    // Don't try to mangle it; the WebView player handles these natively
+                    val actualMediaUrl = if (mediaType == "video") apodUrl else (hdurl ?: apodUrl)
+
                     items.add(FeedItem(
                         id = "nasa_apod_$date",
                         sourceId = sourceId,
@@ -73,7 +77,7 @@ object NasaApiClient {
                         excerpt = explanation,
                         thumbnailUrl = if (mediaType == "image") apodUrl else thumbnailUrl,
                         publishedAt = FeedParser.parseDate(date),
-                        mediaUrl = hdurl ?: apodUrl,
+                        mediaUrl = actualMediaUrl,
                         mediaType = if (mediaType == "video") "video" else "image",
                         apiSource = "nasa"
                     ))
@@ -140,6 +144,13 @@ object NasaApiClient {
                         thumbnailUrl = links[0].asJsonObject.get("href")?.asString
                     }
 
+                    // For videos, resolve the actual .mp4 from the asset manifest
+                    val actualMediaUrl = if (nasaMediaType == "video") {
+                        resolveNasaVideoUrl(nasaId) ?: thumbnailUrl
+                    } else {
+                        thumbnailUrl
+                    }
+
                     items.add(FeedItem(
                         id = "nasa_lib_$nasaId",
                         sourceId = sourceId,
@@ -149,7 +160,7 @@ object NasaApiClient {
                         excerpt = description,
                         thumbnailUrl = thumbnailUrl,
                         publishedAt = FeedParser.parseDate(dateCreated),
-                        mediaUrl = thumbnailUrl, // Thumbnail is usable as media URL for images
+                        mediaUrl = actualMediaUrl,
                         mediaType = if (nasaMediaType == "video") "video" else "image",
                         apiSource = "nasa"
                     ))
@@ -163,6 +174,48 @@ object NasaApiClient {
         } catch (e: Exception) {
             Logger.error(TAG, "NASA Image Library request failed", e.message)
             emptyList()
+        }
+    }
+
+    /**
+     * Resolve the actual playable .mp4 URL for a NASA video by querying the asset manifest.
+     * NASA's Image Library API requires a second request to /asset/{nasa_id} to get file URLs.
+     */
+    private fun resolveNasaVideoUrl(nasaId: String): String? {
+        return try {
+            val url = "https://images-api.nasa.gov/asset/$nasaId"
+            val request = Request.Builder().url(url).build()
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) return null
+
+            val body = response.body?.string() ?: return null
+            val root = gson.fromJson(body, JsonObject::class.java)
+            val items = root.getAsJsonObject("collection")?.getAsJsonArray("items") ?: return null
+
+            // Collect all .mp4 URLs from the manifest
+            val mp4Urls = mutableListOf<String>()
+            for (item in items) {
+                val href = item.asJsonObject.get("href")?.asString ?: continue
+                if (href.endsWith(".mp4", ignoreCase = true)) {
+                    mp4Urls.add(href)
+                }
+            }
+
+            // Prefer ~orig.mp4 (highest quality), then ~mobile.mp4 (most compatible), then any .mp4
+            var best = mp4Urls.firstOrNull { it.contains("~orig.mp4") }
+                ?: mp4Urls.firstOrNull { it.contains("~mobile.mp4") }
+                ?: mp4Urls.firstOrNull()
+
+            if (best != null) {
+                best = best.replace("http://", "https://")
+                Logger.info(TAG, "Resolved NASA video URL for $nasaId: $best")
+            } else {
+                Logger.warn(TAG, "No .mp4 found in asset manifest for $nasaId")
+            }
+            best
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed to resolve NASA video URL for $nasaId: ${e.message}")
+            null
         }
     }
 }

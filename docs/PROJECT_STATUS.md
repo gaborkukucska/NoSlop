@@ -82,12 +82,22 @@ NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private 
 
 55. **Visual-First Curation**: Added a dedicated "Photography" category with high-quality sources (500px, Flickr) and updated the UI to prioritize displaying media over text segments for art and photography feeds.
 
+56. **Unified Peer Handshake Payloads**: Removed duplicate `UserHandshakePayload` (exact copy of `ConnectionRequestPayload`). Both packet types now use a single `PeerHandshakePayload` data class, reducing code surface and preventing future deserialization drift.
+
+57. **Tap-to-Turn Article Reader**: Replaced the `HorizontalPager`-based article reader (which conflicted with the parent `VerticalPager` gesture system) with invisible tap zones on the left/right 20% edges. Tapping right advances to the next page; tapping left goes back. Added a page counter ("1 / 3") below the dot indicators for clarity.
+
+58. **Hardened Zoomable Image Viewer**: `ZoomableImageDialog` now clamps pan offset to screen bounds, preventing images from being dragged off-screen. Added double-tap gesture to toggle between 1x and 3x zoom, resetting pan position on zoom-out.
+
+59. **RSS Auto-Discovery**: `FeedParser.resolveRssUrl()` automatically discovers RSS/Atom feeds from any URL. Checks HTML `<link rel="alternate">` tags first, then probes well-known paths (`/feed`, `/rss`, `/feed.xml`, etc.) as a fallback. This means users can now just type "https://theverge.com" and the app finds the real feed.
+
+60. **Enhanced Debug Observability**: Added strategic `Logger.debug`/`Logger.warn`/`Logger.info` entries across `MediaManager.checkAndAutoDownload`, `MediaCaptureManager`, `MeshTransport`, `ProxiTokClient`, and `NitterApiClient`. Silent degradation paths now explicitly warn instead of silently returning empty results.
+
 ## Pending Implementations & Limitations
 - **Audio Playback Failure**: Audio content pieces currently do not play despite proxy and codec updates; requires investigation into direct file extraction vs. landing pages.
 - **Clearnet Video Compatibility**: Currently, only Archive.org and YouTube (via WebView) playback is verified; other clearnet video sources may still trigger format errors.
-- **Article Pagination Gestures**: Swiping between segments in `SegmentedArticleReader` is currently not working or is being consumed by the vertical pager; needs gesture prioritization fix.
-- **Zoomable Media**: Images in the feed are static; needs implementation of a tap-to-zoom full-screen modal.
-- **RSS Subscription Logic**: Need to enable manual subscription to RSS feeds for sources that provide them in their landing page metadata.
+- ~~**Article Pagination Gestures**~~: ✅ Resolved in milestone 57 (tap-to-turn zones).
+- ~~**Zoomable Media**~~: ✅ Resolved in milestone 58 (bounds-clamped zoom + double-tap reset).
+- ~~**RSS Subscription Logic**~~: ✅ Resolved in milestone 59 (auto-discovery from HTML `<link>` tags).
 - **Feed Pre-loading & Hybrid Mixing**: The current feed loading mechanism needs a rethink to pre-buffer next items and intelligently mix aggregated (clearnet) and broadcasted (mesh) content without stalling or overloading Tor circuits.
 - **Comment Module UI**: The comment module currently lacks a user-facing way to actually post/leave a new comment within the unified feed UI.
 

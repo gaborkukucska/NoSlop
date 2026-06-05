@@ -654,7 +654,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
-            val reqPay = com.noslop.app.mesh.ConnectionRequestPayload(
+            val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName.split(".")[0],
@@ -689,7 +689,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
-            val handshakePay = com.noslop.app.mesh.UserHandshakePayload(
+            val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName.split(".")[0],

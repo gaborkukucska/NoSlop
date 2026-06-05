@@ -9,8 +9,10 @@ import com.noslop.app.feeds.FeedParser
  * ProxiTok API client (TikTok alternative frontend).
  * ProxiTok instances natively provide RSS feeds for trending and users.
  *
- * Note: Most ProxiTok instances are dead or have SSL issues as of 2026.
- * This client degrades gracefully — returns empty if all instances fail.
+ * TODO: Replace or gracefully disable this client in the UI. 
+ * Most ProxiTok instances are dead or have SSL issues as of 2026.
+ * This client degrades gracefully — returns empty if all instances fail, 
+ * but currently fails silently without notifying the user.
  */
 object ProxiTokClient {
     private const val TAG = "PROXITOK_API"
@@ -38,7 +40,7 @@ object ProxiTokClient {
         }
 
         // Silent degradation
-        Logger.debug(TAG, "All ProxiTok instances unavailable for trending")
+        Logger.warn(TAG, "All ProxiTok instances unavailable for trending. Returning empty list.")
         return emptyList()
     }
 }

@@ -90,7 +90,7 @@ data class MediaTransferAckPayload(
     @SerializedName("media_id") val mediaId: String
 )
 
-data class ConnectionRequestPayload(
+data class PeerHandshakePayload(
     val id: String,
     @SerializedName("from_user_id") val fromUserId: String,
     @SerializedName("from_username") val fromUsername: String,
@@ -101,16 +101,7 @@ data class ConnectionRequestPayload(
     val signature: String? = null
 )
 
-data class UserHandshakePayload(
-    val id: String,
-    @SerializedName("from_user_id") val fromUserId: String,
-    @SerializedName("from_username") val fromUsername: String,
-    @SerializedName("from_display_name") val fromDisplayName: String,
-    @SerializedName("from_home_node") val fromHomeNode: String,
-    @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
-    val timestamp: Long,
-    val signature: String? = null
-)
+
 
 data class SyncRequestPayload(
     val since: Long
@@ -144,12 +135,12 @@ data class NetworkPacket(
         Gson().fromJson(payload, EncryptedPayload::class.java)
     } else null
 
-    fun getConnectionRequestPayload(): ConnectionRequestPayload? = if (type == "CONNECTION_REQUEST" && payload != null) {
-        Gson().fromJson(payload, ConnectionRequestPayload::class.java)
+    fun getConnectionRequestPayload(): PeerHandshakePayload? = if (type == "CONNECTION_REQUEST" && payload != null) {
+        Gson().fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
-    fun getUserHandshakePayload(): UserHandshakePayload? = if (type == "USER_HANDSHAKE" && payload != null) {
-        Gson().fromJson(payload, UserHandshakePayload::class.java)
+    fun getUserHandshakePayload(): PeerHandshakePayload? = if (type == "USER_HANDSHAKE" && payload != null) {
+        Gson().fromJson(payload, PeerHandshakePayload::class.java)
     } else null
 
     fun getSyncRequestPayload(): SyncRequestPayload? = if (type == "SYNC_REQUEST" && payload != null) {

@@ -10,8 +10,9 @@ import com.noslop.app.feeds.FeedParser
  * Nitter instances natively provide RSS feeds for searches and profiles.
  * We leverage FeedParser (now on clearnet) to parse the Nitter RSS output.
  *
- * Note: Most Nitter instances are unstable or dead as of 2026.
- * This client degrades gracefully — returns empty if all instances fail.
+ * TODO: Nitter is currently broken for search endpoints across most public instances. 
+ * Most Nitter instances are unstable or dead as of 2026.
+ * We should consider removing this source or using a different scraping method.
  */
 object NitterApiClient {
     private const val TAG = "NITTER_API"
@@ -43,7 +44,7 @@ object NitterApiClient {
         }
 
         // Silent degradation — don't spam error logs since Nitter is known-unstable
-        Logger.debug(TAG, "All Nitter instances unavailable for search query '$query'")
+        Logger.warn(TAG, "All Nitter instances unavailable for search query '$query'.")
         return emptyList()
     }
 }

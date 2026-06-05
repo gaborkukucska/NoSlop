@@ -19,6 +19,16 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
+    abstract val id: String
+    data class Feed(val item: FeedItem) : UnifiedItem(item.publishedAt, false) {
+        override val id: String get() = item.id
+    }
+    data class Mesh(val post: MeshPost) : UnifiedItem(post.timestamp, true) {
+        override val id: String get() = post.id
+    }
+}
+
 class NoSlopViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = NoSlopApp.repository
@@ -69,7 +79,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isAggregatorEnabled = MutableStateFlow(true)
     val isAggregatorEnabled: StateFlow<Boolean> = _isAggregatorEnabled.asStateFlow()
 
-    // Derived feed items that hides them if aggregator is disabled
+    private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
+    val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
+
+    private var allFeeds = emptyList<FeedItem>()
+    private var allMeshes = emptyList<MeshPost>()
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val feedItems: StateFlow<List<FeedItem>> = repository.allFeedItems
         .combine(_isAggregatorEnabled) { items, enabled ->
@@ -138,6 +152,48 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isAggregatorEnabled.value = repository.isAggregatorEnabled()
         }
+
+        // Build stable append-only mixed feed
+        viewModelScope.launch {
+            combine(feedItems, meshPosts) { feeds, meshes ->
+                Pair(feeds, meshes)
+            }.collect { (feeds, meshes) ->
+                allFeeds = feeds
+                allMeshes = meshes
+                
+                // Always try to append new items when the database updates.
+                // This is critical because video sources (Invidious, Archive.org)
+                // arrive much later than RSS/image sources. Without this, late-arriving
+                // videos never make it into the unified feed.
+                if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
+                    loadMoreFeedItems()
+                }
+            }
+        }
+    }
+
+    fun loadMoreFeedItems() {
+        val currentIds = _unifiedFeed.value.map { it.id }.toSet()
+        val unseenFeeds = allFeeds.filter { it.id !in currentIds }
+        val unseenMeshes = allMeshes.filter { it.id !in currentIds }
+
+        if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
+
+        val batch = mutableListOf<UnifiedItem>()
+        
+        // Take 2 from each source/type group
+        val groupedFeeds = unseenFeeds.groupBy { "${it.sourceId}_${it.mediaType}" }
+        for ((_, items) in groupedFeeds) {
+            items.take(2).forEach { batch.add(UnifiedItem.Feed(it)) }
+        }
+        
+        // Take up to 5 mesh posts
+        unseenMeshes.take(5).forEach { batch.add(UnifiedItem.Mesh(it)) }
+        
+        // Only shuffle the new batch to preserve the organic mix without reordering seen items
+        batch.shuffle()
+        
+        _unifiedFeed.value = _unifiedFeed.value + batch
     }
 
     // --- State ---
@@ -266,16 +322,27 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addCustomFeedSource(title: String, url: String, category: String, feedType: String) {
         viewModelScope.launch {
-            val sourceId = "custom_${UUID.randomUUID().hashCode()}"
+            // Auto-discover the real RSS/Atom feed URL if the user provided a website landing page
+            val resolvedUrl = try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.noslop.app.feeds.FeedParser.resolveRssUrl(url)
+                }
+            } catch (e: Exception) {
+                Logger.warn("VM", "RSS auto-discovery failed for '$url': ${e.message}. Using original.")
+                url
+            }
+
+            val sourceId = "custom_${java.util.UUID.randomUUID().hashCode()}"
             repository.insertSource(
                 FeedSource(
                     id = sourceId,
-                    url = url,
+                    url = resolvedUrl,
                     title = title,
                     feedType = feedType,
                     category = category
                 )
             )
+            Logger.info("VM", "Added custom feed source '$title' -> $resolvedUrl")
             refreshFeeds()
         }
     }

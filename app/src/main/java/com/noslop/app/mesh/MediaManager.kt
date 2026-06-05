@@ -76,6 +76,11 @@ object MediaManager {
         }
     }
 
+    /**
+     * Checks if a media item meets the criteria for automatic background downloading.
+     * TODO: This function delegates to the mesh chunking system, but currently lacks
+     * robust retry logic for disconnected peers during auto-download.
+     */
     suspend fun checkAndAutoDownload(
         metadata: MediaMetadata,
         context: String, // "friends" or "private"
@@ -84,21 +89,40 @@ object MediaManager {
     ) {
         val repo = repository ?: return
         val settings = repo.getMediaSettings()
-        if (!settings.enabled) return
+        if (!settings.enabled) {
+            Logger.debug(TAG, "Auto-download disabled globally. Skipping ${metadata.id}.")
+            return
+        }
 
         // Context Check
         if (context == "friends") {
-            if (!settings.autoDownloadFriends) return
+            if (!settings.autoDownloadFriends) {
+                Logger.debug(TAG, "Auto-download for friends disabled. Skipping ${metadata.id}.")
+                return
+            }
             val peer = repo.peerDao.getPeerByPublicKey(authorId)
-            if (peer == null || !peer.isTrusted) return
+            if (peer == null || !peer.isTrusted) {
+                Logger.debug(TAG, "Author $authorId not a trusted friend. Skipping ${metadata.id}.")
+                return
+            }
         }
-        if (context == "private" && !settings.autoDownloadPrivate) return
+        if (context == "private" && !settings.autoDownloadPrivate) {
+            Logger.debug(TAG, "Auto-download for private disabled. Skipping ${metadata.id}.")
+            return
+        }
 
         val maxBytes = settings.maxFileSizeMB.toLong() * 1024 * 1024
-        if (metadata.size > maxBytes && metadata.size > 0) return
+        if (metadata.size > maxBytes && metadata.size > 0) {
+            Logger.debug(TAG, "Media ${metadata.id} size ${metadata.size} exceeds limit $maxBytes. Skipping auto-download.")
+            return
+        }
 
-        if (isMediaDownloaded(metadata.id, metadata.type)) return
+        if (isMediaDownloaded(metadata.id, metadata.type)) {
+            Logger.debug(TAG, "Media ${metadata.id} already downloaded. Skipping.")
+            return
+        }
 
+        Logger.info(TAG, "Auto-downloading media ${metadata.id} from $peerOnion...")
         startDownload(metadata, peerOnion)
     }
 

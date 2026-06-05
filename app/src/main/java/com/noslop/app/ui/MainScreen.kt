@@ -252,14 +252,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel) {
 // UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
 
-/**
- * A sealed class representing a single item in the unified feed,
- * which can be either an RSS FeedItem or a MeshPost.
- */
-sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
-    data class Feed(val item: FeedItem) : UnifiedItem(item.publishedAt, false)
-    data class Mesh(val post: MeshPost) : UnifiedItem(post.timestamp, true)
-}
+// (UnifiedItem definition moved to NoSlopViewModel)
 
 @Composable
 fun UnifiedFeedTab(
@@ -268,54 +261,47 @@ fun UnifiedFeedTab(
     onComposeDismiss: () -> Unit,
     onTabChange: (Int) -> Unit
 ) {
-    val feedItems by viewModel.feedItems.collectAsState()
-    val meshPosts by viewModel.meshPosts.collectAsState()
+    val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
 
     var filterMode by remember { mutableStateOf("All") }
     var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
 
-    // Build unified list sorted by timestamp descending
-    val unifiedItems = remember(feedItems, meshPosts, filterMode) {
-        val all = mutableListOf<UnifiedItem>()
-        
-        feedItems.forEach {
-            val matchesFilter = when (filterMode) {
+    // Filter the pre-computed appended list
+    val unifiedItems = remember(unifiedFeed, filterMode) {
+        unifiedFeed.filter { item ->
+            when (filterMode) {
                 "All" -> true
-                "Videos" -> it.mediaType == "video"
-                "Images" -> it.mediaType == "image"
-                "Audio" -> it.mediaType == "audio"
-                "Articles" -> it.mediaType == null
-                "Mesh" -> false
+                "Videos" -> when (item) {
+                    is UnifiedItem.Feed -> item.item.mediaType == "video"
+                    is UnifiedItem.Mesh -> item.post.mediaType == "video"
+                }
+                "Images" -> when (item) {
+                    is UnifiedItem.Feed -> item.item.mediaType == "image"
+                    is UnifiedItem.Mesh -> item.post.mediaType == "image"
+                }
+                "Audio" -> when (item) {
+                    is UnifiedItem.Feed -> item.item.mediaType == "audio"
+                    is UnifiedItem.Mesh -> item.post.mediaType == "audio"
+                }
+                "Articles" -> when (item) {
+                    is UnifiedItem.Feed -> item.item.mediaType.isNullOrEmpty()
+                    is UnifiedItem.Mesh -> item.post.mediaType.isNullOrEmpty()
+                }
+                "Mesh" -> item is UnifiedItem.Mesh
                 else -> true
-            }
-            if (matchesFilter) all.add(UnifiedItem.Feed(it))
-        }
-
-        meshPosts.forEach {
-            val matchesFilter = when (filterMode) {
-                "All" -> true
-                "Videos" -> it.mediaType == "video"
-                "Images" -> it.mediaType == "image"
-                "Audio" -> it.mediaType == "audio"
-                "Articles" -> it.mediaType == null
-                "Mesh" -> true
-                else -> true
-            }
-            if (matchesFilter) all.add(UnifiedItem.Mesh(it))
-        }
-
-        all.sortedByDescending { 
-            if (it is UnifiedItem.Mesh) {
-                // Boost mesh posts by 7 days to prioritize organic P2P gossip over clearnet aggregator
-                it.timestamp + (1000L * 60 * 60 * 24 * 7)
-            } else {
-                it.timestamp
             }
         }
     }
 
     val pagerState = rememberPagerState { unifiedItems.size }
+
+    // Reset pager to top when filter changes so we don't land out of bounds or at the bottom
+    LaunchedEffect(filterMode) {
+        if (unifiedItems.isNotEmpty()) {
+            pagerState.scrollToPage(0)
+        }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -368,8 +354,15 @@ fun UnifiedFeedTab(
                 VerticalPager(
                     state = pagerState,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
-                    beyondViewportPageCount = 1
+                    beyondViewportPageCount = 1,
+                    key = { index -> unifiedItems[index].id }
                 ) { index ->
+                    // Trigger infinite load when nearing the end
+                    if (index >= unifiedItems.size - 3) {
+                        LaunchedEffect(index) {
+                            viewModel.loadMoreFeedItems()
+                        }
+                    }
                     val item = unifiedItems[index]
                     val isVisible = pagerState.currentPage == index
                     Box(
@@ -684,15 +677,24 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     
-    // Check if it's a web-based video that needs WebView
-    val isWebVideo = (url.contains("youtube") || url.contains("embed") || url.contains("vimeo") || url.contains("dailymotion") || url.contains("archive.org/details"))
-                     && !url.contains("127.0.0.1")
+    // Check if it's a web-based video that needs WebView (streaming pages, not direct file downloads)
+    val isDirectDownload = url.endsWith(".mp4", ignoreCase = true) || url.endsWith(".mkv", ignoreCase = true) ||
+                           url.endsWith(".webm", ignoreCase = true) || url.endsWith(".m3u8", ignoreCase = true) ||
+                           url.contains("/download/") || url.contains("127.0.0.1")
+    val isWebVideo = !isDirectDownload && (url.contains("youtube") || url.contains("youtu.be") ||
+                     url.contains("vimeo.com") || url.contains("dailymotion.com") ||
+                     url.contains("archive.org/embed") || url.contains("archive.org/details"))
 
     if (isWebVideo) {
         Logger.info("VIDEO", "Loading video in WebView: $url")
         AndroidView(
             factory = { ctx ->
                 android.webkit.WebView(ctx).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(android.graphics.Color.BLACK)
                     settings.javaScriptEnabled = true
                     settings.mediaPlaybackRequiresUserGesture = false
                     settings.domStorageEnabled = true
@@ -707,9 +709,10 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                     webViewClient = object : android.webkit.WebViewClient() {
                         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             Logger.info("VIDEO", "WebView page finished: $url")
-                            // Stronger auto-play injection
+                            // Stronger auto-play injection & black background
                             val playJs = """
                                 (function() {
+                                    document.body.style.backgroundColor = 'black';
                                     var v = document.querySelector('video');
                                     if (v) {
                                         v.play();
@@ -723,6 +726,10 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                         }
                         override fun onReceivedError(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?, error: android.webkit.WebResourceError?) {
                             Logger.error("VIDEO", "WebView error: ${error?.description} for ${request?.url}")
+                            if (request?.isForMainFrame == true) {
+                                val errorHtml = "<html><body style='background-color:black;color:#777;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;font-family:sans-serif;'>Video unavailable</body></html>"
+                                view?.loadDataWithBaseURL(null, errorHtml, "text/html", "UTF-8", null)
+                            }
                         }
                     }
                     webChromeClient = android.webkit.WebChromeClient()
@@ -761,8 +768,11 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
         )
     } else {
         Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
-        val exoPlayer = remember(url) {
-            val dataSourceFactory = OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+        var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+
+        DisposableEffect(url) {
+            val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                .setUserAgent("NoSlop-Android/1.0")
 
             val mimeType = when {
                 url.contains(".m3u8") || url.contains("m3u8") -> "application/x-mpegURL"
@@ -773,8 +783,14 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                 else -> null // Let ExoPlayer guess
             }
 
-            androidx.media3.exoplayer.ExoPlayer.Builder(context)
+            val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build()
+
+            val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
+                .setAudioAttributes(audioAttributes, true)
                 .setLoadControl(
                     androidx.media3.exoplayer.DefaultLoadControl.Builder()
                         .setBufferDurationsMs(3000, 10000, 1000, 1500)
@@ -807,20 +823,23 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                     playWhenReady = isVisible
                     repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
                 }
-        }
+                
+            exoPlayer = player
 
-        LaunchedEffect(isVisible) {
-            exoPlayer.playWhenReady = isVisible
-            if (isVisible) {
-                exoPlayer.play()
-            } else {
-                exoPlayer.pause()
+            onDispose {
+                player.release()
+                exoPlayer = null
             }
         }
 
-        DisposableEffect(exoPlayer) {
-            onDispose {
-                exoPlayer.release()
+        LaunchedEffect(isVisible, exoPlayer) {
+            exoPlayer?.let { player ->
+                player.playWhenReady = isVisible
+                if (isVisible) {
+                    player.play()
+                } else {
+                    player.pause()
+                }
             }
         }
 
@@ -842,17 +861,25 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
             AndroidView(
                 factory = { ctx ->
                     androidx.media3.ui.PlayerView(ctx).apply {
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
                         player = exoPlayer
                         useController = true
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
                 update = { view ->
+                    view.player = exoPlayer
                     view.resizeMode = if (isLandscape) {
                         androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
                     } else {
                         androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
+                },
+                onRelease = { view ->
+                    view.player = null
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -869,54 +896,82 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
 
-    val exoPlayer = remember(url) {
-        val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
-        androidx.media3.exoplayer.ExoPlayer.Builder(context)
+    var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+
+    DisposableEffect(url) {
+        val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("NoSlop-Android/1.0")
+        
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+            
+        val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
             .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
+            .setAudioAttributes(audioAttributes, true)
             .build().apply {
                 val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
                 setMediaItem(mediaItem)
+                volume = 1f
                 prepare()
+                playWhenReady = isVisible
                 repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                
+                addListener(object : androidx.media3.common.Player.Listener {
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        Logger.error("AUDIO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                    }
+                    override fun onIsPlayingChanged(playing: Boolean) {
+                        Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
+                        isPlaying = playing
+                    }
+                    override fun onPlaybackStateChanged(state: Int) {
+                        val stateStr = when(state) {
+                            androidx.media3.common.Player.STATE_READY -> "READY"
+                            androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                            androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                            androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                            else -> "UNKNOWN"
+                        }
+                        Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                        if (state == androidx.media3.common.Player.STATE_READY) {
+                            duration = this@apply.duration
+                        }
+                    }
+                })
             }
-    }
-
-    DisposableEffect(exoPlayer) {
-        val listener = object : androidx.media3.common.Player.Listener {
-            override fun onIsPlayingChanged(playing: Boolean) {
-                isPlaying = playing
-            }
-            override fun onPlaybackStateChanged(state: Int) {
-                if (state == androidx.media3.common.Player.STATE_READY) {
-                    duration = exoPlayer.duration
-                }
-            }
-        }
-        exoPlayer.addListener(listener)
+            
+        exoPlayer = player
+        
         onDispose {
-            exoPlayer.removeListener(listener)
-            exoPlayer.release()
+            player.release()
+            exoPlayer = null
         }
     }
 
-    LaunchedEffect(isVisible) {
-        exoPlayer.playWhenReady = isVisible
-        if (isVisible) {
-            exoPlayer.play()
-        } else {
-            exoPlayer.pause()
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        while (isPlaying) {
-            currentPos = exoPlayer.currentPosition
-            val d = exoPlayer.duration
-            if (d > 0) {
-                progress = currentPos.toFloat() / d
-                duration = d
+    LaunchedEffect(isVisible, exoPlayer) {
+        exoPlayer?.let { player ->
+            player.playWhenReady = isVisible
+            if (isVisible) {
+                player.play()
+            } else {
+                player.pause()
             }
-            kotlinx.coroutines.delay(200)
+        }
+    }
+
+    LaunchedEffect(isPlaying, exoPlayer) {
+        exoPlayer?.let { player ->
+            while (isPlaying) {
+                currentPos = player.currentPosition
+                val d = player.duration
+                if (d > 0) {
+                    progress = currentPos.toFloat() / d
+                    duration = d
+                }
+                kotlinx.coroutines.delay(200)
+            }
         }
     }
 
@@ -928,7 +983,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
         verticalArrangement = Arrangement.Center
     ) {
         IconButton(
-            onClick = { if (isPlaying) exoPlayer.pause() else exoPlayer.play() },
+            onClick = { exoPlayer?.let { if (isPlaying) it.pause() else it.play() } },
             modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
         ) {
             Icon(
@@ -974,7 +1029,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             value = progress,
             onValueChange = { 
                 progress = it
-                exoPlayer.seekTo((it * duration).toLong())
+                exoPlayer?.seekTo((it * duration).toLong())
             },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             colors = SliderDefaults.colors(
@@ -1048,7 +1103,8 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
                 resolvedUrl.contains(".wav") ||
                 resolvedUrl.contains(".m4a") ||
                 resolvedUrl.contains(".aac") ||
-                resolvedUrl.contains("archive.org/download") -> {
+                resolvedUrl.contains(".ogg") ||
+                resolvedUrl.contains(".flac") -> {
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
                 isVisualCategory && hasVisualMedia -> {
@@ -1169,17 +1225,35 @@ fun FullScreenMeshCard(
         // ... (existing media rendering code)
         // 1. Media or paginated text content
         if (resolvedUrl != null) {
+            // For mesh proxy URLs (127.0.0.1:8080/stream?...&id=filename.ext),
+            // extract the actual file extension from the id parameter to determine type
+            val idExtension = if (resolvedUrl.contains("id=")) {
+                resolvedUrl.substringAfter("id=").substringBefore("&").lowercase()
+            } else resolvedUrl.lowercase()
+
+            val isVideoUrl = post.mediaType == "video" ||
+                    idExtension.endsWith(".mp4") || idExtension.endsWith(".mkv") ||
+                    idExtension.endsWith(".webm") || idExtension.endsWith(".mov")
+            val isAudioUrl = post.mediaType == "audio" ||
+                    idExtension.endsWith(".mp3") || idExtension.endsWith(".wav") ||
+                    idExtension.endsWith(".m4a") || idExtension.endsWith(".aac")
+            val isImageUrl = post.mediaType == "image" ||
+                    idExtension.endsWith(".jpg") || idExtension.endsWith(".jpeg") ||
+                    idExtension.endsWith(".png") || idExtension.endsWith(".webp") ||
+                    idExtension.endsWith(".gif")
+
             when {
-                post.mediaType == "video" || resolvedUrl.contains(".mp4") || resolvedUrl.contains(".mkv") || resolvedUrl.contains("/stream") -> {
+                isVideoUrl -> {
                     VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailB64 = post.thumbnailB64)
                 }
-                post.mediaType == "audio" || resolvedUrl.contains(".mp3") || resolvedUrl.contains(".wav") -> {
+                isAudioUrl -> {
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
-                post.mediaType == "image" || resolvedUrl.contains(".jpg") || resolvedUrl.contains(".jpeg") || resolvedUrl.contains(".png") || resolvedUrl.contains(".webp") -> {
+                isImageUrl -> {
                     BlurredImageBackground(url = resolvedUrl, thumbnailB64 = post.thumbnailB64)
                 }
                 else -> {
+                    // Unknown media type — show as article with the URL as an image hint
                     SegmentedArticleReader(content = post.content, imageUrl = resolvedUrl)
                 }
             }

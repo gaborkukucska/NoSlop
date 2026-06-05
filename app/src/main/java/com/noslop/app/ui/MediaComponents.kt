@@ -1,14 +1,18 @@
 package com.noslop.app.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,8 +25,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -35,6 +42,7 @@ import com.noslop.app.ui.theme.AccentGreen
 import com.noslop.app.ui.theme.SurfaceDark
 import com.noslop.app.ui.theme.TextLight
 import com.noslop.app.ui.theme.TextMuted
+import kotlinx.coroutines.launch
 
 @Composable
 fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null) {
@@ -85,6 +93,11 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+        val configuration = LocalConfiguration.current
+        val density = LocalDensity.current
+        val screenWidthPx = with(density) { configuration.screenWidthDp.dp.toPx() }
+        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -94,8 +107,16 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
             var scale by remember { mutableStateOf(1f) }
             var offset by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
             val state = rememberTransformableState { zoomChange, offsetChange, _ ->
-                scale *= zoomChange
-                offset += offsetChange
+                val newScale = (scale * zoomChange).coerceIn(1f, 5f)
+                // Clamp offset to prevent dragging the image off-screen
+                val maxX = (screenWidthPx * (newScale - 1f)) / 2f
+                val maxY = (screenHeightPx * (newScale - 1f)) / 2f
+                val newOffset = offset + offsetChange
+                scale = newScale
+                offset = androidx.compose.ui.geometry.Offset(
+                    x = newOffset.x.coerceIn(-maxX, maxX),
+                    y = newOffset.y.coerceIn(-maxY, maxY)
+                )
             }
 
             AsyncImage(
@@ -103,6 +124,19 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                 contentDescription = "Zoomable View",
                 modifier = Modifier
                     .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                // Double-tap to toggle between 1x and 3x zoom
+                                if (scale > 1.5f) {
+                                    scale = 1f
+                                    offset = androidx.compose.ui.geometry.Offset.Zero
+                                } else {
+                                    scale = 3f
+                                }
+                            }
+                        )
+                    }
                     .graphicsLayer(
                         scaleX = scale.coerceIn(1f, 5f),
                         scaleY = scale.coerceIn(1f, 5f),
@@ -126,71 +160,136 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * Article reader with tap-to-turn page navigation.
+ * Uses invisible tap zones on left/right edges to navigate between article segments,
+ * completely avoiding gesture conflicts with the parent VerticalPager.
+ */
 @Composable
 fun SegmentedArticleReader(content: String, modifier: Modifier = Modifier, imageUrl: String? = null) {
     val segments: List<String> = remember(content) { splitIntoSegments(content, 600) }
-    val pagerState = rememberPagerState(pageCount = { segments.size })
-    
+    var currentPage by remember { mutableIntStateOf(0) }
+
     if (imageUrl != null) {
         com.noslop.app.debug.Logger.debug("ARTICLE", "Loading image: $imageUrl")
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier.weight(1f).testTag("article_horizontal_pager"),
-            userScrollEnabled = true, // Explicitly enable scrolling
-            beyondViewportPageCount = 1
-        ) { pageIndex ->
-            Box(
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .testTag("article_tap_reader")
+        ) {
+            // Article content (no verticalScroll to avoid conflicting with VerticalPager)
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
-                contentAlignment = Alignment.Center
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalAlignment = Alignment.Start
             ) {
-                Column(horizontalAlignment = Alignment.Start) {
-                    if (pageIndex == 0 && imageUrl != null) {
-                        AsyncImage(
-                            model = imageUrl,
-                            contentDescription = null,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .padding(bottom = 16.dp),
-                            contentScale = ContentScale.Crop
+                if (currentPage == 0 && imageUrl != null) {
+                    AsyncImage(
+                        model = imageUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .padding(bottom = 16.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Text(
+                    text = segments[currentPage],
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        lineHeight = 28.sp,
+                        letterSpacing = 0.5.sp
+                    ),
+                    color = TextLight,
+                    textAlign = TextAlign.Start
+                )
+            }
+
+            // Tap zones for page navigation (overlaid on edges)
+            if (segments.size > 1) {
+                // Left tap zone — go to previous page
+                if (currentPage > 0) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.2f)
+                            .align(Alignment.CenterStart)
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                currentPage = (currentPage - 1).coerceAtLeast(0)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.ChevronLeft,
+                            contentDescription = "Previous page",
+                            tint = TextMuted.copy(alpha = 0.4f),
+                            modifier = Modifier.size(28.dp)
                         )
                     }
-                    Text(
-                        text = segments[pageIndex],
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            lineHeight = 28.sp,
-                            letterSpacing = 0.5.sp
-                        ),
-                        color = TextLight,
-                        textAlign = TextAlign.Start
-                    )
+                }
+                // Right tap zone — go to next page
+                if (currentPage < segments.size - 1) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth(0.2f)
+                            .align(Alignment.CenterEnd)
+                            .clickable(
+                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                currentPage = (currentPage + 1).coerceAtMost(segments.size - 1)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "Next page",
+                            tint = TextMuted.copy(alpha = 0.4f),
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
                 }
             }
         }
 
+        // Page indicator dots + page counter
         if (segments.size > 1) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 40.dp),
-                horizontalArrangement = Arrangement.Center
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                repeat(segments.size) { i ->
-                    val active = pagerState.currentPage == i
-                    Box(
-                        modifier = Modifier
-                            .padding(4.dp)
-                            .size(if (active) 8.dp else 6.dp)
-                            .clip(CircleShape)
-                            .background(if (active) AccentGreen else TextMuted.copy(alpha = 0.3f))
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    repeat(segments.size) { i ->
+                        val active = currentPage == i
+                        Box(
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(if (active) 8.dp else 6.dp)
+                                .clip(CircleShape)
+                                .background(if (active) AccentGreen else TextMuted.copy(alpha = 0.3f))
+                        )
+                    }
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${currentPage + 1} / ${segments.size}",
+                    color = TextMuted,
+                    fontSize = 11.sp
+                )
             }
         }
     }

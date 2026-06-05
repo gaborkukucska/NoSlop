@@ -395,4 +395,102 @@ object FeedParser {
 
         return url
     }
+
+    /**
+     * RSS Auto-Discovery: Given a URL that may be a website landing page rather than a
+     * direct feed URL, fetch the HTML and look for `<link rel="alternate" type="application/rss+xml">`
+     * or `<link rel="alternate" type="application/atom+xml">` tags.
+     *
+     * Returns the resolved feed URL if found, or the original URL as-is if the URL
+     * already returns valid XML or no alternate link is found.
+     */
+    fun resolveRssUrl(inputUrl: String): String {
+        try {
+            Logger.info(TAG, "Attempting RSS auto-discovery for: $inputUrl")
+            val request = okhttp3.Request.Builder()
+                .url(inputUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .build()
+
+            val response = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute()
+            if (!response.isSuccessful || response.body == null) {
+                Logger.warn(TAG, "RSS discovery failed: HTTP ${response.code} for $inputUrl")
+                return inputUrl
+            }
+
+            val contentType = response.header("Content-Type", "") ?: ""
+
+            // If the server already returns XML/RSS content, it's a direct feed URL
+            if (contentType.contains("xml") || contentType.contains("rss") || contentType.contains("atom")) {
+                Logger.info(TAG, "URL is already a direct feed (Content-Type: $contentType)")
+                response.close()
+                return inputUrl
+            }
+
+            // Otherwise, scan the HTML <head> for alternate feed links
+            val html = response.body!!.string()
+
+            // Look for RSS link tags
+            val rssPattern = Regex(
+                """<link[^>]+type\s*=\s*['"]application/(rss|atom)\+xml['"][^>]+href\s*=\s*['"]([^'"]+)['"]""",
+                RegexOption.IGNORE_CASE
+            )
+            val rssMatch = rssPattern.find(html)
+            if (rssMatch != null) {
+                val feedHref = rssMatch.groupValues[2]
+                val resolvedUrl = if (feedHref.startsWith("http")) {
+                    feedHref
+                } else {
+                    // Resolve relative URL against the base
+                    val base = java.net.URL(inputUrl)
+                    java.net.URL(base, feedHref).toString()
+                }
+                Logger.info(TAG, "Discovered feed URL: $resolvedUrl (from $inputUrl)")
+                return resolvedUrl
+            }
+
+            // Also try reversed attribute order: href before type
+            val altPattern = Regex(
+                """<link[^>]+href\s*=\s*['"]([^'"]+)['"][^>]+type\s*=\s*['"]application/(rss|atom)\+xml['"]""",
+                RegexOption.IGNORE_CASE
+            )
+            val altMatch = altPattern.find(html)
+            if (altMatch != null) {
+                val feedHref = altMatch.groupValues[1]
+                val resolvedUrl = if (feedHref.startsWith("http")) {
+                    feedHref
+                } else {
+                    val base = java.net.URL(inputUrl)
+                    java.net.URL(base, feedHref).toString()
+                }
+                Logger.info(TAG, "Discovered feed URL (alt pattern): $resolvedUrl (from $inputUrl)")
+                return resolvedUrl
+            }
+
+            // Common well-known feed path conventions as a last resort
+            val commonPaths = listOf("/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/index.xml")
+            for (path in commonPaths) {
+                try {
+                    val candidateUrl = inputUrl.trimEnd('/') + path
+                    val probeReq = okhttp3.Request.Builder()
+                        .url(candidateUrl)
+                        .header("User-Agent", "Mozilla/5.0")
+                        .build()
+                    val probeResp = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(probeReq).execute()
+                    val probeType = probeResp.header("Content-Type", "") ?: ""
+                    probeResp.close()
+                    if (probeResp.isSuccessful && (probeType.contains("xml") || probeType.contains("rss") || probeType.contains("atom"))) {
+                        Logger.info(TAG, "Discovered feed at well-known path: $candidateUrl")
+                        return candidateUrl
+                    }
+                } catch (_: Exception) { /* skip failed probes */ }
+            }
+
+            Logger.warn(TAG, "No RSS/Atom feed discovered for $inputUrl. Using original URL.")
+            return inputUrl
+        } catch (e: Exception) {
+            Logger.error(TAG, "RSS discovery exception for $inputUrl: ${e.message}")
+            return inputUrl
+        }
+    }
 }

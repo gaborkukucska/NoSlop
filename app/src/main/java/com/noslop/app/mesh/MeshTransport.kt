@@ -68,11 +68,12 @@ class MeshTransport(
                 val packetStr = line ?: break
                 
                 try {
+                    Logger.debug(TAG, "Parsing incoming packet (length: ${packetStr.length})")
                     val packet = NetworkPacket.fromJson(packetStr)
                     Logger.info(TAG, "Received packet over TCP", "type=${packet.type} | sender=${packet.senderId}")
                     repository.handleIncomingPacket(packet)
                 } catch (e: Exception) {
-                    Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}")
+                    Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}. Raw packet: $packetStr")
                 }
             }
         } catch (e: Exception) {
@@ -103,6 +104,7 @@ class MeshTransport(
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
                 socket = Socket(proxy)
                 // Onion connections can take time to establish (v3 circuits)
+                Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress")
                 socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000) 
                 val writer = PrintWriter(socket.getOutputStream(), true)
                 writer.println(packet.toJson())

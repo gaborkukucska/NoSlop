@@ -64,6 +64,7 @@ class MediaCaptureManager(private val context: Context) {
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner, cameraSelector, preview, imageCapture, videoCapture
                 )
+                Logger.info(TAG, "Camera started successfully. Front camera: $isFrontCamera")
                 onReady()
             } catch (exc: Exception) {
                 Logger.error(TAG, "Use case binding failed", exc.message)
@@ -81,6 +82,7 @@ class MediaCaptureManager(private val context: Context) {
         onReady: () -> Unit
     ) {
         isFrontCamera = !isFrontCamera
+        Logger.debug(TAG, "Flipping camera. Now front camera: $isFrontCamera")
         startCamera(lifecycleOwner, previewView, onReady)
     }
 

@@ -2,10 +2,15 @@
 package com.noslop.app.feeds.api
 
 import com.google.gson.Gson
+import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedParser
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import okhttp3.Request
 
 /**
@@ -83,7 +88,7 @@ object InternetArchiveClient {
         return fetchAndParse(url, "video", sourceId)
     }
 
-    private fun search(
+    private suspend fun search(
         encodedQuery: String,
         defaultMediaType: String,
         sourceId: String,
@@ -97,7 +102,7 @@ object InternetArchiveClient {
         return fetchAndParse(url, defaultMediaType, sourceId)
     }
 
-    private fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> {
+    private suspend fun fetchAndParse(url: String, defaultMediaType: String, sourceId: String): List<FeedItem> {
         return try {
             val request = Request.Builder()
                 .url(url)
@@ -115,46 +120,105 @@ object InternetArchiveClient {
             val docs = root.getAsJsonObject("response")
                 ?.getAsJsonArray("docs") ?: return emptyList()
 
-            val items = mutableListOf<FeedItem>()
-            for (doc in docs) {
-                try {
-                    val obj = doc.asJsonObject
-                    val identifier = obj.get("identifier")?.asString ?: continue
-                    val title = obj.get("title")?.asString ?: continue
+            val items = coroutineScope {
+                docs.mapNotNull { doc ->
+                    async(Dispatchers.IO) {
+                        try {
+                            val obj = doc.asJsonObject
+                            val identifier = obj.get("identifier")?.asString ?: return@async null
+                            val title = obj.get("title")?.asString ?: return@async null
 
-                    val creator = try { obj.get("creator")?.asString } catch (_: Exception) { null }
-                    val description = try { obj.get("description")?.asString?.take(300) } catch (_: Exception) { null }
-                    val dateStr = try { obj.get("date")?.asString } catch (_: Exception) { null }
-                    val mediatype = try { obj.get("mediatype")?.asString } catch (_: Exception) { null }
+                            val creator = try { obj.get("creator")?.asString } catch (_: Exception) { null }
+                            val description = try { obj.get("description")?.asString?.take(300) } catch (_: Exception) { null }
+                            val dateStr = try { obj.get("date")?.asString } catch (_: Exception) { null }
+                            val mediatype = try { obj.get("mediatype")?.asString } catch (_: Exception) { null }
 
-                    val resolvedMediaType = when (mediatype) {
-                        "movies" -> "video"
-                        "audio" -> "audio"
-                        else -> defaultMediaType
+                            val resolvedMediaType = when (mediatype) {
+                                "movies" -> "video"
+                                "audio" -> "audio"
+                                else -> defaultMediaType
+                            }
+
+                            var archiveMediaUrl = "https://archive.org/download/$identifier"
+
+                            // Resolve actual playable file URLs from metadata for both audio and video
+                            if (resolvedMediaType == "audio" || resolvedMediaType == "video") {
+                                try {
+                                    val metaUrl = "https://archive.org/metadata/$identifier/files"
+                                    Logger.debug(TAG, "Fetching metadata for $identifier from: $metaUrl")
+                                    val metaReq = Request.Builder().url(metaUrl).build()
+                                    val metaRes = client.newCall(metaReq).execute()
+                                    val metaBody = metaRes.body?.string()
+                                    if (metaBody != null) {
+                                        val metaJson = gson.fromJson(metaBody, JsonObject::class.java)
+                                        val files = metaJson.getAsJsonArray("result")
+
+                                        if (files != null) {
+                                            Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
+                                            if (resolvedMediaType == "audio") {
+                                                for (f in files) {
+                                                    val fObj = f.asJsonObject
+                                                    val format = fObj.get("format")?.asString
+                                                    val name = fObj.get("name")?.asString
+                                                    if (name != null && (format == "VBR MP3" || format == "128Kbps MP3" || format == "MP3" || name.endsWith(".mp3"))) {
+                                                        val encodedName = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+                                                        archiveMediaUrl = "https://archive.org/download/$identifier/$encodedName"
+                                                        Logger.info(TAG, "Resolved audio for $identifier: $archiveMediaUrl (format=$format)")
+                                                        break
+                                                    }
+                                                }
+                                            } else { // video
+                                                // Prefer MPEG4/h.264, fall back to any .mp4
+                                                var bestVideo: String? = null
+                                                var fallbackVideo: String? = null
+                                                for (f in files) {
+                                                    val fObj = f.asJsonObject
+                                                    val format = fObj.get("format")?.asString
+                                                    val name = fObj.get("name")?.asString ?: continue
+                                                    if (format == "MPEG4" || format == "h.264" || format == "h.264 HD" || format == "h.264 IA") {
+                                                        val encodedName = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+                                                        bestVideo = "https://archive.org/download/$identifier/$encodedName"
+                                                        break
+                                                    }
+                                                    if (fallbackVideo == null && name.endsWith(".mp4", ignoreCase = true)) {
+                                                        val encodedName = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+                                                        fallbackVideo = "https://archive.org/download/$identifier/$encodedName"
+                                                    }
+                                                }
+                                                archiveMediaUrl = bestVideo ?: fallbackVideo ?: "https://archive.org/download/$identifier"
+                                                Logger.info(TAG, "Resolved video for $identifier: $archiveMediaUrl")
+                                            }
+                                        } else {
+                                            Logger.warn(TAG, "No 'result' array in metadata for $identifier")
+                                        }
+                                    } else {
+                                        Logger.warn(TAG, "Empty metadata body for $identifier")
+                                    }
+                                } catch (e: Exception) {
+                                    Logger.warn(TAG, "Failed to resolve media file for $identifier: ${e.message}")
+                                }
+                            }
+                            Logger.debug(TAG, "Final mediaUrl for $identifier ($resolvedMediaType): $archiveMediaUrl")
+
+                            FeedItem(
+                                id = "archive_$identifier",
+                                sourceId = sourceId,
+                                title = title,
+                                url = "https://archive.org/details/$identifier",
+                                author = creator,
+                                excerpt = description,
+                                thumbnailUrl = "https://archive.org/services/img/$identifier",
+                                publishedAt = FeedParser.parseDate(dateStr),
+                                mediaUrl = archiveMediaUrl,
+                                mediaType = resolvedMediaType,
+                                apiSource = "internet_archive"
+                            )
+                        } catch (e: Exception) {
+                            Logger.debug(TAG, "Skipping malformed Archive item: ${e.message}")
+                            null
+                        }
                     }
-
-                    val archiveMediaUrl = when (resolvedMediaType) {
-                        "video" -> "https://archive.org/embed/$identifier"
-                        "audio" -> "https://archive.org/download/$identifier/${identifier}_vbr.mp3"
-                        else -> "https://archive.org/download/$identifier"
-                    }
-
-                    items.add(FeedItem(
-                        id = "archive_$identifier",
-                        sourceId = sourceId,
-                        title = title,
-                        url = "https://archive.org/details/$identifier",
-                        author = creator,
-                        excerpt = description,
-                        thumbnailUrl = "https://archive.org/services/img/$identifier",
-                        publishedAt = FeedParser.parseDate(dateStr),
-                        mediaUrl = archiveMediaUrl,
-                        mediaType = resolvedMediaType,
-                        apiSource = "internet_archive"
-                    ))
-                } catch (e: Exception) {
-                    Logger.debug(TAG, "Skipping malformed Archive item: ${e.message}")
-                }
+                }.awaitAll().filterNotNull()
             }
 
             Logger.info(TAG, "Internet Archive: fetched ${items.size} items")
