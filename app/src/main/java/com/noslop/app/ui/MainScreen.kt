@@ -725,7 +725,6 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                             settings.useWideViewPort = true
                             settings.loadWithOverviewMode = true
                             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
                             
                             webViewClient = object : android.webkit.WebViewClient() {
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
@@ -749,20 +748,30 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                                 }
                             }
                             webChromeClient = android.webkit.WebChromeClient()
-                            val finalUrl = when {
-                                url.contains("youtube.com") || url.contains("youtu.be") -> {
+                            val (baseUrlForData, htmlData) = when {
+                                url.contains("youtube") || url.contains("youtu.be") -> {
                                     val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
+                                                 else if (url.contains("/embed/")) url.substringAfter("/embed/").substringBefore("?")
                                                  else url.substringAfterLast("/")
-                                    val baseUrl = "https://www.youtube-nocookie.com/embed/$videoId"
-                                    if (baseUrl.contains("?")) "$baseUrl&autoplay=1" else "$baseUrl?autoplay=1"
+                                    val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&enablejsapi=1&origin=https://com.noslop.app"
+                                    val iframeHtml = "<html><head><meta name='referrer' content='strict-origin-when-cross-origin'></head><body style='margin:0;padding:0;background-color:black;'><iframe width='100%' height='100%' src='$embedUrl' frameborder='0' allow='autoplay; fullscreen' allowfullscreen></iframe></body></html>"
+                                    Pair("https://com.noslop.app", iframeHtml)
                                 }
                                 url.contains("vimeo.com") -> {
-                                    val videoId = url.substringAfterLast("/")
-                                    "https://player.vimeo.com/video/$videoId?autoplay=1"
+                                    val videoId = if (url.contains("/video/")) url.substringAfter("/video/").substringBefore("?")
+                                                 else url.substringAfterLast("/")
+                                    val embedUrl = "https://player.vimeo.com/video/$videoId?autoplay=1"
+                                    val iframeHtml = "<html><body style='margin:0;padding:0;background-color:black;'><iframe width='100%' height='100%' src='$embedUrl' frameborder='0' allow='autoplay; fullscreen' allowfullscreen></iframe></body></html>"
+                                    Pair("https://vimeo.com", iframeHtml)
                                 }
-                                else -> url
+                                else -> Pair(url, null)
                             }
-                            loadUrl(finalUrl)
+                            
+                            if (htmlData != null) {
+                                loadDataWithBaseURL(baseUrlForData, htmlData, "text/html", "UTF-8", null)
+                            } else {
+                                loadUrl(baseUrlForData)
+                            }
                         }
                     },
                     update = { view ->
