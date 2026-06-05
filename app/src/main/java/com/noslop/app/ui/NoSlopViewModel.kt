@@ -113,6 +113,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     // Direct Messages Chat
+    private val _userProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
+    val userProfile: StateFlow<com.noslop.app.data.UserProfile> = _userProfile.asStateFlow()
+
+    private val _selectedInterests = MutableStateFlow<List<String>>(emptyList())
+    val selectedInterests: StateFlow<List<String>> = _selectedInterests.asStateFlow()
+
+    private val _selectedMusicGenres = MutableStateFlow<List<String>>(emptyList())
+    val selectedMusicGenres: StateFlow<List<String>> = _selectedMusicGenres.asStateFlow()
+
+    private val _selectedVideoGenres = MutableStateFlow<List<String>>(emptyList())
+    val selectedVideoGenres: StateFlow<List<String>> = _selectedVideoGenres.asStateFlow()
+
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
@@ -137,6 +149,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Load media settings
         viewModelScope.launch {
             repository.getMediaSettings()
+        }
+
+        // Load profile and preferences
+        viewModelScope.launch {
+            _userProfile.value = repository.getUserProfile()
+            _selectedInterests.value = repository.getUserSelectedCategories()
+            _selectedMusicGenres.value = repository.getSelectedMusicGenres()
+            _selectedVideoGenres.value = repository.getSelectedVideoGenres()
         }
 
         // Automatically refresh Tor status when daemon state transitions to READY or PROXY_READY
@@ -218,7 +238,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
     }
 
-    fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, mnemonic: String) {
+    fun completeOnboarding(
+        handle: String, 
+        selectedSources: List<BuiltInSource>, 
+        selectedCategories: List<String>, 
+        selectedMusicGenres: List<String>,
+        selectedVideoGenres: List<String>,
+        mnemonic: String
+    ) {
         viewModelScope.launch {
             // 1. Generate identity cryptographically (Ed25519 & ECDH)
             val keys = CryptoService.generateIdentity(handle)
@@ -240,6 +267,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
             // 3. Save selected categories for API pipeline inference
             repository.saveSelectedCategories(selectedCategories)
+            
+            // Save genre preferences
+            if (selectedMusicGenres.isNotEmpty()) {
+                repository.saveSelectedMusicGenres(selectedMusicGenres)
+            }
+            if (selectedVideoGenres.isNotEmpty()) {
+                repository.saveSelectedVideoGenres(selectedVideoGenres)
+            }
+
+            _selectedInterests.value = selectedCategories
+            _selectedMusicGenres.value = selectedMusicGenres
+            _selectedVideoGenres.value = selectedVideoGenres
 
             // 4. Mark Onboarding complete
             repository.setOnboardingComplete(true)
@@ -247,6 +286,42 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
             // Trigger fetch in background
             refreshFeeds()
+        }
+    }
+
+    fun updateUserProfile(profile: com.noslop.app.data.UserProfile) {
+        viewModelScope.launch {
+            repository.saveUserProfile(profile)
+            _userProfile.value = profile
+        }
+    }
+
+    fun updateContentPreferences(
+        selectedCategories: List<String>, 
+        selectedMusicGenres: List<String>,
+        selectedVideoGenres: List<String>
+    ) {
+        viewModelScope.launch {
+            repository.saveSelectedCategories(selectedCategories)
+            repository.saveSelectedMusicGenres(selectedMusicGenres)
+            repository.saveSelectedVideoGenres(selectedVideoGenres)
+            
+            _selectedInterests.value = selectedCategories
+            _selectedMusicGenres.value = selectedMusicGenres
+            _selectedVideoGenres.value = selectedVideoGenres
+
+            // Clear old API data to ensure new preferences are reflected immediately
+            repository.clearApiData()
+            
+            // Trigger fetch in background
+            refreshFeeds()
+        }
+    }
+
+    fun factoryReset() {
+        viewModelScope.launch {
+            repository.factoryReset()
+            _isOnboardingComplete.value = false
         }
     }
 

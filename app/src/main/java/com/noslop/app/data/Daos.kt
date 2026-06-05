@@ -38,6 +38,12 @@ interface FeedDao {
 
     @Query("DELETE FROM feed_items WHERE isSaved = 0 AND publishedAt < :beforeTimestamp")
     suspend fun deleteExpiredItems(beforeTimestamp: Long)
+
+    @Query("DELETE FROM feed_items WHERE sourceId LIKE 'api_%'")
+    suspend fun clearApiItems()
+
+    @Query("DELETE FROM feed_sources WHERE feedType = 'api'")
+    suspend fun clearApiSources()
 }
 
 @Dao

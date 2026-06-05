@@ -139,19 +139,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel) {
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Face, contentDescription = "Profile", modifier = Modifier.size(20.dp)) },
-                    label = { Text("Profile", fontSize = 10.sp) },
-                    colors = NavigationBarItemDefaults.colors(
-                        selectedIconColor = AccentGreen,
-                        selectedTextColor = AccentGreen,
-                        unselectedIconColor = TextMuted,
-                        unselectedTextColor = TextMuted,
-                        indicatorColor = PrimaryBlack
-                    )
-                )
-                NavigationBarItem(
-                    selected = selectedTab == 3,
-                    onClick = { selectedTab = 3 },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", modifier = Modifier.size(20.dp)) },
                     label = { Text("Settings", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
@@ -178,8 +165,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel) {
                     { selectedTab = it }
                 )
                 1 -> DMsTab(viewModel)
-                2 -> ProfileTab(viewModel)
-                3 -> SettingsTab(viewModel)
+                2 -> SettingsTab(viewModel)
             }
             
             if (selectedTab == 0) {
@@ -895,56 +881,63 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
     var currentPos by remember { mutableStateOf(0L) }
 
     var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
+    var hasError by remember { mutableStateOf(false) }
 
-    DisposableEffect(url) {
-        val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("NoSlop-Android/1.0")
-        
-        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
-            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
-            .build()
+    DisposableEffect(url, isVisible) {
+        if (isVisible) {
+            hasError = false
+            val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
             
-        val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
-            .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
-            .setAudioAttributes(audioAttributes, true)
-            .build().apply {
-                val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
-                setMediaItem(mediaItem)
-                volume = 1f
-                prepare()
-                playWhenReady = isVisible
-                repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build()
                 
-                addListener(object : androidx.media3.common.Player.Listener {
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        Logger.error("AUDIO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
-                    }
-                    override fun onIsPlayingChanged(playing: Boolean) {
-                        Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
-                        isPlaying = playing
-                    }
-                    override fun onPlaybackStateChanged(state: Int) {
-                        val stateStr = when(state) {
-                            androidx.media3.common.Player.STATE_READY -> "READY"
-                            androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
-                            androidx.media3.common.Player.STATE_ENDED -> "ENDED"
-                            androidx.media3.common.Player.STATE_IDLE -> "IDLE"
-                            else -> "UNKNOWN"
+            val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+                .setAudioAttributes(audioAttributes, true)
+                .build().apply {
+                    val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+                    setMediaItem(mediaItem)
+                    volume = 1f
+                    prepare()
+                    playWhenReady = true
+                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                    
+                    addListener(object : androidx.media3.common.Player.Listener {
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            hasError = true
+                            Logger.error("AUDIO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
                         }
-                        Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
-                        if (state == androidx.media3.common.Player.STATE_READY) {
-                            duration = this@apply.duration
+                        override fun onIsPlayingChanged(playing: Boolean) {
+                            Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
+                            isPlaying = playing
                         }
-                    }
-                })
-            }
+                        override fun onPlaybackStateChanged(state: Int) {
+                            val stateStr = when(state) {
+                                androidx.media3.common.Player.STATE_READY -> "READY"
+                                androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                                androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                                androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                                else -> "UNKNOWN"
+                            }
+                            Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                            if (state == androidx.media3.common.Player.STATE_READY) {
+                                duration = this@apply.duration
+                            }
+                        }
+                    })
+                }
+                
+            exoPlayer = player
             
-        exoPlayer = player
-        
-        onDispose {
-            player.release()
-            exoPlayer = null
+            onDispose {
+                player.release()
+                exoPlayer = null
+                isPlaying = false
+            }
+        } else {
+            onDispose { }
         }
     }
 
@@ -1892,147 +1885,6 @@ fun ChatThreadScreen(
 }
 
 // ==========================================
-// PROFILE TAB
-// ==========================================
-@Composable
-fun ProfileTab(viewModel: NoSlopViewModel) {
-    val handle by viewModel.localHandle.collectAsState()
-    val localKeys by viewModel.localKeys.collectAsState()
-
-    Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
-        Text(
-            text = "My Profile Node",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            color = TextLight
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, AccentGreen)
-        ) {
-            Column(modifier = Modifier.padding(20.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Lock,
-                        contentDescription = null,
-                        tint = AccentGreen,
-                        modifier = Modifier.size(32.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = "$handle.${localKeys?.tripcode}",
-                            style = MaterialTheme.typography.titleLarge.copy(fontFamily = FontFamily.Monospace),
-                            fontWeight = FontWeight.Bold,
-                            color = AccentGreen
-                        )
-                        Text(
-                            text = "HAI-Net Mesh Address active",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TextMuted
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Divider(color = BorderSubtle)
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Text("MESH NODE IDENTITY", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 12.sp)
-                val rawOnion = localKeys?.onionAddress ?: "Not derived"
-                val maskedOnion = if (rawOnion.length > 16) rawOnion.take(8) + "••••••" + rawOnion.takeLast(6) else rawOnion
-                Text(
-                    text = maskedOnion,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = TextLight.copy(alpha = 0.9f),
-                    modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
-                )
-                Text(
-                    text = "⚠ Onion address hidden for security. Share via QR only.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted,
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-
-                Text("RAW SIGNING PUBLIC KEY", fontWeight = FontWeight.Bold, color = TextLight, fontSize = 12.sp)
-                Text(
-                    text = localKeys?.publicKeyB64 ?: "No keys found",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    color = TextMuted,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            var showShareSheet by remember { mutableStateOf(false) }
-            var showScanScreen by remember { mutableStateOf(false) }
-
-            // "My QR" button -> QRShareSheet
-            Button(
-                onClick = { showShareSheet = true },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
-                border = BorderStroke(1.dp, AccentGreen)
-            ) {
-                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("My QR ID", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-
-            // "Scan Peer" button -> QRScanScreen
-            Button(
-                onClick = { showScanScreen = true },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-            ) {
-                Icon(Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Scan Peer", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-            }
-
-            // Render dialogs if requested
-            if (showShareSheet && localKeys != null) {
-                QRShareSheet(
-                    handle = handle ?: "anonymous",
-                    localKeys = localKeys!!,
-                    onDismiss = { showShareSheet = false }
-                )
-            }
-
-            if (showScanScreen) {
-                QRScanScreen(
-                    onPeerScannedAndAccepted = { scannedHandle, pubKey, onion, encPub ->
-                        viewModel.requestConnection(
-                            handle = scannedHandle,
-                            publicKeyB64 = pubKey,
-                            onionAddress = onion,
-                            encPublicKeyB64 = encPub
-                        )
-                    },
-                    onDismiss = { showScanScreen = false }
-                )
-            }
-        }
-    }
-}
-
-// ==========================================
 // SETTINGS TAB
 // ==========================================
 @Composable
@@ -2048,6 +1900,10 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
         LogsViewerScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 3) {
         ApiKeysScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 4) {
+        UserProfileSettingsScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 5) {
+        ContentPreferencesScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -2111,6 +1967,51 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 ) {
                                     Text("Test Tor", fontWeight = FontWeight.Bold)
                                 }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "ACCOUNT & PREFERENCES",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 4 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("User Profile", fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.List, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Content Preferences", fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                         }
                     }
@@ -2275,6 +2176,88 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 }
                             }
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
+                        }
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "DATA & BACKUP",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            var showFactoryResetConfirm by remember { mutableStateOf(false) }
+
+                            Button(
+                                onClick = { /* Export Trigger */ },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                                border = BorderStroke(1.dp, AccentGreen)
+                            ) {
+                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Export Profile (Zip)", fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Button(
+                                onClick = { /* Import Trigger */ },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                                border = BorderStroke(1.dp, AccentGreen)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Import Profile (Zip)", fontWeight = FontWeight.Bold)
+                            }
+
+                            Spacer(modifier = Modifier.height(24.dp))
+                            HorizontalDivider(color = BorderSubtle)
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Button(
+                                onClick = { showFactoryResetConfirm = true },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight)
+                            ) {
+                                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("FACTORY RESET", fontWeight = FontWeight.Bold)
+                            }
+
+                            if (showFactoryResetConfirm) {
+                                AlertDialog(
+                                    onDismissRequest = { showFactoryResetConfirm = false },
+                                    title = { Text("Nuclear Option") },
+                                    text = { Text("This will wipe all your keys, contacts, settings, and feed data. It cannot be undone without a backup mnemonic. Are you sure?", color = TextMuted) },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                showFactoryResetConfirm = false
+                                                viewModel.factoryReset()
+                                            }
+                                        ) {
+                                            Text("WIPE EVERYTHING", color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showFactoryResetConfirm = false }) {
+                                            Text("Cancel", color = AccentGreen)
+                                        }
+                                    },
+                                    containerColor = SurfaceDark,
+                                    titleContentColor = TextLight
+                                )
+                            }
                         }
                     }
                 }

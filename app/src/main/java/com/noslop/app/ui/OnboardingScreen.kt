@@ -10,9 +10,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -42,6 +44,8 @@ fun OnboardingScreen(
     var currentStep by remember { mutableStateOf(1) }
     var handleText by remember { mutableStateOf("") }
     val selectedInterests = remember { mutableStateListOf<String>() }
+    val selectedMusicGenres = remember { mutableStateListOf<String>() }
+    val selectedVideoGenres = remember { mutableStateListOf<String>() }
     val selectedSources = remember { mutableStateListOf<BuiltInSource>() }
     
     val mnemonic by viewModel.mnemonic.collectAsState()
@@ -85,13 +89,13 @@ fun OnboardingScreen(
                     modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                 )
 
-                // 6-dot step indicators
+                // 7-dot step indicators
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(6) { index ->
+                    repeat(7) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -132,7 +136,20 @@ fun OnboardingScreen(
                             else selectedInterests.add(interest)
                         }
                     )
-                    4 -> Step4Feeds(
+                    4 -> Step4Genres(
+                        interests = selectedInterests,
+                        selectedMusicGenres = selectedMusicGenres,
+                        selectedVideoGenres = selectedVideoGenres,
+                        onToggleMusicGenre = { genre ->
+                            if (selectedMusicGenres.contains(genre)) selectedMusicGenres.remove(genre)
+                            else selectedMusicGenres.add(genre)
+                        },
+                        onToggleVideoGenre = { genre ->
+                            if (selectedVideoGenres.contains(genre)) selectedVideoGenres.remove(genre)
+                            else selectedVideoGenres.add(genre)
+                        }
+                    )
+                    5 -> Step5Feeds(
                         interests = selectedInterests,
                         selectedSources = selectedSources,
                         onToggleSource = { src ->
@@ -140,8 +157,8 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
-                    5 -> Step5Connection(viewModel)
-                    6 -> Step6Finalize(viewModel, handleText, selectedSources, selectedInterests, mnemonic)
+                    6 -> Step6Connection(viewModel)
+                    7 -> Step7Finalize(viewModel, handleText, selectedSources, selectedInterests, selectedMusicGenres, selectedVideoGenres, mnemonic)
                 }
             }
 
@@ -151,7 +168,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 6) {
+                if (currentStep > 1 && currentStep < 7) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -176,15 +193,22 @@ fun OnboardingScreen(
                     1 -> true
                     2 -> handleText.isNotBlank() && mnemonic != null
                     3 -> selectedInterests.isNotEmpty()
-                    4 -> selectedSources.isNotEmpty()
-                    5 -> true
+                    4 -> true // Optional genre selection
+                    5 -> selectedSources.isNotEmpty()
                     6 -> true
+                    7 -> true
                     else -> false
                 }
 
-                if (currentStep < 6) {
+                if (currentStep < 7) {
                     Button(
-                        onClick = { currentStep++ },
+                        onClick = {
+                            if (currentStep == 3 && !selectedInterests.contains("Music") && !selectedInterests.contains("Video Platforms")) {
+                                currentStep += 2 // Skip genres if they don't want music/video
+                            } else {
+                                currentStep++
+                            }
+                        },
                         enabled = canProceed,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGreen,
@@ -208,7 +232,14 @@ fun OnboardingScreen(
                 } else {
                     Button(
                         onClick = {
-                            viewModel.completeOnboarding(handleText, selectedSources, selectedInterests, mnemonic!!)
+                            viewModel.completeOnboarding(
+                                handleText, 
+                                selectedSources, 
+                                selectedInterests, 
+                                selectedMusicGenres,
+                                selectedVideoGenres,
+                                mnemonic!!
+                            )
                             onComplete()
                         },
                         colors = ButtonDefaults.buttonColors(
@@ -400,7 +431,7 @@ fun Step3Interests(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
         ) {
-            items(SourceLibrary.categories) { category ->
+            gridItems(SourceLibrary.categories) { category ->
                 val isSelected = selectedInterests.contains(category)
                 Card(
                     modifier = Modifier
@@ -429,7 +460,123 @@ fun Step3Interests(
 }
 
 @Composable
-fun Step4Feeds(
+fun Step4Genres(
+    interests: List<String>,
+    selectedMusicGenres: MutableList<String>,
+    selectedVideoGenres: MutableList<String>,
+    onToggleMusicGenre: (String) -> Unit,
+    onToggleVideoGenre: (String) -> Unit
+) {
+    val showMusic = interests.contains("Music")
+    val showVideo = interests.contains("Video Platforms")
+    
+    val musicGenres = listOf("Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop")
+    val videoGenres = listOf("Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary")
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (!showMusic && !showVideo) {
+            Text(
+                text = "No genres to select based on your interests.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(16.dp)
+            )
+            return
+        }
+
+        Text(
+            text = "Refine your taste",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "Choose specific genres for your dynamic media streams.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 16.dp)
+        )
+
+        LazyColumn(
+            modifier = Modifier.fillMaxHeight().padding(horizontal = 8.dp)
+        ) {
+            if (showMusic) {
+                item {
+                    Text("Music Genres", style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(vertical = 8.dp))
+                }
+                items(musicGenres) { genre ->
+                    val isSelected = selectedMusicGenres.contains(genre)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { onToggleMusicGenre(genre) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) SurfaceDark else PrimaryBlack
+                        ),
+                        border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(genre, color = TextLight, fontWeight = FontWeight.Bold)
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { onToggleMusicGenre(genre) },
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
+                        }
+                    }
+                }
+            }
+            if (showVideo) {
+                item {
+                    Text("Video Genres", style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+                }
+                items(videoGenres) { genre ->
+                    val isSelected = selectedVideoGenres.contains(genre)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { onToggleVideoGenre(genre) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) SurfaceDark else PrimaryBlack
+                        ),
+                        border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(genre, color = TextLight, fontWeight = FontWeight.Bold)
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { onToggleVideoGenre(genre) },
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Step5Feeds(
     interests: List<String>,
     selectedSources: List<BuiltInSource>,
     onToggleSource: (BuiltInSource) -> Unit
@@ -487,7 +634,7 @@ fun Step4Feeds(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxHeight().padding(horizontal = 16.dp)
         ) {
-            items(suggestedSources) { src: BuiltInSource ->
+            gridItems(suggestedSources) { src: BuiltInSource ->
                 val isSelected = selectedSources.contains(src)
                 Card(
                     modifier = Modifier
@@ -534,7 +681,7 @@ fun Step4Feeds(
 }
 
 @Composable
-fun Step5Connection(viewModel: NoSlopViewModel) {
+fun Step6Connection(viewModel: NoSlopViewModel) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -580,11 +727,13 @@ fun Step5Connection(viewModel: NoSlopViewModel) {
 }
 
 @Composable
-fun Step6Finalize(
+fun Step7Finalize(
     viewModel: NoSlopViewModel,
     handle: String,
     selectedSources: List<BuiltInSource>,
     selectedInterests: List<String>,
+    selectedMusicGenres: List<String>,
+    selectedVideoGenres: List<String>,
     mnemonic: String?
 ) {
     Column(
@@ -774,7 +923,7 @@ fun Step2Feeds(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxHeight().padding(horizontal = 8.dp)
         ) {
-            items(SourceLibrary.sources) { src ->
+            gridItems(SourceLibrary.sources) { src ->
                 val isSelected = selectedSources.contains(src)
                 Card(
                     modifier = Modifier

@@ -41,6 +41,25 @@ object BackupManager {
                 if (prefsFile.exists()) {
                     addToZip(zos, prefsFile, "preferences.xml")
                 }
+
+                // Add Media Directories
+                val possibleDirs = listOf(
+                    android.os.Environment.DIRECTORY_PICTURES,
+                    android.os.Environment.DIRECTORY_MOVIES,
+                    android.os.Environment.DIRECTORY_MUSIC,
+                    android.os.Environment.DIRECTORY_DOWNLOADS
+                )
+                for (dirType in possibleDirs) {
+                    val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                    val noSlopDir = File(baseDir, "NoSlop")
+                    if (noSlopDir.exists() && noSlopDir.isDirectory) {
+                        noSlopDir.listFiles()?.forEach { file ->
+                            if (file.isFile) {
+                                addToZip(zos, file, "media/$dirType/${file.name}")
+                            }
+                        }
+                    }
+                }
             }
 
             // Encrypt the zip
@@ -110,6 +129,19 @@ object BackupManager {
                         "preferences.xml" -> {
                             val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                             restoreFile(zis, prefsFile)
+                        }
+                        else -> {
+                            if (entry!!.name.startsWith("media/")) {
+                                val parts = entry!!.name.split("/")
+                                if (parts.size == 3) {
+                                    val dirType = parts[1]
+                                    val fileName = parts[2]
+                                    val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                                    val noSlopDir = File(baseDir, "NoSlop")
+                                    val targetFile = File(noSlopDir, fileName)
+                                    restoreFile(zis, targetFile)
+                                }
+                            }
                         }
                     }
                     zis.closeEntry()

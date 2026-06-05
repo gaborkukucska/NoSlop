@@ -27,9 +27,7 @@ object SourceLibrary {
         "Art",
         "Photography",
         "Music",
-        "TikTok (Bridges)",
-        "Reddit",
-        "Mastodon"
+        "Reddit"
     )
 
     val sources = listOf(
@@ -78,21 +76,11 @@ object SourceLibrary {
         BuiltInSource("wired", "Wired", "https://www.wired.com/feed/rss", "rss", "Social Clearnet"),
         BuiltInSource("slashdot", "Slashdot", "https://rss.slashdot.org/Slashdot/slashdotMain", "rss", "Social Clearnet"),
 
-        // TikTok (Bridges - using public ProxiTok instances)
-        BuiltInSource("tt-khaby", "Khaby Lame (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@khaby.lame", "rss", "TikTok (Bridges)"),
-        BuiltInSource("tt-zachking", "Zach King (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@zachking", "rss", "TikTok (Bridges)"),
-        BuiltInSource("tt-mrbeast", "MrBeast (TikTok)", "https://proxitok.pabloferreiro.es/api/rss/@mrbeast", "rss", "TikTok (Bridges)"),
-
         // Reddit
         BuiltInSource("r-technology", "r/technology", "https://www.reddit.com/r/technology.rss", "rss", "Reddit"),
         BuiltInSource("r-worldnews", "r/worldnews", "https://www.reddit.com/r/worldnews.rss", "rss", "Reddit"),
         BuiltInSource("r-futurism", "r/futurism", "https://www.reddit.com/r/futurism.rss", "rss", "Reddit"),
         BuiltInSource("r-android", "r/android", "https://www.reddit.com/r/android.rss", "rss", "Reddit"),
-
-        // Mastodon
-        BuiltInSource("m-mastodon", "Mastodon Project", "https://mastodon.social/@mastodon.rss", "rss", "Mastodon"),
-        BuiltInSource("m-eff", "EFF (Mastodon)", "https://mastodon.social/@eff.rss", "rss", "Mastodon"),
-        BuiltInSource("m-feditips", "FediTips", "https://mstdn.social/@feditips.rss", "rss", "Mastodon"),
 
         // Lifestyle
         BuiltInSource("lifehacker", "Lifehacker", "https://lifehacker.com/rss", "rss", "Lifestyle"),
@@ -141,6 +129,7 @@ object SourceLibrary {
         BuiltInSource("api-pexels-video", "Pexels Videos", "pexels:videos", "api", "Video Platforms"),
         BuiltInSource("api-archive-video", "Internet Archive Video", "archive:video", "api", "Video Platforms"),
         BuiltInSource("api-archive-audio", "Internet Archive Audio", "archive:audio", "api", "Music"),
+        BuiltInSource("api-jamendo-music", "Jamendo Free Music", "jamendo:music", "api", "Music"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
         BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),

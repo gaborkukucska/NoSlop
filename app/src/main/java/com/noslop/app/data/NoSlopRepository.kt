@@ -128,6 +128,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     /**
+     * Clears API-generated feed items and sources to prepare for a fresh fetch
+     * when preferences change.
+     */
+    suspend fun clearApiData() = withContext(Dispatchers.IO) {
+        feedDao.clearApiItems()
+        feedDao.clearApiSources()
+        Logger.info(TAG, "Cleared previous API feed items and sources")
+    }
+
+    /**
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.
      */
@@ -165,12 +175,21 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // --- Public API pipeline ---
         try {
             val apiKeyRepo = ApiKeyRepository(context)
-            // Derive active categories from all active sources
-            val activeCategories = activeSources.mapNotNull { it.category }.distinct()
+            // Derive active categories from all active sources + user selected categories
+            val userCategories = getUserSelectedCategories()
+            val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct()
             // Load user keywords
             for (category in activeCategories) {
                 try {
-                    val keywords = getUserKeywordsForCategory(category)
+                    val keywords = getUserKeywordsForCategory(category).toMutableList()
+                    if (category == "Music") {
+                        val genres = getSelectedMusicGenres()
+                        if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                    } else if (category == "Video Platforms") {
+                        val genres = getSelectedVideoGenres()
+                        if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                    }
+                    
                     val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                         category = category,
                         userKeywords = keywords,
@@ -249,6 +268,63 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             } catch (_: Exception) {}
         }
         emptyList()
+    }
+
+    suspend fun saveSelectedMusicGenres(genres: List<String>) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(genres)
+        appSettingDao.insertSetting(AppSetting("selected_music_genres", json))
+    }
+
+    suspend fun getSelectedMusicGenres(): List<String> = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("selected_music_genres")
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
+                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+            } catch (_: Exception) {}
+        }
+        emptyList()
+    }
+
+    suspend fun saveSelectedVideoGenres(genres: List<String>) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(genres)
+        appSettingDao.insertSetting(AppSetting("selected_video_genres", json))
+    }
+
+    suspend fun getSelectedVideoGenres(): List<String> = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("selected_video_genres")
+        if (!json.isNullOrBlank()) {
+            try {
+                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
+                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
+            } catch (_: Exception) {}
+        }
+        emptyList()
+    }
+
+    suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
+        val json = com.google.gson.Gson().toJson(profile)
+        appSettingDao.insertSetting(AppSetting("user_profile", json))
+    }
+
+    suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("user_profile")
+        if (!json.isNullOrBlank()) {
+            try {
+                return@withContext com.google.gson.Gson().fromJson(json, UserProfile::class.java)
+            } catch (_: Exception) {}
+        }
+        UserProfile() // Default empty profile
+    }
+
+    suspend fun factoryReset() = withContext(Dispatchers.IO) {
+        // Clear all database tables
+        db.clearAllTables()
+        
+        // Reset shared preferences via IdentityRepository
+        identityRepository.logout()
+        setOnboardingComplete(false)
+        _identityUpdateFlow.emit(Unit)
     }
 
     /**

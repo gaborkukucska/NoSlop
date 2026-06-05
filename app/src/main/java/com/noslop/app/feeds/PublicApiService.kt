@@ -57,6 +57,7 @@ object PublicApiService {
                     items += safeCall { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
+                    items += safeCall { JamendoApiClient.searchTracks(query) }
                     items += safeCall { PodcastIndexClient.searchEpisodes(query, apiKeyRepo) }
                     items += safeCall { InvidiousApiClient.searchVideos("$query music") }
                     items += safeCall { PexelsApiClient.searchVideos(query, apiKeyRepo) }
@@ -92,13 +93,6 @@ object PublicApiService {
                 }
                 "Social Clearnet" -> {
                     items += safeCall { RedditApiClient.fetchSubreddit("technology", "new") }
-                    items += safeCall { NitterApiClient.searchTweets(query) }
-                }
-                "Mastodon" -> {
-                    // Mastodon handled by RSS — no public API without instance auth
-                }
-                "TikTok (Bridges)" -> {
-                    items += safeCall { ProxiTokClient.getTrending() }
                 }
                 else -> {
                     items += safeCall { NewsApiClient.searchArticles(query, null, apiKeyRepo) }
