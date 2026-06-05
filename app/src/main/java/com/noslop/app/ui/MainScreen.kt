@@ -364,7 +364,7 @@ fun UnifiedFeedTab(
                         }
                     }
                     val item = unifiedItems[index]
-                    val isVisible = pagerState.currentPage == index
+                    val isVisible = pagerState.currentPage == index || pagerState.targetPage == index
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -713,11 +713,6 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                             val playJs = """
                                 (function() {
                                     document.body.style.backgroundColor = 'black';
-                                    var v = document.querySelector('video');
-                                    if (v) {
-                                        v.play();
-                                        v.muted = false;
-                                    }
                                     var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label="Play"]');
                                     if (btn) btn.click();
                                 })();
@@ -738,10 +733,11 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                             val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
                                          else url.substringAfterLast("/")
                             val baseUrl = "https://www.youtube-nocookie.com/embed/$videoId"
-                            if (baseUrl.contains("?")) "$baseUrl&autoplay=1&mute=0" else "$baseUrl?autoplay=1&mute=0"
+                            if (baseUrl.contains("?")) "$baseUrl&autoplay=1" else "$baseUrl?autoplay=1"
                         }
-                        url.contains("archive.org/embed") && !url.contains("autoplay=1") -> {
-                            if (url.contains("?")) "$url&autoplay=1" else "$url?autoplay=1"
+                        url.contains("vimeo.com") -> {
+                            val videoId = url.substringAfterLast("/")
+                            "https://player.vimeo.com/video/$videoId?autoplay=1"
                         }
                         else -> url
                     }
@@ -751,12 +747,9 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
             update = { view ->
                 if (!isVisible) {
                     view.onPause()
-                    view.pauseTimers()
                 } else {
                     view.onResume()
-                    view.resumeTimers()
-                    // Re-trigger auto-play on update
-                    view.evaluateJavascript("(function() { var v = document.querySelector('video'); if (v) v.play(); })();", null)
+                    view.evaluateJavascript("(function() { var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label=\"Play\"]'); if (btn) btn.click(); })();", null)
                 }
             },
             modifier = Modifier.fillMaxSize(),
@@ -767,79 +760,43 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
             }
         )
     } else {
-        Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
         var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
 
-        DisposableEffect(url) {
-            val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
-                .setUserAgent("NoSlop-Android/1.0")
-
-            val mimeType = when {
-                url.contains(".m3u8") || url.contains("m3u8") -> "application/x-mpegURL"
-                url.contains(".mpd") || url.contains("mpd") -> "application/dash+xml"
-                url.contains(".mp4") || url.contains("mp4") -> "video/mp4"
-                url.contains(".mkv") || url.contains("mkv") -> "video/x-matroska"
-                url.contains("/stream") -> "video/mp4" // Mesh videos proxied via LOCAL_PORT
-                else -> null // Let ExoPlayer guess
-            }
-
-            val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
-                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
-                .build()
-
-            val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
-                .setMediaSourceFactory(DefaultMediaSourceFactory(context).setDataSourceFactory(dataSourceFactory))
-                .setAudioAttributes(audioAttributes, true)
-                .setLoadControl(
-                    androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                        .setBufferDurationsMs(3000, 10000, 1000, 1500)
-                        .build()
-                )
-                .build().apply {
-                    val mediaItem = androidx.media3.common.MediaItem.Builder()
-                        .setUri(url)
-                        .setMimeType(mimeType)
-                        .build()
-                    setMediaItem(mediaItem)
-
-                    addListener(object : androidx.media3.common.Player.Listener {
-                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
-                        }
-                        override fun onPlaybackStateChanged(state: Int) {
-                            val stateStr = when(state) {
-                                androidx.media3.common.Player.STATE_READY -> "READY"
-                                androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
-                                androidx.media3.common.Player.STATE_ENDED -> "ENDED"
-                                androidx.media3.common.Player.STATE_IDLE -> "IDLE"
-                                else -> "UNKNOWN"
-                            }
-                            Logger.info("VIDEO", "ExoPlayer state changed: $stateStr for $url")
-                        }
-                    })
-
-                    prepare()
-                    playWhenReady = isVisible
-                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
-                }
+        DisposableEffect(url, isVisible) {
+            if (isVisible) {
+                Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
                 
-            exoPlayer = player
+                val dataSourceFactory = androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                    .setUserAgent("NoSlop-Android/1.0")
+                val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
-            onDispose {
-                player.release()
-                exoPlayer = null
-            }
-        }
+                val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(mediaSource)
+                    .build().apply {
+                        val mimeType = when {
+                            url.endsWith(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                            else -> androidx.media3.common.MimeTypes.VIDEO_MP4
+                        }
+                        val mediaItem = androidx.media3.common.MediaItem.Builder().setUri(url).setMimeType(mimeType).build()
+                        setMediaItem(mediaItem)
+                        prepare()
+                        playWhenReady = true
+                        repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
+                        
+                        addListener(object : androidx.media3.common.Player.Listener {
+                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                            }
+                        })
+                    }
+                exoPlayer = player
 
-        LaunchedEffect(isVisible, exoPlayer) {
-            exoPlayer?.let { player ->
-                player.playWhenReady = isVisible
-                if (isVisible) {
-                    player.play()
-                } else {
-                    player.pause()
+                onDispose {
+                    player.release()
+                    exoPlayer = null
                 }
+            } else {
+                onDispose { }
             }
         }
 

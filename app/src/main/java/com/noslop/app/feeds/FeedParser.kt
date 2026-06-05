@@ -362,23 +362,11 @@ object FeedParser {
     }
 
     fun stripHtml(html: String): String {
-        // First remove code and pre blocks entirely
-        val noCode = html.replace(Regex("<code[^>]*>.*?</code>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-            .replace(Regex("<pre[^>]*>.*?</pre>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-        
-        // Then remove other common noise tags
-        val noStyle = noCode.replace(Regex("<style[^>]*>.*?</style>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-            .replace(Regex("<script[^>]*>.*?</script>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)), "")
-
-        // Then remove all other tags
-        return noStyle.replace(Regex("<[^>]*>"), " ")
-            .replace(Regex("&nbsp;", RegexOption.IGNORE_CASE), " ")
-            .replace(Regex("&amp;", RegexOption.IGNORE_CASE), "&")
-            .replace(Regex("&lt;", RegexOption.IGNORE_CASE), "<")
-            .replace(Regex("&gt;", RegexOption.IGNORE_CASE), ">")
-            .replace(Regex("&quot;", RegexOption.IGNORE_CASE), "\"")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+        return try {
+            android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+        } catch (e: Exception) {
+            html.replace(Regex("<[^>]*>"), " ").trim()
+        }
     }
 
     private fun extractFirstImage(html: String): String? {

@@ -58,9 +58,14 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
+        val request = coil.request.ImageRequest.Builder(context)
+            .data(url)
+            .crossfade(true)
+            .build()
+            
         // Background blurred layer
         AsyncImage(
-            model = url,
+            model = request,
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
@@ -72,7 +77,7 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         
         // Foreground uncropped layer
         AsyncImage(
-            model = url,
+            model = request,
             contentDescription = null,
             modifier = Modifier
                 .fillMaxWidth()

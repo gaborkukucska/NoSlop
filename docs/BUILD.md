@@ -14,7 +14,7 @@ To build and run NoSlop locally, ensure your development environment has the fol
     *   `compileSdk = 34`
     *   `minSdk = 26` (Android 8.0 Oreo - required for cryptographic APIs and background networking routines)
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
-*   **Orbot Fallback (Optional)**: NoSlop includes an embedded Tor client. No separate app is required to connect to the mesh network. However, for power users who prefer external routing, falling back to an external Orbot client (listening on local port 9050) is still optionally supported.
+*   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
 ---
 
@@ -122,23 +122,18 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 2. SOCKS5 Proxy SocketException (Tor Connection Failure)
 *   **Symptom**: Diagnostic logs print `Connection refused` or `Socket timeout` during "Test Tor" pings.
-*   **Cause**: Orbot application is either not running, or is configured on a non-standard SOCKS port.
-*   **Fix**: Launch the Orbot application on your phone, click the large gray Onion button to activate the VPN/Proxy tunnel, and verify that the SOCKS port displayed is set to `9050`.
+*   **Cause**: The embedded Tor daemon is either still bootstrapping circuits or failed to bind to port 9050.
+*   **Fix**: Wait an additional 30 seconds for the internal daemon to achieve 100% bootstrap. If it continues to fail, fully force-close the app and reopen it to restart the native Tor process.
 
 ### 3. SQLite Database Migration Crash
 *   **Symptom**: App crashes upon launching after a package update.
 *   **Cause**: The database entity schema was modified, but Room database version was not incremented, or a migration configuration was omitted.
 *   **Fix**: During early R&D phases, you can clear the app's cache and local storage data via **App Info** -> **Storage** -> **Clear Data** on the device to drop local files and allow Room to re-create the tables cleanly.
 
-### 4. Manifest Query Blocks Orbot App Detection
-*   **Symptom**: The app reports Orbot is "Not Installed" even when it is actively installed.
-*   **Cause**: Android 11+ (API 30+) introduces package visibility safety restrictions, blocking apps from querying installed applications.
-*   **Fix**: Verify that the `<queries>` element is correctly configured in `app/src/main/AndroidManifest.xml` targeting package `org.torproject.android`:
-    ```xml
-    <queries>
-        <package android:name="org.torproject.android" />
-    </queries>
-    ```
+### 4. MediaCodec Exhaustion (Video Black Screens)
+*   **Symptom**: Videos in the feed fail to play, showing a black screen and logging `Media Quality Service not found`.
+*   **Cause**: The device has exhausted its limit of hardware video decoders.
+*   **Fix**: Verify that `VerticalPager` is properly releasing ExoPlayer instances (`player.release()`) when `isVisible` is false, to ensure hardware decoders are freed for the incoming slides.
 
 ### 5. Network Clearnet Traffic Blocked
 *   **Symptom**: Custom RSS clearnet feeds fail to fetch with `IOException: Cleartext HTTP traffic not permitted`.
