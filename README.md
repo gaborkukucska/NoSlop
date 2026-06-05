@@ -66,13 +66,16 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 | Layer | Technology |
 |---|---|
-| UI | Jetpack Compose |
-| Networking | Tor SOCKS5 (embedded, onion-routed) |
+| UI | Jetpack Compose + Material Design 3 |
+| Media | ExoPlayer (HLS/DASH/MP4), WebView (YouTube), Coil (images) |
+| Content | RSS/Atom parser, Jamendo API, Archive.org, YouTube RSS |
+| Networking | Embedded Tor SOCKS5 daemon (onion-routed), OkHttp + DNS-over-HTTPS |
 | Signing | Ed25519 (Android Keystore / Bouncy Castle) |
 | Key exchange | X25519 |
-| Encryption | AES-256-GCM (DMs), AES-CBC (backup) |
+| Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
 | Storage | Room SQLite (WAL mode) + EncryptedSharedPreferences |
 | Background sync | WorkManager |
+| Camera | CameraX + ML Kit (QR scanning) |
 
 ---
 
@@ -90,6 +93,7 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 - 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
 - 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)** — HAI-Net wire protocol reference.
 - 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
+- 🛠️ **[SUPPORT.md](docs/SUPPORT.md)** — operations guide, backup/restore, and troubleshooting.
 
 ---
 

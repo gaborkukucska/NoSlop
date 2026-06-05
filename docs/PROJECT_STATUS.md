@@ -1,11 +1,18 @@
 # NoSlop — Project Status (v0.1)
 
-NoSlop is a serverless, offline-first personal RSS/Atom feed reader and private decentralized social mesh node configured for the **HAI-Net** decentralized initiative.
+NoSlop is a **privacy-first Android application** that combines an immersive, TikTok-style vertical media feed with a serverless encrypted social mesh. It aggregates content from the open web (RSS/Atom feeds, YouTube, Archive.org, Jamendo music, and public APIs) without trackers or algorithmic manipulation, while providing end-to-end encrypted peer-to-peer messaging over Tor. All identity, data, and cryptographic keys are stored exclusively on the user's device — no accounts, no servers, no phone numbers. NoSlop is built for the **[HAI-Net](https://hai-net.com)** decentralized initiative and the **[People Power Initiative](https://pplpwr.me)**.
+
+### Core Capabilities
+- **Immersive Feed**: Full-screen vertical pager with blurred image backgrounds, paginated article reader, native ExoPlayer video/audio playback, and YouTube WebView embeds.
+- **Clearnet Aggregation**: Curated sources across 14+ categories (Tech, Science, Music, Gaming, Photography, etc.) with user-configurable interests and genre preferences that dynamically personalize API-driven content.
+- **Encrypted Social Mesh**: Tor-routed gossip protocol with Ed25519-signed posts, X25519/ChaCha20-Poly1305 encrypted DMs, QR code pairing, and gossip flood routing with per-sender rate limiting.
+- **Sovereign Identity**: BIP39 mnemonic recovery, hardware-backed key storage, user profile management, and AES-256 encrypted backup/restore with full media portability.
+- **Self-Contained Networking**: Embedded Tor daemon (no Orbot dependency), automatic hidden service registration, DNS-over-HTTPS fallback, and a unified settings panel for all system configuration.
 
 ## Current Build & Integration Status
-- **Android Compilation Target**: API Level 35 (compiled using JDK 11, standard Jetpack Compose UI)
-- **Status**: **PASSING & FULLY COMPILED** (successfully verified via `compile_applet`)
-- **Visual Identity**: Premium brutalist dark slate styling integrated with custom adaptive colors and Material Design 3 guidelines.
+- **Android Compilation Target**: API Level 35 (compiled using JDK 17, Jetpack Compose with Material Design 3)
+- **Status**: **PASSING & FULLY COMPILED** (verified via `./gradlew assembleDebug`)
+- **Visual Identity**: Premium brutalist dark-mode styling with custom adaptive color system (AccentGreen, DestructiveRed, SurfaceDark) and Material Design 3 guidelines.
 
 ## Completed Milestones
 1. **Package Re-alignment**: Restructured and renamed all packages from original placeholders to `com.noslop.app` dynamically across directories.

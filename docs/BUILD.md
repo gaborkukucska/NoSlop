@@ -1,6 +1,6 @@
 # Building NoSlop Android
 
-This document outlines the steps to build, compile, and successfully run the **NoSlop** serverless node and feed aggregator on Android.
+This document outlines the steps to build, compile, and run **NoSlop** — a privacy-first Android application combining an immersive vertical media feed, clearnet content aggregation, and serverless encrypted social networking over Tor.
 
 ---
 
@@ -10,9 +10,9 @@ To build and run NoSlop locally, ensure your development environment has the fol
 
 *   **Java Development Kit (JDK 17)**: Recommended version is JDK 17 (Eclipse Temurin or OpenJDK), as modern Android Gradle Plugin (AGP) and Kotlin versions are strictly optimized for Java 17.
 *   **Android Studio (Koala or newer)**: Standard IDE for Android developers. It supplies the required compilation Android SDK, tools, and virtual emulators.
-*   **Android SDK (API Level 34)**:
-    *   `compileSdk = 34`
-    *   `minSdk = 26` (Android 8.0 Oreo - required for cryptographic APIs and background networking routines)
+*   **Android SDK (API Level 35)**:
+    *   `compileSdk = 35`
+    *   `minSdk = 26` (Android 8.0 Oreo — required for cryptographic APIs, EncryptedSharedPreferences, and background networking routines)
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
@@ -77,13 +77,20 @@ When you boot NoSlop for the first time, verify the following checklist of scree
 1.  **Step 1: Identity Generation**
     *   Input your chosen handle (e.g., `alice`) into the validated input box.
     *   Press **Generate Keypair**.
-    *   Verify the app presents you with a custom registration card showing your combined `Display Handle` (e.g. `alice.a1b2c3`) and your truncated, copyable onion address.
-2.  **Step 2: Feed Selection**
-    *   Select categories of interest from the built-in, operational feeds list (including Tech, Security, World News).
-    *   Confirm a checkbox appears on each chosen feed card.
-3.  **Step 3: Connection Walkthrough**
-    *   Read the peer mesh information guidelines.
-    *   Click **Enter App** to write settings to the SQLite database and enter the dashboard. Subsequent launches must completely skip onboarding.
+    *   Verify the app presents you with a registration card showing your combined `Display Handle` (e.g., `alice.a1b2c3`) and your truncated, copyable onion address.
+2.  **Step 2: Recovery Phrase (BIP39 Word Cloud)**
+    *   A 12-word mnemonic phrase is displayed. Tap to copy.
+    *   Write this down — it is the only way to recover your account.
+3.  **Step 3: Interest Selection**
+    *   Select categories of interest from the built-in library (Tech, Science, Music, Gaming, Photography, Lifestyle, and more).
+    *   Confirm a checkbox border highlights each chosen category card.
+4.  **Step 4: Genre Refinement** (conditional)
+    *   If you selected "Music" or "Video Platforms" in Step 3, a genre picker appears.
+    *   Choose specific genres (e.g., Electronic, Lo-Fi, Jazz, Education, Documentary) to fine-tune your feed.
+5.  **Step 5: Connection Walkthrough**
+    *   Review the peer mesh information guidelines.
+6.  **Step 6: Enter App**
+    *   Click **Enter App** to save all preferences and enter the main dashboard. The app pre-loads 50+ feed items in the background. Subsequent launches skip onboarding entirely.
 
 ---
 

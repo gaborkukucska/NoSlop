@@ -1,10 +1,10 @@
 # Debugging NoSlop Android
 
-NoSlop includes an offline-first, local-only logging architecture designed specifically for decentralized node debugging. There are no analytics trackers or central telemetry backend integrations. Instead, all diagnostics write to:
-1.  An in-memory **1000-line ring buffer** for real-time viewing on the Settings tab.
-2.  A local, persistent, newline-delimited JSON log file on your device.
+NoSlop includes an offline-first, local-only logging architecture designed for decentralized node debugging. There are no analytics trackers, telemetry SDKs, or central reporting backends. All diagnostics write to:
+1.  An in-memory **1000-line ring buffer** for real-time viewing in the Settings tab.
+2.  A local, persistent, newline-delimited JSON log file on the device.
 
-This document describes how to access, read, and share these log details.
+This document describes how to access, filter, and share these diagnostic details.
 
 ---
 
@@ -14,7 +14,7 @@ All system events are logged using our high-performance `Logger.kt` engine. The 
 
 *   **Log File Name**: `noslop-debug.log`
 *   **Absolute Path On Device**:
-    `/data/data/com.aistudio.noslop.ayzxqp/files/noslop-debug.log`
+    `/data/data/com.noslop.app/files/noslop-debug.log`
 *   **Android Context Reference**: `context.filesDir.absolutePath + "/noslop-debug.log"`
 
 ---
@@ -60,13 +60,13 @@ If you are developing locally with a physical phone connected over USB, use stan
 ### 4.1 Live Streaming Logs to Terminal
 Use `tail` to observe system operations in real-time as you tap on features:
 ```bash
-adb shell run-as com.aistudio.noslop.ayzxqp tail -f /data/data/com.aistudio.noslop.ayzxqp/files/noslop-debug.log
+adb shell run-as com.noslop.app tail -f /data/data/com.noslop.app/files/noslop-debug.log
 ```
 
 ### 4.2 Pulling the Log File to your Laptop
 Download the entire `.log` file to your active working directory on your personal machine:
 ```bash
-adb exec-out run-as com.aistudio.noslop.ayzxqp cat files/noslop-debug.log > ./noslop-debug.log
+adb exec-out run-as com.noslop.app cat files/noslop-debug.log > ./noslop-debug.log
 ```
 
 ---
@@ -78,8 +78,8 @@ Filters are applied in the logger to help isolate specific subsystem issues:
 *   **`ONBOARDING`**: Documents the user wizard. Look here if keys or feeds aren't writing on first-run.
 *   **`CRYPTO`**: Details public key creation, sha-256 derivations, signing, and ECDH encryption procedures.
     *   *Security Precaution: The cryptography engine NEVER logs raw private keys or seed variables.*
-*   **`TOR`**: Details Orbot installation query states, SOCKS5 port checks, and result parameters from pings to `check.torproject.org`.
-*   **`FEED`**: Audits XML parsing events, stripping HTML operations, and database insertions.
+*   **`TOR`**: Details embedded Tor daemon lifecycle, SOCKS5 port checks, hidden service registration, and result parameters from pings to `check.torproject.org`.
+*   **`FEED`**: Audits RSS/Atom XML parsing, HTML sanitization, API pipeline fetches (Jamendo, YouTube, Archive.org), and database insertions.
 *   **`FIREWALL`**: Audits our strict mesh packet filter rules. It lists sender pubkeys and drops packets that are not explicitly trusted.
 *   **`REPOSITORY` / `DATABASE`**: Audits CRUD actions, Room transactions, and synchronization locks.
 
@@ -90,7 +90,7 @@ Filters are applied in the logger to help isolate specific subsystem issues:
 The following is a realistic 14-line log snippet showing a successful lifecycle start, identity generation, a feed fetch, and a blocked spam packet event:
 
 ```text
-[2026-05-30 12:45:01.011] [INFO] [TOR] Orbot package info found. Installed = true
+[2026-05-30 12:45:01.011] [INFO] [TOR] Embedded Tor daemon bootstrapped successfully
 [2026-05-30 12:45:01.121] [INFO] [CRYPTO] Generating secure cryptographic identity for handle: bob
 [2026-05-30 12:45:01.320] [INFO] [CRYPTO] Identity keys successfully created | tripcode=287cf0 | onion=e63ba...onion
 [2026-05-30 12:45:01.334] [INFO] [REPOSITORY] Local Identity saved in database for user 'bob'
@@ -108,12 +108,12 @@ The following is a realistic 14-line log snippet showing a successful lifecycle 
 
 ---
 
-## 7. Providing Logs for LLM Correction
+## 7. Providing Logs for Debugging
 
-When debugging and writing reports back to AI Studio:
+When debugging issues or seeking help:
 
-1.  Navigate to **Settings** -> **Structured Debug Logs** on your emulator/phone.
-2.  Tap on the **Copy Logs** button.
-3.  Paste the **copied log dump** into your chat message.
-4.  Add a brief description of what you expected to see on screen vs what actually occurred.
-5.  The AI agent will analyze the log, pinpoint exactly which Kotlin class or layout broke, and provide immediate fixes to rebuild successfully!
+1.  Navigate to **Settings** → **Structured Debug Logs** on your emulator/phone.
+2.  Tap the **Copy Logs** button.
+3.  Paste the **copied log dump** into your bug report, chat thread, or issue tracker.
+4.  Add a brief description of what you expected to see on screen vs. what actually occurred.
+5.  Include the device model and Android version for hardware-specific debugging (e.g., MediaCodec exhaustion varies by chipset).

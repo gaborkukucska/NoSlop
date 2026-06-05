@@ -1,6 +1,6 @@
 # NoSlop Packet Schema
 
-This document defines the exact JSON structure of each packet type used in the HAI-Net wire protocol. All packets are encapsulated in a base `NetworkPacket` container.
+This document defines the JSON structure of each packet type used in NoSlop's HAI-Net mesh wire protocol. All peer-to-peer gossip broadcasts, encrypted direct messages, connection requests, and history synchronizations use these packet formats. Packets are transmitted as newline-delimited JSON over Tor-routed SOCKS5 TCP connections.
 
 ## Base Container (NetworkPacket)
 All packets broadcast or sent over DM are wrapped in this JSON container.
