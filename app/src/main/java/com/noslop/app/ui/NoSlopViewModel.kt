@@ -224,13 +224,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Only shuffle the new batch to preserve the organic mix without reordering seen items
         batch.shuffle()
         
-        // If this is the initial load (feed is empty), restrict the batch to max 5 items
-        // so that late-arriving video sources can quickly populate the upcoming slides.
-        val finalBatch = if (_unifiedFeed.value.isEmpty() && batch.size > 5) {
-            batch.take(5)
-        } else {
-            batch
-        }
+        // Always restrict the batch to max 5 items per load
+        // so that late-arriving video sources can quickly populate the upcoming slides
+        // and manual refreshes behave exactly like the first load.
+        val finalBatch = batch.take(5)
         
         _unifiedFeed.value = _unifiedFeed.value + finalBatch
     }

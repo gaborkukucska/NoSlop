@@ -156,16 +156,25 @@ object InternetArchiveClient {
                                         if (files != null) {
                                             Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
                                             if (resolvedMediaType == "audio") {
+                                                var bestAudio: String? = null
                                                 for (f in files) {
                                                     val fObj = f.asJsonObject
                                                     val format = fObj.get("format")?.asString
-                                                    val name = fObj.get("name")?.asString
-                                                    if (name != null && (format == "VBR MP3" || format == "128Kbps MP3" || format == "MP3" || name.endsWith(".mp3"))) {
+                                                    val name = fObj.get("name")?.asString ?: continue
+                                                    val nLow = name.lowercase()
+                                                    if (format == "VBR MP3" || format == "128Kbps MP3" || format == "MP3" || 
+                                                        nLow.endsWith(".mp3") || nLow.endsWith(".ogg") || nLow.endsWith(".m4a") || nLow.endsWith(".flac")) {
                                                         val encodedName = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
-                                                        archiveMediaUrl = "https://archive.org/download/$identifier/$encodedName"
-                                                        Logger.info(TAG, "Resolved audio for $identifier: $archiveMediaUrl (format=$format)")
+                                                        bestAudio = "https://archive.org/download/$identifier/$encodedName"
+                                                        Logger.info(TAG, "Resolved audio for $identifier: $bestAudio (format=$format)")
                                                         break
                                                     }
+                                                }
+                                                if (bestAudio != null) {
+                                                    archiveMediaUrl = bestAudio
+                                                } else {
+                                                    Logger.warn(TAG, "No playable audio found for $identifier, dropping.")
+                                                    archiveMediaUrl = "" // Mark as invalid
                                                 }
                                             } else { // video
                                                 // Prefer MPEG4/h.264, fall back to any .mp4
@@ -185,8 +194,13 @@ object InternetArchiveClient {
                                                         fallbackVideo = "https://archive.org/download/$identifier/$encodedName"
                                                     }
                                                 }
-                                                archiveMediaUrl = bestVideo ?: fallbackVideo ?: "https://archive.org/download/$identifier"
-                                                Logger.info(TAG, "Resolved video for $identifier: $archiveMediaUrl")
+                                                if (bestVideo != null || fallbackVideo != null) {
+                                                    archiveMediaUrl = bestVideo ?: fallbackVideo!!
+                                                    Logger.info(TAG, "Resolved video for $identifier: $archiveMediaUrl")
+                                                } else {
+                                                    Logger.warn(TAG, "No playable video file found for $identifier, will fallback to embed.")
+                                                    // Leave archiveMediaUrl as default, the HEAD check will catch it and convert to embed
+                                                }
                                             }
                                         } else {
                                             Logger.warn(TAG, "No 'result' array in metadata for $identifier")
@@ -198,25 +212,37 @@ object InternetArchiveClient {
                                     Logger.warn(TAG, "Failed to resolve media file for $identifier: ${e.message}")
                                 }
                             }
+                            
                             // Validate the resolved URL
                             var finalMediaUrl: String? = archiveMediaUrl
                             var finalMediaType = resolvedMediaType
-                            try {
-                                val headReq = Request.Builder().url(archiveMediaUrl).head().build()
-                                val headRes = client.newCall(headReq).execute()
-                                val code = headRes.code
-                                headRes.close()
-                                
-                                if (code == 401 || code == 403) {
-                                    Logger.warn(TAG, "Download URL requires auth ($identifier), using embed fallback")
-                                    finalMediaUrl = "https://archive.org/embed/$identifier"
-                                    finalMediaType = "video" // Embeds are handled via WebView
-                                } else if (code == 404) {
-                                    Logger.warn(TAG, "Download URL not found ($identifier), skipping")
-                                    finalMediaUrl = null
+                            
+                            if (archiveMediaUrl.isEmpty()) {
+                                finalMediaUrl = null // Drop
+                            } else {
+                                try {
+                                    val headReq = Request.Builder().url(archiveMediaUrl).head().build()
+                                    val headRes = client.newCall(headReq).execute()
+                                    val code = headRes.code
+                                    val contentType = headRes.header("Content-Type") ?: ""
+                                    headRes.close()
+                                    
+                                    if (code == 401 || code == 403 || contentType.contains("text/html")) {
+                                        if (finalMediaType == "audio") {
+                                            Logger.warn(TAG, "Audio URL is HTML or restricted ($identifier), dropping item")
+                                            finalMediaUrl = null
+                                        } else {
+                                            Logger.warn(TAG, "Download URL is HTML/restricted ($identifier), using embed fallback")
+                                            finalMediaUrl = "https://archive.org/embed/$identifier"
+                                            finalMediaType = "video" // Embeds are handled via WebView
+                                        }
+                                    } else if (code == 404) {
+                                        Logger.warn(TAG, "Download URL not found ($identifier), skipping")
+                                        finalMediaUrl = null
+                                    }
+                                } catch (e: Exception) {
+                                    Logger.warn(TAG, "Failed to validate URL for $identifier: ${e.message}")
                                 }
-                            } catch (e: Exception) {
-                                Logger.warn(TAG, "Failed to validate URL for $identifier: ${e.message}")
                             }
 
                             if (finalMediaUrl == null) {
