@@ -14,7 +14,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.noslop.app.data.UserProfile
@@ -399,6 +401,9 @@ fun ManageSourcesDialog(
     onDismiss: () -> Unit,
     onToggleSource: (String, Boolean) -> Unit
 ) {
+    val context = LocalContext.current
+    val apiKeyRepository = remember { com.noslop.app.data.ApiKeyRepository(context) }
+    var showApiWarningFor by remember { mutableStateOf<String?>(null) }
     val allLibrarySources = SourceLibrary.sources
     val activeSourceIds = savedSources.filter { it.isActive }.map { it.id }.toSet()
 
@@ -428,8 +433,15 @@ fun ManageSourcesDialog(
                         }
                         items(sourcesInCategory) { src ->
                             val isActive = activeSourceIds.contains(src.id)
+                            
+                            val isApiSource = src.feedType == "api"
+                            val serviceId = if (isApiSource) src.url.split(":").first() else null
+                            val requiresKey = serviceId != null && com.noslop.app.data.ApiKeyRepository.SERVICES.find { it.id == serviceId }?.requiresUserKey == true
+                            val hasKey = if (requiresKey) apiKeyRepository.hasKey(serviceId!!) else true
+                            val alpha = if (!isActive && requiresKey && !hasKey) 0.5f else 1f
+
                             Card(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().alpha(alpha),
                                 colors = CardDefaults.cardColors(
                                     containerColor = if (isActive) SurfaceDark else PrimaryBlack
                                 ),
@@ -450,7 +462,13 @@ fun ManageSourcesDialog(
                                     )
                                     Switch(
                                         checked = isActive,
-                                        onCheckedChange = { onToggleSource(src.id, true) },
+                                        onCheckedChange = { 
+                                            if (!isActive && requiresKey && !hasKey) {
+                                                showApiWarningFor = src.title
+                                            } else {
+                                                onToggleSource(src.id, true) 
+                                            }
+                                        },
                                         colors = SwitchDefaults.colors(
                                             checkedThumbColor = PrimaryBlack,
                                             checkedTrackColor = AccentGreen,
@@ -471,4 +489,18 @@ fun ManageSourcesDialog(
             }
         }
     )
+
+    if (showApiWarningFor != null) {
+        AlertDialog(
+            onDismissRequest = { showApiWarningFor = null },
+            title = { Text("API Key Required", color = AccentGreen) },
+            text = { Text("To enable ${showApiWarningFor}, you must first configure its API key in Settings -> API Keys.", color = TextLight) },
+            confirmButton = {
+                TextButton(onClick = { showApiWarningFor = null }) {
+                    Text("OK", color = AccentGreen)
+                }
+            },
+            containerColor = SurfaceDark
+        )
+    }
 }

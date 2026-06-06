@@ -117,6 +117,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         feedDao.insertSource(source)
     }
 
+    suspend fun insertFeedItem(item: FeedItem) = withContext(Dispatchers.IO) {
+        feedDao.insertItems(listOf(item))
+    }
+
     suspend fun updateSource(source: FeedSource) = withContext(Dispatchers.IO) {
         feedDao.updateSource(source)
     }
@@ -154,8 +158,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         Logger.info(TAG, "Starting feed synchronization...")
         val activeSources = feedDao.getActiveSourcesList()
-        if (activeSources.isEmpty()) {
-            Logger.warn(TAG, "No active feed sources found to sync")
+        val userCategories = getUserSelectedCategories()
+        
+        if (activeSources.isEmpty() && userCategories.isEmpty()) {
+            Logger.warn(TAG, "No active feed sources or categories found to sync")
             return@withContext
         }
 
@@ -193,7 +199,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         try {
             val apiKeyRepo = ApiKeyRepository(context)
             // Derive active categories from all active sources + user selected categories
-            val userCategories = getUserSelectedCategories()
             val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct()
             
             // All explicitly activated API sources
@@ -246,6 +251,58 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             }
         } catch (e: Exception) {
             Logger.error(TAG, "API pipeline initialization failed", e.message)
+        }
+    }
+
+    // --- Custom Feed Search Pipeline ---
+    suspend fun searchCustomFeed(query: String, filterMode: String?) = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext
+        Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
+        
+        try {
+            val apiKeyRepo = ApiKeyRepository(context)
+            // Use all explicitly activated API sources. If none, use all built-in API sources
+            val activeSources = feedDao.getActiveSourcesList()
+            val explicitApiSourceIds = activeSources.filter { it.feedType == "api" }.map { it.id }
+            val activeApiSourceIds = explicitApiSourceIds.ifEmpty {
+                com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
+            }
+
+            val langPrefList = getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+
+            val searchCategory = when (filterMode) {
+                "Videos" -> "Video Platforms"
+                "Audio" -> "Music"
+                "Images" -> "Photography"
+                "Articles" -> "Technology" // Technology is heavily article-based
+                else -> "Search" // Triggers the general 'else' block
+            }
+
+            val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
+                category = searchCategory,
+                userKeywords = listOf(query),
+                apiKeyRepo = apiKeyRepo,
+                activeApiSourceIds = activeApiSourceIds,
+                language = langPref
+            )
+
+            if (apiItems.isNotEmpty()) {
+                val userNegative = getUserNegativeKeywords().map { it.lowercase() }
+                val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+                
+                val filteredApiItems = apiItems.filter { item ->
+                    val text = "${item.title} ${item.excerpt}".lowercase()
+                    allNegative.none { text.contains(it) }
+                }
+
+                if (filteredApiItems.isNotEmpty()) {
+                    feedDao.insertItems(filteredApiItems)
+                    Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '$query'")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Search pipeline failed for query '$query'", e.message)
         }
     }
 

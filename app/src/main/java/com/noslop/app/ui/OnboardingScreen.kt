@@ -22,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -581,6 +582,10 @@ fun Step5Feeds(
     selectedSources: List<BuiltInSource>,
     onToggleSource: (BuiltInSource) -> Unit
 ) {
+    val context = LocalContext.current
+    val apiKeyRepository = remember { com.noslop.app.data.ApiKeyRepository(context) }
+    var showApiWarningFor by remember { mutableStateOf<String?>(null) }
+    
     var searchQuery by remember { mutableStateOf("") }
     
     val suggestedSources = remember(interests, searchQuery) {
@@ -636,10 +641,24 @@ fun Step5Feeds(
         ) {
             gridItems(suggestedSources) { src: BuiltInSource ->
                 val isSelected = selectedSources.contains(src)
+                
+                val isApiSource = src.feedType == "api"
+                val serviceId = if (isApiSource) src.url.split(":").first() else null
+                val requiresKey = serviceId != null && com.noslop.app.data.ApiKeyRepository.SERVICES.find { it.id == serviceId }?.requiresUserKey == true
+                val hasKey = if (requiresKey) apiKeyRepository.hasKey(serviceId!!) else true
+                val alpha = if (!isSelected && requiresKey && !hasKey) 0.5f else 1f
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onToggleSource(src) },
+                        .alpha(alpha)
+                        .clickable { 
+                            if (!isSelected && requiresKey && !hasKey) {
+                                showApiWarningFor = src.title
+                            } else {
+                                onToggleSource(src) 
+                            }
+                        },
                     colors = CardDefaults.cardColors(
                         containerColor = if (isSelected) SurfaceDark else PrimaryBlack
                     ),
@@ -666,7 +685,13 @@ fun Step5Feeds(
                         }
                         Checkbox(
                             checked = isSelected,
-                            onCheckedChange = { onToggleSource(src) },
+                            onCheckedChange = { 
+                                if (!isSelected && requiresKey && !hasKey) {
+                                    showApiWarningFor = src.title
+                                } else {
+                                    onToggleSource(src) 
+                                }
+                            },
                             colors = CheckboxDefaults.colors(
                                 checkedColor = AccentGreen,
                                 checkmarkColor = PrimaryBlack,
@@ -677,6 +702,20 @@ fun Step5Feeds(
                 }
             }
         }
+    }
+
+    if (showApiWarningFor != null) {
+        AlertDialog(
+            onDismissRequest = { showApiWarningFor = null },
+            title = { Text("API Key Required", color = AccentGreen) },
+            text = { Text("To enable ${showApiWarningFor}, you must first configure its API key in Settings -> API Keys. Please skip it for now and come back later.", color = TextLight) },
+            confirmButton = {
+                TextButton(onClick = { showApiWarningFor = null }) {
+                    Text("OK", color = AccentGreen)
+                }
+            },
+            containerColor = SurfaceDark
+        )
     }
 }
 

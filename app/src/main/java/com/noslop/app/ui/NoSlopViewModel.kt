@@ -82,6 +82,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
 
+    private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>()
+    val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
+
     private var allFeeds = emptyList<FeedItem>()
     private var allMeshes = emptyList<MeshPost>()
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -202,14 +205,65 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun loadMoreFeedItems() {
+    fun searchAndCreateCustomFeed(query: String, filterMode: String?) {
+        if (query.isBlank()) return
+        if (_isRefreshingFeeds.value) return // Prevent concurrent refreshes
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                Logger.info("VM", "Searching for custom feed with query: $query and filter: $filterMode")
+                _unifiedFeed.value = emptyList() // Clear current feed
+                allFeeds = emptyList() // Clear local cache to prevent instantaneous reload of deleted items
+                repository.clearFeedData() // Wipe local database for unsaved items to fetch fresh
+                repository.searchCustomFeed(query, filterMode)
+            } catch (e: Exception) {
+                Logger.error("VM", "Custom search exception: ${e.message}")
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
+    fun loadMoreFeedItems(filterMode: String? = null) {
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
-        val unseenFeeds = allFeeds.filter { it.id !in currentIds }
-        val unseenMeshes = allMeshes.filter { it.id !in currentIds }
+        
+        var unseenFeeds = allFeeds.filter { it.id !in currentIds }
+        var unseenMeshes = allMeshes.filter { it.id !in currentIds }
+        
+        if (filterMode == "History") {
+            unseenFeeds = unseenFeeds.filter { it.isRead }
+            unseenMeshes = emptyList() // Meshes aren't tracked as 'read' in DB yet, or we only show clearnet items
+        } else if (filterMode == "Liked") {
+            unseenFeeds = unseenFeeds.filter { it.isSaved }
+            unseenMeshes = emptyList() 
+        }
 
         if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
 
-        // Separate items by category to ensure a good mix
+        if (filterMode != null && filterMode != "Live Feed" && filterMode != "History" && filterMode != "Liked") {
+            val specificFeeds = unseenFeeds.filter {
+                when (filterMode) {
+                    "Videos" -> it.mediaType == "video"
+                    "Audio" -> it.mediaType == "audio"
+                    "Images" -> it.mediaType == "image"
+                    "Articles" -> it.mediaType.isNullOrEmpty()
+                    else -> false
+                }
+            }
+            val specificMeshes = if (filterMode == "Mesh") unseenMeshes else emptyList()
+            
+            val batch = mutableListOf<UnifiedItem>()
+            val needed = if (_unifiedFeed.value.isEmpty()) 2 else 5
+            
+            batch.addAll(specificFeeds.take(needed).map { UnifiedItem.Feed(it) })
+            batch.addAll(specificMeshes.take(needed - batch.size).map { UnifiedItem.Mesh(it) })
+            
+            batch.shuffle()
+            _unifiedFeed.value = _unifiedFeed.value + batch
+            return
+        }
+
+        // Separate items by category to ensure a good mix for Live Feed
         val videos = mutableListOf<UnifiedItem>()
         val audios = mutableListOf<UnifiedItem>()
         val textImages = mutableListOf<UnifiedItem>()
@@ -232,27 +286,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         textImages.shuffle()
 
         val batch = mutableListOf<UnifiedItem>()
+        val needed = if (_unifiedFeed.value.isEmpty()) 2 else 5
         
-        // If the feed is currently empty, we only load 2 items to start. 
-        // This gives slower API sources (like videos) time to fetch and populate the subsequent items
-        // rather than burying them under 10 fast-loading RSS articles.
-        var needed = if (_unifiedFeed.value.isEmpty()) 2 else 5
+        val v = videos.take(2)
+        val a = audios.take(1)
+        val t = textImages.take(needed - v.size - a.size)
         
-        val v = videos.take(2).also { needed -= it.size }
-        val a = audios.take(1).also { needed -= it.size }
-        val t = textImages.take(needed).also { needed -= it.size }
-        
-        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size)).take(needed)
-
+        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size)).take(needed - v.size - a.size - t.size)
         batch.addAll(v)
         batch.addAll(a)
         batch.addAll(t)
         batch.addAll(extra)
 
-        if (batch.isEmpty()) return
-
         batch.shuffle()
-        
         _unifiedFeed.value = _unifiedFeed.value + batch
     }
 
@@ -534,6 +580,29 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return
         viewModelScope.launch {
             repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle)
+        }
+    }
+
+    fun injectMeshClearnetToFeed(post: MeshPost) {
+        if (post.clearnetUrl == null) return
+        viewModelScope.launch {
+            val feedItem = FeedItem(
+                id = "mesh_${post.id}",
+                sourceId = "mesh_shared",
+                title = post.clearnetTitle ?: "Shared Link",
+                url = post.clearnetUrl,
+                author = post.authorHandle,
+                excerpt = post.content.take(100),
+                publishedAt = System.currentTimeMillis(),
+                isRead = true, // viewed in history
+                isSaved = false
+            )
+            repository.insertFeedItem(feedItem)
+            // Prepend to unifiedFeed so it shows at the top
+            val currentFeed = _unifiedFeed.value.toMutableList()
+            currentFeed.add(0, UnifiedItem.Feed(feedItem))
+            _unifiedFeed.value = currentFeed
+            _scrollToTopEvent.emit(Unit)
         }
     }
 
