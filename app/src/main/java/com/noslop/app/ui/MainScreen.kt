@@ -102,6 +102,20 @@ fun MainScreenContent(viewModel: NoSlopViewModel) {
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("main_scaffold"),
         containerColor = PrimaryBlack,
+        floatingActionButton = {
+            if (selectedTab == 0) {
+                FloatingActionButton(
+                    onClick = { showComposeDialog = true },
+                    containerColor = AccentGreen,
+                    contentColor = PrimaryBlack,
+                    shape = RoundedCornerShape(50),
+                    modifier = Modifier.size(56.dp).offset(y = 58.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
+                }
+            }
+        },
+        floatingActionButtonPosition = FabPosition.Center,
         bottomBar = {
             NavigationBar(
                 containerColor = SurfaceDark,
@@ -184,24 +198,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel) {
                     1 -> DMsTab(viewModel)
                     2 -> HaiNetTab()
                     3 -> SettingsTab(viewModel)
-                }
-            }
-            
-            if (selectedTab == 0) {
-                // FAB overlay — positioned relative to the full screen so it overlaps the nav bar
-                // 75% over nav bar, 25% over the feed: offset up by 14dp from the screen bottom
-                // (nav bar ~80dp tall, FAB 56dp, 75% of 56 = 42dp into the nav, so bottom of FAB at ~38dp from screen bottom)
-                FloatingActionButton(
-                    onClick = { showComposeDialog = true },
-                    containerColor = AccentGreen,
-                    contentColor = PrimaryBlack,
-                    shape = RoundedCornerShape(50),
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .offset(y = (-38).dp)
-                        .size(56.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
                 }
             }
         }
