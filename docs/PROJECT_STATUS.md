@@ -126,6 +126,11 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 
 80. **Decentralized Clearnet Content Sharing**: When sharing clearnet content to the mesh, the original URL and title are now embedded in the `PostPayload` as `clearnet_url` and `clearnet_title` fields, persisted in the `MeshPost` Room entity, and propagated through the gossip protocol. Mesh peers receiving shared clearnet posts see a "View on Clearnet" button that opens the original content via `ACTION_VIEW` intent. Updated `PACKET_SCHEMA.md` to document the new fields.
 
+81. **Settings Menu Consolidation**: Unified the fragmented User Profile, Content Categories, Genres, Languages, and Source Manager screens into a single `ContentPreferencesScreen` (`Profile & Preferences`), removing redundant menus and local search bars for a cleaner user experience.
+82. **Robust Source Toggling**: Rewrote the feed source toggle logic to use SQL `INSERT OR REPLACE` operations. This ensures that manually enabling a new source securely commits it to the database regardless of its prior caching state.
+83. **Aggressive Feed Wiping**: Modified the `refreshFeeds()` pipeline to properly clear the in-memory feed cache (`_unifiedFeed.value = emptyList()`) and rigorously purge all unsaved RSS/API items from the local database (`clearUnsavedItems`) whenever preferences are changed. This guarantees the feed immediately reconstructs itself using exclusively the newest user parameters.
+84. **Smart Source Fallback**: Updated the API fetching logic (`syncApiFeeds()`) to determine API sources strictly on a per-category basis. If a user selects a category but explicitly toggles *no* API sources for it, the engine dynamically falls back to querying all built-in sources for that category. If the user explicitly selects *any* source within the category, the system strictly enforces the manual selection.
+
 ## Pending Implementations & Limitations
 - **Audio Playback Failure**: Audio content pieces currently do not play despite proxy and codec updates; requires investigation into direct file extraction vs. landing pages.
 - **Clearnet Video Compatibility**: Currently, only Archive.org and YouTube (via WebView) playback is verified; other clearnet video sources may still trigger format errors.

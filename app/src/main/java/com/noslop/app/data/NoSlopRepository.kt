@@ -192,21 +192,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // --- Public API pipeline ---
         try {
             val apiKeyRepo = ApiKeyRepository(context)
-            var activeApiSourceIds = activeSources.filter { it.feedType == "api" }.map { it.id }
-            
-            // If no API sources are explicitly saved, derive them from the user's
-            // selected categories so videos/audio are never silently blocked.
-            if (activeApiSourceIds.isEmpty()) {
-                val userCats = getUserSelectedCategories()
-                activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
-                    .filter { it.feedType == "api" && (userCats.contains(it.category) || userCats.isEmpty()) }
-                    .map { it.id }
-                Logger.info(TAG, "No API sources in DB; auto-derived ${activeApiSourceIds.size} from categories: $userCats")
-            }
-
             // Derive active categories from all active sources + user selected categories
             val userCategories = getUserSelectedCategories()
             val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct()
+            
+            // All explicitly activated API sources
+            val explicitApiSources = activeSources.filter { it.feedType == "api" }
+
             // Load user keywords
             for (category in activeCategories) {
                 try {
@@ -219,11 +211,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
                     }
                     
+                    // Determine which API sources to query for this category
+                    var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
+                    if (categoryApiSourceIds.isEmpty() && userCategories.contains(category)) {
+                        // User selected this category, but hasn't explicitly activated any API sources for it.
+                        // Auto-derive all built-in API sources for this category to ensure content isn't missing.
+                        categoryApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
+                            .filter { it.feedType == "api" && it.category == category }
+                            .map { it.id }
+                    }
+
+                    if (categoryApiSourceIds.isEmpty()) continue
+
                     val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                         category = category,
                         userKeywords = keywords,
                         apiKeyRepo = apiKeyRepo,
-                        activeApiSourceIds = activeApiSourceIds,
+                        activeApiSourceIds = categoryApiSourceIds,
                         language = langPref
                     )
                     if (apiItems.isNotEmpty()) {
@@ -232,19 +236,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             allNegative.none { text.contains(it) }
                         }
                         if (filteredApiItems.isNotEmpty()) {
-                            val apiSources = filteredApiItems.map { it.sourceId }.distinct().map { sId ->
-                                com.noslop.app.data.FeedSource(
-                                    id = sId,
-                                    url = "api://$sId",
-                                    title = "API: $sId",
-                                    feedType = "api",
-                                    category = category,
-                                    isActive = true
-                                )
-                            }
-                            for (source in apiSources) {
-                                feedDao.insertSource(source)
-                            }
                             feedDao.insertItems(filteredApiItems)
                             Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
                         }

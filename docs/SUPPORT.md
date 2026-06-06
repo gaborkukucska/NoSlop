@@ -34,11 +34,13 @@ NoSlop provides a built-in backup system accessible from **Settings → Data & B
 To back up your Node profile via ADB:
 `adb backup -f noslop_backup.ab com.noslop.app`
 
-## User Profile & Content Preferences
-All identity and preference settings are managed through the unified **Settings** tab:
-- **User Profile**: Edit your display name, bio, and avatar from **Settings → User Profile**.
-- **Content Preferences**: Adjust your interest categories, music genres, and video genres from **Settings → Content Preferences**. Changes immediately trigger a fresh content sync.
-- **API Keys**: Configure optional API keys for enhanced content sources from **Settings → API Keys**.
+## Profile & Preferences
+All identity and content configuration is managed through a single unified interface accessible via **Settings → Profile & Preferences**:
+- **Identity**: Edit your display name, bio, and profile avatar.
+- **Content Interests**: Adjust your interest categories, music genres, video genres, and content language.
+- **Source Management**: Manually toggle individual RSS and API sources on or off. The system uses a smart fallback—if no sources are explicitly checked for an active category, it derives from the built-in library automatically.
+- **Negative Keywords**: Add custom keywords to filter out unwanted topics.
+- **API Keys**: Configure optional API keys for enhanced content sources via the separate **Settings → API Keys** menu.
 
 ## Factory Reset
 NoSlop includes a "nuclear option" accessible from **Settings → Data & Backup → Factory Reset**. This permanently:

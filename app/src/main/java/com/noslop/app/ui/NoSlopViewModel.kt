@@ -273,7 +273,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val updated = source.copy(isActive = !source.isActive)
             repository.insertSource(updated)
-            refreshFeeds()
         }
     }
 
