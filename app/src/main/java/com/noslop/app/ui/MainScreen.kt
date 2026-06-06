@@ -351,14 +351,22 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    // Prefetch the next slide's video while user is idle on the current one
-                    LaunchedEffect(pagerState.settledPage) {
-                        val nextIndex = pagerState.settledPage + 1
-                        if (nextIndex < unifiedItems.size) {
-                            val nextItem = unifiedItems[nextIndex]
-                            val nextVideoUrl = getVideoUrlFromItem(nextItem, context)
-                            if (nextVideoUrl != null) {
-                                PreloadManager.warmUp(context, nextVideoUrl)
+                    // Prefetch the next slide's media while user is idle on the current one
+                    LaunchedEffect(pagerState.settledPage, filterMode) {
+                        val limit = if (filterMode == "All") 10 else 1
+                        val lookAheadLimit = minOf(pagerState.settledPage + 1 + limit, unifiedItems.size)
+                        
+                        for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
+                            val nextItem = unifiedItems[i]
+                            val prefetchUrl = getPrefetchUrlFromItem(nextItem, context)
+                            
+                            if (prefetchUrl != null) {
+                                // Only prefetch if we're in a relevant view
+                                val shouldPrefetch = filterMode == "All" || filterMode == "Videos" || filterMode == "Audio"
+                                if (shouldPrefetch) {
+                                    PreloadManager.warmUp(context, prefetchUrl)
+                                    break
+                                }
                             }
                         }
                     }
@@ -672,18 +680,24 @@ fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String
     return mediaUrl
 }
 
-fun getVideoUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
-    val (mediaType, mediaUrl) = when (item) {
-        is UnifiedItem.Feed -> Pair(item.item.mediaType, item.item.mediaUrl)
-        is UnifiedItem.Mesh -> Pair(item.post.mediaType, item.post.mediaUrl)
-    }
-    if (mediaType == "video" && mediaUrl != null) {
+fun getPrefetchUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
+    if (item !is UnifiedItem.Feed) return null
+    val mediaType = item.item.mediaType
+    val mediaUrl = item.item.mediaUrl
+
+    if ((mediaType == "video" || mediaType == "audio") && mediaUrl != null) {
         val resolved = resolveMediaUrl(mediaUrl, context)
         if (resolved != null) {
             val isDirectDownload = resolved.endsWith(".mp4", ignoreCase = true) || 
                                    resolved.endsWith(".mkv", ignoreCase = true) ||
                                    resolved.endsWith(".webm", ignoreCase = true) || 
                                    resolved.endsWith(".m3u8", ignoreCase = true) ||
+                                   resolved.endsWith(".mp3", ignoreCase = true) ||
+                                   resolved.endsWith(".wav", ignoreCase = true) ||
+                                   resolved.endsWith(".m4a", ignoreCase = true) ||
+                                   resolved.endsWith(".aac", ignoreCase = true) ||
+                                   resolved.endsWith(".ogg", ignoreCase = true) ||
+                                   resolved.endsWith(".flac", ignoreCase = true) ||
                                    resolved.contains("/download/") || 
                                    resolved.contains("127.0.0.1")
             if (isDirectDownload) {
@@ -949,24 +963,11 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
     DisposableEffect(url, isVisible) {
         if (isVisible) {
             hasError = false
-            val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
             
-            val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
-                .setUsage(androidx.media3.common.C.USAGE_MEDIA)
-                .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
-                .build()
-                
-            val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
-                .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
-                .setAudioAttributes(audioAttributes, true)
-                .build().apply {
-                    val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
-                    setMediaItem(mediaItem)
-                    volume = 1f
-                    prepare()
+            val preloaded = PreloadManager.claim(url)
+            val player = if (preloaded != null) {
+                preloaded.apply {
                     playWhenReady = true
-                    repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
-                    
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             hasError = true
@@ -990,7 +991,55 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                             }
                         }
                     })
+                    // Ensure duration is caught if already ready
+                    if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                        duration = this.duration
+                    }
                 }
+            } else {
+                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
+                
+                val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+                    .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                    .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .build()
+                    
+                androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                    .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+                    .setAudioAttributes(audioAttributes, true)
+                    .build().apply {
+                        val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
+                        setMediaItem(mediaItem)
+                        volume = 1f
+                        prepare()
+                        playWhenReady = true
+                        repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+                        
+                        addListener(object : androidx.media3.common.Player.Listener {
+                            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                hasError = true
+                                Logger.error("AUDIO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                            }
+                            override fun onIsPlayingChanged(playing: Boolean) {
+                                Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
+                                isPlaying = playing
+                            }
+                            override fun onPlaybackStateChanged(state: Int) {
+                                val stateStr = when(state) {
+                                    androidx.media3.common.Player.STATE_READY -> "READY"
+                                    androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+                                    androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+                                    androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+                                    else -> "UNKNOWN"
+                                }
+                                Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                                if (state == androidx.media3.common.Player.STATE_READY) {
+                                    duration = this@apply.duration
+                                }
+                            }
+                        })
+                    }
+            }
                 
             exoPlayer = player
             

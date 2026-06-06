@@ -29,7 +29,7 @@ A vertical feed purpose-built for signal-to-noise ratio.
 
 - **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
 - **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
-- **Video playback** — seamless HLS/m3u8 and MP4 streaming from clearnet sources (YouTube and others) without signing in or being tracked.
+- **Media playback** — seamless audio and video streaming (HLS/m3u8, MP4, MP3, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
 - **Interest-based curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) during onboarding. NoSlop pre-loads curated RSS/Atom feeds from sources like Hacker News, BBC World, NASA, EFF Deeplinks, and Krebs on Security — no account required.
 
 ### Serverless Social Mesh

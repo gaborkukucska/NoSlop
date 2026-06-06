@@ -27,7 +27,7 @@ object PreloadManager {
     fun warmUp(context: Context, url: String) {
         if (preloadedPlayers.containsKey(url)) return
         
-        Logger.info("PRELOAD", "Warming up video: $url")
+        Logger.info("PRELOAD", "Warming up media: $url")
         
         val dataSourceFactory = OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
@@ -42,13 +42,25 @@ object PreloadManager {
             )
             .build()
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
+
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, true)
             .build()
             
         val mimeType = when {
-            url.endsWith(".m3u8") -> MimeTypes.APPLICATION_M3U8
+            url.endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+            url.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
+            url.endsWith(".wav", ignoreCase = true) -> MimeTypes.AUDIO_WAV
+            url.endsWith(".m4a", ignoreCase = true) -> MimeTypes.AUDIO_MP4
+            url.endsWith(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
+            url.endsWith(".ogg", ignoreCase = true) -> MimeTypes.AUDIO_OGG
+            url.endsWith(".flac", ignoreCase = true) -> MimeTypes.AUDIO_FLAC
             else -> MimeTypes.VIDEO_MP4
         }
         val mediaItem = MediaItem.Builder().setUri(url).setMimeType(mimeType).build()
