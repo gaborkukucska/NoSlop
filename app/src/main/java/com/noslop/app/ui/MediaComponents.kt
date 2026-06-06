@@ -39,10 +39,12 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.noslop.app.ui.theme.AccentGreen
+import com.noslop.app.ui.theme.PrimaryBlack
 import com.noslop.app.ui.theme.SurfaceDark
 import com.noslop.app.ui.theme.TextLight
 import com.noslop.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloat
 
 @Composable
 fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null) {
@@ -390,5 +392,40 @@ private fun InteractionButton(
             color = TextLight,
             modifier = Modifier.padding(top = 4.dp)
         )
+    }
+}
+
+@Composable
+fun LoadingShimmer(modifier: Modifier = Modifier) {
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.8f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(1000, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(PrimaryBlack),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(
+                color = AccentGreen.copy(alpha = alpha),
+                modifier = Modifier.size(48.dp),
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Loading...",
+                color = AccentGreen.copy(alpha = alpha),
+                style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
+            )
+        }
     }
 }

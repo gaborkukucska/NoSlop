@@ -247,6 +247,7 @@ fun UnifiedFeedTab(
     onComposeDismiss: () -> Unit,
     onTabChange: (Int) -> Unit
 ) {
+    val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
 
@@ -349,6 +350,19 @@ fun UnifiedFeedTab(
                             viewModel.loadMoreFeedItems()
                         }
                     }
+
+                    // Prefetch the next slide's video while user is idle on the current one
+                    LaunchedEffect(pagerState.settledPage) {
+                        val nextIndex = pagerState.settledPage + 1
+                        if (nextIndex < unifiedItems.size) {
+                            val nextItem = unifiedItems[nextIndex]
+                            val nextVideoUrl = getVideoUrlFromItem(nextItem, context)
+                            if (nextVideoUrl != null) {
+                                PreloadManager.warmUp(context, nextVideoUrl)
+                            }
+                        }
+                    }
+
                     val item = unifiedItems[index]
                     val isVisible = pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index
                     Box(
@@ -357,7 +371,7 @@ fun UnifiedFeedTab(
                             .background(PrimaryBlack),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("Loading...", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                        LoadingShimmer()
                         when (item) {
                             is UnifiedItem.Feed -> FullScreenFeedCard(
                                 item = item.item,
@@ -658,6 +672,28 @@ fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String
     return mediaUrl
 }
 
+fun getVideoUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
+    val (mediaType, mediaUrl) = when (item) {
+        is UnifiedItem.Feed -> Pair(item.item.mediaType, item.item.mediaUrl)
+        is UnifiedItem.Mesh -> Pair(item.post.mediaType, item.post.mediaUrl)
+    }
+    if (mediaType == "video" && mediaUrl != null) {
+        val resolved = resolveMediaUrl(mediaUrl, context)
+        if (resolved != null) {
+            val isDirectDownload = resolved.endsWith(".mp4", ignoreCase = true) || 
+                                   resolved.endsWith(".mkv", ignoreCase = true) ||
+                                   resolved.endsWith(".webm", ignoreCase = true) || 
+                                   resolved.endsWith(".m3u8", ignoreCase = true) ||
+                                   resolved.contains("/download/") || 
+                                   resolved.contains("127.0.0.1")
+            if (isDirectDownload) {
+                return resolved
+            }
+        }
+    }
+    return null
+}
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = null, thumbnailB64: String? = null) {
@@ -777,36 +813,60 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
         var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
         var hasError by remember { mutableStateOf(false) }
         var errorMessage by remember { mutableStateOf("") }
+        var isBuffering by remember { mutableStateOf(true) }
 
         DisposableEffect(url, isVisible) {
             if (isVisible) {
                 Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
                 hasError = false
+                isBuffering = true
                 
-                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
-                val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
-
-                val player = androidx.media3.exoplayer.ExoPlayer.Builder(context)
-                    .setMediaSourceFactory(mediaSource)
-                    .build().apply {
-                        val mimeType = when {
-                            url.endsWith(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
-                            else -> androidx.media3.common.MimeTypes.VIDEO_MP4
-                        }
-                        val mediaItem = androidx.media3.common.MediaItem.Builder().setUri(url).setMimeType(mimeType).build()
-                        setMediaItem(mediaItem)
-                        prepare()
+                val preloaded = PreloadManager.claim(url)
+                val player = if (preloaded != null) {
+                    preloaded.apply { 
                         playWhenReady = true
-                        repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
-                        
                         addListener(object : androidx.media3.common.Player.Listener {
+                            override fun onPlaybackStateChanged(playbackState: Int) {
+                                isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                            }
                             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                                 hasError = true
                                 errorMessage = error.message ?: "Playback failed"
                                 Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
                             }
                         })
+                        // Initial state check
+                        isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
                     }
+                } else {
+                    val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
+                    val mediaSource = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
+
+                    androidx.media3.exoplayer.ExoPlayer.Builder(context)
+                        .setMediaSourceFactory(mediaSource)
+                        .build().apply {
+                            val mimeType = when {
+                                url.endsWith(".m3u8") -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                                else -> androidx.media3.common.MimeTypes.VIDEO_MP4
+                            }
+                            val mediaItem = androidx.media3.common.MediaItem.Builder().setUri(url).setMimeType(mimeType).build()
+                            setMediaItem(mediaItem)
+                            prepare()
+                            playWhenReady = true
+                            repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
+                            
+                            addListener(object : androidx.media3.common.Player.Listener {
+                                override fun onPlaybackStateChanged(playbackState: Int) {
+                                    isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                                }
+                                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                                    hasError = true
+                                    errorMessage = error.message ?: "Playback failed"
+                                    Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                                }
+                            })
+                        }
+                }
                 exoPlayer = player
 
                 onDispose {
@@ -819,6 +879,9 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
         }
 
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (isBuffering && thumbnailUrl == null && thumbnailB64 == null && isVisible && !hasError) {
+                LoadingShimmer()
+            }
             if (thumbnailUrl != null || thumbnailB64 != null) {
                 coil.compose.AsyncImage(
                     model = thumbnailUrl ?: thumbnailB64?.let {
@@ -830,7 +893,7 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                     contentDescription = "Video Thumbnail",
                     modifier = Modifier.fillMaxSize(),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    alpha = if (isVisible && !hasError) 0.5f else 1.0f
+                    alpha = if (isVisible && !hasError && !isBuffering) 0.5f else 1.0f
                 )
             }
             if (!hasError) {

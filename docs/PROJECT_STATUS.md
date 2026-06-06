@@ -38,7 +38,6 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 16. **QR Code Pairing (Scan & Share)**: Built `QRScanScreen` using mobile CameraX + Google ML Kit for frictionless live QR companion pairing, paired with `QRShareSheet` to display/share generated thematic contact profiles.
 17. **Worker Repository Leak Fix**: Separated mesh socket initialization (`startListening`) into `NoSlopApp.onCreate()` singleton from `NoSlopRepository.init`, preventing dangerous port rebinding exceptions when `FeedSyncWorker` spins up in the background.
 18. **Embedded Tor daemon (tor-android) — no Orbot dependency**: Replaced external dependency with a native daemon binding.
-
 19. **Tor hidden service auto-registration**: Onion address is now automatically requested via `jtorctl` (ADD_ONION) on Tor daemon start, providing a listening endpoint for peer connections.
 20. **Debug screen for two-device test visibility**: Created a unified Debug/Test screen to monitor Tor routing, listener state, active peer lists, and recent diagnostic logs cleanly.
 21. **DebugScreen type bugs fixed**: Fixed state flows and collection mappings in `DebugScreen` to unblock the final two-device tests.
@@ -48,10 +47,14 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 25. **BIP39 Word Cloud Password**: Implemented `MnemonicGenerator.kt` for 12-word mnemonic generation and seed derivation, replacing raw key display with a human-readable recovery phrase.
 26. **Secure Data Portability**: Developed `BackupManager.kt` providing AES-256 encrypted export/import of SQLite databases and secure preferences, keyed by the mnemonic seed.
 27. **Session Locking**: Added `logout()` and `unlock(mnemonic)` capabilities to `IdentityRepository.kt`, enabling secure session management without clearing hardware keys.
-28. **Real Media Capture Engine**: Integrated CameraX and MediaRecorder in `MediaCaptureManager.kt` for native photo, video, and audio capture.
-29. **Advanced Onboarding Flow**: Refactored `OnboardingScreen.kt` into a 6-step journey including interest-based filtering and background content pre-loading (50+ items).
-30. **Snapping Full-Screen Feed**: Refactored `MainScreen.kt` to use `VerticalPager` (TikTok-style) for immersive, focused content viewing.
-31. **Sophisticated Media Rendering**:
+28. **TikTok-style Full Screen Vertical Feed**: Finalized `UnifiedFeedTab` implementation natively using Jetpack Compose `VerticalPager`.
+29. **P2P Media Exchange Architecture**: Implemented robust distributed content fetching with `MEDIA_REQUEST` routing logic over the SOCKS5 proxy layer.
+30. **Hardware Codec Exhaustion Guard**: Mitigated fatal Android `MediaCodec` allocation failures by properly scoping ExoPlayer to Compose `DisposableEffect` with proactive `.release()` calls tied to pager offscreen recycling.
+31. **Media Pre-fetching & Loading Polish**: Added an ExoPlayer `PreloadManager` pool to asynchronously prepare the next slide's video during idle feed state, dramatically reducing playback latency. Replaced basic feed placeholders with a pulsing `LoadingShimmer` composable for a premium aesthetic.
+32. **Real Media Capture Engine**: Integrated CameraX and MediaRecorder in `MediaCaptureManager.kt` for native photo, video, and audio capture.
+33. **Advanced Onboarding Flow**: Refactored `OnboardingScreen.kt` into a 6-step journey including interest-based filtering and background content pre-loading (50+ items).
+34. **Snapping Full-Screen Feed**: Refactored `MainScreen.kt` to use `VerticalPager` (TikTok-style) for immersive, focused content viewing.
+35. **Sophisticated Media Rendering**:
     - **Blurred Backgrounds**: `BlurredImageBackground` Composable for uncropped images with aesthetic fill.
     - **Segmented Articles**: `SegmentedArticleReader` for horizontal pagination of long text content within the vertical feed.
 32. **Interaction Overlays**: Integrated floating Reaction (Like), Share, and Comment buttons with context-aware logic for mesh vs. clearnet content.
