@@ -32,6 +32,10 @@ All packets broadcast or sent over DM are wrapped in this JSON container.
 | `privacy` | String | Yes (default "public") | "public", "friends", or "private" |
 | `hashtags` | Array<String> | No | List of hashtags |
 | `signature` | String | No | Signature of the post payload |
+| `media_id` | String | No | ID of associated media |
+| `media_metadata` | Object | No | Media metadata object |
+| `clearnet_url` | String | No | Original URL if sharing a clearnet article |
+| `clearnet_title` | String | No | Original title if sharing a clearnet article |
 
 ---
 

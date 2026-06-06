@@ -16,7 +16,7 @@ import androidx.room.RoomDatabase
         AppSetting::class,
         MeshComment::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {

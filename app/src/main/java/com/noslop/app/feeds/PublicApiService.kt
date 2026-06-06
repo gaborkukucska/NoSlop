@@ -21,7 +21,8 @@ object PublicApiService {
     suspend fun fetchItemsForCategory(
         category: String,
         userKeywords: List<String>,
-        apiKeyRepo: ApiKeyRepository
+        apiKeyRepo: ApiKeyRepository,
+        language: String = "en"
     ): List<FeedItem> {
         val items = mutableListOf<FeedItem>()
         val query = userKeywords.firstOrNull() ?: category
@@ -29,25 +30,25 @@ object PublicApiService {
         try {
             when (category) {
                 "Technology", "Open Source", "Self-Hosting" -> {
-                    items += safeCall { InvidiousApiClient.searchVideos(query) }
-                    items += safeCall { NewsApiClient.searchArticles(query, "technology", apiKeyRepo) }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query $language") }
+                    items += safeCall { NewsApiClient.searchArticles(query, "technology", apiKeyRepo, language = language) }
                     items += safeCall { GuardianApiClient.searchArticles(query, "technology", apiKeyRepo) }
                     items += safeCall { RedditApiClient.fetchSubreddit("technology", "hot") }
                 }
                 "Privacy & Security" -> {
                     items += safeCall { RedditApiClient.fetchSubreddit("privacy", "hot") }
                     items += safeCall { RedditApiClient.fetchSubreddit("netsec", "hot") }
-                    items += safeCall { NewsApiClient.searchArticles("cybersecurity privacy", null, apiKeyRepo) }
+                    items += safeCall { NewsApiClient.searchArticles("cybersecurity privacy", null, apiKeyRepo, language = language) }
                 }
                 "Science" -> {
                     items += safeCall { NasaApiClient.fetchAPOD(apiKeyRepo) }
                     items += safeCall { NasaApiClient.searchImageLibrary(query) }
-                    items += safeCall { InvidiousApiClient.searchVideos("$query science") }
-                    items += safeCall { NewsApiClient.getTopHeadlines("science", apiKeyRepo) }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query science $language") }
+                    items += safeCall { NewsApiClient.getTopHeadlines("science", apiKeyRepo, language = language) }
                     items += safeCall { GuardianApiClient.searchSection("science", apiKeyRepo) }
                 }
                 "World News" -> {
-                    items += safeCall { NewsApiClient.getTopHeadlines("general", apiKeyRepo) }
+                    items += safeCall { NewsApiClient.getTopHeadlines("general", apiKeyRepo, language = language) }
                     items += safeCall { GuardianApiClient.searchSection("world", apiKeyRepo) }
                     items += safeCall { RedditApiClient.fetchSubreddit("worldnews", "hot") }
                 }
@@ -58,8 +59,8 @@ object PublicApiService {
                 }
                 "Music" -> {
                     items += safeCall { JamendoApiClient.searchTracks(query) }
-                    items += safeCall { PodcastIndexClient.searchEpisodes(query, apiKeyRepo) }
-                    items += safeCall { InvidiousApiClient.searchVideos("$query music") }
+                    items += safeCall { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query music $language") }
                     items += safeCall { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                     items += safeCall { InternetArchiveClient.searchAudio(query) }
                 }
@@ -69,24 +70,24 @@ object PublicApiService {
                     items += safeCall { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                 }
                 "Health" -> {
-                    items += safeCall { NewsApiClient.getTopHeadlines("health", apiKeyRepo) }
+                    items += safeCall { NewsApiClient.getTopHeadlines("health", apiKeyRepo, language = language) }
                     items += safeCall { GuardianApiClient.searchSection("society", apiKeyRepo) }
-                    items += safeCall { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo) }
+                    items += safeCall { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo, language = language) }
                 }
                 "Gaming" -> {
-                    items += safeCall { InvidiousApiClient.searchVideos("$query gaming") }
-                    items += safeCall { NewsApiClient.searchArticles("gaming", null, apiKeyRepo) }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query gaming $language") }
+                    items += safeCall { NewsApiClient.searchArticles("gaming", null, apiKeyRepo, language = language) }
                     items += safeCall { RedditApiClient.fetchSubreddit("gaming", "hot") }
                 }
                 "Lifestyle" -> {
-                    items += safeCall { NewsApiClient.searchArticles(query, null, apiKeyRepo) }
+                    items += safeCall { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     items += safeCall { PexelsApiClient.getCuratedPhotos(apiKeyRepo) }
                     items += safeCall { RedditApiClient.fetchSubreddit("LifeProTips", "hot") }
                 }
                 "Automotive" -> {
-                    items += safeCall { InvidiousApiClient.searchVideos("$query cars automotive") }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query cars automotive $language") }
                     items += safeCall { RedditApiClient.fetchSubreddit("cars", "hot") }
-                    items += safeCall { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo) }
+                    items += safeCall { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo, language = language) }
                 }
                 "Reddit" -> {
                     items += safeCall { RedditApiClient.fetchSubreddit("popular", "hot") }
@@ -95,8 +96,8 @@ object PublicApiService {
                     items += safeCall { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
                 else -> {
-                    items += safeCall { NewsApiClient.searchArticles(query, null, apiKeyRepo) }
-                    items += safeCall { InvidiousApiClient.searchVideos(query) }
+                    items += safeCall { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    items += safeCall { InvidiousApiClient.searchVideos("$query $language") }
                     items += safeCall { RedditApiClient.searchReddit(query) }
                 }
             }

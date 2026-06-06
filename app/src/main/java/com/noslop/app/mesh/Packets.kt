@@ -23,7 +23,9 @@ data class PostPayload(
     val hashtags: List<String>? = null,
     val signature: String? = null,
     @SerializedName("media_id") val mediaId: String? = null,
-    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    @SerializedName("clearnet_url") val clearnetUrl: String? = null,
+    @SerializedName("clearnet_title") val clearnetTitle: String? = null
 )
 
 data class CommentPayload(

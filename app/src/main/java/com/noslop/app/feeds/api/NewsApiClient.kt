@@ -15,16 +15,16 @@ object NewsApiClient {
     private val gson = Gson()
     private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
 
-    suspend fun searchArticles(query: String, category: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-search"): List<FeedItem> {
+    suspend fun searchArticles(query: String, category: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-search", language: String = "en"): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("newsapi")
         if (apiKey.isNullOrBlank()) return emptyList()
-        return fetch("https://newsapi.org/v2/everything?q=${java.net.URLEncoder.encode(query, "UTF-8")}&sortBy=relevancy&pageSize=20", apiKey, sourceId)
+        return fetch("https://newsapi.org/v2/everything?q=${java.net.URLEncoder.encode(query, "UTF-8")}&sortBy=relevancy&pageSize=20&language=$language", apiKey, sourceId)
     }
 
-    suspend fun getTopHeadlines(category: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-top"): List<FeedItem> {
+    suspend fun getTopHeadlines(category: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-top", language: String = "en"): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("newsapi")
         if (apiKey.isNullOrBlank()) return emptyList()
-        return fetch("https://newsapi.org/v2/top-headlines?category=$category&pageSize=20", apiKey, sourceId)
+        return fetch("https://newsapi.org/v2/top-headlines?category=$category&pageSize=20&language=$language", apiKey, sourceId)
     }
 
     private fun fetch(url: String, apiKey: String, sourceId: String): List<FeedItem> {

@@ -628,11 +628,15 @@ fun UnifiedFeedTab(
                 Button(
                     onClick = {
                         val shareText = if (url.isNotEmpty()) {
-                            "\uD83D\uDD17 $title\n$url\n— via NoSlop"
+                            "\uD83D\uDCE2 Shared Clearnet Post:\n$title\n— via NoSlop"
                         } else {
                             "\uD83D\uDCE2 Shared Mesh Post:\n$title\n— via NoSlop"
                         }
-                        viewModel.composeAndBroadcastPost(shareText)
+                        viewModel.composeAndBroadcastPost(
+                            content = shareText,
+                            clearnetUrl = if (url.isNotEmpty()) url else null,
+                            clearnetTitle = if (url.isNotEmpty()) title else null
+                        )
                         showShareDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
@@ -1417,6 +1421,23 @@ fun FullScreenMeshCard(
                         fontFamily = FontFamily.Monospace,
                         color = TextMuted
                     )
+                }
+
+                if (post.clearnetUrl != null) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(post.clearnetUrl))
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen.copy(alpha = 0.2f), contentColor = AccentGreen),
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("View on Clearnet", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
                 }
             }
         }

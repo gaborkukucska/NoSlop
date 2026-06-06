@@ -78,7 +78,9 @@ data class MeshPost(
     val mediaType: String? = null,
     val gossipCount: Int = 1,
     val privacy: String = "public", // "public", "friends"
-    val thumbnailB64: String? = null
+    val thumbnailB64: String? = null,
+    val clearnetUrl: String? = null,
+    val clearnetTitle: String? = null
 )
 
 @Entity(

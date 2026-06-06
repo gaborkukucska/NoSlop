@@ -125,6 +125,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedVideoGenres = MutableStateFlow<List<String>>(emptyList())
     val selectedVideoGenres: StateFlow<List<String>> = _selectedVideoGenres.asStateFlow()
 
+    private val _negativeKeywords = MutableStateFlow("")
+    val negativeKeywords: StateFlow<String> = _negativeKeywords.asStateFlow()
+
+    private val _languagePreference = MutableStateFlow("en")
+    val languagePreference: StateFlow<String> = _languagePreference.asStateFlow()
+
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
@@ -157,6 +163,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _selectedInterests.value = repository.getUserSelectedCategories()
             _selectedMusicGenres.value = repository.getSelectedMusicGenres()
             _selectedVideoGenres.value = repository.getSelectedVideoGenres()
+            _negativeKeywords.value = repository.getUserNegativeKeywords().joinToString(", ")
+            _languagePreference.value = repository.getLanguagePreference()
         }
 
         // Automatically refresh Tor status when daemon state transitions to READY or PROXY_READY
@@ -201,19 +209,30 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         val batch = mutableListOf<UnifiedItem>()
         
-        // Take 2 from each source/type group
+        // Group by source and type
         val groupedFeeds = unseenFeeds.groupBy { "${it.sourceId}_${it.mediaType}" }
-        for ((_, items) in groupedFeeds) {
-            items.take(2).forEach { batch.add(UnifiedItem.Feed(it)) }
+        
+        for ((key, items) in groupedFeeds) {
+            val isVideoOrAudio = key.contains("video") || key.contains("audio")
+            val limit = if (isVideoOrAudio) 3 else 1
+            items.take(limit).forEach { batch.add(UnifiedItem.Feed(it)) }
         }
         
-        // Take up to 5 mesh posts
-        unseenMeshes.take(5).forEach { batch.add(UnifiedItem.Mesh(it)) }
+        // Take up to 3 mesh posts to mix in
+        unseenMeshes.take(3).forEach { batch.add(UnifiedItem.Mesh(it)) }
         
         // Only shuffle the new batch to preserve the organic mix without reordering seen items
         batch.shuffle()
         
-        _unifiedFeed.value = _unifiedFeed.value + batch
+        // If this is the initial load (feed is empty), restrict the batch to max 5 items
+        // so that late-arriving video sources can quickly populate the upcoming slides.
+        val finalBatch = if (_unifiedFeed.value.isEmpty() && batch.size > 5) {
+            batch.take(5)
+        } else {
+            batch
+        }
+        
+        _unifiedFeed.value = _unifiedFeed.value + finalBatch
     }
 
     // --- State ---
@@ -299,16 +318,23 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun updateContentPreferences(
         selectedCategories: List<String>, 
         selectedMusicGenres: List<String>,
-        selectedVideoGenres: List<String>
+        selectedVideoGenres: List<String>,
+        negativeKeywords: String? = null,
+        languagePreference: String? = null
     ) {
         viewModelScope.launch {
             repository.saveSelectedCategories(selectedCategories)
             repository.saveSelectedMusicGenres(selectedMusicGenres)
             repository.saveSelectedVideoGenres(selectedVideoGenres)
             
+            if (negativeKeywords != null) repository.saveUserNegativeKeywords(negativeKeywords)
+            if (languagePreference != null) repository.saveLanguagePreference(languagePreference)
+
             _selectedInterests.value = selectedCategories
             _selectedMusicGenres.value = selectedMusicGenres
             _selectedVideoGenres.value = selectedVideoGenres
+            if (negativeKeywords != null) _negativeKeywords.value = negativeKeywords
+            if (languagePreference != null) _languagePreference.value = languagePreference
 
             // Clear old API data to ensure new preferences are reflected immediately
             repository.clearApiData()
@@ -368,6 +394,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isRefreshingFeeds.value = true
             try {
+                _unifiedFeed.value = emptyList() // Clear current feed
+                repository.clearApiData() // Wipe local database for API items to fetch fresh
                 repository.refreshFeeds()
             } catch (e: Exception) {
                 Logger.error("VM", "Manual refresh exception: ${e.message}")
@@ -454,10 +482,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public") {
-        if (content.isBlank() && mediaMetadata == null) return
+    fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null) {
+        if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return
         viewModelScope.launch {
-            repository.composeAndBroadcastPost(content, mediaMetadata, privacy)
+            repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle)
         }
     }
 

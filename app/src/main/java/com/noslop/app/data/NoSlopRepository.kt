@@ -17,6 +17,8 @@ import java.util.UUID
 
 class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
+    private val OFFICIAL_NEGATIVE_KEYWORDS = listOf("nude", "porn", "murder", "rape", "gore", "nsfw", "sex", "kill")
+
     private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
@@ -154,6 +156,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             return@withContext
         }
 
+        // Load negative keywords and language
+        val userNegative = getUserNegativeKeywords().map { it.lowercase() }
+        val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+        val langPrefList = getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+
         // --- RSS/Atom pipeline (skip API-type sources) ---
         for (source in activeSources) {
             if (source.feedType == "api") continue // Handled by API pipeline below
@@ -162,10 +170,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
                 val items = FeedParser.fetchAndParse(source.url, source.id)
                 if (items.isNotEmpty()) {
-                    feedDao.insertItems(items)
-                    val unread = items.count { !it.isRead }
+                    val filteredItems = items.filter { item ->
+                        val text = "${item.title} ${item.excerpt}".lowercase()
+                        allNegative.none { text.contains(it) }
+                    }
+                    if (filteredItems.isNotEmpty()) {
+                        feedDao.insertItems(filteredItems)
+                    }
+                    val unread = filteredItems.count { !it.isRead }
                     feedDao.updateSource(source.copy(lastFetchedAt = System.currentTimeMillis(), unreadCount = unread))
-                    Logger.info(TAG, "Fetched ${items.size} items for ${source.title}")
+                    Logger.info(TAG, "Fetched ${filteredItems.size} items for ${source.title}")
                 }
             } catch (e: Exception) {
                 Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
@@ -193,24 +207,31 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                         category = category,
                         userKeywords = keywords,
-                        apiKeyRepo = apiKeyRepo
+                        apiKeyRepo = apiKeyRepo,
+                        language = langPref
                     )
                     if (apiItems.isNotEmpty()) {
-                        val apiSources = apiItems.map { it.sourceId }.distinct().map { sId ->
-                            com.noslop.app.data.FeedSource(
-                                id = sId,
-                                url = "api://$sId",
-                                title = "API: $sId",
-                                feedType = "api",
-                                category = category,
-                                isActive = true
-                            )
+                        val filteredApiItems = apiItems.filter { item ->
+                            val text = "${item.title} ${item.excerpt}".lowercase()
+                            allNegative.none { text.contains(it) }
                         }
-                        for (source in apiSources) {
-                            feedDao.insertSource(source)
+                        if (filteredApiItems.isNotEmpty()) {
+                            val apiSources = filteredApiItems.map { it.sourceId }.distinct().map { sId ->
+                                com.noslop.app.data.FeedSource(
+                                    id = sId,
+                                    url = "api://$sId",
+                                    title = "API: $sId",
+                                    feedType = "api",
+                                    category = category,
+                                    isActive = true
+                                )
+                            }
+                            for (source in apiSources) {
+                                feedDao.insertSource(source)
+                            }
+                            feedDao.insertItems(filteredApiItems)
+                            Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
                         }
-                        feedDao.insertItems(apiItems)
-                        Logger.info(TAG, "API pipeline: fetched ${apiItems.size} items for $category")
                     }
                 } catch (e: Exception) {
                     Logger.error(TAG, "API pipeline failed for $category", e.message)
@@ -268,6 +289,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             } catch (_: Exception) {}
         }
         emptyList()
+    }
+
+    suspend fun saveUserNegativeKeywords(keywords: String) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("negative_keywords", keywords))
+    }
+
+    suspend fun getUserNegativeKeywords(): List<String> = withContext(Dispatchers.IO) {
+        val str = appSettingDao.getSetting("negative_keywords") ?: ""
+        str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    suspend fun saveLanguagePreference(language: String) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("language_preference", language))
+    }
+
+    suspend fun getLanguagePreference(): String = withContext(Dispatchers.IO) {
+        appSettingDao.getSetting("language_preference") ?: "en"
     }
 
     suspend fun saveSelectedMusicGenres(genres: List<String>) = withContext(Dispatchers.IO) {
@@ -346,7 +384,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
-        privacy: String = "public"
+        privacy: String = "public",
+        clearnetUrl: String? = null,
+        clearnetTitle: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
@@ -367,7 +407,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             signature = signature,
             privacy = privacy,
             mediaId = mediaMetadata?.id,
-            mediaMetadata = mediaMetadata
+            mediaMetadata = mediaMetadata,
+            clearnetUrl = clearnetUrl,
+            clearnetTitle = clearnetTitle
         )
 
         val gson = com.google.gson.Gson()
@@ -393,7 +435,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             mediaUrl = mediaMetadata?.id?.let { "noslop://${myKeys.onionAddress}/$it" },
             mediaType = mediaMetadata?.type,
             privacy = privacy,
-            thumbnailB64 = mediaMetadata?.thumbnailB64
+            thumbnailB64 = mediaMetadata?.thumbnailB64,
+            clearnetUrl = clearnetUrl,
+            clearnetTitle = clearnetTitle
         )
 
         postDao.insertPost(localPost)
@@ -504,7 +548,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         signature = postPay.signature ?: "",
                         mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
                         mediaType = postPay.mediaMetadata?.type,
-                        thumbnailB64 = postPay.mediaMetadata?.thumbnailB64
+                        thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
+                        clearnetUrl = postPay.clearnetUrl,
+                        clearnetTitle = postPay.clearnetTitle
                     )
                     postDao.insertPost(post)
                     stored++
@@ -539,7 +585,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     mediaType = postPay.mediaMetadata?.type,
                     gossipCount = 1,
                     privacy = postPay.privacy,
-                    thumbnailB64 = postPay.mediaMetadata?.thumbnailB64
+                    thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
+                    clearnetUrl = postPay.clearnetUrl,
+                    clearnetTitle = postPay.clearnetTitle
                 )
                 postDao.insertPost(meshPost)
                 

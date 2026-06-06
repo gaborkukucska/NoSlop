@@ -15,7 +15,7 @@ object PodcastIndexClient {
     private val gson = Gson()
     private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
 
-    suspend fun searchEpisodes(query: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-podcast-search"): List<FeedItem> {
+    suspend fun searchEpisodes(query: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-podcast-search", language: String = "en"): List<FeedItem> {
         val credentials = apiKeyRepo.getKey("podcastindex")
         if (credentials.isNullOrBlank() || !credentials.contains(":")) return emptyList()
         val parts = credentials.split(":", limit = 2)
@@ -27,7 +27,7 @@ object PodcastIndexClient {
         val hash = sha1(data4Hash)
 
         return try {
-            val url = "$BASE_URL/search/byterm?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
+            val url = "$BASE_URL/search/byterm?q=${java.net.URLEncoder.encode(query, "UTF-8")}&lang=$language"
             val request = Request.Builder()
                 .url(url)
                 .header("X-Auth-Date", apiHeaderTime)
