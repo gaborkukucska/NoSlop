@@ -2033,8 +2033,6 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
         LogsViewerScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 3) {
         ApiKeysScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
-    } else if (selectedSettingsScreen == 4) {
-        UserProfileSettingsScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 5) {
         ContentPreferencesScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
@@ -2120,29 +2118,14 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 4 }.padding(vertical = 8.dp),
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("User Profile", fontWeight = FontWeight.Bold, color = TextLight)
-                                }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
-                            }
-                            
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.List, contentDescription = null, tint = AccentGreen)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Content Preferences", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Profile & Preferences", fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }

@@ -204,12 +204,15 @@ object InternetArchiveClient {
                                             }
                                         } else {
                                             Logger.warn(TAG, "No 'result' array in metadata for $identifier")
+                                            if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                         }
                                     } else {
                                         Logger.warn(TAG, "Empty metadata body for $identifier")
+                                        if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                     }
                                 } catch (e: Exception) {
                                     Logger.warn(TAG, "Failed to resolve media file for $identifier: ${e.message}")
+                                    if (resolvedMediaType == "audio") archiveMediaUrl = ""
                                 }
                             }
                             

@@ -131,6 +131,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _languagePreference = MutableStateFlow("en")
     val languagePreference: StateFlow<String> = _languagePreference.asStateFlow()
 
+    val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
+
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
@@ -207,29 +209,51 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
 
-        val batch = mutableListOf<UnifiedItem>()
-        
-        // Group by source and type
+        // Separate items by category to ensure a good mix
+        val videos = mutableListOf<UnifiedItem>()
+        val audios = mutableListOf<UnifiedItem>()
+        val textImages = mutableListOf<UnifiedItem>()
+
         val groupedFeeds = unseenFeeds.groupBy { "${it.sourceId}_${it.mediaType}" }
-        
         for ((key, items) in groupedFeeds) {
-            val isVideoOrAudio = key.contains("video") || key.contains("audio")
-            val limit = if (isVideoOrAudio) 3 else 1
-            items.take(limit).forEach { batch.add(UnifiedItem.Feed(it)) }
+            if (key.contains("video")) {
+                items.take(3).forEach { videos.add(UnifiedItem.Feed(it)) }
+            } else if (key.contains("audio")) {
+                items.take(3).forEach { audios.add(UnifiedItem.Feed(it)) }
+            } else {
+                items.take(1).forEach { textImages.add(UnifiedItem.Feed(it)) }
+            }
         }
         
-        // Take up to 3 mesh posts to mix in
-        unseenMeshes.take(3).forEach { batch.add(UnifiedItem.Mesh(it)) }
+        unseenMeshes.take(3).forEach { textImages.add(UnifiedItem.Mesh(it)) }
+
+        videos.shuffle()
+        audios.shuffle()
+        textImages.shuffle()
+
+        val batch = mutableListOf<UnifiedItem>()
         
-        // Only shuffle the new batch to preserve the organic mix without reordering seen items
+        // If the feed is currently empty, we only load 2 items to start. 
+        // This gives slower API sources (like videos) time to fetch and populate the subsequent items
+        // rather than burying them under 10 fast-loading RSS articles.
+        var needed = if (_unifiedFeed.value.isEmpty()) 2 else 5
+        
+        val v = videos.take(2).also { needed -= it.size }
+        val a = audios.take(1).also { needed -= it.size }
+        val t = textImages.take(needed).also { needed -= it.size }
+        
+        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size)).take(needed)
+
+        batch.addAll(v)
+        batch.addAll(a)
+        batch.addAll(t)
+        batch.addAll(extra)
+
+        if (batch.isEmpty()) return
+
         batch.shuffle()
         
-        // Always restrict the batch to max 5 items per load
-        // so that late-arriving video sources can quickly populate the upcoming slides
-        // and manual refreshes behave exactly like the first load.
-        val finalBatch = batch.take(5)
-        
-        _unifiedFeed.value = _unifiedFeed.value + finalBatch
+        _unifiedFeed.value = _unifiedFeed.value + batch
     }
 
     // --- State ---
@@ -242,6 +266,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (newState) {
                 refreshFeeds()
             }
+        }
+    }
+
+    fun toggleSource(source: com.noslop.app.data.FeedSource) {
+        viewModelScope.launch {
+            val updated = source.copy(isActive = !source.isActive)
+            repository.insertSource(updated)
+            refreshFeeds()
         }
     }
 
@@ -276,6 +308,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         title = bs.title,
                         feedType = bs.feedType,
                         category = bs.category,
+                        addedDuringOnboarding = true
+                    )
+                )
+            }
+
+            // 2b. Auto-insert API-backed sources for selected categories
+            // so video/audio sources are always present in the DB
+            val selectedSourceIds = selectedSources.map { it.id }.toSet()
+            val apiSourcesForCategories = SourceLibrary.sources.filter { 
+                it.feedType == "api" && selectedCategories.contains(it.category) && it.id !in selectedSourceIds
+            }
+            for (apiSrc in apiSourcesForCategories) {
+                repository.insertSource(
+                    FeedSource(
+                        id = apiSrc.id,
+                        url = apiSrc.url,
+                        title = apiSrc.title,
+                        feedType = apiSrc.feedType,
+                        category = apiSrc.category,
                         addedDuringOnboarding = true
                     )
                 )
@@ -333,8 +384,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (negativeKeywords != null) _negativeKeywords.value = negativeKeywords
             if (languagePreference != null) _languagePreference.value = languagePreference
 
-            // Clear old API data to ensure new preferences are reflected immediately
-            repository.clearApiData()
+            // Clear old data to ensure new preferences are reflected immediately
+            repository.clearFeedData()
             
             // Trigger fetch in background
             refreshFeeds()
@@ -392,7 +443,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isRefreshingFeeds.value = true
             try {
                 _unifiedFeed.value = emptyList() // Clear current feed
-                repository.clearApiData() // Wipe local database for API items to fetch fresh
+                allFeeds = emptyList() // Clear local cache to prevent instantaneous reload of deleted items
+                repository.clearFeedData() // Wipe local database for unsaved items to fetch fresh
                 repository.refreshFeeds()
             } catch (e: Exception) {
                 Logger.error("VM", "Manual refresh exception: ${e.message}")
@@ -416,7 +468,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteFeedSource(source: FeedSource) {
         viewModelScope.launch {
-            repository.deleteSource(source)
+            repository.removeSource(source)
         }
     }
 

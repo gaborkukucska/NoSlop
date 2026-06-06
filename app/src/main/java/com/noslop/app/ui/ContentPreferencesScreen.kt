@@ -9,17 +9,34 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.noslop.app.data.UserProfile
+import com.noslop.app.data.FeedSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.ui.theme.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
+    // Profile state
+    val currentProfile by viewModel.userProfile.collectAsState()
+    val currentNegativeKeywords by viewModel.negativeKeywords.collectAsState()
+    val currentLanguage by viewModel.languagePreference.collectAsState()
+
+    var displayName by remember { mutableStateOf(currentProfile.displayName) }
+    var bio by remember { mutableStateOf(currentProfile.bio) }
+    var avatarUrl by remember { mutableStateOf(currentProfile.avatarUrl) }
+    var negativeKeywords by remember { mutableStateOf(currentNegativeKeywords) }
+    var language by remember { mutableStateOf(currentLanguage) }
+
+    // Categories & genres state
     val interests by viewModel.selectedInterests.collectAsState()
     val musicGenres by viewModel.selectedMusicGenres.collectAsState()
     val videoGenres by viewModel.selectedVideoGenres.collectAsState()
@@ -31,6 +48,10 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     val allMusicGenres = listOf("Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop")
     val allVideoGenres = listOf("Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary")
 
+    // Sources state
+    val sources by viewModel.allSources.collectAsState(initial = emptyList())
+    var showSourceManager by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
         Row(
             modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(16.dp),
@@ -40,7 +61,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
             }
             Text(
-                text = "Content Preferences",
+                text = "Settings",
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -51,14 +72,94 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
+            // ────────────────── PROFILE ──────────────────
             item {
-                Text(
-                    text = "CATEGORIES",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = AccentGreen,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                Box(
+                    modifier = Modifier
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(SurfaceDark)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            item {
+                Text("PROFILE", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("Display Name") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = bio,
+                    onValueChange = { bio = it },
+                    label = { Text("Bio") },
+                    maxLines = 3,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = avatarUrl,
+                    onValueChange = { avatarUrl = it },
+                    label = { Text("Avatar URL (or local path)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── CONTENT SOURCES ──────────────────
+            item {
+                Text("CONTENT SOURCES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val activeSources = sources.filter { it.isActive }
+                if (activeSources.isEmpty()) {
+                    Text("No active sources.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text(
+                        text = activeSources.joinToString(", ") { it.title },
+                        color = TextLight,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Button(
+                    onClick = { showSourceManager = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Manage Sources", fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── CATEGORIES ──────────────────
+            item {
+                Text("CATEGORIES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             }
 
             items(SourceLibrary.categories) { category ->
@@ -78,8 +179,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         Text(category, color = TextLight)
                         Checkbox(
                             checked = isSelected,
-                            onCheckedChange = { 
-                                if (it) localInterests.add(category) else localInterests.remove(category) 
+                            onCheckedChange = {
+                                if (it) localInterests.add(category) else localInterests.remove(category)
                             },
                             colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
                         )
@@ -87,16 +188,11 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 }
             }
 
+            // ────────────────── MUSIC GENRES ──────────────────
             if (localInterests.contains("Music")) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "MUSIC GENRES",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AccentGreen,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                    Text("MUSIC GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allMusicGenres) { genre ->
                     val isSelected = localMusicGenres.contains(genre)
@@ -115,8 +211,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             Text(genre, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
-                                onCheckedChange = { 
-                                    if (it) localMusicGenres.add(genre) else localMusicGenres.remove(genre) 
+                                onCheckedChange = {
+                                    if (it) localMusicGenres.add(genre) else localMusicGenres.remove(genre)
                                 },
                                 colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
                             )
@@ -125,16 +221,11 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 }
             }
 
+            // ────────────────── VIDEO GENRES ──────────────────
             if (localInterests.contains("Video Platforms")) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text(
-                        text = "VIDEO GENRES",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AccentGreen,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
+                    Text("VIDEO GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allVideoGenres) { genre ->
                     val isSelected = localVideoGenres.contains(genre)
@@ -153,8 +244,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             Text(genre, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
-                                onCheckedChange = { 
-                                    if (it) localVideoGenres.add(genre) else localVideoGenres.remove(genre) 
+                                onCheckedChange = {
+                                    if (it) localVideoGenres.add(genre) else localVideoGenres.remove(genre)
                                 },
                                 colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
                             )
@@ -162,21 +253,222 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     }
                 }
             }
+
+            // ────────────────── NEGATIVE KEYWORDS ──────────────────
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("FILTERING", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = negativeKeywords,
+                    onValueChange = { negativeKeywords = it },
+                    label = { Text("Negative Keywords (comma separated)") },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // ────────────────── LANGUAGE ──────────────────
+            item {
+                var expanded by remember { mutableStateOf(false) }
+                val languages = listOf(
+                    "en" to "English", "es" to "Español", "fr" to "Français", "de" to "Deutsch",
+                    "it" to "Italiano", "pt" to "Português", "ru" to "Русский", "zh" to "中文",
+                    "ja" to "日本語", "ko" to "한국어", "ar" to "العربية", "hi" to "हिन्दी",
+                    "nl" to "Nederlands", "tr" to "Türkçe", "pl" to "Polski", "sv" to "Svenska",
+                    "id" to "Bahasa Indonesia", "vi" to "Tiếng Việt", "th" to "ไทย", "el" to "Ελληνικά",
+                    "hu" to "Magyar"
+                )
+                val selectedLangs = language.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                val displayLanguage = if (selectedLangs.isEmpty()) "Any Language" else selectedLangs.mapNotNull { code -> languages.find { it.first == code }?.second }.joinToString(", ")
+
+                ExposedDropdownMenuBox(
+                    expanded = expanded,
+                    onExpandedChange = { expanded = !expanded }
+                ) {
+                    OutlinedTextField(
+                        value = displayLanguage,
+                        onValueChange = { },
+                        readOnly = true,
+                        label = { Text("Content Languages") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                            focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                        ),
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false }
+                    ) {
+                        languages.forEach { lang ->
+                            val isSelected = selectedLangs.contains(lang.first)
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = null,
+                                            colors = CheckboxDefaults.colors(checkedColor = AccentGreen, uncheckedColor = TextMuted)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(lang.second, color = if (isSelected) AccentGreen else TextLight)
+                                    }
+                                },
+                                onClick = {
+                                    val newSelected = if (isSelected) {
+                                        selectedLangs - lang.first
+                                    } else {
+                                        selectedLangs + lang.first
+                                    }
+                                    language = newSelected.joinToString(",")
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
+        // Manage Sources dialog
+        if (showSourceManager) {
+            ManageSourcesDialog(
+                savedSources = sources,
+                onDismiss = { showSourceManager = false },
+                onToggleSource = { sourceId, isBuiltIn ->
+                    if (isBuiltIn) {
+                        val builtIn = SourceLibrary.sources.find { it.id == sourceId }
+                        if (builtIn != null) {
+                            val existing = sources.find { it.id == sourceId }
+                            if (existing != null) {
+                                viewModel.toggleSource(existing)
+                            } else {
+                                viewModel.toggleSource(
+                                    FeedSource(
+                                        id = builtIn.id,
+                                        url = builtIn.url,
+                                        title = builtIn.title,
+                                        feedType = builtIn.feedType,
+                                        category = builtIn.category,
+                                        isActive = false
+                                    )
+                                )
+                            }
+                        }
+                    } else {
+                        val existing = sources.find { it.id == sourceId }
+                        if (existing != null) viewModel.toggleSource(existing)
+                    }
+                }
+            )
+        }
+
+        // Save button
         Button(
             onClick = {
+                viewModel.updateUserProfile(
+                    UserProfile(displayName = displayName, bio = bio, avatarUrl = avatarUrl)
+                )
                 viewModel.updateContentPreferences(
-                    localInterests.toList(),
-                    localMusicGenres.toList(),
-                    localVideoGenres.toList()
+                    selectedCategories = localInterests.toList(),
+                    selectedMusicGenres = localMusicGenres.toList(),
+                    selectedVideoGenres = localVideoGenres.toList(),
+                    negativeKeywords = negativeKeywords,
+                    languagePreference = language
                 )
                 onBack()
             },
             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
             modifier = Modifier.fillMaxWidth().padding(16.dp).height(50.dp)
         ) {
-            Text("Save Preferences", fontWeight = FontWeight.Bold)
+            Text("Save Settings", fontWeight = FontWeight.Bold)
         }
     }
+}
+
+@Composable
+fun ManageSourcesDialog(
+    savedSources: List<FeedSource>,
+    onDismiss: () -> Unit,
+    onToggleSource: (String, Boolean) -> Unit
+) {
+    val allLibrarySources = SourceLibrary.sources
+    val activeSourceIds = savedSources.filter { it.isActive }.map { it.id }.toSet()
+
+    // Group sources by category for clean presentation
+    val groupedSources = allLibrarySources
+        .groupBy { it.category }
+        .toSortedMap()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = PrimaryBlack,
+        title = {
+            Text("Manage Sources", color = AccentGreen, fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.8f)) {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    groupedSources.forEach { (category, sourcesInCategory) ->
+                        item {
+                            Text(
+                                text = category.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AccentGreen,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                            )
+                        }
+                        items(sourcesInCategory) { src ->
+                            val isActive = activeSourceIds.contains(src.id)
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isActive) SurfaceDark else PrimaryBlack
+                                ),
+                                border = BorderStroke(1.dp, if (isActive) AccentGreen else BorderSubtle),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = src.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = TextLight,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = isActive,
+                                        onCheckedChange = { onToggleSource(src.id, true) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = PrimaryBlack,
+                                            checkedTrackColor = AccentGreen,
+                                            uncheckedThumbColor = TextMuted,
+                                            uncheckedTrackColor = SurfaceDark
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = AccentGreen)
+            }
+        }
+    )
 }

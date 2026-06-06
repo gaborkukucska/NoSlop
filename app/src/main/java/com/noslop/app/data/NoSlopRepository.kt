@@ -117,7 +117,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         feedDao.insertSource(source)
     }
 
-    suspend fun deleteSource(source: FeedSource) = withContext(Dispatchers.IO) {
+    suspend fun updateSource(source: FeedSource) = withContext(Dispatchers.IO) {
+        feedDao.updateSource(source)
+    }
+
+    suspend fun removeSource(source: FeedSource) = withContext(Dispatchers.IO) {
         feedDao.deleteSource(source)
     }
 
@@ -130,13 +134,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     /**
-     * Clears API-generated feed items and sources to prepare for a fresh fetch
+     * Clears feed items and dynamically generated API sources to prepare for a fresh fetch
      * when preferences change.
      */
-    suspend fun clearApiData() = withContext(Dispatchers.IO) {
-        feedDao.clearApiItems()
-        feedDao.clearApiSources()
-        Logger.info(TAG, "Cleared previous API feed items and sources")
+    suspend fun clearFeedData() = withContext(Dispatchers.IO) {
+        feedDao.clearUnsavedItems()
+        Logger.info(TAG, "Cleared previous feed items and sources")
     }
 
     /**
@@ -189,6 +192,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // --- Public API pipeline ---
         try {
             val apiKeyRepo = ApiKeyRepository(context)
+            var activeApiSourceIds = activeSources.filter { it.feedType == "api" }.map { it.id }
+            
+            // If no API sources are explicitly saved, derive them from the user's
+            // selected categories so videos/audio are never silently blocked.
+            if (activeApiSourceIds.isEmpty()) {
+                val userCats = getUserSelectedCategories()
+                activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
+                    .filter { it.feedType == "api" && (userCats.contains(it.category) || userCats.isEmpty()) }
+                    .map { it.id }
+                Logger.info(TAG, "No API sources in DB; auto-derived ${activeApiSourceIds.size} from categories: $userCats")
+            }
+
             // Derive active categories from all active sources + user selected categories
             val userCategories = getUserSelectedCategories()
             val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct()
@@ -208,6 +223,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                         category = category,
                         userKeywords = keywords,
                         apiKeyRepo = apiKeyRepo,
+                        activeApiSourceIds = activeApiSourceIds,
                         language = langPref
                     )
                     if (apiItems.isNotEmpty()) {
