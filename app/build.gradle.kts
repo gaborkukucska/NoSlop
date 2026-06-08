@@ -39,11 +39,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debugConfig") // fallback to debug signing for testing
+            // No signingConfig here — sign manually for release
         }
         debug {
             isDebuggable = true
-            signingConfig = signingConfigs.getByName("debugConfig")
+            // No signingConfig needed — Android uses the default debug keystore automatically
         }
     }
 
