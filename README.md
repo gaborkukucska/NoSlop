@@ -41,6 +41,24 @@ Direct peer-to-peer communication over the HAI-Net gossip network. No central se
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
 - **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
 
+### Clearnet-to-Mesh Broadcasts
+
+NoSlop is the bridge between the open web and your private mesh. Consuming content from your aggregated clearnet feed isn't a passive act — it's a gateway into community.
+
+When you **like**, **share**, or **comment** on any clearnet item in your feed, NoSlop transforms that interaction into a **mesh broadcast**. The original URL and title are signed with your Ed25519 key and gossiped to your peers as a `POST` packet with embedded `clearnet_url` and `clearnet_title` fields. From that moment, the content lives in two worlds simultaneously: on the clearnet where it originated, and on the mesh where it travels under your identity.
+
+All subsequent interactions — reactions, comments, replies — happen entirely on the mesh between you and your connections. No clearnet platform sees the engagement. No algorithm counts the signal. The conversation belongs to your network.
+
+This is how NoSlop unites entertainment, community, and communication in one place:
+
+- **Entertainment** — your curated clearnet feed surfaces the best of the open web, tracker-free.
+- **Community** — a single tap broadcasts that content into your mesh, making it a shared reference point for your circle.
+- **Communication** — every reply, comment, and reaction threads through the gossip protocol, end-to-end encrypted where needed, and fully offline-capable.
+
+> ⚠️ **In development** — The clearnet interaction-to-broadcast pipeline is partially implemented. The `PostPayload` schema already carries `clearnet_url` and `clearnet_title`, the Share-to-Mesh dialog is wired up, and peers can already tap "View on Clearnet" to open shared links. Reaction (`LIKE`) and comment propagation specifically tied to clearnet-originated broadcasts are still being built out. See [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the detailed plan.
+
+---
+
 ### Sovereign Identity
 
 Your identity is generated locally and never leaves your device unless you export it yourself.
