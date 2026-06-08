@@ -117,8 +117,6 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 ## About
 
-NoSlop is part of the [People Power Initiative](https://pplpwr.me) — building tools where AI and open networks work for people, not corporations.
+NoSlop is part of the [HAI-Net Initiative](https://hai-net.com) — building tools where AI and open networks work for people, not corporations.
 
 Licensed under **AGPL-3.0**. Fork it. Run it. Own it.
-
-> *"The galley is on top, but the water flows below. The water is the master."* 🌊
