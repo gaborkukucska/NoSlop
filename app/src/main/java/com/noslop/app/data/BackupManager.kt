@@ -5,6 +5,7 @@ import android.util.Base64
 import com.noslop.app.crypto.MnemonicGenerator
 import com.noslop.app.debug.Logger
 import java.io.*
+import java.security.SecureRandom
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -66,7 +67,8 @@ object BackupManager {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            val iv = ByteArray(16) // In production, use random IV and prepend it to the file
+            val iv = ByteArray(16)
+            SecureRandom().nextBytes(iv)
             cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
 
             FileInputStream(tempZip).use { input ->

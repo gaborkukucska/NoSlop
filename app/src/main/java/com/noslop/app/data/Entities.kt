@@ -2,7 +2,6 @@
 package com.noslop.app.data
 
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -26,14 +25,6 @@ data class FeedSource(
 
 @Entity(
     tableName = "feed_items",
-    foreignKeys = [
-        ForeignKey(
-            entity = FeedSource::class,
-            parentColumns = ["id"],
-            childColumns = ["sourceId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
     indices = [Index(value = ["sourceId"])]
 )
 data class FeedItem(
@@ -101,14 +92,6 @@ data class ChatMessage(
 
 @Entity(
     tableName = "mesh_comments",
-    foreignKeys = [
-        ForeignKey(
-            entity = MeshPost::class,
-            parentColumns = ["id"],
-            childColumns = ["postId"],
-            onDelete = ForeignKey.CASCADE
-        )
-    ],
     indices = [Index(value = ["postId"])]
 )
 data class MeshComment(
@@ -120,6 +103,16 @@ data class MeshComment(
     val timestamp: Long,
     val signature: String,
     val parentCommentId: String? = null
+)
+
+@Entity(tableName = "mesh_reactions")
+data class MeshReaction(
+    @PrimaryKey val id: String,
+    val postId: String,
+    val authorPublicKeyB64: String,
+    val reactionType: String,
+    val timestamp: Long,
+    val signature: String
 )
 
 @Entity(tableName = "app_settings")

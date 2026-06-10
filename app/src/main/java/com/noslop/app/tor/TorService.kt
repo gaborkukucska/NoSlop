@@ -2,6 +2,7 @@ package com.noslop.app.tor
 
 import android.content.Context
 import com.noslop.app.debug.Logger
+import com.noslop.app.util.Constants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -164,7 +165,7 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
             
-            val content = "ControlPort 9051\nCookieAuthentication 0\n"
+            val content = "ControlPort 9051\nCookieAuthentication 1\n"
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {
@@ -253,7 +254,7 @@ object TorService {
      */
     suspend fun registerHiddenService(privateKeyB64: String? = null, onAddressReady: (String) -> Unit) =
         withContext(Dispatchers.IO) {
-            Logger.info(TAG, "Registering Tor hidden service on port 9999 (persistent=${privateKeyB64 != null})...")
+            Logger.info(TAG, "Registering Tor hidden service on port ${Constants.MESH_PORT} (persistent=${privateKeyB64 != null})...")
             try {
                 // Wait for control port 9051 to be ready
                 waitForControlPort(timeoutSeconds = 10)
@@ -288,8 +289,8 @@ object TorService {
 
                 // Build and send ADD_ONION command as raw text
                 // Syntax: ADD_ONION KeyType:KeyBlob [Flags=Detach] Port=VirtPort[,Target]
-                val cmd = "ADD_ONION $keyParam Flags=Detach Port=9999,127.0.0.1:9999"
-                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=9999,127.0.0.1:9999")
+                val cmd = "ADD_ONION $keyParam Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}"
+                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}")
                 writer.print("$cmd\r\n")
                 writer.flush()
 

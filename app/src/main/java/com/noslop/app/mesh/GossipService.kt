@@ -2,6 +2,7 @@ package com.noslop.app.mesh
 
 import com.noslop.app.data.PeerDao
 import com.noslop.app.debug.Logger
+import com.noslop.app.util.Constants
 import kotlinx.coroutines.*
 import java.io.File
 import java.util.*
@@ -134,7 +135,7 @@ object GossipService {
                     type = "MEDIA_RECOVERY_FOUND",
                     payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
                 )
-                transport?.sendPacket(senderId, 9999, foundPacket)
+                transport?.sendPacket(senderId, Constants.MESH_PORT, foundPacket)
             }
             return
         }
@@ -170,7 +171,7 @@ object GossipService {
                     // This assumes listeners are our connected peers.
                     val peer = peerDao?.getPeerByPublicKey(listenerId)
                     if (peer != null) {
-                        transport?.sendPacket(peer.onionAddress, 9999, foundPacket)
+                        transport?.sendPacket(peer.onionAddress, Constants.MESH_PORT, foundPacket)
                     }
                 }
             }
@@ -211,7 +212,7 @@ object GossipService {
 
         for (peer in peersToForward) {
             scope.launch {
-                tx.sendPacket(peer.onionAddress, 9999, forwardedPacket)
+                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
             }
         }
     }
@@ -234,7 +235,7 @@ object GossipService {
         
         for (peer in trustedPeers) {
             scope.launch {
-                tx.sendPacket(peer.onionAddress, 9999, packet)
+                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
             }
         }
     }

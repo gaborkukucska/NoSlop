@@ -2,6 +2,7 @@ package com.noslop.app.mesh
 
 import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.debug.Logger
+import com.noslop.app.util.Constants
 import kotlinx.coroutines.*
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -13,7 +14,7 @@ import java.net.Socket
 
 class MeshTransport(
     val repository: NoSlopRepository,
-    private val listenPort: Int = 9999,
+    private val listenPort: Int = Constants.MESH_PORT,
     private val socksHost: String = "127.0.0.1",
     private val socksPort: Int = 9050
 ) {
@@ -33,7 +34,7 @@ class MeshTransport(
                 Logger.info(TAG, "Starting TCP ServerSocket on port $listenPort")
                 serverSocket = ServerSocket(listenPort, 50, java.net.InetAddress.getByName("127.0.0.1"))
                 listening = true
-                Logger.info(TAG, "TCP listener bound — 127.0.0.1:9999 (hidden service only)")
+                Logger.info(TAG, "TCP listener bound — 127.0.0.1:$listenPort (hidden service only)")
                 while (isActive && isRunning) {
                     val clientSocket = serverSocket?.accept() ?: break
                     scope.launch {
@@ -88,7 +89,7 @@ class MeshTransport(
         }
     }
 
-    suspend fun sendPacket(onionAddress: String, port: Int = 9999, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+    suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
         // Ensure Tor proxy is ready before attempting send

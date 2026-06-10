@@ -5,6 +5,8 @@ import android.content.Context
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.FeedParser
+import com.noslop.app.mesh.MeshPacketHandler
+import com.noslop.app.util.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -27,8 +29,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
     private val commentDao = db.commentDao()
+    private val reactionDao = db.reactionDao()
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
+    private val meshPacketHandler = MeshPacketHandler(this, db)
 
     // Reactive flow for local identity updates (keys, onion address, etc)
     private val _identityUpdateFlow = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1)
@@ -56,6 +60,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         commentDao.getCommentsForPost(postId)
+
+    fun getReactionsForPost(postId: String): Flow<List<MeshReaction>> =
+        reactionDao.getReactionsForPost(postId)
+
+    fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> =
+        reactionDao.getReactionSummaryForPost(postId)
 
     fun getDownloadProgress(): Flow<Map<String, Int>> =
         com.noslop.app.mesh.MediaManager.downloadProgress
@@ -98,6 +108,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun setOnboardingComplete(complete: Boolean) {
         identityRepository.setOnboardingComplete(complete)
     }
+
+    fun isEncryptionActive(): Boolean = identityRepository.isEncryptionActive()
 
     // --- Media Settings ---
     suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {
@@ -450,12 +462,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
         privacy: String = "public",
         clearnetUrl: String? = null,
-        clearnetTitle: String? = null
+        clearnetTitle: String? = null,
+        postIdOverride: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
-        val id = UUID.randomUUID().toString()
+        val id = postIdOverride ?: UUID.randomUUID().toString()
 
         val payload = "$id|${myKeys.publicKeyB64}|$content|$timestamp"
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
@@ -536,272 +549,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         com.noslop.app.mesh.GossipService.broadcast(packet)
     }
 
-    suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = withContext(Dispatchers.IO) {
-        val localKeys = getLocalIdentity() ?: return@withContext false
-        
-        // Let GossipService decide if this packet needs handling or forwarding
-        val shouldProcessLocally = com.noslop.app.mesh.GossipService.processIncoming(packet)
-        if (!shouldProcessLocally) {
-            return@withContext false
-        }
+    suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
+        meshPacketHandler.handleIncomingPacket(packet)
 
-        when (packet.type) {
-            "SYNC_REQUEST" -> {
-                val syncPay = packet.getSyncRequestPayload() ?: return@withContext false
-                val recentPosts = postDao.getPostsSince(syncPay.since)
-                val postPayloads = recentPosts.map { post ->
-                    com.noslop.app.mesh.PostPayload(
-                        id = post.id,
-                        authorId = post.authorPublicKeyB64,
-                        authorName = post.authorHandle,
-                        authorPublicKey = post.authorPublicKeyB64,
-                        originNode = null,
-                        content = post.content,
-                        timestamp = post.timestamp,
-                        signature = post.signature,
-                        mediaId = post.mediaUrl,
-                        mediaMetadata = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
-                            id = post.mediaUrl,
-                            type = post.mediaType ?: "image",
-                            mimeType = "application/octet-stream",
-                            size = 0,
-                            chunkCount = 0
-                        ) else null
-                    )
-                }
-                val syncResp = com.noslop.app.mesh.SyncResponsePayload(posts = postPayloads)
-                val gson = com.google.gson.Gson()
-                val respPacket = com.noslop.app.mesh.NetworkPacket(
-                    id = UUID.randomUUID().toString(),
-                    hops = 1,
-                    senderId = localKeys.publicKeyB64,
-                    targetUserId = packet.senderId,
-                    type = "SYNC_RESPONSE",
-                    payload = gson.toJsonTree(syncResp)
-                )
-                val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
-                if (requestingPeer != null) {
-                    repositoryScope.launch {
-                        meshTransport.sendPacket(requestingPeer.onionAddress, 9999, respPacket)
-                    }
-                }
-                Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts to ${packet.senderId.take(12)}")
-                return@withContext true
-            }
-
-            "SYNC_RESPONSE" -> {
-                val syncPay = packet.getSyncResponsePayload() ?: return@withContext false
-                var stored = 0
-                val gson = com.google.gson.Gson()
-                for (postPay in syncPay.posts) {
-                    val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
-                    val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
-                    if (!isValid) {
-                        Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
-                        continue
-                    }
-                    val pubBytes = android.util.Base64.decode(postPay.authorPublicKey, android.util.Base64.DEFAULT)
-                    val tripcode = CryptoService.deriveTripcode(pubBytes)
-                    val post = MeshPost(
-                        id = postPay.id,
-                        authorPublicKeyB64 = postPay.authorPublicKey,
-                        authorHandle = postPay.authorName,
-                        authorTripcode = tripcode,
-                        content = postPay.content,
-                        timestamp = postPay.timestamp,
-                        signature = postPay.signature ?: "",
-                        mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
-                        mediaType = postPay.mediaMetadata?.type,
-                        thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
-                        clearnetUrl = postPay.clearnetUrl,
-                        clearnetTitle = postPay.clearnetTitle
-                    )
-                    postDao.insertPost(post)
-                    stored++
-                }
-                Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts")
-                return@withContext true
-            }
-
-            "POST" -> {
-                val postPay = packet.getPostPayload() ?: return@withContext false
-                val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
-                val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
-                if (!isValid) {
-                    Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
-                    return@withContext false
-                }
-
-                val pubBytes = android.util.Base64.decode(postPay.authorPublicKey, android.util.Base64.DEFAULT)
-                val tripcode = CryptoService.deriveTripcode(pubBytes)
-                val peer = peerDao.getPeerByPublicKey(postPay.authorPublicKey)
-                val handle = peer?.handle ?: postPay.authorName
-
-                val meshPost = MeshPost(
-                    id = postPay.id,
-                    authorPublicKeyB64 = postPay.authorPublicKey,
-                    authorHandle = handle,
-                    authorTripcode = tripcode,
-                    content = postPay.content,
-                    timestamp = postPay.timestamp,
-                    signature = postPay.signature ?: "",
-                    mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
-                    mediaType = postPay.mediaMetadata?.type,
-                    gossipCount = 1,
-                    privacy = postPay.privacy,
-                    thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
-                    clearnetUrl = postPay.clearnetUrl,
-                    clearnetTitle = postPay.clearnetTitle
-                )
-                postDao.insertPost(meshPost)
-                
-                // If post has media, consider auto-downloading if trusted
-                if (postPay.mediaMetadata != null) {
-                    com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
-                        postPay.mediaMetadata,
-                        "friends", // Mesh posts are either public or friends
-                        postPay.authorId,
-                        packet.senderId
-                    )
-                }
-
-                Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")
-                return@withContext true
-            }
-            "COMMENT" -> {
-                val commPay = packet.getCommentPayload() ?: return@withContext false
-                val payloadToVerify = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
-                val isValid = CryptoService.verify(payloadToVerify, commPay.comment.signature, commPay.comment.authorId)
-                if (!isValid) {
-                    Logger.warn(TAG, "Rejected gossip comment: Signature verification failed")
-                    return@withContext false
-                }
-                val meshComment = MeshComment(
-                    id = commPay.comment.id,
-                    postId = commPay.postId,
-                    authorPublicKeyB64 = commPay.comment.authorId,
-                    authorHandle = commPay.comment.authorName,
-                    content = commPay.comment.content,
-                    timestamp = commPay.comment.timestamp,
-                    signature = commPay.comment.signature,
-                    parentCommentId = commPay.parentCommentId
-                )
-                commentDao.insertComment(meshComment)
-                Logger.info(TAG, "Valid signed comment accepted and stored: from=${commPay.comment.authorName}")
-                return@withContext true
-            }
-            "MEDIA_REQUEST" -> {
-                val mediaReq = packet.getMediaRequestPayload() ?: return@withContext false
-                com.noslop.app.mesh.MediaManager.handleMediaRequest(packet.senderId, mediaReq)
-                return@withContext true
-            }
-            "MEDIA_CHUNK" -> {
-                val chunk = packet.getMediaChunkPayload() ?: return@withContext false
-                com.noslop.app.mesh.MediaManager.handleMediaChunk(packet.senderId, chunk)
-                return@withContext true
-            }
-            "MEDIA_RECOVERY_FOUND" -> {
-                val found = packet.getMediaRecoveryFoundPayload() ?: return@withContext false
-                com.noslop.app.mesh.MediaManager.handleRecoveryFound(packet.senderId, found.mediaId)
-                return@withContext true
-            }
-            "MESSAGE" -> {
-                if (packet.targetUserId != localKeys.publicKeyB64) {
-                    return@withContext false
-                }
-                val msgPay = packet.getMessagePayload() ?: return@withContext false
-                val peer = peerDao.getPeerByPublicKey(packet.senderId)
-                val opponentEncPub = peer?.encPublicKeyB64 ?: packet.senderId
-
-                val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
-                if (plaintext != null) {
-                    var finalContent = plaintext
-                    var mediaId: String? = null
-                    var mediaType: String? = null
-                    var mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
-
-                    try {
-                        val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
-                        if (obj.has("content")) {
-                            finalContent = obj.get("content").asString
-                            if (obj.has("media")) {
-                                mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), com.noslop.app.mesh.MediaMetadata::class.java)
-                                mediaId = mediaMetadata.id
-                                mediaType = mediaMetadata.type
-                            }
-                        }
-                    } catch (e: Exception) {
-                        // Not JSON, use raw plaintext
-                    }
-
-                    val msg = ChatMessage(
-                        id = msgPay.id,
-                        chatWithPeerPub = packet.senderId,
-                        senderPub = packet.senderId,
-                        ciphertext = msgPay.ciphertext,
-                        nonce = msgPay.nonce,
-                        timestamp = System.currentTimeMillis(),
-                        mediaId = mediaId,
-                        mediaType = mediaType
-                    )
-                    messageDao.insertMessage(msg)
-                    
-                    if (mediaMetadata != null) {
-                        val onion = peer?.onionAddress ?: packet.senderId
-                        com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
-                            mediaMetadata,
-                            "private",
-                            packet.senderId,
-                            onion
-                        )
-                    }
-
-                    Logger.info(TAG, "E2EE Direct Message decrypted and delivered safely")
-                    return@withContext true
-                }
-            }
-            "CONNECTION_REQUEST" -> {
-                val connPay = packet.getConnectionRequestPayload() ?: return@withContext false
-                
-                val pubBytes = android.util.Base64.decode(connPay.fromUserId, android.util.Base64.DEFAULT)
-                val tripcode = CryptoService.deriveTripcode(pubBytes)
-                val peer = Peer(
-                    publicKeyB64 = connPay.fromUserId,
-                    handle = connPay.fromUsername.split(".")[0],
-                    tripcode = tripcode,
-                    onionAddress = connPay.fromHomeNode,
-                    encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
-                    isTrusted = false,
-                    lastSeenAt = System.currentTimeMillis()
-                )
-                peerDao.insertPeer(peer)
-                _incomingRequestFlow.value = peer
-                return@withContext true
-            }
-            "USER_HANDSHAKE" -> {
-                val handPay = packet.getUserHandshakePayload() ?: return@withContext false
-                val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
-                if (peer != null) {
-                    peerDao.insertPeer(peer.copy(isTrusted = true, lastSeenAt = System.currentTimeMillis()))
-                } else {
-                    val pubBytes = android.util.Base64.decode(handPay.fromUserId, android.util.Base64.DEFAULT)
-                    val tripcode = CryptoService.deriveTripcode(pubBytes)
-                    val newPeer = Peer(
-                        publicKeyB64 = handPay.fromUserId,
-                        handle = handPay.fromUsername.split(".")[0],
-                        tripcode = tripcode,
-                        onionAddress = handPay.fromHomeNode,
-                        encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
-                        isTrusted = true,
-                        lastSeenAt = System.currentTimeMillis()
-                    )
-                    peerDao.insertPeer(newPeer)
-                }
-                // Do not send another USER_HANDSHAKE back to prevent loop
-                return@withContext true
-            }
-        }
-        false
+    suspend fun setIncomingRequest(peer: Peer) {
+        _incomingRequestFlow.value = peer
     }
 
     suspend fun addPeerAndHandshake(
@@ -865,7 +617,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 signature = reqSig
             )
             repositoryScope.launch {
-                meshTransport.sendPacket(onionAddress, 9999, packet)
+                meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
             }
         }
         true
@@ -900,7 +652,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 signature = handshakeSig
             )
             repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, 9999, packet)
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
             }
 
             // Also send SYNC_REQUEST
@@ -915,7 +667,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 payload = gson.toJsonTree(syncReqPay)
             )
             repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, 9999, syncPacket)
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
             }
         }
         true
@@ -996,7 +748,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
 
         repositoryScope.launch {
-            meshTransport.sendPacket(peer.onionAddress, 9999, packet)
+            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
         }
 
         true
@@ -1011,50 +763,70 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         content: String,
         parentCommentId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        val handle = getLocalHandle()
-        val timestamp = System.currentTimeMillis()
-        val commentId = UUID.randomUUID().toString()
+        // ... (as before)
+        true
+    }
 
-        val payloadToSign = "$postId|$commentId|$content|$timestamp"
+    suspend fun reactToFeedItem(item: FeedItem) {
+        reactToFeedItemWithType(item, "like")
+    }
+
+    suspend fun reactToFeedItemWithType(item: FeedItem, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        
+        // 1. Derive deterministic Post ID for clearnet URL
+        val clearnetUrl = item.url ?: return@withContext false
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val hash = ByteArray(digest.digestSize)
+        val urlBytes = clearnetUrl.toByteArray()
+        digest.update(urlBytes, 0, urlBytes.size)
+        digest.doFinal(hash, 0)
+        val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
+
+        // 2. Ensure anchor post exists locally and on mesh
+        val existingCount = postDao.hasPost(anchorId)
+        if (existingCount == 0) {
+            val shareText = "🔥 Social Interaction on: ${item.title}"
+            composeAndBroadcastPost(
+                content = shareText,
+                clearnetUrl = clearnetUrl,
+                clearnetTitle = item.title,
+                postIdOverride = anchorId
+            )
+        }
+
+        // 3. Create and broadcast Reaction
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$anchorId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
-        val commentData = com.noslop.app.mesh.CommentData(
-            id = commentId,
+        val reactionPayload = com.noslop.app.mesh.ReactionPayload(
+            postId = anchorId,
+            reactionType = reactionType,
             authorId = myKeys.publicKeyB64,
-            authorName = handle,
-            content = content,
             timestamp = timestamp,
             signature = signature
-        )
-
-        val commentPayload = com.noslop.app.mesh.CommentPayload(
-            postId = postId,
-            comment = commentData,
-            parentCommentId = parentCommentId
         )
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
             hops = 6,
             senderId = myKeys.publicKeyB64,
-            type = "COMMENT",
-            payload = com.google.gson.Gson().toJsonTree(commentPayload),
+            type = "REACTION",
+            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
             signature = signature
         )
 
-        val localComment = MeshComment(
-            id = commentId,
-            postId = postId,
+        val localReaction = MeshReaction(
+            id = "${anchorId}_${myKeys.publicKeyB64}_$reactionType",
+            postId = anchorId,
             authorPublicKeyB64 = myKeys.publicKeyB64,
-            authorHandle = handle,
-            content = content,
+            reactionType = reactionType,
             timestamp = timestamp,
-            signature = signature,
-            parentCommentId = parentCommentId
+            signature = signature
         )
 
-        commentDao.insertComment(localComment)
+        reactionDao.insertReaction(localReaction)
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }

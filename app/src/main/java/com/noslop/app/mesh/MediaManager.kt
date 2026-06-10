@@ -5,6 +5,7 @@ import android.os.Environment
 import android.util.Base64
 import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.debug.Logger
+import com.noslop.app.util.Constants
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -189,7 +190,7 @@ object MediaManager {
                 )
                 
                 scope.launch {
-                    repo.meshTransport.sendPacket(peer, 9999, packet)
+                    repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 }
                 
                 if (dl.inflight.size >= MAX_CONCURRENCY) break
@@ -278,7 +279,7 @@ object MediaManager {
             )
             val peer = dl.peerOnion
             if (peer != null) {
-                scope.launch { repo.meshTransport.sendPacket(peer, 9999, packet) }
+                scope.launch { repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet) }
             }
             
         } catch (e: Exception) {
@@ -343,7 +344,7 @@ object MediaManager {
                     type = "MEDIA_METADATA_RESPONSE", // Add new type
                     payload = com.google.gson.Gson().toJsonTree(metadata)
                 )
-                repo.meshTransport.sendPacket(senderId, 9999, packet)
+                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
                 return
             }
         }
@@ -380,7 +381,7 @@ object MediaManager {
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)
                 )
                 
-                repo.meshTransport.sendPacket(senderId, 9999, packet)
+                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
             }
         } else {
             // 2. We don't have it, are we relaying it?

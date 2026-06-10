@@ -66,6 +66,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _torReadyState = MutableStateFlow(Pair(false, "Unknown"))
     val torReadyState: StateFlow<Pair<Boolean, String>> = _torReadyState.asStateFlow()
 
+    private val _isEncryptionActive = MutableStateFlow(true)
+    val isEncryptionActive: StateFlow<Boolean> = _isEncryptionActive.asStateFlow()
+
     private val _isTorChecking = MutableStateFlow(false)
     val isTorChecking: StateFlow<Boolean> = _isTorChecking.asStateFlow()
 
@@ -111,6 +114,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         repository.getCommentsForPost(postId)
+
+    fun getReactionsForPost(postId: String): Flow<List<MeshReaction>> =
+        repository.getReactionsForPost(postId)
+
+    fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> =
+        repository.getReactionSummaryForPost(postId)
 
     val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -184,6 +193,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Load aggregator setting
         viewModelScope.launch {
             _isAggregatorEnabled.value = repository.isAggregatorEnabled()
+        }
+
+        // Update encryption status
+        viewModelScope.launch {
+            _isEncryptionActive.value = repository.isEncryptionActive()
         }
 
         // Build stable append-only mixed feed
@@ -641,6 +655,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.deletePeer(peerPub)
         }
+    }
+
+    fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
+        viewModelScope.launch { repository.reactToFeedItemWithType(item, reactionType) }
+    }
+
+    fun getReactionAnchorIdForUrl(url: String): String {
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val hash = ByteArray(digest.digestSize)
+        val urlBytes = url.toByteArray()
+        digest.update(urlBytes, 0, urlBytes.size)
+        digest.doFinal(hash, 0)
+        return "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
     }
 
     /**

@@ -335,7 +335,9 @@ fun OverlayInteractions(
     isMesh: Boolean = false,
     onLike: () -> Unit,
     onShare: () -> Unit,
-    onComment: (() -> Unit)? = null
+    onComment: (() -> Unit)? = null,
+    likeCount: Int = 0,
+    commentCount: Int = 0
 ) {
     Column(
         modifier = modifier
@@ -345,7 +347,7 @@ fun OverlayInteractions(
     ) {
         InteractionButton(
             icon = Icons.Default.Favorite,
-            label = "Like",
+            label = if (likeCount > 0) likeCount.toString() else "Like",
             onClick = onLike
         )
         
@@ -358,7 +360,7 @@ fun OverlayInteractions(
         if (onComment != null) {
             InteractionButton(
                 icon = Icons.Default.Chat,
-                label = "Chat",
+                label = if (commentCount > 0) commentCount.toString() else "Chat",
                 onClick = onComment
             )
         }

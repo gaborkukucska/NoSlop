@@ -130,9 +130,25 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 82. **Robust Source Toggling**: Rewrote the feed source toggle logic to use SQL `INSERT OR REPLACE` operations. This ensures that manually enabling a new source securely commits it to the database regardless of its prior caching state.
 83. **Aggressive Feed Wiping**: Modified the `refreshFeeds()` pipeline to properly clear the in-memory feed cache (`_unifiedFeed.value = emptyList()`) and rigorously purge all unsaved RSS/API items from the local database (`clearUnsavedItems`) whenever preferences are changed. This guarantees the feed immediately reconstructs itself using exclusively the newest user parameters.
 84. **Smart Source Fallback**: Updated the API fetching logic (`syncApiFeeds()`) to determine API sources strictly on a per-category basis. If a user selects a category but explicitly toggles *no* API sources for it, the engine dynamically falls back to querying all built-in sources for that category. If the user explicitly selects *any* source within the category, the system strictly enforces the manual selection.
+85. **BIP39 Compliance**: Hardened `MnemonicGenerator.kt` with the full 2048-word official BIP39 English wordlist, ensuring industry-standard mnemonic recovery phrases.
+86. **Secure Backup IV**: Refactored `BackupManager.kt` to use a cryptographically secure random Initialization Vector (IV) for AES-256-CBC encryption, prepending it to the backup file to ensure proper decryption on any device.
+87. **Data Layer Refactoring**: Decoupled `NoSlopRepository.kt` by extracting complex mesh packet processing into a dedicated `MeshPacketHandler.kt`, reducing repository size and improving logic isolation.
+88. **UI Componentization**: Extracted 1,500+ lines from the oversized `MainScreen.kt` into atomic, reusable components (VideoPlayer, AudioPlayer) and specialized tab screens (DMsTab, SettingsTab, LogsViewer, ApiKeysScreen) for better modularity.
+89. **Identity Security Awareness**: Enhanced `IdentityRepository` to detect hardware-backed keystore availability and implemented a high-visibility UI security warning in Settings for users on devices with restricted encryption capabilities.
+
+## Technical Debt & Security Improvements (from March 2025 Audit)
+- **God Files Refactoring**: `MainScreen.kt` (2,889 lines) and `NoSlopRepository.kt` (1,061 lines) need decomposition. Split UI into atomic components (ArticleReader, VideoPlayer, etc.) and move mesh packet logic from Repository to a dedicated `MeshPacketHandler`.
+- **Identity Security**: Currently, `IdentityRepository` silently falls back to plaintext `SharedPreferences` if `EncryptedSharedPreferences` fails. Needs a UI-level warning for users if hardware-backed encryption is unavailable.
+- **Tor Control Security**: `ControlPort` currently uses `CookieAuthentication 0`. Plan to transition to `CookieAuthentication 1` for better process-level isolation on rooted devices.
+- **Dependency Alignment**: 
+    - Align `okhttp` (4.10.0) with `okhttp-dnsoverhttps` (4.12.0).
+    - Migrate from `accompanist-permissions` to native Compose permission APIs.
+    - Consider upgrading `security-crypto` to stable `1.0.0` if alpha features are no longer strictly required.
+- **Test Coverage**: Critical need for unit tests in `CryptoService` (sign/verify/encryption) and `GossipService` (firewall/rate-limiting logic).
 
 ## Pending Implementations & Limitations
 - **Audio Playback Failure**: Audio content pieces currently do not play despite proxy and codec updates; requires investigation into direct file extraction vs. landing pages.
+- **Clearnet Feed Starvation**: Reported issue where only a subset of selected content sources are actually loaded into the unified feed, even when all interests are enabled during onboarding. Requires investigation into the `refreshFeeds()` pipeline and database insertion limits.
 - **Clearnet Video Compatibility**: Currently, only Archive.org and YouTube (via WebView) playback is verified; other clearnet video sources may still trigger format errors.
 - ~~**Article Pagination Gestures**~~: ✅ Resolved in milestone 57 (tap-to-turn zones).
 - ~~**Zoomable Media**~~: ✅ Resolved in milestone 58 (bounds-clamped zoom + double-tap reset).

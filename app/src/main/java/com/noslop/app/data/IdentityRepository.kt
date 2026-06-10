@@ -114,4 +114,12 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         appSettingDao.insertSetting(AppSetting("local_onion", address))
         Logger.info(TAG, "Onion address dynamically updated in Room: $address")
     }
+
+    /**
+     * Checks if encryption is active.
+     * Returns true if using EncryptedSharedPreferences, false if using fallback plaintext SharedPreferences.
+     */
+    fun isEncryptionActive(): Boolean {
+        return prefs.javaClass.name.contains("EncryptedSharedPreferences")
+    }
 }

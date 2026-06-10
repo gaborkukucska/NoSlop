@@ -14,9 +14,10 @@ import androidx.room.RoomDatabase
         MeshPost::class,
         ChatMessage::class,
         AppSetting::class,
-        MeshComment::class
+        MeshComment::class,
+        MeshReaction::class
     ],
-    version = 12,
+    version = 14,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -27,6 +28,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun appSettingDao(): AppSettingDao
     abstract fun commentDao(): CommentDao
+    abstract fun reactionDao(): ReactionDao
 
     companion object {
         @Volatile

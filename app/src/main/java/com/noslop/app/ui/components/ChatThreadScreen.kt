@@ -1,0 +1,218 @@
+package com.noslop.app.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.noslop.app.crypto.CryptoService
+import com.noslop.app.data.ChatMessage
+import com.noslop.app.data.Peer
+import com.noslop.app.mesh.MediaMetadata
+import com.noslop.app.ui.NoSlopViewModel
+import com.noslop.app.ui.theme.*
+import java.text.SimpleDateFormat
+import java.util.*
+
+@Composable
+fun ChatThreadScreen(
+    peer: Peer,
+    messages: List<ChatMessage>,
+    localKeys: CryptoService.IdentityKeys?,
+    viewModel: NoSlopViewModel,
+    onSendMessage: (String, MediaMetadata?) -> Unit,
+    onBack: () -> Unit
+) {
+    var rawText by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
+        // Thread header
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SurfaceDark)
+                .padding(horizontal = 8.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, contentDescription = "Close chat thread", tint = AccentGreen)
+            }
+
+            Icon(
+                imageVector = Icons.Default.Lock,
+                contentDescription = null,
+                tint = AccentGreen,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Column {
+                Text(
+                    text = "${peer.handle}.${peer.tripcode}",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    color = TextLight
+                )
+                Text(
+                    text = "Direct E2EE session with ECDH agreement active",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AccentGreen
+                )
+            }
+        }
+
+                // Message Thread list
+                val downloadProgress by viewModel.downloadProgress.collectAsState()
+                
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(messages) { msg ->
+                        val isSelf = msg.senderPub != peer.publicKeyB64
+                        val decryptedText = remember(msg.ciphertext, localKeys) {
+                            if (localKeys != null) {
+                                val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
+                                CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
+                            } else {
+                                msg.ciphertext
+                            }
+                        }
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelf) AccentGreen else SurfaceDark)
+                                    .padding(12.dp)
+                                    .widthIn(max = 260.dp)
+                            ) {
+                                Column {
+                                    if (decryptedText.isNotEmpty()) {
+                                        Text(
+                                            text = decryptedText, 
+                                            color = if (isSelf) PrimaryBlack else TextLight,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+
+                                    msg.mediaId?.let { mid ->
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        val progress = downloadProgress[mid] ?: 0
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(60.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(PrimaryBlack.copy(alpha = 0.3f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(
+                                                    if (progress == 100) Icons.Default.CheckCircle else Icons.Default.PlayArrow, 
+                                                    contentDescription = null, 
+                                                    tint = if (isSelf) PrimaryBlack else AccentGreen
+                                                )
+                                                if (progress in 1..99) {
+                                                    LinearProgressIndicator(
+                                                        progress = progress / 100f,
+                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                                        color = if (isSelf) PrimaryBlack else AccentGreen
+                                                    )
+                                                }
+                                                Text(
+                                                    if (progress == 100) "Media Ready" else if (progress > 0) "Downloading $progress%" else "Tap to Download",
+                                                    fontSize = 10.sp,
+                                                    color = if (isSelf) PrimaryBlack else TextMuted
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
+                                        color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+        // Chat Input box
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(SurfaceDark)
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            var attachedMediaId by remember { mutableStateOf<String?>(null) }
+            
+            IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
+                Icon(
+                    if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.Add, 
+                    contentDescription = "Attach", 
+                    tint = if (attachedMediaId != null) AccentGreen else TextMuted
+                )
+            }
+            
+            OutlinedTextField(
+                value = rawText,
+                onValueChange = { rawText = it },
+                placeholder = { Text("Message...") },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentGreen,
+                    unfocusedBorderColor = BorderSubtle,
+                    focusedTextColor = TextLight,
+                    unfocusedTextColor = TextLight
+                ),
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = {
+                    val mediaMetadata = attachedMediaId?.let { id ->
+                        MediaMetadata(
+                            id = id,
+                            type = "image",
+                            mimeType = "image/jpeg",
+                            size = 512 * 1024,
+                            chunkCount = 2,
+                            originNode = localKeys?.onionAddress,
+                            ownerId = localKeys?.publicKeyB64
+                        )
+                    }
+                    onSendMessage(rawText, mediaMetadata)
+                    rawText = ""
+                    attachedMediaId = null
+                },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AccentGreen)
+            ) {
+                Icon(Icons.Default.Send, contentDescription = "Send", tint = PrimaryBlack)
+            }
+        }
+    }
+}

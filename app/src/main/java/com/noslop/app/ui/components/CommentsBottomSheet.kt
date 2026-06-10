@@ -1,0 +1,134 @@
+package com.noslop.app.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.noslop.app.data.MeshComment
+import com.noslop.app.ui.NoSlopViewModel
+import com.noslop.app.ui.theme.*
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CommentsBottomSheet(
+    postId: String,
+    viewModel: NoSlopViewModel,
+    onDismiss: () -> Unit
+) {
+    val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
+    var commentText by remember { mutableStateOf("") }
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = SurfaceDark,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.8f)
+                .padding(16.dp)
+        ) {
+            Text(
+                "Mesh Comments",
+                style = MaterialTheme.typography.titleLarge,
+                color = TextLight,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (comments.isEmpty()) {
+                    item {
+                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                            Text("No comments yet. Be the first to gossip!", color = TextMuted)
+                        }
+                    }
+                }
+                items(comments) { comment ->
+                    CommentItem(comment)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = commentText,
+                    onValueChange = { commentText = it },
+                    placeholder = { Text("Add a comment...") },
+                    modifier = Modifier.weight(1f),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen,
+                        unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight
+                    )
+                )
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                IconButton(
+                    onClick = {
+                        viewModel.composeAndBroadcastComment(postId, commentText)
+                        commentText = ""
+                    },
+                    enabled = commentText.isNotBlank(),
+                    modifier = Modifier.background(AccentGreen, CircleShape)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CommentItem(comment: MeshComment) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PrimaryBlack.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                comment.authorHandle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(comment.timestamp),
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMuted
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            comment.content,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextLight
+        )
+    }
+}

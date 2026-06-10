@@ -123,6 +123,29 @@ interface CommentDao {
 }
 
 @Dao
+interface ReactionDao {
+    data class ReactionCount(
+        val reactionType: String,
+        val count: Int
+    )
+
+    @Query("SELECT * FROM mesh_reactions WHERE postId = :postId ORDER BY timestamp ASC")
+    fun getReactionsForPost(postId: String): kotlinx.coroutines.flow.Flow<List<MeshReaction>>
+
+    @Query("SELECT reactionType, COUNT(*) as count FROM mesh_reactions WHERE postId = :postId GROUP BY reactionType")
+    fun getReactionSummaryForPost(postId: String): kotlinx.coroutines.flow.Flow<List<ReactionCount>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReaction(reaction: MeshReaction)
+
+    @Query("SELECT COUNT(*) FROM mesh_reactions WHERE postId = :postId")
+    suspend fun getReactionCountForPost(postId: String): Int
+
+    @Query("DELETE FROM mesh_reactions WHERE postId = :postId")
+    suspend fun deleteReactionsForPost(postId: String)
+}
+
+@Dao
 interface AppSettingDao {
     @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
     suspend fun getSetting(key: String): String?
