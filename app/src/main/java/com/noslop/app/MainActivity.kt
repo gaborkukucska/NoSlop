@@ -26,6 +26,10 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
 
+                LaunchedEffect(isOnboarded) {
+                    viewModel.startTor()
+                }
+
                 if (isOnboarded) {
                     MainScreen(viewModel = viewModel)
                 } else {
@@ -43,7 +47,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (this::viewModel.isInitialized) {
-            viewModel.startTor()
             viewModel.refreshTorStatus()
         }
     }

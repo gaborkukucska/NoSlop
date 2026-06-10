@@ -890,6 +890,10 @@ fun UnifiedFeedTab(
             is UnifiedItem.Feed -> unified.item.url ?: ""
             is UnifiedItem.Mesh -> ""
         }
+        val thumbUrl = when(unified) {
+            is UnifiedItem.Feed -> unified.item.thumbnailUrl
+            is UnifiedItem.Mesh -> null
+        }
 
         AlertDialog(
             onDismissRequest = { showShareDialog = null },
@@ -914,7 +918,8 @@ fun UnifiedFeedTab(
                         viewModel.composeAndBroadcastPost(
                             content = shareText,
                             clearnetUrl = if (url.isNotEmpty()) url else null,
-                            clearnetTitle = if (url.isNotEmpty()) title else null
+                            clearnetTitle = if (url.isNotEmpty()) title else null,
+                            clearnetThumbnailUrl = thumbUrl
                         )
                         showShareDialog = null
                     },
@@ -1136,15 +1141,50 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
         val reactions by (viewModel?.getReactionsForPost(anchorId) ?: emptyFlow()).collectAsState(initial = emptyList())
         val comments by (viewModel?.getCommentsForPost(anchorId) ?: emptyFlow()).collectAsState(initial = emptyList())
 
-        OverlayInteractions(
-            isMesh = false,
-            onLike = { viewModel?.reactToFeedItem(item) },
-            onShare = onShareToMesh,
-            onComment = { showComments = true },
-            likeCount = reactions.size,
-            commentCount = comments.size,
-            modifier = Modifier.align(Alignment.CenterEnd)
-        )
+        // Content Health Logic
+        val upvotes = reactions.count { it.reactionType == "upvote" || it.reactionType == "like" }
+        val downvotes = reactions.count { it.reactionType == "downvote" }
+        val angryReactions = reactions.count { it.reactionType == "angry" }
+        val totalSignals = reactions.size
+        val negativeSignals = downvotes + angryReactions
+        val negativeRatio = if (totalSignals > 0) negativeSignals.toFloat() / totalSignals else 0f
+
+        var isHardBlocked = false
+        var isSoftBlocked = false
+        if (totalSignals >= 5) {
+            if (negativeRatio > 0.95f) isHardBlocked = true
+            else if (negativeRatio > 0.66f) isSoftBlocked = true
+        }
+
+        var revealOverride by remember { mutableStateOf(false) }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            OverlayInteractions(
+                isMesh = false,
+                showLike = true,
+                showComment = true,
+                onLike = {
+                    viewModel?.reactToFeedItem(item, "like")
+                },
+                onReaction = { type ->
+                    viewModel?.reactToFeedItem(item, type)
+                },
+                onShare = onShareToMesh,
+                onComment = { showComments = true },
+                reactionSummary = reactions.groupBy { it.reactionType }.mapValues { it.value.size },
+                commentCount = comments.size,
+                netScore = upvotes - downvotes,
+                isBlocked = isHardBlocked,
+                isFlagged = isSoftBlocked,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+
+            ContentHealthOverlay(
+                isBlocked = isHardBlocked,
+                isSoftBlocked = isSoftBlocked && !revealOverride,
+                onReveal = { revealOverride = true }
+            )
+        }
 
         if (showComments && viewModel != null) {
             CommentsBottomSheet(
@@ -1270,18 +1310,15 @@ fun FullScreenMeshCard(
 
                 if (post.clearnetUrl != null) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    Button(
+                    ClearnetAttachment(
+                        title = post.clearnetTitle ?: "Shared Link",
+                        thumbnailUrl = post.clearnetThumbnailUrl,
+                        author = null,
                         onClick = {
                             viewModel?.injectMeshClearnetToFeed(post)
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen.copy(alpha = 0.2f), contentColor = AccentGreen),
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("View on Clearnet", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
+                        modifier = Modifier.padding(horizontal = 0.dp) // already padded by parent
+                    )
                 }
             }
         }
@@ -1290,25 +1327,48 @@ fun FullScreenMeshCard(
         val reactions by (viewModel?.getReactionsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
         val comments by (viewModel?.getCommentsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
 
-        OverlayInteractions(
-            isMesh = true,
-            onLike = { 
-                // We can reuse reactToFeedItem for mesh posts too if they have a URL
-                viewModel?.reactToFeedItem(FeedItem(
-                    id = post.id,
-                    sourceId = "mesh",
-                    title = post.content.take(50),
-                    url = post.clearnetUrl ?: "mesh://${post.authorPublicKeyB64}/${post.id}",
-                    author = post.authorHandle,
-                    publishedAt = post.timestamp
-                ))
-            },
-            onShare = onShareToMesh,
-            onComment = { showComments = true },
-            likeCount = reactions.size,
-            commentCount = comments.size,
-            modifier = Modifier.align(Alignment.CenterEnd)
-        )
+        // Content Health Logic
+        val upvotes = reactions.count { it.reactionType == "upvote" || it.reactionType == "like" }
+        val downvotes = reactions.count { it.reactionType == "downvote" }
+        val angryReactions = reactions.count { it.reactionType == "angry" }
+        val totalSignals = reactions.size
+        val negativeSignals = downvotes + angryReactions
+        val negativeRatio = if (totalSignals > 0) negativeSignals.toFloat() / totalSignals else 0f
+
+        var isHardBlocked = false
+        var isSoftBlocked = false
+        if (totalSignals >= 5) {
+            if (negativeRatio > 0.95f) isHardBlocked = true
+            else if (negativeRatio > 0.66f) isSoftBlocked = true
+        }
+
+        var revealOverride by remember { mutableStateOf(false) }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            OverlayInteractions(
+                isMesh = true,
+                onLike = {
+                    viewModel?.reactToMeshPost(post.id, "like")
+                },
+                onReaction = { type ->
+                    viewModel?.reactToMeshPost(post.id, type)
+                },
+                onShare = onShareToMesh,
+                onComment = { showComments = true },
+                reactionSummary = reactions.groupBy { it.reactionType }.mapValues { it.value.size },
+                commentCount = comments.size,
+                netScore = upvotes - downvotes,
+                isBlocked = isHardBlocked,
+                isFlagged = isSoftBlocked,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+
+            ContentHealthOverlay(
+                isBlocked = isHardBlocked,
+                isSoftBlocked = isSoftBlocked && !revealOverride,
+                onReveal = { revealOverride = true }
+            )
+        }
     }
 
     if (showComments && viewModel != null) {

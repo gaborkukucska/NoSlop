@@ -83,6 +83,20 @@ All packets broadcast or sent over DM are wrapped in this JSON container.
 
 ---
 
+## REACTION
+**Type:** `REACTION`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `post_id` | String | Yes | ID of the post being reacted to |
+| `reaction_type` | String | Yes | Type of reaction (e.g. "like", "upvote", "downvote", "angry") |
+| `author_id` | String | Yes | Public key of the reactor |
+| `timestamp` | Long | Yes | Epoch timestamp |
+| `signature` | String | Yes | Ed25519 signature of the reaction payload |
+| `action` | String | No | "add" (default) or "remove" to toggle reaction |
+
+---
+
 ## SYNC_REQUEST
 **Type:** `SYNC_REQUEST`
 

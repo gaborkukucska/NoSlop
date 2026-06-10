@@ -116,7 +116,8 @@ class MeshPacketHandler(
                 mediaType = postPay.mediaMetadata?.type,
                 thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
                 clearnetUrl = postPay.clearnetUrl,
-                clearnetTitle = postPay.clearnetTitle
+                clearnetTitle = postPay.clearnetTitle,
+                clearnetThumbnailUrl = postPay.clearnetThumbnailUrl
             )
             postDao.insertPost(post)
             stored++
@@ -153,7 +154,8 @@ class MeshPacketHandler(
             privacy = postPay.privacy,
             thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
             clearnetUrl = postPay.clearnetUrl,
-            clearnetTitle = postPay.clearnetTitle
+            clearnetTitle = postPay.clearnetTitle,
+            clearnetThumbnailUrl = postPay.clearnetThumbnailUrl
         )
         postDao.insertPost(meshPost)
         
@@ -203,16 +205,23 @@ class MeshPacketHandler(
             return false
         }
 
-        val localReaction = com.noslop.app.data.MeshReaction(
-            id = "${payload.postId}_${payload.authorId}_${payload.reactionType}",
-            postId = payload.postId,
-            authorPublicKeyB64 = payload.authorId,
-            reactionType = payload.reactionType,
-            timestamp = payload.timestamp,
-            signature = payload.signature
-        )
-        reactionDao.insertReaction(localReaction)
-        Logger.info(TAG, "Received and saved mesh reaction: ${payload.reactionType} on ${payload.postId}")
+        val reactionId = "${payload.postId}_${payload.authorId}_${payload.reactionType}"
+
+        if (payload.action == "remove") {
+            reactionDao.deleteReactionById(reactionId)
+            Logger.info(TAG, "Removed mesh reaction: ${payload.reactionType} on ${payload.postId}")
+        } else {
+            val localReaction = com.noslop.app.data.MeshReaction(
+                id = reactionId,
+                postId = payload.postId,
+                authorPublicKeyB64 = payload.authorId,
+                reactionType = payload.reactionType,
+                timestamp = payload.timestamp,
+                signature = payload.signature
+            )
+            reactionDao.insertReaction(localReaction)
+            Logger.info(TAG, "Received and saved mesh reaction: ${payload.reactionType} on ${payload.postId}")
+        }
         return true
     }
 

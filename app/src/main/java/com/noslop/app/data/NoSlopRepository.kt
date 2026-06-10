@@ -463,6 +463,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         privacy: String = "public",
         clearnetUrl: String? = null,
         clearnetTitle: String? = null,
+        clearnetThumbnailUrl: String? = null,
         postIdOverride: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
@@ -486,7 +487,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             mediaId = mediaMetadata?.id,
             mediaMetadata = mediaMetadata,
             clearnetUrl = clearnetUrl,
-            clearnetTitle = clearnetTitle
+            clearnetTitle = clearnetTitle,
+            clearnetThumbnailUrl = clearnetThumbnailUrl
         )
 
         val gson = com.google.gson.Gson()
@@ -514,7 +516,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             privacy = privacy,
             thumbnailB64 = mediaMetadata?.thumbnailB64,
             clearnetUrl = clearnetUrl,
-            clearnetTitle = clearnetTitle
+            clearnetTitle = clearnetTitle,
+            clearnetThumbnailUrl = clearnetThumbnailUrl
         )
 
         postDao.insertPost(localPost)
@@ -763,49 +766,72 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         content: String,
         parentCommentId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        // ... (as before)
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val handle = getLocalHandle()
+        val timestamp = System.currentTimeMillis()
+        val id = UUID.randomUUID().toString()
+
+        val payload = "$postId|$id|$content|$timestamp"
+        val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
+
+        val commentData = com.noslop.app.mesh.CommentData(
+            id = id,
+            authorId = myKeys.publicKeyB64,
+            authorName = handle,
+            content = content,
+            timestamp = timestamp,
+            signature = signature
+        )
+
+        val commentPay = com.noslop.app.mesh.CommentPayload(
+            postId = postId,
+            comment = commentData,
+            parentCommentId = parentCommentId
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(commentPay),
+            signature = signature
+        )
+
+        val localComment = MeshComment(
+            id = id,
+            postId = postId,
+            authorPublicKeyB64 = myKeys.publicKeyB64,
+            authorHandle = handle,
+            content = content,
+            timestamp = timestamp,
+            signature = signature,
+            parentCommentId = parentCommentId
+        )
+
+        commentDao.insertComment(localComment)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
-    suspend fun reactToFeedItem(item: FeedItem) {
-        reactToFeedItemWithType(item, "like")
-    }
-
-    suspend fun reactToFeedItemWithType(item: FeedItem, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         
-        // 1. Derive deterministic Post ID for clearnet URL
-        val clearnetUrl = item.url ?: return@withContext false
-        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-        val hash = ByteArray(digest.digestSize)
-        val urlBytes = clearnetUrl.toByteArray()
-        digest.update(urlBytes, 0, urlBytes.size)
-        digest.doFinal(hash, 0)
-        val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
+        val reactionId = "${postId}_${myKeys.publicKeyB64}_$reactionType"
+        val existingReaction = reactionDao.getReactionById(reactionId)
+        val action = if (existingReaction != null) "remove" else "add"
 
-        // 2. Ensure anchor post exists locally and on mesh
-        val existingCount = postDao.hasPost(anchorId)
-        if (existingCount == 0) {
-            val shareText = "🔥 Social Interaction on: ${item.title}"
-            composeAndBroadcastPost(
-                content = shareText,
-                clearnetUrl = clearnetUrl,
-                clearnetTitle = item.title,
-                postIdOverride = anchorId
-            )
-        }
-
-        // 3. Create and broadcast Reaction
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$anchorId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = "$postId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.ReactionPayload(
-            postId = anchorId,
+            postId = postId,
             reactionType = reactionType,
             authorId = myKeys.publicKeyB64,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            action = action
         )
 
         val packet = com.noslop.app.mesh.NetworkPacket(
@@ -817,17 +843,50 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             signature = signature
         )
 
-        val localReaction = MeshReaction(
-            id = "${anchorId}_${myKeys.publicKeyB64}_$reactionType",
-            postId = anchorId,
-            authorPublicKeyB64 = myKeys.publicKeyB64,
-            reactionType = reactionType,
-            timestamp = timestamp,
-            signature = signature
-        )
+        if (action == "remove") {
+            reactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = MeshReaction(
+                id = reactionId,
+                postId = postId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                reactionType = reactionType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            reactionDao.insertReaction(localReaction)
+        }
 
-        reactionDao.insertReaction(localReaction)
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
+    }
+
+    suspend fun reactToFeedItem(item: FeedItem) {
+        reactToFeedItemWithType(item, "like")
+    }
+
+    suspend fun reactToFeedItemWithType(item: FeedItem, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+        // Derive deterministic Post ID for clearnet URL
+        val clearnetUrl = item.url ?: return@withContext false
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val hash = ByteArray(digest.digestSize)
+        val urlBytes = clearnetUrl.toByteArray()
+        digest.update(urlBytes, 0, urlBytes.size)
+        digest.doFinal(hash, 0)
+        val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
+
+        // Ensure anchor post exists locally and on mesh
+        val existingCount = postDao.hasPost(anchorId)
+        if (existingCount == 0) {
+            composeAndBroadcastPost(
+                content = "🔥 Shared Clearnet Post: ${item.title}",
+                clearnetUrl = clearnetUrl,
+                clearnetTitle = item.title,
+                clearnetThumbnailUrl = item.thumbnailUrl,
+                postIdOverride = anchorId
+            )
+        }
+
+        reactToMeshPost(anchorId, reactionType)
     }
 }

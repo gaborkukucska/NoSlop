@@ -72,6 +72,13 @@ object TorService {
      * be running on 9050.
      */
     fun startTor(context: Context, privateKeyB64: String? = null) {
+        if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
+            Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
+            // Still update the key in case it changed (e.g. after onboarding)
+            currentPrivateKeyB64 = privateKeyB64
+            return
+        }
+
         Logger.info(TAG, "Starting embedded Tor daemon via native Intent...")
         _torState.value = TorState.STARTING
         currentPrivateKeyB64 = privateKeyB64
@@ -226,8 +233,8 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(15, TimeUnit.SECONDS)
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
                     .build()
                 val request = Request.Builder()
                     .url("https://check.torproject.org/")

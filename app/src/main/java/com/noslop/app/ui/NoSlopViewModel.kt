@@ -590,10 +590,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null) {
+    fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null, clearnetThumbnailUrl: String? = null) {
         if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return
         viewModelScope.launch {
-            repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle)
+            repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl)
         }
     }
 
@@ -659,6 +659,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch { repository.reactToFeedItemWithType(item, reactionType) }
+    }
+
+    fun reactToMeshPost(postId: String, reactionType: String = "like") {
+        viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
     }
 
     fun getReactionAnchorIdForUrl(url: String): String {

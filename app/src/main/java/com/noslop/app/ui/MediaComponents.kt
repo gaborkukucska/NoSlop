@@ -1,7 +1,11 @@
 package com.noslop.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -33,15 +37,18 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
 import com.noslop.app.ui.theme.AccentGreen
+import com.noslop.app.ui.theme.DestructiveRed
 import com.noslop.app.ui.theme.PrimaryBlack
 import com.noslop.app.ui.theme.SurfaceDark
 import com.noslop.app.ui.theme.TextLight
+import com.noslop.app.ui.theme.BorderSubtle
 import com.noslop.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloat
@@ -333,53 +340,192 @@ private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
 fun OverlayInteractions(
     modifier: Modifier = Modifier,
     isMesh: Boolean = false,
+    showLike: Boolean = true,
+    showComment: Boolean = true,
     onLike: () -> Unit,
+    onReaction: (String) -> Unit = {},
     onShare: () -> Unit,
     onComment: (() -> Unit)? = null,
-    likeCount: Int = 0,
-    commentCount: Int = 0
+    reactionSummary: Map<String, Int> = emptyMap(),
+    commentCount: Int = 0,
+    netScore: Int? = null,
+    isFlagged: Boolean = false,
+    isBlocked: Boolean = false
 ) {
+    val totalLikes = reactionSummary.values.sum()
+    var showReactionPicker by remember { mutableStateOf(false) }
+
     Column(
         modifier = modifier
             .padding(end = 16.dp, bottom = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        InteractionButton(
-            icon = Icons.Default.Favorite,
-            label = if (likeCount > 0) likeCount.toString() else "Like",
-            onClick = onLike
-        )
-        
-        InteractionButton(
-            icon = Icons.Default.Share,
-            label = "Share",
-            onClick = onShare
-        )
+        if (!isBlocked) {
+            if (showLike) {
+                Box {
+                    InteractionButton(
+                        icon = Icons.Default.Favorite,
+                        label = netScore?.toString() ?: (if (totalLikes > 0) totalLikes.toString() else "Like"),
+                        onClick = onLike,
+                        onLongClick = { showReactionPicker = true }
+                    )
 
-        if (onComment != null) {
+                    if (showReactionPicker) {
+                        ReactionPicker(
+                            onReactionSelect = {
+                                onReaction(it)
+                                showReactionPicker = false
+                            },
+                            onDismiss = { showReactionPicker = false }
+                        )
+                    }
+                }
+            }
+
             InteractionButton(
-                icon = Icons.Default.Chat,
-                label = if (commentCount > 0) commentCount.toString() else "Chat",
-                onClick = onComment
+                icon = Icons.Default.Share,
+                label = "Share",
+                onClick = onShare
+            )
+
+            if (showComment && onComment != null) {
+                InteractionButton(
+                    icon = Icons.Default.Chat,
+                    label = if (commentCount > 0) commentCount.toString() else "Chat",
+                    onClick = onComment
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ClearnetAttachment(
+    title: String,
+    thumbnailUrl: String?,
+    author: String?,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        color = SurfaceDark.copy(alpha = 0.5f),
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, BorderSubtle),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (thumbnailUrl != null) {
+                AsyncImage(
+                    model = thumbnailUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(60.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+            }
+            
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextLight,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold
+                )
+                if (author != null) {
+                    Text(
+                        text = author,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AccentGreen
+                    )
+                }
+            }
+            
+            Icon(
+                Icons.Default.OpenInNew,
+                contentDescription = "Open",
+                tint = TextMuted,
+                modifier = Modifier.size(18.dp).padding(horizontal = 4.dp)
             )
         }
     }
 }
 
 @Composable
+fun ReactionPicker(
+    onReactionSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val reactions = listOf(
+        "like" to "❤️",
+        "upvote" to "👍",
+        "downvote" to "👎",
+        "laugh" to "😂",
+        "wow" to "😮",
+        "sad" to "😢",
+        "fire" to "🔥",
+        "angry" to "😡"
+    )
+
+    androidx.compose.ui.window.Popup(
+        alignment = Alignment.CenterEnd,
+        onDismissRequest = onDismiss
+    ) {
+        Surface(
+            color = SurfaceDark.copy(alpha = 0.9f),
+            shape = RoundedCornerShape(24.dp),
+            border = BorderStroke(1.dp, BorderSubtle),
+            modifier = Modifier.padding(end = 64.dp)
+        ) {
+            Row(
+                modifier = Modifier.padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                reactions.forEach { (type, emoji) ->
+                    Text(
+                        text = emoji,
+                        fontSize = 24.sp,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onReactionSelect(type) }
+                            .padding(8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
 private fun InteractionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        IconButton(
-            onClick = onClick,
+        Box(
             modifier = Modifier
                 .size(50.dp)
                 .clip(CircleShape)
                 .background(SurfaceDark.copy(alpha = 0.6f))
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick
+                ),
+            contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
@@ -397,6 +543,65 @@ private fun InteractionButton(
     }
 }
 
+@Composable
+fun ContentHealthOverlay(
+    isBlocked: Boolean,
+    isSoftBlocked: Boolean,
+    onReveal: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (!isBlocked && !isSoftBlocked) return
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                imageVector = if (isBlocked) Icons.Default.Shield else Icons.Default.Warning,
+                contentDescription = null,
+                tint = if (isBlocked) DestructiveRed else Color.Yellow,
+                modifier = Modifier.size(64.dp)
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = if (isBlocked) "Content Blocked" else "Community Flagged",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            Text(
+                text = if (isBlocked) 
+                    "This broadcast has been community hidden (>95% negative feedback)." 
+                    else "This content has received significantly negative feedback (2/3+).",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextMuted,
+                textAlign = TextAlign.Center
+            )
+            
+            if (isSoftBlocked && !isBlocked) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onReveal,
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, BorderSubtle)
+                ) {
+                    Text("Temporarily View")
+                }
+            }
+        }
+    }
+}
 @Composable
 fun LoadingShimmer(modifier: Modifier = Modifier) {
     val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")

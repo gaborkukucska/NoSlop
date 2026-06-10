@@ -138,6 +138,12 @@ interface ReactionDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReaction(reaction: MeshReaction)
 
+    @Query("SELECT * FROM mesh_reactions WHERE id = :id LIMIT 1")
+    suspend fun getReactionById(id: String): MeshReaction?
+
+    @Query("DELETE FROM mesh_reactions WHERE id = :id")
+    suspend fun deleteReactionById(id: String)
+
     @Query("SELECT COUNT(*) FROM mesh_reactions WHERE postId = :postId")
     suspend fun getReactionCountForPost(postId: String): Int
 

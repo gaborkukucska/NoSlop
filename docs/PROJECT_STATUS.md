@@ -136,6 +136,17 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 88. **UI Componentization**: Extracted 1,500+ lines from the oversized `MainScreen.kt` into atomic, reusable components (VideoPlayer, AudioPlayer) and specialized tab screens (DMsTab, SettingsTab, LogsViewer, ApiKeysScreen) for better modularity.
 89. **Identity Security Awareness**: Enhanced `IdentityRepository` to detect hardware-backed keystore availability and implemented a high-visibility UI security warning in Settings for users on devices with restricted encryption capabilities.
 
+90. **Enhanced Reactions and Content Health (gChat Alignment)**:
+    - **Expanded Reactions**: Support for ❤️, 😂, 😮, 😢, 😡, 🔥, 👍, 👎.
+    - **Net Score Calculation**: Mesh posts and shared clearnet content now display a live Net Score (Upvotes - Downvotes).
+    - **Content Health Moderation**: Implemented gChat-style automatic moderation. Content with >66% negative signals (downvotes + 😡) is soft-blocked with a "Community Flagged" overlay. Content with >95% negative signals (min 5 total) is hard-blocked.
+    - **Reaction Toggling**: Users can now add/remove reactions by clicking the same emoji again, with full mesh synchronization via the `action: "remove"` packet field.
+    - **Clearnet-to-Mesh Bridge**: Clearnet feed items now correctly bind to deterministic mesh anchor posts based on SHA3-256 URL hashes, unifying mesh engagement (comments, votes) across all nodes.
+    - **Interaction Isolation**: Removed Like/Comment buttons from clearnet feed items to drive engagement toward shared mesh broadcasts.
+    - **Rich Clearnet Previews**: Shared clearnet links now include a `clearnet_thumbnail_url` for high-fidelity visual previews within the mesh social layer.
+
+91. **Tor Establishment Stability**: Resolved an issue where Tor would flap/restart on every `onResume` call in `MainActivity`. Implementation is now idempotent via `TorService.startTor`.
+
 ## Technical Debt & Security Improvements (from March 2025 Audit)
 - **God Files Refactoring**: `MainScreen.kt` (2,889 lines) and `NoSlopRepository.kt` (1,061 lines) need decomposition. Split UI into atomic components (ArticleReader, VideoPlayer, etc.) and move mesh packet logic from Repository to a dedicated `MeshPacketHandler`.
 - **Identity Security**: Currently, `IdentityRepository` silently falls back to plaintext `SharedPreferences` if `EncryptedSharedPreferences` fails. Needs a UI-level warning for users if hardware-backed encryption is unavailable.

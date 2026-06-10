@@ -71,7 +71,8 @@ data class MeshPost(
     val privacy: String = "public", // "public", "friends"
     val thumbnailB64: String? = null,
     val clearnetUrl: String? = null,
-    val clearnetTitle: String? = null
+    val clearnetTitle: String? = null,
+    val clearnetThumbnailUrl: String? = null
 )
 
 @Entity(

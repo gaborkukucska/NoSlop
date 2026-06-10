@@ -25,7 +25,8 @@ data class PostPayload(
     @SerializedName("media_id") val mediaId: String? = null,
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
     @SerializedName("clearnet_url") val clearnetUrl: String? = null,
-    @SerializedName("clearnet_title") val clearnetTitle: String? = null
+    @SerializedName("clearnet_title") val clearnetTitle: String? = null,
+    @SerializedName("clearnet_thumbnail_url") val clearnetThumbnailUrl: String? = null
 )
 
 data class CommentPayload(
@@ -105,10 +106,11 @@ data class PeerHandshakePayload(
 
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
-    @SerializedName("reaction_type") val reactionType: String, // e.g., "like"
+    @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
     @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    val action: String = "add" // "add" or "remove"
 )
 
 
