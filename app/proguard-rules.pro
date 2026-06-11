@@ -16,6 +16,8 @@
 # tor-android + jtorctl + netcipher — required for embedded Tor daemon
 -keep class net.freehaven.tor.control.** { *; }
 -keep class org.torproject.android.** { *; }
+-keep class org.torproject.jni.** { *; }
+-keep class info.guardianproject.** { *; }
 -keep class info.guardianproject.netcipher.** { *; }
 -dontwarn net.freehaven.tor.control.**
 -dontwarn org.torproject.android.**
