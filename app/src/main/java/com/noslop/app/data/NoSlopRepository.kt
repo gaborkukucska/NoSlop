@@ -110,6 +110,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     fun isEncryptionActive(): Boolean = identityRepository.isEncryptionActive()
+    
+    val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
 
     // --- Media Settings ---
     suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {

@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Face
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,6 +32,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     val currentProfile by viewModel.userProfile.collectAsState()
     val currentNegativeKeywords by viewModel.negativeKeywords.collectAsState()
     val currentLanguage by viewModel.languagePreference.collectAsState()
+    val isUsingInsecureStorage by viewModel.isUsingInsecureStorage.collectAsState()
 
     var displayName by remember { mutableStateOf(currentProfile.displayName) }
     var bio by remember { mutableStateOf(currentProfile.bio) }
@@ -74,6 +76,26 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             modifier = Modifier.weight(1f).padding(horizontal = 16.dp),
             contentPadding = PaddingValues(vertical = 16.dp)
         ) {
+            if (isUsingInsecureStorage) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.15f)),
+                        border = BorderStroke(1.dp, DestructiveRed)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = DestructiveRed, modifier = Modifier.size(32.dp))
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("SECURITY WARNING", color = DestructiveRed, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Hardware-backed Keystore is unavailable on this device. Your identity and private keys are currently stored in PLAINTEXT. Do not use this device for sensitive communication.", color = TextLight, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+
             // ────────────────── PROFILE ──────────────────
             item {
                 Box(

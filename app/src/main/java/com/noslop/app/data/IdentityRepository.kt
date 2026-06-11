@@ -21,20 +21,26 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
 
     private val TAG = "IDENTITY_REPO"
 
+    val isUsingInsecureStorage = kotlinx.coroutines.flow.MutableStateFlow(false)
+
     // EncryptedSharedPreferences backed by Android Keystore master key
-    // Throws exception if hardware Keystore is unavailable (emulator/restricted devices)
-    private val prefs: android.content.SharedPreferences = EncryptedSharedPreferences.create(
-        context,
-        "noslop_identity_secure",
-        MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build(),
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
-    
-    init {
-        Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
+    // Falls back to plaintext SharedPreferences if hardware Keystore is unavailable
+    private val prefs: android.content.SharedPreferences = try {
+        EncryptedSharedPreferences.create(
+            context,
+            "noslop_identity_secure",
+            MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build(),
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        ).also {
+            Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
+        }
+    } catch (e: Exception) {
+        Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to plaintext: ${e.message}")
+        isUsingInsecureStorage.value = true
+        context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
     }
 
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {

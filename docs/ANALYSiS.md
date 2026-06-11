@@ -45,13 +45,9 @@ The architecture is broadly sensible and the separation of concerns is good for 
 
 **3. The mnemonic wordlist is truncated.** `MnemonicGenerator.kt` has an internal comment acknowledging it's not the full BIP39 2048-word list — it's somewhere around 700–800 words. This means generated mnemonics are not BIP39-compliant and cannot be recovered in any other BIP39-compatible wallet or tool. For a recovery mechanism this is a real correctness concern, not just a polish issue.
 
-**4. Backup uses a static zero IV.** In `BackupManager.exportData()`:
-```kotlin
-val iv = ByteArray(16) // In production, use random IV and prepend it to the file
-```
-The comment acknowledges the problem. A zero IV with AES-CBC means two backups encrypted from the same mnemonic will have identical first blocks, which is a cryptographic weakness. The fix is one line — `SecureRandom().nextBytes(iv)` — and it already reads the IV back correctly on import.
+**4. Backup uses a static zero IV.** ~~In `BackupManager.exportData()`~~ ✅ **RESOLVED**: Now generates a cryptographically secure random IV and prepends it properly.
 
-**5. Encrypted prefs fallback to plaintext.** In `IdentityRepository`, if `EncryptedSharedPreferences` init fails, it silently falls back to a plain `SharedPreferences` file. This protects against crashes on emulators but means private keys could be stored unencrypted on a real device if the Keystore is unavailable, without the user knowing.
+**5. Encrypted prefs fallback to plaintext.** ~~In `IdentityRepository`, if `EncryptedSharedPreferences` init fails, it silently falls back to a plain `SharedPreferences` file.~~ ✅ **RESOLVED**: A fallback still occurs for older devices, but it now emits an `isUsingInsecureStorage` flag which immediately flags the user with a destructive red UI banner in the app.
 
 **6. `ControlPort` has no authentication in production.** `TorService` writes `CookieAuthentication 0` to the `torrc`, meaning any process on the device that can reach `127.0.0.1:9051` can issue Tor control commands. On a non-rooted device this is usually fine, but it's worth noting.
 

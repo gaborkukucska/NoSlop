@@ -144,6 +144,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val languagePreference: StateFlow<String> = _languagePreference.asStateFlow()
 
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
+    val isUsingInsecureStorage = repository.isUsingInsecureStorage
 
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()

@@ -147,6 +147,11 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 
 91. **Tor Establishment Stability**: Resolved an issue where Tor would flap/restart on every `onResume` call in `MainActivity`. Implementation is now idempotent via `TorService.startTor`.
 
+149. **BackupManager Security Fix**: Corrected the AES-256-CBC IV generation to use cryptographically secure random bytes instead of a static array.
+150. **DNS Error Spam Resolution**: Added an empty favicon `<link>` tag to the HTML injected into `VideoPlayer.kt` and `AudioPlayer.kt`'s `WebView`.
+151. **Identity Security Warning**: Exposed `isUsingInsecureStorage` state flow and added a prominent SECURITY WARNING banner in `ContentPreferencesScreen.kt` to inform the user if their private keys are stored in plaintext.
+152. **Architectural Cleanup (God Component)**: Refactored `MainScreen.kt` by extracting `UnifiedFeedTab` and `FullScreenFeedCard`, drastically reducing UI monolith sizes.
+
 ## Technical Debt & Security Improvements (from March 2025 Audit)
 - **God Files Refactoring**: `MainScreen.kt` (2,889 lines) and `NoSlopRepository.kt` (1,061 lines) need decomposition. Split UI into atomic components (ArticleReader, VideoPlayer, etc.) and move mesh packet logic from Repository to a dedicated `MeshPacketHandler`.
 - **Identity Security**: Currently, `IdentityRepository` silently falls back to plaintext `SharedPreferences` if `EncryptedSharedPreferences` fails. Needs a UI-level warning for users if hardware-backed encryption is unavailable.
@@ -166,6 +171,18 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 - ~~**RSS Subscription Logic**~~: ✅ Resolved in milestone 59 (auto-discovery from HTML `<link>` tags).
 - **Feed Pre-loading & Hybrid Mixing**: The current feed loading mechanism needs a rethink to pre-buffer next items and intelligently mix aggregated (clearnet) and broadcasted (mesh) content without stalling or overloading Tor circuits.
 - **Comment Module UI**: The comment module currently lacks a user-facing way to actually post/leave a new comment within the unified feed UI.
+
+## Phase 2: Feature Expansion & Social Parity (Planned)
+
+Based on recent user testing, the following core features are planned for the next development cycle to bring NoSlop to parity with modern messaging apps (e.g., gChat):
+
+1. **Enhanced Reactions UI**: Migrate from long-press reactions to a single-tap inline reaction bar. Include individual reaction counters per post/comment. Extend reactions to Direct Messages.
+2. **Group Chats**: Implement decentralized group chat capabilities with dedicated mesh packet routing.
+3. **Mesh Comment Synchronization Fix**: Resolve the issue where users only see their own comments on the mesh. Requires an audit of the `COMMENT` packet broadcast and firewall ingestion logic.
+4. **Sophisticated Notification System**: Implement Android local notifications for DMs and mentions. Add in-app popups and UI markers for active engagement. Provide a toggle in settings to enable/disable notifications.
+5. **Semi-Active Background Mode**: Implement a Foreground Service to keep the mesh connection alive and Tor daemon running while the phone is locked, allowing notifications to arrive in real-time. Include auto-lock timeouts.
+6. **Biometric Security**: Integrate `androidx.biometric`. Add a logout/login mechanism and prompt the user for fingerprint/face unlock upon returning to the app after the auto-lock timeout.
+7. **Rich Clearnet Sharing Overhaul**: Re-design shared clearnet broadcasts to visually mirror native mesh broadcasts, pulling the thumbnail, title, and description from the clearnet feed metadata. Add a large "View Clearnet Content" button that seamlessly pulls the item into the live feed rather than a basic web intent.
 
 ## Clearnet-to-Mesh Broadcast System (Planned)
 
