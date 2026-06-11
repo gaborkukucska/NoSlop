@@ -21,25 +21,25 @@ android {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
     }
-
+    
     signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        create("release") {
+            storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
+            storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
+            keyAlias = project.property("NOSLOP_KEY_ALIAS") as String
+            keyPassword = project.property("NOSLOP_KEY_PASSWORD") as String
         }
     }
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")  // add this
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // No signingConfig here — sign manually for release
         }
         debug {
             isDebuggable = true
