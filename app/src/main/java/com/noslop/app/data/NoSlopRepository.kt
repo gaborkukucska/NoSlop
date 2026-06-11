@@ -527,31 +527,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         true
     }
 
-    private suspend fun propagatePostToPeers(post: MeshPost) {
-        val myKeys = getLocalIdentity() ?: return
-        val postPay = com.noslop.app.mesh.PostPayload(
-            id = post.id,
-            authorId = post.authorPublicKeyB64,
-            authorName = post.authorHandle,
-            authorPublicKey = post.authorPublicKeyB64,
-            originNode = myKeys.onionAddress,
-            content = post.content,
-            timestamp = post.timestamp,
-            signature = post.signature
-        )
-        val gson = com.google.gson.Gson()
-        val payloadJson = gson.toJsonTree(postPay)
-        val packet = com.noslop.app.mesh.NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 6,
-            senderId = myKeys.publicKeyB64,
-            type = "POST",
-            payload = payloadJson,
-            signature = post.signature
-        )
-        com.noslop.app.mesh.GossipService.broadcast(packet)
-    }
-
     suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
         meshPacketHandler.handleIncomingPacket(packet)
 

@@ -21,20 +21,20 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
 
     private val TAG = "IDENTITY_REPO"
 
-    // EncryptedSharedPreferences backed by Android Keystore master key with robust fallback to prevent startup/emulator crashes
-    private val prefs: android.content.SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
-            "noslop_identity_secure",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-    } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences init failed. Falling back to unencrypted SharedPreferences.", e.message)
-        context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+    // EncryptedSharedPreferences backed by Android Keystore master key
+    // Throws exception if hardware Keystore is unavailable (emulator/restricted devices)
+    private val prefs: android.content.SharedPreferences = EncryptedSharedPreferences.create(
+        context,
+        "noslop_identity_secure",
+        MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build(),
+        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+    )
+    
+    init {
+        Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
     }
 
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {

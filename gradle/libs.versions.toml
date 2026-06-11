@@ -34,6 +34,7 @@ securityCrypto = "1.1.0-alpha06"
 workManager = "2.9.0"
 mlkitBarcodeScanning = "17.3.0"
 zxing = "3.5.3"
+roboelectric = "4.14.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -77,6 +78,7 @@ androidx-security-crypto = { group = "androidx.security", name = "security-crypt
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 google-mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+roboelectric = { group = "org.robolectric", name = "robolectric", version.ref = "roboelectric" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
