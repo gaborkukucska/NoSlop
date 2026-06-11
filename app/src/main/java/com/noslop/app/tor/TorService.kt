@@ -19,7 +19,11 @@ import java.net.Proxy
 import java.net.Socket
 import java.util.concurrent.TimeUnit
 
-enum class TorState { STARTING, PROXY_READY, READY, FAILED }
+// IDLE = process just started, startTor() has not been called yet.
+// This is the critical fix: initialising to STARTING caused the guard in
+// startTor() to bail out immediately on every cold launch, so the daemon
+// was never actually started.
+enum class TorState { IDLE, STARTING, PROXY_READY, READY, FAILED }
 
 object TorService {
 
@@ -33,7 +37,9 @@ object TorService {
     // It is initialised once in NoSlopApp.onCreate() and never torn down independently.
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val _torState = MutableStateFlow(TorState.STARTING)
+    // FIX: Initial state is IDLE (not STARTING) so that the first startTor() call
+    // always proceeds rather than hitting the idempotency guard and returning early.
+    private val _torState = MutableStateFlow(TorState.IDLE)
     val torState: StateFlow<TorState> = _torState.asStateFlow()
 
     private var bootstrapJob: kotlinx.coroutines.Job? = null
@@ -72,6 +78,8 @@ object TorService {
      * be running on 9050.
      */
     fun startTor(context: Context, privateKeyB64: String? = null) {
+        // FIX: Guard now excludes IDLE — IDLE means "not started yet" and must
+        // always proceed. FAILED also now falls through so the Retry button works.
         if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
             // Still update the key in case it changed (e.g. after onboarding)
@@ -79,7 +87,7 @@ object TorService {
             return
         }
 
-        Logger.info(TAG, "Starting embedded Tor daemon via native Intent...")
+        Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=${_torState.value})...")
         _torState.value = TorState.STARTING
         currentPrivateKeyB64 = privateKeyB64
         
@@ -111,8 +119,8 @@ object TorService {
                 if (proxyReady) {
                     _torState.value = TorState.PROXY_READY
                     
-                    // 2. Continually check for circuit availability via Tor check
-                    // This acts as a fallback for cases where the STATUS_ON broadcast is missed
+                    // 2. Continually check for circuit availability via Tor check.
+                    // This acts as a fallback for cases where the STATUS_ON broadcast is missed.
                     for (attempt in 1..20) {
                         if (_torState.value == TorState.READY) break
                         

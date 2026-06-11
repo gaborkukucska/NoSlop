@@ -36,7 +36,8 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
         return // Hidden entirely when healthy
     }
 
-    if (daemonState == TorState.STARTING || daemonState == TorState.PROXY_READY) {
+    // Show spinner while starting up — IDLE means startTor() hasn't fired yet (brief window on cold launch)
+    if (daemonState == TorState.IDLE || daemonState == TorState.STARTING || daemonState == TorState.PROXY_READY) {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
@@ -57,7 +58,11 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = if (daemonState == TorState.STARTING) "Starting Tor..." else "Building Circuits...",
+                    text = when (daemonState) {
+                        TorState.IDLE -> "Preparing Tor..."
+                        TorState.PROXY_READY -> "Building Circuits..."
+                        else -> "Starting Tor..."
+                    },
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 16.sp
@@ -124,7 +129,8 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 ) {
                     Button(
                         onClick = { viewModel.startTor() },
-                        enabled = daemonState != TorState.STARTING,
+                        // FIX: also disable during IDLE (briefly) to avoid double-tap before first launch
+                        enabled = daemonState != TorState.STARTING && daemonState != TorState.IDLE,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGreen,
                             contentColor = PrimaryBlack

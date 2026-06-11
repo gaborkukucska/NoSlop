@@ -304,9 +304,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         val v = videos.take(2)
         val a = audios.take(1)
-        val t = textImages.take(needed - v.size - a.size)
+        // FIX: clamp to maxOf(0, ...) — when v.size + a.size already equals or
+        // exceeds `needed` (e.g. needed=2, v=2, a=1) the remainder is negative,
+        // which causes Kotlin's take() to throw IllegalArgumentException and crash.
+        val t = textImages.take(maxOf(0, needed - v.size - a.size))
         
-        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size)).take(needed - v.size - a.size - t.size)
+        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size))
+            .take(maxOf(0, needed - v.size - a.size - t.size))
         batch.addAll(v)
         batch.addAll(a)
         batch.addAll(t)
