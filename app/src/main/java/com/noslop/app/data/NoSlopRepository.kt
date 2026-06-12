@@ -687,15 +687,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
             }
 
-            // Also send SYNC_REQUEST
+            // Also send INVENTORY_SYNC_REQUEST
             val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-            val syncReqPay = com.noslop.app.mesh.SyncRequestPayload(since = sevenDaysAgo)
+            val recentPosts = postDao.getPostsSince(sevenDaysAgo)
+            val md = java.security.MessageDigest.getInstance("SHA3-256")
+            val inventory = recentPosts.map { post ->
+                val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}"
+                val hashHex = md.digest(hashInput.toByteArray()).joinToString("") { "%02x".format(it) }
+                com.noslop.app.mesh.InventoryItem(post.id, hashHex)
+            }
+            
+            val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
             val syncPacket = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
-                type = "SYNC_REQUEST",
+                type = "INVENTORY_SYNC_REQUEST",
                 payload = gson.toJsonTree(syncReqPay)
             )
             repositoryScope.launch {

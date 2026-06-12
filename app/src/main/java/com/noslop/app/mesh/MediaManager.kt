@@ -139,6 +139,12 @@ object MediaManager {
         val inflight = ConcurrentHashMap<Int, Long>() // index -> sentAt
         var receivedCount = 0
         var lastAttemptAt = 0L
+
+        // AIMD State
+        var windowSize = 4.0
+        var ssthresh = 128.0
+        var rttEma = 5000L
+        var currentTimeoutMs = 5000L
     }
 
     private fun maintainDownloads() {
@@ -147,14 +153,18 @@ object MediaManager {
             if (dl.status == ActiveDownload.Status.ACTIVE) {
                 // Check for timeouts
                 dl.inflight.forEach { (index, sentAt) ->
-                    if (now - sentAt > DOWNLOAD_TIMEOUT_MS) {
-                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying.")
+                    if (now - sentAt > dl.currentTimeoutMs) {
+                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying. (Window shrank)")
                         dl.inflight.remove(index)
+                        
+                        // AIMD Multiplicative Decrease
+                        dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
+                        dl.windowSize = 1.0
                     }
                 }
                 
                 // Pump queue
-                if (dl.inflight.size < MAX_CONCURRENCY) {
+                if (dl.inflight.size < dl.windowSize.toInt()) {
                     requestNextChunks(dl)
                 }
             } else if (dl.status == ActiveDownload.Status.RECOVERING) {
@@ -193,7 +203,7 @@ object MediaManager {
                     repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 }
                 
-                if (dl.inflight.size >= MAX_CONCURRENCY) break
+                if (dl.inflight.size >= dl.windowSize.toInt()) break
             }
         }
     }
@@ -236,9 +246,23 @@ object MediaManager {
         if (dl.chunks[payload.chunkIndex] == null) {
             dl.chunks[payload.chunkIndex] = chunkData
             dl.receivedCount++
-            dl.inflight.remove(payload.chunkIndex)
+            val sentAt = dl.inflight.remove(payload.chunkIndex)
             
-            Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks})")
+            if (sentAt != null) {
+                val rtt = System.currentTimeMillis() - sentAt
+                dl.rttEma = (dl.rttEma * 7 + rtt) / 8
+                dl.currentTimeoutMs = Math.max(2000L, dl.rttEma * 2) // Timeout is 2x RTT EMA, min 2s
+
+                // AIMD Additive Increase
+                if (dl.windowSize < dl.ssthresh) {
+                    dl.windowSize += 1.0 // Slow start
+                } else {
+                    dl.windowSize += 1.0 / dl.windowSize // Congestion avoidance
+                }
+                if (dl.windowSize > 128.0) dl.windowSize = 128.0
+            }
+            
+            Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks}) [Win: ${dl.windowSize.toInt()}, RTT: ${dl.rttEma}ms]")
             
             chunkListeners[payload.mediaId]?.forEach { it(payload.chunkIndex, chunkData) }
 

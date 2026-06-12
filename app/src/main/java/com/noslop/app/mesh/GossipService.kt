@@ -21,8 +21,12 @@ object GossipService {
         val mediaId: String,
         val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
         var sourceNode: String? = null,
-        val metadata: MediaMetadata? = null
+        val metadata: MediaMetadata? = null,
+        val establishedAt: Long = System.currentTimeMillis(),
+        var lastActivity: Long = System.currentTimeMillis()
     )
+
+    private var cleanupJob: Job? = null
 
     private var peerDao: PeerDao? = null
     private var transport: MeshTransport? = null
@@ -33,6 +37,31 @@ object GossipService {
         this.peerDao = peerDao
         this.transport = transport
         this.localPublicKeyB64 = localPublicKeyB64
+        
+        cleanupJob?.cancel()
+        cleanupJob = scope.launch {
+            while (isActive) {
+                delay(60_000)
+                cleanupStaleRoutes()
+            }
+        }
+    }
+
+    private fun cleanupStaleRoutes() {
+        val now = System.currentTimeMillis()
+        val timeoutMs = 5 * 60 * 1000L // 5 minutes timeout
+        val iterator = relayStates.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (now - entry.value.lastActivity > timeoutMs) {
+                iterator.remove()
+                Logger.info(TAG, "Cleaned up stale relay state for media ${entry.key}")
+            }
+        }
+    }
+
+    fun touchRelayState(mediaId: String) {
+        relayStates[mediaId]?.lastActivity = System.currentTimeMillis()
     }
 
     /**

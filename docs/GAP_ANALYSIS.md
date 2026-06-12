@@ -356,9 +356,9 @@ projects, but worth fixing alongside the above):
 Quick-reference list of items from this document, roughly ordered by
 implementation effort vs. value:
 
-- [ ] Fix doc/code mismatches in `CryptoService.kt` KDoc and README (§11) — trivial, do first
-- [ ] Add `clearnet_thumbnail_url` to `PACKET_SCHEMA.md`'s POST table (§11)
-- [ ] `ANNOUNCE_PEER` packet + online/offline presence indicator (§4)
+- [x] Fix doc/code mismatches in `CryptoService.kt` KDoc and README (§11) — trivial, do first
+- [x] Add `clearnet_thumbnail_url` to `PACKET_SCHEMA.md`'s POST table (§11)
+- [x] `ANNOUNCE_PEER` packet + online/offline presence indicator (§4)
 - [ ] `COMMENT_REACTION` / `COMMENT_VOTE` packets + UI (§1, §2)
 - [ ] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
 - [ ] "Opt-in Transparency" override for soft-blocked content (§2)

@@ -143,6 +143,15 @@ data class SyncRequestPayload(
     val since: Long
 )
 
+data class InventoryItem(
+    val id: String,
+    val hash: String
+)
+
+data class InventorySyncRequestPayload(
+    val inventory: List<InventoryItem>
+)
+
 data class CommentSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -175,7 +184,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -251,5 +260,9 @@ data class NetworkPacket(
 
     fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {
         Gson().fromJson(payload, AnnouncePeerPayload::class.java)
+    } else null
+
+    fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
+        Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
     } else null
 }

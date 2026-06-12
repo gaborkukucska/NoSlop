@@ -35,6 +35,7 @@ class MeshPacketHandler(
 
         when (packet.type) {
             "SYNC_REQUEST" -> handleSyncRequest(packet, localKeys)
+            "INVENTORY_SYNC_REQUEST" -> handleInventorySyncRequest(packet, localKeys)
             "SYNC_RESPONSE" -> handleSyncResponse(packet)
             "POST" -> handlePost(packet)
             "COMMENT" -> handleComment(packet)
@@ -122,6 +123,88 @@ class MeshPacketHandler(
             repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
         }
         Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
+        return true
+    }
+
+    private suspend fun handleInventorySyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
+        val syncPay = packet.getInventorySyncRequestPayload() ?: return false
+        val peerInventory = syncPay.inventory.associate { it.id to it.hash }
+        
+        val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+        val recentPosts = postDao.getPostsSince(sevenDaysAgo)
+        val md = java.security.MessageDigest.getInstance("SHA3-256")
+        
+        val missingOrUpdatedPosts = recentPosts.filter { post ->
+            val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}"
+            val localHash = md.digest(hashInput.toByteArray()).joinToString("") { "%02x".format(it) }
+            peerInventory[post.id] != localHash
+        }
+
+        val postPayloads = missingOrUpdatedPosts.map { post ->
+            PostPayload(
+                id = post.id,
+                authorId = post.authorPublicKeyB64,
+                authorName = post.authorHandle,
+                authorPublicKey = post.authorPublicKeyB64,
+                originNode = null,
+                content = post.content,
+                timestamp = post.timestamp,
+                signature = post.signature,
+                mediaId = post.mediaUrl,
+                mediaMetadata = if (post.mediaUrl != null) MediaMetadata(
+                    id = post.mediaUrl,
+                    type = post.mediaType ?: "image",
+                    mimeType = "application/octet-stream",
+                    size = 0,
+                    chunkCount = 0
+                ) else null
+            )
+        }
+
+        val recentComments = commentDao.getCommentsSince(sevenDaysAgo)
+        val commentSyncList = recentComments.map { c ->
+            CommentSyncData(
+                id = c.id,
+                postId = c.postId,
+                authorId = c.authorPublicKeyB64,
+                authorName = c.authorHandle,
+                content = c.content,
+                timestamp = c.timestamp,
+                signature = c.signature,
+                parentCommentId = c.parentCommentId
+            )
+        }
+
+        val recentReactions = reactionDao.getReactionsSince(sevenDaysAgo)
+        val reactionSyncList = recentReactions.map { r ->
+            ReactionSyncData(
+                id = r.id,
+                postId = r.postId,
+                authorId = r.authorPublicKeyB64,
+                reactionType = r.reactionType,
+                timestamp = r.timestamp,
+                signature = r.signature
+            )
+        }
+
+        val syncResp = SyncResponsePayload(
+            posts = postPayloads,
+            comments = commentSyncList,
+            reactions = reactionSyncList
+        )
+        val respPacket = NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = localKeys.publicKeyB64,
+            targetUserId = packet.senderId,
+            type = "SYNC_RESPONSE",
+            payload = com.google.gson.Gson().toJsonTree(syncResp)
+        )
+        val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
+        if (requestingPeer != null) {
+            repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+        }
+        Logger.info(TAG, "INVENTORY_SYNC_REQUEST handled — sent ${missingOrUpdatedPosts.size} missing posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
     }
 
@@ -313,6 +396,7 @@ class MeshPacketHandler(
 
     private suspend fun handleMediaChunk(packet: NetworkPacket): Boolean {
         val chunk = packet.getMediaChunkPayload() ?: return false
+        GossipService.touchRelayState(chunk.mediaId)
         MediaManager.handleMediaChunk(packet.senderId, chunk)
         return true
     }
