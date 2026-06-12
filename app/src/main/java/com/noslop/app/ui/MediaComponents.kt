@@ -352,27 +352,70 @@ fun OverlayInteractions(
     isFlagged: Boolean = false,
     isBlocked: Boolean = false
 ) {
-    val totalLikes = reactionSummary.values.sum()
     var showReactionPicker by remember { mutableStateOf(false) }
+
+    // Map reaction types to emojis for display
+    val emojiMap = mapOf(
+        "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
+        "laugh" to "😂", "wow" to "😮", "sad" to "😢",
+        "fire" to "🔥", "angry" to "😡"
+    )
 
     Column(
         modifier = modifier
-            .padding(end = 16.dp, bottom = 48.dp),
+            .padding(end = 12.dp, bottom = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (!isBlocked) {
+            // ─── Reaction Pills (gChat-style: each emoji with its own counter) ───
+            if (reactionSummary.isNotEmpty()) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    reactionSummary.entries
+                        .filter { it.value > 0 }
+                        .sortedByDescending { it.value }
+                        .forEach { (type, count) ->
+                            val emoji = emojiMap[type] ?: type
+                            Surface(
+                                onClick = { onReaction(type) },
+                                color = SurfaceDark.copy(alpha = 0.7f),
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(1.dp, BorderSubtle)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(emoji, fontSize = 14.sp)
+                                    Text(
+                                        count.toString(),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccentGreen
+                                    )
+                                }
+                            }
+                        }
+                }
+            }
+
+            // ─── Main Action Buttons ───
             if (showLike) {
                 Box {
+                    // Single tap opens picker (gChat parity), matching user request
                     InteractionButton(
-                        icon = Icons.Default.Favorite,
-                        label = netScore?.toString() ?: (if (totalLikes > 0) totalLikes.toString() else "Like"),
-                        onClick = onLike,
-                        onLongClick = { showReactionPicker = true }
+                        icon = Icons.Default.AddReaction,
+                        label = "React",
+                        onClick = { showReactionPicker = !showReactionPicker }
                     )
 
                     if (showReactionPicker) {
                         ReactionPicker(
+                            currentReactions = reactionSummary,
                             onReactionSelect = {
                                 onReaction(it)
                                 showReactionPicker = false
@@ -464,6 +507,7 @@ fun ClearnetAttachment(
 
 @Composable
 fun ReactionPicker(
+    currentReactions: Map<String, Int> = emptyMap(),
     onReactionSelect: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -483,37 +527,69 @@ fun ReactionPicker(
         onDismissRequest = onDismiss
     ) {
         Surface(
-            color = SurfaceDark.copy(alpha = 0.9f),
-            shape = RoundedCornerShape(24.dp),
+            color = SurfaceDark.copy(alpha = 0.95f),
+            shape = RoundedCornerShape(28.dp),
             border = BorderStroke(1.dp, BorderSubtle),
-            modifier = Modifier.padding(end = 64.dp)
+            shadowElevation = 8.dp,
+            modifier = Modifier.padding(end = 56.dp)
         ) {
-            Row(
+            Column(
                 modifier = Modifier.padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                reactions.forEach { (type, emoji) ->
-                    Text(
-                        text = emoji,
-                        fontSize = 24.sp,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { onReactionSelect(type) }
-                            .padding(8.dp)
-                    )
+                // Top row: ❤️ 👍 👎 😂
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    reactions.take(4).forEach { (type, emoji) ->
+                        val count = currentReactions[type] ?: 0
+                        ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                    }
+                }
+                // Bottom row: 😮 😢 🔥 😡
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    reactions.drop(4).forEach { (type, emoji) ->
+                        val count = currentReactions[type] ?: 0
+                        ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                    }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ReactionPickerItem(emoji: String, count: Int, onClick: () -> Unit) {
+    val hasCount = count > 0
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (hasCount) AccentGreen.copy(alpha = 0.1f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(emoji, fontSize = 24.sp)
+            if (hasCount) {
+                Text(
+                    count.toString(),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = AccentGreen
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun InteractionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null
+    onClick: () -> Unit
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -521,10 +597,7 @@ private fun InteractionButton(
                 .size(50.dp)
                 .clip(CircleShape)
                 .background(SurfaceDark.copy(alpha = 0.6f))
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = onLongClick
-                ),
+                .clickable(onClick = onClick),
             contentAlignment = Alignment.Center
         ) {
             Icon(

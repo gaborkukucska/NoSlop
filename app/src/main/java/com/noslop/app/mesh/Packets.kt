@@ -113,6 +113,24 @@ data class ReactionPayload(
     val action: String = "add" // "add" or "remove"
 )
 
+data class ChatReactionPayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("reaction_type") val reactionType: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add"
+)
+
+data class CommentReactionPayload(
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("reaction_type") val reactionType: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add"
+)
+
 
 
 data class SyncRequestPayload(
@@ -151,7 +169,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT", "REACTION"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -215,5 +233,13 @@ data class NetworkPacket(
 
     fun getReactionPayload(): ReactionPayload? = if (type == "REACTION" && payload != null) {
         Gson().fromJson(payload, ReactionPayload::class.java)
+    } else null
+
+    fun getChatReactionPayload(): ChatReactionPayload? = if (type == "CHAT_REACTION" && payload != null) {
+        Gson().fromJson(payload, ChatReactionPayload::class.java)
+    } else null
+
+    fun getCommentReactionPayload(): CommentReactionPayload? = if (type == "COMMENT_REACTION" && payload != null) {
+        Gson().fromJson(payload, CommentReactionPayload::class.java)
     } else null
 }

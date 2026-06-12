@@ -16,6 +16,10 @@
     <!-- For WorkManager reschedule on startup -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Foreground Service permissions for background mesh sync -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
     <application
         android:name=".NoSlopApp"
         android:allowBackup="false"
@@ -52,6 +56,10 @@
 
         <service android:name="org.torproject.jni.TorService"
             android:exported="false" />
+
+        <service android:name=".mesh.NoSlopForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
     </application>
 

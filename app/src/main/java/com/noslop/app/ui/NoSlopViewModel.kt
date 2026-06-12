@@ -686,6 +686,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         Logger.info("VM", "Instructing TorService to start embedded daemon")
         viewModelScope.launch {
             val identity = repository.getLocalIdentity()
+            // Start the foreground service to ensure background persistence
+            com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
             TorService.startTor(getApplication(), identity?.privateKeyB64)
         }
     }
