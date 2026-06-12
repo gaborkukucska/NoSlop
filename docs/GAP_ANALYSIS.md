@@ -149,11 +149,12 @@ from the heavyweight signed `USER_HANDSHAKE`/`CONNECTION_REQUEST` packets.
 
 NoSlop currently has **no online/offline concept**. `Peer.lastSeenAt` is only
 updated on handshake or incoming packets, so the UI cannot distinguish "online
-right now" from "was seen three days ago." Adding `ANNOUNCE_PEER` (broadcast
-periodically — e.g. every 60s — to trusted peers, and on Tor-ready transition)
-plus a `Peer.isOnline` derived/cached field would close this gap and is
-low-risk since the packet carries no sensitive data beyond what a handshake
-already reveals to trusted peers.
+right now" from "was seen three days ago."
+
+> **UPDATE (2026-06-13):** This gap has been **fully closed**. `ANNOUNCE_PEER`
+> heartbeats broadcast every 60s to trusted peers, `Peer.isOnline` is tracked
+> in Room, stale peers auto-timeout after 3 minutes, and `PeerItem.kt` renders
+> a green online indicator. See `PROJECT_STATUS.md` milestone 156.
 
 ---
 
@@ -201,9 +202,12 @@ established_at, last_activity }` per transfer session, with a
 
 NoSlop's current `GossipService.RelayState` (in `GossipService.kt`) tracks
 `mediaId -> listeners` but:
-- Has **no stale-route cleanup** — `relayStates` is an unbounded
+- Has **no stale-route cleanup** — ~~`relayStates` is an unbounded
   `ConcurrentHashMap` with no TTL/eviction, a potential slow memory leak on
-  long-running nodes that participate in many relays.
+  long-running nodes that participate in many relays.~~ **FIXED (2026-06-13):**
+  `RelayState` now tracks `establishedAt`/`lastActivity`. A periodic 60-second
+  sweeper evicts routes idle for >5 minutes. `MeshPacketHandler` refreshes
+  `lastActivity` on every `MEDIA_CHUNK` via `GossipService.touchRelayState()`.
 - Does **not yet implement the actual chunk-forwarding proxy** —
   `handleRelayRequest`/`handleRecoveryFound` resolve *where* the media is, but
   `MeshPacketHandler.handleMediaChunk` delegates straight to
@@ -362,12 +366,12 @@ implementation effort vs. value:
 - [ ] `COMMENT_REACTION` / `COMMENT_VOTE` packets + UI (§1, §2)
 - [ ] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
 - [ ] "Opt-in Transparency" override for soft-blocked content (§2)
-- [ ] Relay state TTL/cleanup in `GossipService.RelayState` (§6)
+- [x] Relay state TTL/cleanup in `GossipService.RelayState` (§6)
 - [ ] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6)
-- [ ] `INVENTORY_SYNC_REQUEST`/`RESPONSE` (hash-based sync) to replace
+- [x] `INVENTORY_SYNC_REQUEST`/`RESPONSE` (hash-based sync) to replace
       timestamp-based `SYNC_REQUEST`/`RESPONSE` (§1)
 - [ ] `EDIT_POST` / `DELETE_POST` packets (§1)
-- [ ] AIMD congestion control for media chunk downloads (§7)
+- [x] AIMD congestion control for media chunk downloads (§7)
 - [ ] `CHAT_REACTION` / `CHAT_VOTE` for DM engagement (§1)
 - [ ] `IDENTITY_UPDATE` packet for profile-change propagation (§1)
 - [ ] `FOLLOW`/`UNFOLLOW` asymmetric relationship model (§1)
