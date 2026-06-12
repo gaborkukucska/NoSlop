@@ -450,6 +450,8 @@ data class NetworkPacket(
 | `CommentPayload` | `COMMENT` | `postId, comment: CommentData, parentCommentId?` |
 | `CommentData` | nested in `CommentPayload` | `id, authorId, authorName, content, timestamp, signature` |
 | `ReactionPayload` | `REACTION` | `postId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
+| `ChatReactionPayload` | `CHAT_REACTION` | `messageId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
+| `CommentReactionPayload`| `COMMENT_REACTION`| `commentId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
 | `EncryptedPayload` | `MESSAGE` | `id, nonce, ciphertext, groupId?` (groupId reserved, unused — see Gap Analysis §3) |
 | `PeerHandshakePayload` | `CONNECTION_REQUEST`, `USER_HANDSHAKE` | `id, fromUserId, fromUsername, fromDisplayName, fromHomeNode, fromEncryptionPublicKey?, timestamp, signature?` (unified type per milestone 56 — previously two near-duplicate classes) |
 | `SyncRequestPayload` | `SYNC_REQUEST` | `since: Long` |
@@ -775,6 +777,7 @@ migration path defined).
 
 ## 11. Background Work
 
+- **`NoSlopForegroundService`** (`mesh/NoSlopForegroundService.kt`): an Android 8+ compliant Foreground Service bound to `TorService`. It posts an ongoing "Mesh Sync" notification to prevent the OS from aggressively killing the Tor daemon and mesh networking listeners when the app goes into the background.
 - **`FeedSyncWorker`** (`feeds/FeedSyncWorker.kt`, 20 LOC): a `CoroutineWorker`
   registered via `WorkManager` as a `PeriodicWorkRequest` with a **15-minute**
   interval, constrained to `NetworkType.CONNECTED`. Calls
@@ -798,6 +801,14 @@ migration path defined).
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
+
+---
+
+## 13. Future Architecture: HAI-Net Hub Client
+
+While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes). 
+
+In this architecture, NoSlop could serve as a `SLAVE_FRONTEND` client. Instead of maintaining a full local mesh stack and embedded Tor daemon, it would connect directly to a user's remote HAI-Net hub via a private, authenticated onion address. This would allow the mobile app to function as a lightweight UI, delegating heavy mesh routing, continuous availability, and media storage to the hub. This model aligns with gChat's dual hidden service architecture and is a planned avenue for long-term scalability.
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
 

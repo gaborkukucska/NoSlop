@@ -15,7 +15,7 @@ import javax.crypto.spec.SecretKeySpec
  * Cryptographic identity and messaging for NoSlop / HAI-Net mesh nodes.
  *
  * Signing:   Ed25519 (via Android Keystore API 33+, Bouncy Castle fallback for API 24-32)
- * DM Crypto: ECDH (P-256) key agreement -> SHA-256 -> AES-256-GCM
+ * DM Crypto: X25519 key agreement -> SHA3-256 -> ChaCha20-Poly1305
  */
 object CryptoService {
 
