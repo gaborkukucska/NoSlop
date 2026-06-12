@@ -1,6 +1,8 @@
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,65 +95,126 @@ fun ChatThreadScreen(
                                 msg.ciphertext
                             }
                         }
+                        
+                        val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
+                        var showReactionPicker by remember { mutableStateOf(false) }
+
                         Box(
                             modifier = Modifier.fillMaxWidth(),
                             contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(if (isSelf) AccentGreen else SurfaceDark)
-                                    .padding(12.dp)
-                                    .widthIn(max = 260.dp)
-                            ) {
-                                Column {
-                                    if (decryptedText.isNotEmpty()) {
-                                        Text(
-                                            text = decryptedText, 
-                                            color = if (isSelf) PrimaryBlack else TextLight,
-                                            style = MaterialTheme.typography.bodyMedium
-                                        )
-                                    }
+                            Column(horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(if (isSelf) AccentGreen else SurfaceDark)
+                                        .pointerInput(Unit) {
+                                            detectTapGestures(
+                                                onLongPress = { showReactionPicker = true }
+                                            )
+                                        }
+                                        .padding(12.dp)
+                                        .widthIn(max = 260.dp)
+                                ) {
+                                    Column {
+                                        if (decryptedText.isNotEmpty()) {
+                                            Text(
+                                                text = decryptedText, 
+                                                color = if (isSelf) PrimaryBlack else TextLight,
+                                                style = MaterialTheme.typography.bodyMedium
+                                            )
+                                        }
 
-                                    msg.mediaId?.let { mid ->
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        val progress = downloadProgress[mid] ?: 0
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(60.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(PrimaryBlack.copy(alpha = 0.3f)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Icon(
-                                                    if (progress == 100) Icons.Default.CheckCircle else Icons.Default.PlayArrow, 
-                                                    contentDescription = null, 
-                                                    tint = if (isSelf) PrimaryBlack else AccentGreen
-                                                )
-                                                if (progress in 1..99) {
-                                                    LinearProgressIndicator(
-                                                        progress = progress / 100f,
-                                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                                        color = if (isSelf) PrimaryBlack else AccentGreen
+                                        msg.mediaId?.let { mid ->
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            val progress = downloadProgress[mid] ?: 0
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(60.dp)
+                                                    .clip(RoundedCornerShape(4.dp))
+                                                    .background(PrimaryBlack.copy(alpha = 0.3f)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Icon(
+                                                        if (progress == 100) Icons.Default.CheckCircle else Icons.Default.PlayArrow, 
+                                                        contentDescription = null, 
+                                                        tint = if (isSelf) PrimaryBlack else AccentGreen
+                                                    )
+                                                    if (progress in 1..99) {
+                                                        LinearProgressIndicator(
+                                                            progress = progress / 100f,
+                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                                                            color = if (isSelf) PrimaryBlack else AccentGreen
+                                                        )
+                                                    }
+                                                    Text(
+                                                        if (progress == 100) "Media Ready" else if (progress > 0) "Downloading $progress%" else "Tap to Download",
+                                                        fontSize = 10.sp,
+                                                        color = if (isSelf) PrimaryBlack else TextMuted
                                                     )
                                                 }
+                                            }
+                                        }
+
+                                        Text(
+                                            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
+                                            color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
+                                            fontSize = 9.sp,
+                                            modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
+                                        )
+                                    }
+                                }
+                                
+                                if (reactions.isNotEmpty()) {
+                                    val grouped = reactions.groupBy { it.reactionType }
+                                    Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        grouped.forEach { (type, reacts) ->
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(SurfaceDark)
+                                                    .clickable { viewModel.reactToChat(msg.id, type, peer.publicKeyB64) }
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                                            ) {
                                                 Text(
-                                                    if (progress == 100) "Media Ready" else if (progress > 0) "Downloading $progress%" else "Tap to Download",
-                                                    fontSize = 10.sp,
-                                                    color = if (isSelf) PrimaryBlack else TextMuted
+                                                    text = "$type ${reacts.size}",
+                                                    fontSize = 12.sp,
+                                                    color = if (reacts.any { it.authorPublicKeyB64 == localKeys?.publicKeyB64 }) AccentGreen else TextMuted
                                                 )
                                             }
                                         }
                                     }
+                                }
 
-                                    Text(
-                                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
-                                        color = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
-                                        fontSize = 9.sp,
-                                        modifier = Modifier.align(Alignment.End).padding(top = 4.dp)
-                                    )
+                                if (showReactionPicker) {
+                                    val emojis = listOf("👍", "❤️", "😂", "😮", "😢", "😡")
+                                    Row(
+                                        modifier = Modifier
+                                            .padding(top = 4.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(SurfaceDark)
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        emojis.forEach { emoji ->
+                                            Text(
+                                                text = emoji,
+                                                fontSize = 20.sp,
+                                                modifier = Modifier.clickable {
+                                                    viewModel.reactToChat(msg.id, emoji, peer.publicKeyB64)
+                                                    showReactionPicker = false
+                                                }
+                                            )
+                                        }
+                                        Icon(
+                                            Icons.Default.Close, 
+                                            contentDescription = "Close", 
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
+                                        )
+                                    }
                                 }
                             }
                         }

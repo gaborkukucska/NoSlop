@@ -35,17 +35,17 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 | `DELETE_POST` | gChat | Signed tombstone request; marks a post `isOrphaned` across the mesh ("Nuclear Option" in HAI-Net Vision docs) | Absent |
 | `VOTE` | gChat | Up/down vote on a **post** (distinct from emoji `REACTION`); feeds the Content Health soft/hard-block ratio | Partial — NoSlop folds "downvote" into `REACTION` (`reactionType="downvote"`), but gChat tracks `votes` and `reactions` as separate maps on the post |
 | `COMMENT_VOTE` | gChat | Up/down vote on an individual **comment** | Absent — NoSlop comments have no voting at all |
-| `COMMENT_REACTION` | gChat | Emoji reaction scoped to a comment (not just the parent post) | Absent |
-| `CHAT_REACTION` | gChat | Emoji reaction on a **direct message** (1:1 chat) | Absent — README's Phase 2 roadmap mentions "Extend reactions to Direct Messages" but no packet type is defined yet |
+| `COMMENT_REACTION` | gChat | Emoji reaction scoped to a comment (not just the parent post) | **Done** — `COMMENT_REACTION` payloads and persistence added in Phase 3 |
+| `CHAT_REACTION` | gChat | Emoji reaction on a **direct message** (1:1 chat) | **Done** — `CHAT_REACTION` payloads and DM long-press UI added in Phase 3 |
 | `CHAT_VOTE` | gChat | Up/down vote on a chat message | Absent |
-| `IDENTITY_UPDATE` | gChat | Propagates changes to display name / avatar / bio to peers without a full re-handshake | Absent — NoSlop has no mechanism to notify peers of profile changes after initial handshake |
-| `ANNOUNCE_PEER` | gChat | Lightweight "I'm online" heartbeat carrying `onionAddress` + `alias`; drives gChat's "Live Contact Sync" (instant green/online indicator) | Absent — NoSlop has no online/offline presence signal at all |
+| `IDENTITY_UPDATE` | gChat | Propagates changes to display name / avatar / bio to peers without a full re-handshake | **Done** — Handled when `displayName` is changed in settings |
+| `ANNOUNCE_PEER` | gChat | Lightweight "I'm online" heartbeat carrying `onionAddress` + `alias`; drives gChat's "Live Contact Sync" (instant green/online indicator) | **Done** — `ANNOUNCE_PEER` implemented in Phase 1 |
 | `FOLLOW` / `UNFOLLOW` | gChat | Asymmetric "follow" relationship distinct from the symmetric Trusted Peer / firewall relationship | Absent — NoSlop's only relationship model is binary trust (`Peer.isTrusted`) |
 | `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` / `GROUP_QUERY` / `GROUP_SYNC` | gChat | Full decentralized group-chat packet family (see §3) | Absent — NoSlop README Phase 2 lists "Group Chats" as planned but no schema exists |
 | `TYPING` | gChat | Ephemeral typing-indicator packet (not persisted) | Absent |
 | `READ_RECEIPT` | gChat | Per-message read acknowledgement | Absent |
-| `INVENTORY_SYNC_REQUEST` / `INVENTORY_SYNC_RESPONSE` | gChat | Hash-based inventory diffing — peer sends a list of `{id, hash}` pairs; the other side replies only with posts the requester is missing | Partial — NoSlop's `SYNC_REQUEST`/`SYNC_RESPONSE` is timestamp-based ("everything since X"), not hash-based. Less efficient and can re-send posts the peer already has |
-| `USER_EXIT` / `NODE_SHUTDOWN` | gChat | Graceful shutdown protocol — broadcast on exit, peers ACK, process waits up to 30s before terminating (avoids "ghost peers") | Absent — NoSlop has no shutdown broadcast; peers will see a node as "last seen" stale rather than cleanly offline |
+| `INVENTORY_SYNC_REQUEST` / `INVENTORY_SYNC_RESPONSE` | gChat | Hash-based inventory diffing — peer sends a list of `{id, hash}` pairs; the other side replies only with posts the requester is missing | **Done** — Replaced legacy sync with `INVENTORY_SYNC_REQUEST` in Phase 2 |
+| `USER_EXIT` / `NODE_SHUTDOWN` | gChat | Graceful shutdown protocol — broadcast on exit, peers ACK, process waits up to 30s before terminating (avoids "ghost peers") | **Done** — NoSlop implements `USER_EXIT` during logout and foreground service termination |
 
 ### Recommendation
 At minimum, NoSlop should prioritize:
@@ -175,6 +175,8 @@ processes more abruptly than a desktop shutdown), but the `logout()` flow in
 `IdentityRepository`/`NoSlopRepository` could still broadcast a `USER_EXIT`-
 equivalent so peers' presence indicators (once §4 is implemented) update
 promptly rather than relying on a timeout.
+
+> **UPDATE (2026-06-13):** This gap has been **fully closed**. NoSlop now properly implements the `USER_EXIT` packet, and triggers `broadcastUserExit()` both during `logout()` and inside the lifecycle hook `NoSlopForegroundService.onDestroy()`. When a `USER_EXIT` packet is received, the node immediately sets the peer's `isOnline` status to `false`.
 
 ---
 

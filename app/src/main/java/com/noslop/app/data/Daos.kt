@@ -158,6 +158,36 @@ interface ReactionDao {
 }
 
 @Dao
+interface ChatReactionDao {
+    @Query("SELECT * FROM chat_reactions WHERE messageId = :messageId ORDER BY timestamp ASC")
+    fun getReactionsForMessage(messageId: String): Flow<List<ChatReaction>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReaction(reaction: ChatReaction)
+
+    @Query("SELECT * FROM chat_reactions WHERE id = :id LIMIT 1")
+    suspend fun getReactionById(id: String): ChatReaction?
+
+    @Query("DELETE FROM chat_reactions WHERE id = :id")
+    suspend fun deleteReactionById(id: String)
+}
+
+@Dao
+interface CommentReactionDao {
+    @Query("SELECT * FROM comment_reactions WHERE commentId = :commentId ORDER BY timestamp ASC")
+    fun getReactionsForComment(commentId: String): Flow<List<CommentReaction>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReaction(reaction: CommentReaction)
+
+    @Query("SELECT * FROM comment_reactions WHERE id = :id LIMIT 1")
+    suspend fun getReactionById(id: String): CommentReaction?
+
+    @Query("DELETE FROM comment_reactions WHERE id = :id")
+    suspend fun deleteReactionById(id: String)
+}
+
+@Dao
 interface AppSettingDao {
     @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
     suspend fun getSetting(key: String): String?

@@ -1,6 +1,8 @@
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -8,12 +10,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.noslop.app.data.MeshComment
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
@@ -26,6 +32,7 @@ fun CommentsBottomSheet(
     onDismiss: () -> Unit
 ) {
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
+    val localKeys by viewModel.localKeys.collectAsState()
     var commentText by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState()
 
@@ -62,7 +69,7 @@ fun CommentsBottomSheet(
                     }
                 }
                 items(comments) { comment ->
-                    CommentItem(comment)
+                    CommentItem(comment, viewModel, localKeys)
                 }
             }
             
@@ -103,10 +110,16 @@ fun CommentsBottomSheet(
 }
 
 @Composable
-fun CommentItem(comment: MeshComment) {
+fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?) {
+    val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
+    var showReactionPicker by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .pointerInput(Unit) {
+                detectTapGestures(onLongPress = { showReactionPicker = true })
+            }
             .background(PrimaryBlack.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
             .padding(12.dp)
     ) {
@@ -130,5 +143,56 @@ fun CommentItem(comment: MeshComment) {
             style = MaterialTheme.typography.bodyMedium,
             color = TextLight
         )
+
+        if (reactions.isNotEmpty()) {
+            val grouped = reactions.groupBy { it.reactionType }
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                grouped.forEach { (type, reacts) ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(SurfaceDark)
+                            .clickable { viewModel.reactToComment(comment.id, type) }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "$type ${reacts.size}",
+                            fontSize = 12.sp,
+                            color = if (reacts.any { it.authorPublicKeyB64 == localKeys?.publicKeyB64 }) AccentGreen else TextMuted
+                        )
+                    }
+                }
+            }
+        }
+
+        if (showReactionPicker) {
+            val emojis = listOf("👍", "🔥", "😂", "👎", "👀")
+            Row(
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SurfaceDark)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                emojis.forEach { emoji ->
+                    Text(
+                        text = emoji,
+                        fontSize = 20.sp,
+                        modifier = Modifier.clickable {
+                            viewModel.reactToComment(comment.id, emoji)
+                            showReactionPicker = false
+                        }
+                    )
+                }
+                Icon(
+                    Icons.Default.Close, 
+                    contentDescription = "Close", 
+                    tint = TextMuted,
+                    modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
+                )
+            }
+        }
     }
 }

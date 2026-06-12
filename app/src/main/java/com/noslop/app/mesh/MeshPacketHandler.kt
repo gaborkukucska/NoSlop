@@ -47,6 +47,10 @@ class MeshPacketHandler(
             "CONNECTION_REQUEST" -> handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handleUserHandshake(packet)
             "ANNOUNCE_PEER" -> handleAnnouncePeer(packet)
+            "CHAT_REACTION" -> handleChatReaction(packet)
+            "COMMENT_REACTION" -> handleCommentReaction(packet)
+            "IDENTITY_UPDATE" -> handleIdentityUpdate(packet)
+            "USER_EXIT" -> handleUserExit(packet)
             else -> {
                 Logger.warn(TAG, "Unknown packet type received: ${packet.type}")
                 false
@@ -521,6 +525,80 @@ class MeshPacketHandler(
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
             Logger.debug(TAG, "ANNOUNCE_PEER received: ${peer.handle} is online")
+        }
+        return true
+    }
+
+    private suspend fun handleChatReaction(packet: NetworkPacket): Boolean {
+        val reactionPay = packet.getChatReactionPayload() ?: return false
+        val payloadToVerify = "${reactionPay.messageId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
+        if (!isValid) return false
+
+        val reactionDao = db.chatReactionDao()
+        val reactionId = "${reactionPay.messageId}_${reactionPay.authorId}_${reactionPay.reactionType}"
+
+        if (reactionPay.action == "remove") {
+            reactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = com.noslop.app.data.ChatReaction(
+                id = reactionId,
+                messageId = reactionPay.messageId,
+                authorPublicKeyB64 = reactionPay.authorId,
+                reactionType = reactionPay.reactionType,
+                timestamp = reactionPay.timestamp,
+                signature = reactionPay.signature
+            )
+            reactionDao.insertReaction(localReaction)
+        }
+        return true
+    }
+
+    private suspend fun handleCommentReaction(packet: NetworkPacket): Boolean {
+        val reactionPay = packet.getCommentReactionPayload() ?: return false
+        val payloadToVerify = "${reactionPay.commentId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
+        if (!isValid) return false
+
+        val reactionDao = db.commentReactionDao()
+        val reactionId = "${reactionPay.commentId}_${reactionPay.authorId}_${reactionPay.reactionType}"
+
+        if (reactionPay.action == "remove") {
+            reactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = com.noslop.app.data.CommentReaction(
+                id = reactionId,
+                commentId = reactionPay.commentId,
+                authorPublicKeyB64 = reactionPay.authorId,
+                reactionType = reactionPay.reactionType,
+                timestamp = reactionPay.timestamp,
+                signature = reactionPay.signature
+            )
+            reactionDao.insertReaction(localReaction)
+        }
+        return true
+    }
+
+    private suspend fun handleIdentityUpdate(packet: NetworkPacket): Boolean {
+        val identityPay = packet.getIdentityUpdatePayload() ?: return false
+        val payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)
+        if (!isValid) return false
+
+        val peer = peerDao.getPeerByPublicKey(identityPay.userId)
+        if (peer != null) {
+            peerDao.insertPeer(peer.copy(handle = identityPay.handle, lastSeenAt = System.currentTimeMillis()))
+            Logger.debug(TAG, "IDENTITY_UPDATE applied for ${identityPay.userId}")
+        }
+        return true
+    }
+
+    private suspend fun handleUserExit(packet: NetworkPacket): Boolean {
+        val exitPay = packet.getUserExitPayload() ?: return false
+        val peer = peerDao.getPeerByPublicKey(exitPay.userId)
+        if (peer != null) {
+            peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
+            Logger.debug(TAG, "USER_EXIT processed for ${exitPay.userId}")
         }
         return true
     }

@@ -137,6 +137,18 @@ data class CommentReactionPayload(
     val action: String = "add"
 )
 
+data class IdentityUpdatePayload(
+    @SerializedName("user_id") val userId: String,
+    val handle: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class UserExitPayload(
+    @SerializedName("user_id") val userId: String,
+    val timestamp: Long
+)
+
 
 
 data class SyncRequestPayload(
@@ -184,7 +196,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -264,5 +276,13 @@ data class NetworkPacket(
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
         Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
+    } else null
+
+    fun getIdentityUpdatePayload(): IdentityUpdatePayload? = if (type == "IDENTITY_UPDATE" && payload != null) {
+        Gson().fromJson(payload, IdentityUpdatePayload::class.java)
+    } else null
+
+    fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
+        Gson().fromJson(payload, UserExitPayload::class.java)
     } else null
 }

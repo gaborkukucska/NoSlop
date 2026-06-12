@@ -117,6 +117,26 @@ data class MeshReaction(
     val signature: String
 )
 
+@Entity(tableName = "chat_reactions")
+data class ChatReaction(
+    @PrimaryKey val id: String,
+    val messageId: String,
+    val authorPublicKeyB64: String,
+    val reactionType: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Entity(tableName = "comment_reactions")
+data class CommentReaction(
+    @PrimaryKey val id: String,
+    val commentId: String,
+    val authorPublicKeyB64: String,
+    val reactionType: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 @Entity(tableName = "app_settings")
 data class AppSetting(
     @PrimaryKey val key: String,

@@ -121,6 +121,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> =
         repository.getReactionSummaryForPost(postId)
 
+    fun getReactionsForMessage(messageId: String): Flow<List<com.noslop.app.data.ChatReaction>> =
+        repository.getReactionsForMessage(messageId)
+
+    fun getReactionsForComment(commentId: String): Flow<List<com.noslop.app.data.CommentReaction>> =
+        repository.getReactionsForComment(commentId)
+
     val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -424,6 +430,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.saveUserProfile(profile)
             _userProfile.value = profile
+            
+            // Sync the core identity handle if it changed, and broadcast IDENTITY_UPDATE
+            val currentHandle = repository.getLocalHandle()
+            if (profile.displayName.isNotBlank() && profile.displayName != currentHandle) {
+                repository.updateLocalHandle(profile.displayName)
+            }
         }
     }
 
@@ -677,6 +689,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         digest.update(urlBytes, 0, urlBytes.size)
         digest.doFinal(hash, 0)
         return "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
+    }
+
+    fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) {
+        viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) }
+    }
+
+    fun reactToComment(commentId: String, reactionType: String) {
+        viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
     }
 
     /**

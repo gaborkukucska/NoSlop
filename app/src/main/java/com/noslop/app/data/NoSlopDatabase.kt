@@ -6,7 +6,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-// FIX: Bumped from 16 → 17 for isOnline schema change on Peer.
+// FIX: Bumped from 17 → 18 for ChatReaction and CommentReaction entities.
 //
 // Two crashes were caused by a stale on-device database:
 //
@@ -35,9 +35,11 @@ import androidx.room.RoomDatabase
         ChatMessage::class,
         AppSetting::class,
         MeshComment::class,
-        MeshReaction::class
+        MeshReaction::class,
+        ChatReaction::class,
+        CommentReaction::class
     ],
-    version = 17,
+    version = 18,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -49,6 +51,8 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun appSettingDao(): AppSettingDao
     abstract fun commentDao(): CommentDao
     abstract fun reactionDao(): ReactionDao
+    abstract fun chatReactionDao(): ChatReactionDao
+    abstract fun commentReactionDao(): CommentReactionDao
 
     companion object {
         @Volatile

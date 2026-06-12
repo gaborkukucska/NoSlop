@@ -463,6 +463,8 @@ data class NetworkPacket(
 | `MediaRecoveryFoundPayload` | `MEDIA_RECOVERY_FOUND` | `mediaId` |
 | `MediaPendingPayload` | `MEDIA_PENDING` | `mediaId, chunkIndex` |
 | `MediaTransferAckPayload` | `MEDIA_TRANSFER_ACK` | `mediaId` |
+| `IdentityUpdatePayload` | `IDENTITY_UPDATE` | `userId, displayName, timestamp, signature` |
+| `UserExitPayload` | `USER_EXIT` | `userId, timestamp, signature` |
 
 ### 5.3 Field Naming Convention
 

@@ -70,6 +70,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> =
         reactionDao.getReactionSummaryForPost(postId)
 
+    fun getReactionsForMessage(messageId: String): Flow<List<ChatReaction>> =
+        db.chatReactionDao().getReactionsForMessage(messageId)
+
+    fun getReactionsForComment(commentId: String): Flow<List<CommentReaction>> =
+        db.commentReactionDao().getReactionsForComment(commentId)
+
     fun getDownloadProgress(): Flow<Map<String, Int>> =
         com.noslop.app.mesh.MediaManager.downloadProgress
 
@@ -93,6 +99,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     suspend fun logout() {
+        broadcastUserExit()
         identityRepository.logout()
         _identityUpdateFlow.emit(Unit)
     }
@@ -109,6 +116,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     suspend fun getLocalHandle(): String = identityRepository.getHandle()
+
+    suspend fun updateLocalHandle(newHandle: String) {
+        appSettingDao.insertSetting(AppSetting("local_handle", newHandle))
+        broadcastIdentityUpdate(newHandle)
+        _identityUpdateFlow.emit(Unit)
+    }
 
     suspend fun isOnboardingComplete(): Boolean = identityRepository.isOnboardingComplete()
 
@@ -928,5 +941,146 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
 
         reactToMeshPost(anchorId, reactionType)
+    }
+
+    suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val chatReactionDao = db.chatReactionDao()
+        val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
+        val existingReaction = chatReactionDao.getReactionById(reactionId)
+        val action = if (existingReaction != null) "remove" else "add"
+        val timestamp = System.currentTimeMillis()
+        
+        val payloadToSign = "$messageId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val reactionPayload = com.noslop.app.mesh.ChatReactionPayload(
+            messageId = messageId,
+            reactionType = reactionType,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature,
+            action = action
+        )
+
+        if (action == "remove") {
+            chatReactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = ChatReaction(
+                id = reactionId,
+                messageId = messageId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                reactionType = reactionType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            chatReactionDao.insertReaction(localReaction)
+        }
+
+        val peer = peerDao.getPeerByPublicKey(recipientPubB64)
+        if (peer != null) {
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = recipientPubB64,
+                type = "CHAT_REACTION",
+                payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                signature = signature
+            )
+            repositoryScope.launch {
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+            }
+        }
+        true
+    }
+
+    suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val commentReactionDao = db.commentReactionDao()
+        val reactionId = "${commentId}_${myKeys.publicKeyB64}_$reactionType"
+        val existingReaction = commentReactionDao.getReactionById(reactionId)
+        val action = if (existingReaction != null) "remove" else "add"
+        val timestamp = System.currentTimeMillis()
+        
+        val payloadToSign = "$commentId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val reactionPayload = com.noslop.app.mesh.CommentReactionPayload(
+            commentId = commentId,
+            reactionType = reactionType,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature,
+            action = action
+        )
+
+        if (action == "remove") {
+            commentReactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = com.noslop.app.data.CommentReaction(
+                id = reactionId,
+                commentId = commentId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                reactionType = reactionType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            commentReactionDao.insertReaction(localReaction)
+        }
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "COMMENT_REACTION",
+            payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+            signature = signature
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun broadcastIdentityUpdate(newHandle: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val updatePayload = com.noslop.app.mesh.IdentityUpdatePayload(
+            userId = myKeys.publicKeyB64,
+            handle = newHandle,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "IDENTITY_UPDATE",
+            payload = com.google.gson.Gson().toJsonTree(updatePayload),
+            signature = signature
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun broadcastUserExit(): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val timestamp = System.currentTimeMillis()
+
+        val exitPayload = com.noslop.app.mesh.UserExitPayload(
+            userId = myKeys.publicKeyB64,
+            timestamp = timestamp
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "USER_EXIT",
+            payload = com.google.gson.Gson().toJsonTree(exitPayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
     }
 }
