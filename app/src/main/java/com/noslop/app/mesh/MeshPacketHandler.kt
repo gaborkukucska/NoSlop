@@ -132,11 +132,14 @@ class MeshPacketHandler(
         
         val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
         val recentPosts = postDao.getPostsSince(sevenDaysAgo)
-        val md = java.security.MessageDigest.getInstance("SHA3-256")
         
         val missingOrUpdatedPosts = recentPosts.filter { post ->
-            val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}"
-            val localHash = md.digest(hashInput.toByteArray()).joinToString("") { "%02x".format(it) }
+            val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            val hashBytes = ByteArray(digest.digestSize)
+            digest.update(hashInput, 0, hashInput.size)
+            digest.doFinal(hashBytes, 0)
+            val localHash = hashBytes.joinToString("") { "%02x".format(it) }
             peerInventory[post.id] != localHash
         }
 

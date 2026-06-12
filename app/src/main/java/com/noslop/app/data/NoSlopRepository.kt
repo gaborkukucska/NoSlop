@@ -690,10 +690,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             // Also send INVENTORY_SYNC_REQUEST
             val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
             val recentPosts = postDao.getPostsSince(sevenDaysAgo)
-            val md = java.security.MessageDigest.getInstance("SHA3-256")
             val inventory = recentPosts.map { post ->
-                val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}"
-                val hashHex = md.digest(hashInput.toByteArray()).joinToString("") { "%02x".format(it) }
+                val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
+                val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+                val hashBytes = ByteArray(digest.digestSize)
+                digest.update(hashInput, 0, hashInput.size)
+                digest.doFinal(hashBytes, 0)
+                val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
                 com.noslop.app.mesh.InventoryItem(post.id, hashHex)
             }
             
