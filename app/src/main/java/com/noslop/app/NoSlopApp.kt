@@ -65,6 +65,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             val identity = repository.getLocalIdentity()
             if (identity != null) {
                 GossipService.initialize(repository.peerDao, repository.meshTransport, identity.publicKeyB64)
+                repository.startPresenceHeartbeat()
             }
         }
 

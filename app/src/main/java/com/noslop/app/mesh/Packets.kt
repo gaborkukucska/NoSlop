@@ -104,6 +104,12 @@ data class PeerHandshakePayload(
     val signature: String? = null
 )
 
+data class AnnouncePeerPayload(
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
@@ -169,7 +175,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -241,5 +247,9 @@ data class NetworkPacket(
 
     fun getCommentReactionPayload(): CommentReactionPayload? = if (type == "COMMENT_REACTION" && payload != null) {
         Gson().fromJson(payload, CommentReactionPayload::class.java)
+    } else null
+
+    fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {
+        Gson().fromJson(payload, AnnouncePeerPayload::class.java)
     } else null
 }

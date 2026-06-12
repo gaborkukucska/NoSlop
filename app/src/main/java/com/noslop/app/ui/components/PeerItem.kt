@@ -4,7 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
@@ -41,16 +43,32 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
             Box(
                 modifier = Modifier
                     .size(44.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(PrimaryBlack),
-                contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = peer.handle.take(1).uppercase(),
-                    color = if (peer.isTrusted) AccentGreen else TextMuted,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(PrimaryBlack),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = peer.handle.take(1).uppercase(),
+                        color = if (peer.isTrusted) AccentGreen else TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp
+                    )
+                }
+
+                if (peer.isTrusted && peer.isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(12.dp)
+                            .clip(CircleShape)
+                            .background(AccentGreen)
+                            .border(2.dp, SurfaceDark, CircleShape)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.width(12.dp))

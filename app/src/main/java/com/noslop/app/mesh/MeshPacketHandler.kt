@@ -45,6 +45,7 @@ class MeshPacketHandler(
             "MESSAGE" -> handleDirectMessage(packet, localKeys)
             "CONNECTION_REQUEST" -> handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handleUserHandshake(packet)
+            "ANNOUNCE_PEER" -> handleAnnouncePeer(packet)
             else -> {
                 Logger.warn(TAG, "Unknown packet type received: ${packet.type}")
                 false
@@ -416,6 +417,23 @@ class MeshPacketHandler(
                 lastSeenAt = System.currentTimeMillis()
             )
             peerDao.insertPeer(newPeer)
+        }
+        return true
+    }
+
+    private suspend fun handleAnnouncePeer(packet: NetworkPacket): Boolean {
+        val announcePay = packet.getAnnouncePeerPayload() ?: return false
+        val payloadToVerify = "${announcePay.authorId}|${announcePay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected ANNOUNCE_PEER: Signature verification failed")
+            return false
+        }
+        
+        val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
+        if (peer != null) {
+            peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+            Logger.debug(TAG, "ANNOUNCE_PEER received: ${peer.handle} is online")
         }
         return true
     }

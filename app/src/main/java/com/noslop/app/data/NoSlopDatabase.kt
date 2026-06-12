@@ -6,7 +6,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-// FIX: Bumped from 15 → 16.
+// FIX: Bumped from 16 → 17 for isOnline schema change on Peer.
 //
 // Two crashes were caused by a stale on-device database:
 //
@@ -37,7 +37,7 @@ import androidx.room.RoomDatabase
         MeshComment::class,
         MeshReaction::class
     ],
-    version = 16,
+    version = 17,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {

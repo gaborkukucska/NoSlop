@@ -53,6 +53,7 @@ data class Peer(
     val onionAddress: String,
     val encPublicKeyB64: String = "", // Separate public key for X25519 encryption
     val isTrusted: Boolean = false,
+    val isOnline: Boolean = false,
     val lastSeenAt: Long = System.currentTimeMillis()
 )
 

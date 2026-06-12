@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
@@ -43,6 +44,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     private val _mediaSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(MediaSettings())
     val mediaSettingsFlow = _mediaSettingsFlow.asStateFlow()
+
+    private var presenceJob: kotlinx.coroutines.Job? = null
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -81,6 +84,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         identityRepository.saveIdentity(handle, keys, mnemonic)
         com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
         com.noslop.app.mesh.MediaManager.initialize(this)
+        startPresenceHeartbeat()
         
         // Notify Tor to re-register with the persistent key
         com.noslop.app.tor.TorService.updateKeyAndRegister(keys.privateKeyB64)
@@ -97,7 +101,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun unlock(mnemonic: String): Boolean {
         val success = identityRepository.unlock(mnemonic)
-        if (success) _identityUpdateFlow.emit(Unit)
+        if (success) {
+            _identityUpdateFlow.emit(Unit)
+            startPresenceHeartbeat()
+        }
         return success
     }
 
@@ -112,6 +119,51 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun isEncryptionActive(): Boolean = identityRepository.isEncryptionActive()
     
     val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
+
+    fun startPresenceHeartbeat() {
+        if (presenceJob?.isActive == true) return
+        presenceJob = repositoryScope.launch {
+            while (isActive) {
+                try {
+                    val myKeys = getLocalIdentity()
+                    if (myKeys != null) {
+                        val timestamp = System.currentTimeMillis()
+                        val payload = "${myKeys.publicKeyB64}|$timestamp"
+                        val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
+                        
+                        val announcePay = com.noslop.app.mesh.AnnouncePeerPayload(
+                            authorId = myKeys.publicKeyB64,
+                            timestamp = timestamp,
+                            signature = signature
+                        )
+                        
+                        val packet = com.noslop.app.mesh.NetworkPacket(
+                            id = UUID.randomUUID().toString(),
+                            hops = 1,
+                            senderId = myKeys.publicKeyB64,
+                            type = "ANNOUNCE_PEER",
+                            payload = com.google.gson.Gson().toJsonTree(announcePay),
+                            signature = signature
+                        )
+                        
+                        com.noslop.app.mesh.GossipService.broadcast(packet)
+                    }
+
+                    val timeout = System.currentTimeMillis() - 3 * 60 * 1000
+                    val peers = peerDao.getAllPeersList()
+                    for (peer in peers) {
+                        if (peer.isOnline && peer.lastSeenAt < timeout) {
+                            peerDao.insertPeer(peer.copy(isOnline = false))
+                            Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Error in presence heartbeat: ${e.message}")
+                }
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
+    }
 
     // --- Media Settings ---
     suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {
