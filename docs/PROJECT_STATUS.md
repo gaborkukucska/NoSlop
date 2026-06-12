@@ -33,7 +33,7 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 11. **Coroutine Lifecycle Management**: All fire-and-forget sends use supervised repository and gossip scopes, not bare `CoroutineScope`.
 12. **Signed Handshakes**: `USER_HANDSHAKE` packets are Ed25519-signed before transmission to establish robust trust identity.
 13. **Isolated Server Socket Binding**: `ServerSocket` is bound strictly to loopback `127.0.0.1` to prevent local network exposure, solidifying a Tor hidden service only architecture.
-14. **Send Retry with Backoff**: `MeshTransport` retries failed transmissions up to 3 times with a 2-second and 4-second exponential backoff structure.
+14. **Send Retry with Backoff**: `MeshTransport` retries failed transmissions up to 5 times, with a `attempt * 3s` exponential backoff (3s/6s/9s/12s between attempts 2-5) and a 30s per-attempt onion connect timeout.
 15. **Background Feed Sync (WorkManager)**: Integrated periodic WorkManager `FeedSyncWorker` task to refresh subscribed RSS/Atom feed content every 15 minutes when connected to a network.
 16. **QR Code Pairing (Scan & Share)**: Built `QRScanScreen` using mobile CameraX + Google ML Kit for frictionless live QR companion pairing, paired with `QRShareSheet` to display/share generated thematic contact profiles.
 17. **Worker Repository Leak Fix**: Separated mesh socket initialization (`startListening`) into `NoSlopApp.onCreate()` singleton from `NoSlopRepository.init`, preventing dangerous port rebinding exceptions when `FeedSyncWorker` spins up in the background.
@@ -153,9 +153,9 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 152. **Architectural Cleanup (God Component)**: Refactored `MainScreen.kt` by extracting `UnifiedFeedTab` and `FullScreenFeedCard`, drastically reducing UI monolith sizes.
 
 ## Technical Debt & Security Improvements (from March 2025 Audit)
-- **God Files Refactoring**: `MainScreen.kt` (2,889 lines) and `NoSlopRepository.kt` (1,061 lines) need decomposition. Split UI into atomic components (ArticleReader, VideoPlayer, etc.) and move mesh packet logic from Repository to a dedicated `MeshPacketHandler`.
+- ~~**God Files Refactoring**~~: ✅ Largely resolved. `MainScreen.kt` is now 332 lines (down from 2,889) with UI extracted into `ui/components/` (FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen, CommentsBottomSheet, PeerItem) and `ui/tabs/` (DMsTab, SettingsTab, ApiKeysScreen, LogsViewerScreen), plus dedicated `UnifiedFeedTab.kt`/`HaiNetTab.kt`. `NoSlopRepository.kt` is now 869 lines (down from 1,061) with mesh packet dispatch fully extracted to `MeshPacketHandler.kt`.
 - **Identity Security**: Currently, `IdentityRepository` silently falls back to plaintext `SharedPreferences` if `EncryptedSharedPreferences` fails. Needs a UI-level warning for users if hardware-backed encryption is unavailable.
-- **Tor Control Security**: `ControlPort` currently uses `CookieAuthentication 0`. Plan to transition to `CookieAuthentication 1` for better process-level isolation on rooted devices.
+- **Tor Control Security**: `TorService.writeTorrc` now writes `CookieAuthentication 1` (transitioned from `CookieAuthentication 0` as planned). However, `registerHiddenService` still authenticates to the control port with a bare `AUTHENTICATE` (no cookie/password), which is only valid under `CookieAuthentication 0`. **This needs verification against the running `tor-android` daemon** — either the control-port auth call needs to read and send the auth cookie file, or the torrc setting should remain `0` until cookie-based auth is implemented.
 - **Dependency Alignment**: 
     - Align `okhttp` (4.10.0) with `okhttp-dnsoverhttps` (4.12.0).
     - Migrate from `accompanist-permissions` to native Compose permission APIs.
@@ -171,51 +171,50 @@ NoSlop is a **privacy-first Android application** that combines an immersive, Ti
 - ~~**RSS Subscription Logic**~~: ✅ Resolved in milestone 59 (auto-discovery from HTML `<link>` tags).
 - **Feed Pre-loading & Hybrid Mixing**: The current feed loading mechanism needs a rethink to pre-buffer next items and intelligently mix aggregated (clearnet) and broadcasted (mesh) content without stalling or overloading Tor circuits.
 - **Comment Module UI**: The comment module currently lacks a user-facing way to actually post/leave a new comment within the unified feed UI.
+- **Handshake Signature Verification Gap**: `PeerHandshakePayload` (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) carries a `signature` field that is computed and sent by `NoSlopRepository`, but `MeshPacketHandler` never verifies it on receipt. A peer could theoretically forge a handshake claiming to be a different identity. Add signature verification (`fromUserId|fromUsername|timestamp` or similar) to `handleConnectionRequest`/`handleUserHandshake`.
+- **Relay State Memory Growth**: `GossipService.relayStates` (`ConcurrentHashMap`) has no TTL/eviction policy — long-running nodes that participate in many media relays will accumulate stale entries indefinitely. Add a periodic sweep (mirroring `hainet-social`'s `cleanup_stale_routes`).
 
 ## Phase 2: Feature Expansion & Social Parity (Planned)
 
 Based on recent user testing, the following core features are planned for the next development cycle to bring NoSlop to parity with modern messaging apps (e.g., gChat):
 
-1. **Enhanced Reactions UI**: Migrate from long-press reactions to a single-tap inline reaction bar. Include individual reaction counters per post/comment. Extend reactions to Direct Messages.
-2. **Group Chats**: Implement decentralized group chat capabilities with dedicated mesh packet routing.
+1. ~~**Enhanced Reactions UI**~~: ✅ Largely resolved (milestone 90 — "Enhanced Reactions and Content Health"). `REACTION` packets, signed/gossiped reaction toggling, and the soft-block/hard-block Content Health overlay are implemented. Remaining: per-post/per-comment reaction counters in the feed UI, and extending reactions to Direct Messages (`CHAT_REACTION` — see gap analysis doc).
+2. **Group Chats**: Implement decentralized group chat capabilities with dedicated mesh packet routing. gChat already has a complete reference spec (`Group` entity, `GROUP_INVITE`/`GROUP_UPDATE`/`GROUP_DELETE`/`GROUP_QUERY`/`GROUP_SYNC` packets, multi-recipient X25519 encryption fan-out) — see [NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md](NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md) §3 for the full spec to port.
 3. **Mesh Comment Synchronization Fix**: Resolve the issue where users only see their own comments on the mesh. Requires an audit of the `COMMENT` packet broadcast and firewall ingestion logic.
 4. **Sophisticated Notification System**: Implement Android local notifications for DMs and mentions. Add in-app popups and UI markers for active engagement. Provide a toggle in settings to enable/disable notifications.
 5. **Semi-Active Background Mode**: Implement a Foreground Service to keep the mesh connection alive and Tor daemon running while the phone is locked, allowing notifications to arrive in real-time. Include auto-lock timeouts.
 6. **Biometric Security**: Integrate `androidx.biometric`. Add a logout/login mechanism and prompt the user for fingerprint/face unlock upon returning to the app after the auto-lock timeout.
-7. **Rich Clearnet Sharing Overhaul**: Re-design shared clearnet broadcasts to visually mirror native mesh broadcasts, pulling the thumbnail, title, and description from the clearnet feed metadata. Add a large "View Clearnet Content" button that seamlessly pulls the item into the live feed rather than a basic web intent.
+7. **Rich Clearnet Sharing Overhaul**: Partially resolved — `clearnet_thumbnail_url` now flows through `PostPayload` and `MeshPost` (milestone 90), and anchor posts already carry title/thumbnail metadata for shared links. Remaining: render these as rich preview cards mirroring native mesh broadcasts in the feed UI (see "Remaining polish work" under Clearnet-to-Mesh Broadcast System below).
+8. **Online Presence Indicators**: Add a lightweight `ANNOUNCE_PEER` heartbeat packet so contacts show as online/offline in real time, matching gChat's "Live Contact Sync". See gap analysis doc §4.
+9. **Hash-Based Sync (`INVENTORY_SYNC`)**: Replace the current timestamp-based `SYNC_REQUEST`/`SYNC_RESPONSE` ("everything since X") with hash-based inventory diffing to avoid re-transferring posts peers already have. See gap analysis doc §1.
 
-## Clearnet-to-Mesh Broadcast System (Planned)
+## Clearnet-to-Mesh Broadcast System
 
 This feature is the core bridge between NoSlop's clearnet aggregator and the mesh social layer. When a user interacts with clearnet feed content (via like, share, or comment), that interaction becomes a signed mesh broadcast, and all subsequent engagement on that content happens peer-to-peer on the mesh.
 
-### What is already in place
+### What is implemented
 
-- **`PostPayload` schema** (`Packets.kt`): `clearnet_url` and `clearnet_title` fields exist and are serialised in every gossip `POST` packet.
-- **Room persistence** (`Entities.kt`): `MeshPost` entity already stores `clearnetUrl` and `clearnetTitle`, persisting shared clearnet references locally.
-- **Share-to-Mesh dialog** (`MainScreen.kt`): `showShareDialog` state and the "Share to Mesh" confirmation dialog are implemented for `UnifiedItem.Feed` items. The dialog calls `composeAndBroadcastPost` with the item's URL and title.
-- **ViewModel wiring** (`NoSlopViewModel.kt`): `composeAndBroadcastPost()` accepts `clearnetUrl` and `clearnetTitle` parameters and passes them through to `NoSlopRepository`.
+- **`PostPayload` schema** (`Packets.kt`): `clearnet_url`, `clearnet_title`, and `clearnet_thumbnail_url` fields exist and are serialised in every gossip `POST` packet.
+- **Room persistence** (`Entities.kt`): `MeshPost` entity stores `clearnetUrl`, `clearnetTitle`, and `clearnetThumbnailUrl`, persisting shared clearnet references locally.
+- **Share-to-Mesh dialog** (`MainScreen.kt`): `showShareDialog` state and the "Share to Mesh" confirmation dialog are implemented for `UnifiedItem.Feed` items. The dialog calls `composeAndBroadcastPost` with the item's URL, title, and thumbnail.
+- **ViewModel wiring** (`NoSlopViewModel.kt`): `composeAndBroadcastPost()` accepts `clearnetUrl`, `clearnetTitle`, and `clearnetThumbnailUrl` parameters and passes them through to `NoSlopRepository`.
 - **Repository broadcast path** (`NoSlopRepository.kt`): `composeAndBroadcastPost()` builds and signs the `NetworkPacket` with clearnet metadata and calls `GossipService.broadcast()`.
-- **"View on Clearnet" button**: Peers receiving a shared clearnet post already see a button that opens the original URL via `ACTION_VIEW` intent.
-- **Interaction overlays** (`MainScreen.kt`): Like, Share, and Comment buttons are rendered on `FullScreenFeedCard` for both clearnet and mesh items. Clearnet items have `onShare = onShareToMesh` wired, with `onLike` and `onComment` stubbed (`/* local feedback */`, `/* gossip like? */`).
+- **"View on Clearnet" button**: Peers receiving a shared clearnet post see a button that opens the original URL via `ACTION_VIEW` intent.
 - **Comment gossip engine**: `COMMENT` packet type, `CommentPayload`/`CommentData` structures, signature verification, Room persistence, and `composeAndBroadcastComment()` are fully implemented for mesh-native posts.
+- **`REACTION` packet type** (`Packets.kt`): `ReactionPayload` with `post_id`, `reaction_type`, `author_id`, `timestamp`, `signature`, and `action` (`"add"`/`"remove"` toggle).
+- **`REACTION` gossip handling** (`MeshPacketHandler.kt`): incoming `REACTION` packets are signature-verified (`postId|reactionType|authorId|timestamp`) and persisted to/removed from the `mesh_reactions` Room table via `ReactionDao`. `getReactionsForPost(postId)` and `getReactionSummaryForPost(postId)` Flows are exposed from the repository.
+- **Clearnet broadcast trigger on Like** (`NoSlopRepository.reactToFeedItemWithType`): tapping a reaction on a clearnet feed item (a) derives a deterministic anchor ID via `"clearnet_" + SHA3-256(url).take(16)`, (b) creates the anchor `POST` if it doesn't exist locally yet, then (c) broadcasts a `REACTION` packet against that anchor ID.
+- **Broadcast anchor deduplication**: the SHA3-256-derived `anchorId` is deterministic per URL, so every node that shares the same clearnet link converges on the same mesh post ID without coordination — comments and reactions across nodes land on a single shared thread per URL.
+- **Interaction overlays** (`MainScreen.kt`): Like, Share, and Comment buttons are rendered on `FullScreenFeedCard`. Per milestone 90, Like/Comment are removed from raw clearnet feed cards (engagement is funneled through the mesh anchor) while Share-to-Mesh remains available.
 
-### What needs to be built
+### Remaining polish work
 
-1. **`REACTION` packet type** — Define a new `REACTION` packet in `Packets.kt` with fields: `post_id` (the mesh post ID of the clearnet broadcast), `reaction_type` (e.g. `"like"`), `clearnet_url` (the original source URL for reference), `author_id`, `timestamp`, and `signature`. Add a corresponding `ReactionPayload` data class.
+1. **Reaction count display on feed cards** — surface a live reaction counter (via `getReactionSummaryForPost`) directly on clearnet feed cards that already have a mesh anchor, not just on the mesh feed.
+2. **Rich clearnet preview cards** — visually mirror native mesh broadcasts using `clearnet_thumbnail_url`, rather than a plain "View on Clearnet" link.
+3. **Feed hybrid mixing** — surface comment/reaction counts directly on clearnet feed cards once an anchor exists, blurring the boundary between aggregated content and mesh conversation (tracked together with "Feed Pre-loading & Hybrid Mixing" below).
+4. **Network-aware anchor check** — `reactToFeedItemWithType` currently only checks for an existing anchor *locally* before broadcasting a new `POST`; because `anchorId` is deterministic this still converges correctly, but it means the same anchor post may be re-broadcast by multiple originating peers. A lightweight "anchor already seen on the mesh" check would reduce redundant gossip traffic.
 
-2. **`REACTION` gossip handling** (`GossipService.kt` / `NoSlopRepository.kt`) — Add a `when` branch in the gossip packet dispatcher to receive, verify, deduplicate, and store incoming `REACTION` packets. Persist reactions to a new `MeshReaction` Room entity (fields: `id`, `postId`, `authorId`, `reactionType`, `timestamp`). Expose a `getReactionsForPost(postId)` Flow from `ReactionDao`.
-
-3. **Clearnet broadcast trigger on Like** (`MainScreen.kt` / `NoSlopViewModel.kt`) — When a user taps Like on a clearnet feed item: (a) check whether a mesh broadcast post already exists for that `clearnetUrl`; (b) if not, auto-broadcast a new `POST` packet with the clearnet metadata and an empty content body as the broadcast anchor; (c) then broadcast a `REACTION` packet referencing the new or existing mesh post ID. Update `onLike` in `FullScreenFeedCard` to call a new `ViewModel.reactToFeedItem(item)` function implementing this two-step logic.
-
-4. **Clearnet broadcast trigger on Comment** (`MainScreen.kt`) — Mirror the Like logic: when a user taps Comment on a clearnet item, first ensure a mesh broadcast post exists for the URL (creating one silently if not), then open the comment sheet bound to that mesh post ID rather than the clearnet item's local ID. This unifies clearnet and mesh comment threads under the same gossip post anchor.
-
-5. **Reaction count display** — Add a live reaction counter beneath the Like button on mesh posts and on clearnet items that have been broadcast. Collect from `getReactionsForPost(postId)` and display the count with a heart icon.
-
-6. **Broadcast anchor deduplication** — Add a `FeedItemDao` or `MeshPostDao` query to look up an existing mesh post by `clearnet_url` before creating a new broadcast anchor. This prevents duplicate mesh posts from accumulating when multiple users share the same clearnet link. Consider a canonical post-ID derivation scheme (e.g. a deterministic UUID from SHA3-256 of the clearnet URL) so all nodes converge on the same anchor ID without coordination.
-
-7. **Feed hybrid mixing** — Once clearnet items that have been broadcast have a mesh post anchor, the unified feed can surface community engagement signals (comment count, reaction count) directly on the clearnet feed card, blurring the boundary between aggregated content and mesh conversation.
-
-8. **`PACKET_SCHEMA.md` update** — Document the new `REACTION` packet type and its fields once the above is implemented.
+See [docs/NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md](NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md) for further parity items versus gChat/HAI-Net (presence/`ANNOUNCE_PEER`, `COMMENT_REACTION`/`COMMENT_VOTE`, hash-based `INVENTORY_SYNC`, group chats, etc.).
 
 ## Cryptographic Specification Contract
 | Function | Primitive | Format / Library | Storage Backend |
@@ -225,3 +224,10 @@ This feature is the core bridge between NoSlop's clearnet aggregator and the mes
 | **Onion Addressing** | SHA3-256 Tor v3 | 56-char `.onion` address | Database / Memory |
 | **Key Agreement** | X25519 | Bouncy Castle | `EncryptedSharedPreferences` |
 | **Direct Message E2EE** | ChaCha20-Poly1305 | 12-byte random nonce + SHA3-256 shared secret derivation | Local DB (Encrypted) |
+
+## Build Configuration Notes
+- **`minSdk` discrepancy**: `docs/BUILD.md` states `minSdk = 26`, but `app/build.gradle.kts` currently sets `minSdk = 24`. Confirm which is authoritative — if 24 is intentional (broader device support), update `BUILD.md`; if 26 is required (e.g. for a dependency), update `build.gradle.kts` and re-test on API 24/25.
+
+## Further Reading
+- [docs/NOSLOP_TECHNICAL_REFERENCE.md](NOSLOP_TECHNICAL_REFERENCE.md) — exhaustive technical reference covering package layout, exact crypto derivation formulas, gossip pipeline internals, the full wire protocol, media/Tor internals, Room schema, and build configuration.
+- [docs/NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md](NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md) — detailed comparison against gChat and HAI-Net's `hainet-social` Rust crate, with a prioritized backlog checklist for packet types, presence, group chats, congestion control, and more.
