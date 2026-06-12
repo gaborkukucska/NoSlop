@@ -75,7 +75,39 @@ class MeshPacketHandler(
                 ) else null
             )
         }
-        val syncResp = SyncResponsePayload(posts = postPayloads)
+
+        // Also include comments and reactions for full sync
+        val recentComments = commentDao.getCommentsSince(syncPay.since)
+        val commentSyncList = recentComments.map { c ->
+            CommentSyncData(
+                id = c.id,
+                postId = c.postId,
+                authorId = c.authorPublicKeyB64,
+                authorName = c.authorHandle,
+                content = c.content,
+                timestamp = c.timestamp,
+                signature = c.signature,
+                parentCommentId = c.parentCommentId
+            )
+        }
+
+        val recentReactions = reactionDao.getReactionsSince(syncPay.since)
+        val reactionSyncList = recentReactions.map { r ->
+            ReactionSyncData(
+                id = r.id,
+                postId = r.postId,
+                authorId = r.authorPublicKeyB64,
+                reactionType = r.reactionType,
+                timestamp = r.timestamp,
+                signature = r.signature
+            )
+        }
+
+        val syncResp = SyncResponsePayload(
+            posts = postPayloads,
+            comments = commentSyncList,
+            reactions = reactionSyncList
+        )
         val respPacket = NetworkPacket(
             id = UUID.randomUUID().toString(),
             hops = 1,
@@ -88,7 +120,7 @@ class MeshPacketHandler(
         if (requestingPeer != null) {
             repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
         }
-        Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts to ${packet.senderId.take(12)}")
+        Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
     }
 
@@ -123,6 +155,53 @@ class MeshPacketHandler(
             stored++
         }
         Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts")
+
+        // Process synced comments
+        var storedComments = 0
+        syncPay.comments?.forEach { c ->
+            val payloadToVerify = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
+            val isValid = CryptoService.verify(payloadToVerify, c.signature, c.authorId)
+            if (!isValid) {
+                Logger.warn(TAG, "Sync: rejecting comment ${c.id} — invalid signature")
+                return@forEach
+            }
+            val meshComment = MeshComment(
+                id = c.id,
+                postId = c.postId,
+                authorPublicKeyB64 = c.authorId,
+                authorHandle = c.authorName,
+                content = c.content,
+                timestamp = c.timestamp,
+                signature = c.signature,
+                parentCommentId = c.parentCommentId
+            )
+            commentDao.insertComment(meshComment)
+            storedComments++
+        }
+        if (storedComments > 0) Logger.info(TAG, "SYNC_RESPONSE: stored $storedComments comments")
+
+        // Process synced reactions
+        var storedReactions = 0
+        syncPay.reactions?.forEach { r ->
+            val payloadToVerify = "${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}"
+            val isValid = CryptoService.verify(payloadToVerify, r.signature, r.authorId)
+            if (!isValid) {
+                Logger.warn(TAG, "Sync: rejecting reaction ${r.id} — invalid signature")
+                return@forEach
+            }
+            val meshReaction = MeshReaction(
+                id = r.id,
+                postId = r.postId,
+                authorPublicKeyB64 = r.authorId,
+                reactionType = r.reactionType,
+                timestamp = r.timestamp,
+                signature = r.signature
+            )
+            reactionDao.insertReaction(meshReaction)
+            storedReactions++
+        }
+        if (storedReactions > 0) Logger.info(TAG, "SYNC_RESPONSE: stored $storedReactions reactions")
+
         return true
     }
 

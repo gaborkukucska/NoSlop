@@ -119,8 +119,30 @@ data class SyncRequestPayload(
     val since: Long
 )
 
+data class CommentSyncData(
+    val id: String,
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_name") val authorName: String,
+    val content: String,
+    val timestamp: Long,
+    val signature: String,
+    @SerializedName("parent_comment_id") val parentCommentId: String? = null
+)
+
+data class ReactionSyncData(
+    val id: String,
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("reaction_type") val reactionType: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class SyncResponsePayload(
-    val posts: List<PostPayload>
+    val posts: List<PostPayload>,
+    val comments: List<CommentSyncData>? = null,
+    val reactions: List<ReactionSyncData>? = null
 )
 
 data class NetworkPacket(

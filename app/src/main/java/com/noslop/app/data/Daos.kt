@@ -120,6 +120,9 @@ interface CommentDao {
 
     @Query("DELETE FROM mesh_comments WHERE postId = :postId")
     suspend fun deleteCommentsForPost(postId: String)
+
+    @Query("SELECT * FROM mesh_comments WHERE timestamp > :since ORDER BY timestamp ASC")
+    suspend fun getCommentsSince(since: Long): List<MeshComment>
 }
 
 @Dao
@@ -149,6 +152,9 @@ interface ReactionDao {
 
     @Query("DELETE FROM mesh_reactions WHERE postId = :postId")
     suspend fun deleteReactionsForPost(postId: String)
+
+    @Query("SELECT * FROM mesh_reactions WHERE timestamp > :since ORDER BY timestamp ASC")
+    suspend fun getReactionsSince(since: Long): List<MeshReaction>
 }
 
 @Dao
