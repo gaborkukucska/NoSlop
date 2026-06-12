@@ -37,7 +37,7 @@ A vertical feed purpose-built for signal-to-noise ratio.
 Direct peer-to-peer communication over the HAI-Net gossip network. No central server is ever involved.
 
 - **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
-- **End-to-end encrypted DMs** — direct messages use ECDH (X25519) key agreement into AES-256-GCM. Only you and your contact can read them.
+- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key. Only you and your contact can read them.
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
 - **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
 
@@ -55,7 +55,7 @@ This is how NoSlop unites entertainment, community, and communication in one pla
 - **Community** — a single tap broadcasts that content into your mesh, making it a shared reference point for your circle.
 - **Communication** — every reply, comment, and reaction threads through the gossip protocol, end-to-end encrypted where needed, and fully offline-capable.
 
-> ⚠️ **In development** — The clearnet interaction-to-broadcast pipeline is partially implemented. The `PostPayload` schema already carries `clearnet_url` and `clearnet_title`, the Share-to-Mesh dialog is wired up, and peers can already tap "View on Clearnet" to open shared links. Reaction (`LIKE`) and comment propagation specifically tied to clearnet-originated broadcasts are still being built out. See [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) for the detailed plan.
+> ✅ **Implemented** — The clearnet interaction-to-broadcast pipeline is live. The `PostPayload` schema carries `clearnet_url`, `clearnet_title`, and `clearnet_thumbnail_url`; liking, sharing, or commenting on a clearnet item creates (or reuses) a deterministic SHA3-256-derived mesh anchor post for that URL, and `REACTION` packets are signed, gossiped, and toggleable (add/remove). Peers can tap "View on Clearnet" to open shared links. Remaining polish work (richer clearnet preview cards, reaction-count UI on feed cards, hybrid feed mixing) is tracked in [PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
 
 ---
 
@@ -112,6 +112,8 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 - 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)** — HAI-Net wire protocol reference.
 - 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
 - 🛠️ **[SUPPORT.md](docs/SUPPORT.md)** — operations guide, backup/restore, and troubleshooting.
+- 🔬 **[NOSLOP_TECHNICAL_REFERENCE.md](docs/NOSLOP_TECHNICAL_REFERENCE.md)** — deep technical reference: crypto derivations, gossip pipeline internals, wire protocol, media/Tor internals, build config.
+- 🔭 **[NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md](docs/NOSLOP_GAP_ANALYSIS_AND_UPSTREAM_NOTES.md)** — feature gaps vs. gChat/HAI-Net (presence, group chats, hash-based sync, etc.) and a backlog checklist.
 
 ---
 
