@@ -177,8 +177,34 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 )
                 
-                // Spacer for the middle FAB
-                Spacer(modifier = Modifier.weight(1f))
+                // Spacer for the middle FAB or Notifications Icon
+                if (selectedTab == 0) {
+                    Spacer(modifier = Modifier.weight(1f))
+                } else {
+                    NavigationBarItem(
+                        selected = selectedTab == 4,
+                        onClick = { selectedTab = 4 },
+                        icon = { 
+                            BadgedBox(
+                                badge = {
+                                    if (unreadNotifs > 0) {
+                                        Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Notifications, contentDescription = "Alerts", modifier = Modifier.size(20.dp))
+                            }
+                        },
+                        label = { Text("Alerts", fontSize = 10.sp) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = AccentGreen,
+                            selectedTextColor = AccentGreen,
+                            unselectedIconColor = TextMuted,
+                            unselectedTextColor = TextMuted,
+                            indicatorColor = PrimaryBlack
+                        )
+                    )
+                }
 
                 NavigationBarItem(
                     selected = selectedTab == 2,
@@ -506,6 +532,36 @@ fun UnifiedFeedTab(
                     Spacer(modifier = Modifier.width(8.dp))
                 }
                 
+
+                
+                // The main floating search button
+                IconButton(
+                    onClick = { showSearchModal = true },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            SurfaceDark.copy(alpha = 0.6f),
+                            RoundedCornerShape(50)
+                        )
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = "Search & Filter",
+                        tint = TextLight.copy(alpha = 0.85f),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+        }
+
+        // ─── Floating notifications icon & refresh indicator (top-left) ───
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 12.dp, start = 12.dp)
+                .zIndex(10f)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 // Notifications button
                 IconButton(
                     onClick = { onTabChange(4) },
@@ -531,42 +587,15 @@ fun UnifiedFeedTab(
                         )
                     }
                 }
-                
-                Spacer(modifier = Modifier.width(8.dp))
-                
-                // The main floating search button
-                IconButton(
-                    onClick = { showSearchModal = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            SurfaceDark.copy(alpha = 0.6f),
-                            RoundedCornerShape(50)
-                        )
-                ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search & Filter",
-                        tint = TextLight.copy(alpha = 0.85f),
-                        modifier = Modifier.size(22.dp)
+
+                if (isRefreshing) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = AccentGreen,
+                        strokeWidth = 2.dp
                     )
                 }
-            }
-        }
-
-        // ─── Floating refresh indicator (top-left) ───
-        if (isRefreshing) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = 16.dp, start = 16.dp)
-                    .zIndex(10f)
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    color = AccentGreen,
-                    strokeWidth = 2.dp
-                )
             }
         }
     }
@@ -608,7 +637,20 @@ fun UnifiedFeedTab(
                             focusedTextColor = TextLight,
                             unfocusedTextColor = TextLight
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Search
+                        ),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onSearch = {
+                                if (localSearchQuery.isNotBlank()) {
+                                    searchQuery = localSearchQuery
+                                    filterMode = localFilterMode
+                                    viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
+                                    showSearchModal = false
+                                }
+                            }
+                        )
                     )
 
                     // ── Content type filters ──

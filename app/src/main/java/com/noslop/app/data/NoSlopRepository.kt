@@ -423,12 +423,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         
         try {
             val apiKeyRepo = ApiKeyRepository(context)
-            // Use all explicitly activated API sources. If none, use all built-in API sources
-            val activeSources = feedDao.getActiveSourcesList()
-            val explicitApiSourceIds = activeSources.filter { it.feedType == "api" }.map { it.id }
-            val activeApiSourceIds = explicitApiSourceIds.ifEmpty {
-                com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
-            }
+            // Use all built-in API sources for custom searches to ensure we search across all platforms
+            val activeApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" }.map { it.id }
 
             val langPrefList = getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
             val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"

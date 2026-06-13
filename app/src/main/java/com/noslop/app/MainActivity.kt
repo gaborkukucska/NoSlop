@@ -30,17 +30,34 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme {
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
                 val targetRoute by _routeFlow.collectAsState()
+                
+                // Track if onboarding was shown during this app session
+                var didJustFinishOnboarding by remember { mutableStateOf(false) }
 
                 LaunchedEffect(isOnboarded) {
                     viewModel.startTor()
                 }
 
                 if (isOnboarded) {
-                    MainScreen(viewModel = viewModel, initialRoute = targetRoute)
+                    var showSplash by remember { mutableStateOf(!didJustFinishOnboarding) }
+
+                    LaunchedEffect(Unit) {
+                        if (showSplash) {
+                            kotlinx.coroutines.delay(3000)
+                            showSplash = false
+                        }
+                    }
+
+                    if (showSplash) {
+                        com.noslop.app.ui.SplashScreen()
+                    } else {
+                        MainScreen(viewModel = viewModel, initialRoute = targetRoute)
+                    }
                 } else {
                     OnboardingScreen(
                         viewModel = viewModel,
                         onComplete = {
+                            didJustFinishOnboarding = true
                             // On completion, state automatically triggers recomposition to MainScreen
                         }
                     )
