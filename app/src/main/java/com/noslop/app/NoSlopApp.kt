@@ -56,6 +56,8 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
         val db = NoSlopDatabase.getDatabase(this)
         repository = NoSlopRepository(this, db)
+        
+        com.noslop.app.util.NotificationHelper.createNotificationChannel(this)
 
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()

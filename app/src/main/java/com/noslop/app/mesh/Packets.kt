@@ -149,6 +149,22 @@ data class UserExitPayload(
     val timestamp: Long
 )
 
+data class EditPostPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("author_id") val authorId: String,
+    val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class DeletePostPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+
 
 
 data class SyncRequestPayload(
@@ -196,7 +212,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -284,5 +300,13 @@ data class NetworkPacket(
 
     fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
         Gson().fromJson(payload, UserExitPayload::class.java)
+    } else null
+
+    fun getEditPostPayload(): EditPostPayload? = if (type == "EDIT_POST" && payload != null) {
+        Gson().fromJson(payload, EditPostPayload::class.java)
+    } else null
+
+    fun getDeletePostPayload(): DeletePostPayload? = if (type == "DELETE_POST" && payload != null) {
+        Gson().fromJson(payload, DeletePostPayload::class.java)
     } else null
 }

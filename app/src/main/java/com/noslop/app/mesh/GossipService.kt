@@ -64,6 +64,37 @@ object GossipService {
         relayStates[mediaId]?.lastActivity = System.currentTimeMillis()
     }
 
+    suspend fun forwardRelayChunk(mediaId: String, packet: NetworkPacket): Boolean {
+        val state = relayStates[mediaId] ?: return false
+        state.lastActivity = System.currentTimeMillis()
+        
+        val tx = transport ?: return false
+        var forwarded = false
+        
+        // Forward the exact chunk packet to all listeners
+        state.listeners.forEach { listenerId ->
+            if (listenerId != localPublicKeyB64 && listenerId != packet.senderId) {
+                scope.launch {
+                    val peer = peerDao?.getPeerByPublicKey(listenerId)
+                    if (peer != null) {
+                        // Create a shallow copy with decremented hops
+                        val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
+                        if (currentHops > 1) {
+                            val relayedPacket = packet.copy(
+                                id = UUID.randomUUID().toString(), // Give it a new ID to bypass dedup on the next node
+                                hops = currentHops - 1,
+                                senderId = localPublicKeyB64
+                            )
+                            tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, relayedPacket)
+                        }
+                    }
+                }
+                forwarded = true
+            }
+        }
+        return forwarded
+    }
+
     /**
      * Process an incoming packet: validate, dedup, firewall, and then trigger forwarding.
      * Returns true if packet should be processed locally.

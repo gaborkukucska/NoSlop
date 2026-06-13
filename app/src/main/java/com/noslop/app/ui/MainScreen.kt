@@ -145,7 +145,7 @@ fun FullScreenMeshCard(
     viewModel: NoSlopViewModel? = null
 ) {
     val context = LocalContext.current
-    val resolvedUrl = resolveMediaUrl(post.mediaUrl, context)
+    val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
     var showComments by remember { mutableStateOf(false) }
 
     Box(
@@ -164,10 +164,13 @@ fun FullScreenMeshCard(
 
             val isVideoUrl = post.mediaType == "video" ||
                     idExtension.endsWith(".mp4") || idExtension.endsWith(".mkv") ||
-                    idExtension.endsWith(".webm") || idExtension.endsWith(".mov")
+                    idExtension.endsWith(".webm") || idExtension.endsWith(".mov") ||
+                    resolvedUrl.contains("youtube") || resolvedUrl.contains("vimeo") ||
+                    resolvedUrl.contains("archive.org/embed")
             val isAudioUrl = post.mediaType == "audio" ||
                     idExtension.endsWith(".mp3") || idExtension.endsWith(".wav") ||
-                    idExtension.endsWith(".m4a") || idExtension.endsWith(".aac")
+                    idExtension.endsWith(".m4a") || idExtension.endsWith(".aac") ||
+                    idExtension.endsWith(".ogg") || idExtension.endsWith(".flac")
             val isImageUrl = post.mediaType == "image" ||
                     idExtension.endsWith(".jpg") || idExtension.endsWith(".jpeg") ||
                     idExtension.endsWith(".png") || idExtension.endsWith(".webp") ||
@@ -244,19 +247,6 @@ fun FullScreenMeshCard(
                         fontSize = 10.sp,
                         fontFamily = FontFamily.Monospace,
                         color = TextMuted
-                    )
-                }
-
-                if (post.clearnetUrl != null) {
-                    Spacer(modifier = Modifier.height(12.dp))
-                    ClearnetAttachment(
-                        title = post.clearnetTitle ?: "Shared Link",
-                        thumbnailUrl = post.clearnetThumbnailUrl,
-                        author = null,
-                        onClick = {
-                            viewModel?.injectMeshClearnetToFeed(post)
-                        },
-                        modifier = Modifier.padding(horizontal = 0.dp) // already padded by parent
                     )
                 }
             }

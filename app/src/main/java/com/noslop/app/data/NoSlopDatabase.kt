@@ -39,7 +39,7 @@ import androidx.room.RoomDatabase
         ChatReaction::class,
         CommentReaction::class
     ],
-    version = 18,
+    version = 19,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {

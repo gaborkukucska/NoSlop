@@ -51,6 +51,8 @@ class MeshPacketHandler(
             "COMMENT_REACTION" -> handleCommentReaction(packet)
             "IDENTITY_UPDATE" -> handleIdentityUpdate(packet)
             "USER_EXIT" -> handleUserExit(packet)
+            "EDIT_POST" -> handleEditPost(packet)
+            "DELETE_POST" -> handleDeletePost(packet)
             else -> {
                 Logger.warn(TAG, "Unknown packet type received: ${packet.type}")
                 false
@@ -361,6 +363,18 @@ class MeshPacketHandler(
             parentCommentId = commPay.parentCommentId
         )
         commentDao.insertComment(meshComment)
+        
+        // Notify if it's on our post (unless it's from ourselves)
+        val post = postDao.getPostById(commPay.postId)
+        val localKeys = repo.getLocalIdentity()
+        if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && commPay.comment.authorId != localKeys?.publicKeyB64) {
+            com.noslop.app.util.NotificationHelper.showNotification(
+                context = repo.context,
+                title = "New Comment",
+                message = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}"
+            )
+        }
+        
         Logger.info(TAG, "Valid signed comment accepted and stored: from=${commPay.comment.authorName}")
         return true
     }
@@ -403,7 +417,11 @@ class MeshPacketHandler(
 
     private suspend fun handleMediaChunk(packet: NetworkPacket): Boolean {
         val chunk = packet.getMediaChunkPayload() ?: return false
-        GossipService.touchRelayState(chunk.mediaId)
+        
+        // Zero-copy forward if we are acting as a relay
+        GossipService.forwardRelayChunk(chunk.mediaId, packet)
+        
+        // Also process locally if we are the destination/requester
         MediaManager.handleMediaChunk(packet.senderId, chunk)
         return true
     }
@@ -455,6 +473,12 @@ class MeshPacketHandler(
             )
             messageDao.insertMessage(msg)
             
+            com.noslop.app.util.NotificationHelper.showNotification(
+                context = repo.context,
+                title = "New Direct Message",
+                message = "Message from ${peer?.handle ?: "Anonymous"}"
+            )
+            
             if (mediaMetadata != null) {
                 val onion = peer?.onionAddress ?: packet.senderId
                 MediaManager.checkAndAutoDownload(
@@ -474,6 +498,18 @@ class MeshPacketHandler(
     private suspend fun handleConnectionRequest(packet: NetworkPacket): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
         
+        val signature = packet.signature
+        if (signature == null) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Missing signature")
+            return false
+        }
+        val payloadToVerify = com.google.gson.Gson().toJson(connPay)
+        val isValid = CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Signature verification failed")
+            return false
+        }
+        
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         val peer = Peer(
@@ -492,6 +528,19 @@ class MeshPacketHandler(
 
     private suspend fun handleUserHandshake(packet: NetworkPacket): Boolean {
         val handPay = packet.getUserHandshakePayload() ?: return false
+        
+        val signature = packet.signature
+        if (signature == null) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: Missing signature")
+            return false
+        }
+        val payloadToVerify = com.google.gson.Gson().toJson(handPay)
+        val isValid = CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: Signature verification failed")
+            return false
+        }
+
         val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isTrusted = true, lastSeenAt = System.currentTimeMillis()))
@@ -599,6 +648,46 @@ class MeshPacketHandler(
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
             Logger.debug(TAG, "USER_EXIT processed for ${exitPay.userId}")
+        }
+        return true
+    }
+
+    private suspend fun handleEditPost(packet: NetworkPacket): Boolean {
+        val editPay = packet.getEditPostPayload() ?: return false
+        val payloadToVerify = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
+        if (!isValid) return false
+
+        val existingPost = postDao.getPostById(editPay.postId)
+        if (existingPost != null) {
+            if (existingPost.authorPublicKeyB64 != editPay.authorId) {
+                Logger.warn(TAG, "Rejected EDIT_POST: Author mismatch")
+                return false
+            }
+            if (!existingPost.isOrphaned && editPay.timestamp >= existingPost.timestamp) {
+                postDao.updatePostContent(editPay.postId, editPay.content)
+                Logger.info(TAG, "Applied EDIT_POST for ${editPay.postId}")
+            }
+        }
+        return true
+    }
+
+    private suspend fun handleDeletePost(packet: NetworkPacket): Boolean {
+        val deletePay = packet.getDeletePostPayload() ?: return false
+        val payloadToVerify = "${deletePay.postId}|${deletePay.authorId}|${deletePay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, deletePay.signature, deletePay.authorId)
+        if (!isValid) return false
+
+        val existingPost = postDao.getPostById(deletePay.postId)
+        if (existingPost != null) {
+            if (existingPost.authorPublicKeyB64 != deletePay.authorId) {
+                Logger.warn(TAG, "Rejected DELETE_POST: Author mismatch")
+                return false
+            }
+            if (!existingPost.isOrphaned && deletePay.timestamp >= existingPost.timestamp) {
+                postDao.markPostOrphaned(deletePay.postId)
+                Logger.info(TAG, "Applied DELETE_POST for ${deletePay.postId}")
+            }
         }
         return true
     }

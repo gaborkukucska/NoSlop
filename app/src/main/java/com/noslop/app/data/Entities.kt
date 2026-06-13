@@ -73,7 +73,8 @@ data class MeshPost(
     val thumbnailB64: String? = null,
     val clearnetUrl: String? = null,
     val clearnetTitle: String? = null,
-    val clearnetThumbnailUrl: String? = null
+    val clearnetThumbnailUrl: String? = null,
+    val isOrphaned: Boolean = false
 )
 
 @Entity(

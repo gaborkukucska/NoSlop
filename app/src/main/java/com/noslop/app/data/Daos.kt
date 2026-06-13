@@ -84,8 +84,17 @@ interface PostDao {
     @Query("SELECT COUNT(*) FROM mesh_posts WHERE id = :id")
     suspend fun hasPost(id: String): Int
 
+    @Query("SELECT * FROM mesh_posts WHERE id = :id LIMIT 1")
+    suspend fun getPostById(id: String): MeshPost?
+
     @Query("SELECT * FROM mesh_posts WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getPostsSince(since: Long): List<MeshPost>
+
+    @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
+    suspend fun markPostOrphaned(id: String)
+
+    @Query("UPDATE mesh_posts SET content = :newContent WHERE id = :id")
+    suspend fun updatePostContent(id: String, newContent: String)
 }
 
 @Dao

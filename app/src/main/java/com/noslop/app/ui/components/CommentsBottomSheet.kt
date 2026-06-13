@@ -34,7 +34,7 @@ fun CommentsBottomSheet(
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
     val localKeys by viewModel.localKeys.collectAsState()
     var commentText by remember { mutableStateOf("") }
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -45,8 +45,9 @@ fun CommentsBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.8f)
-                .padding(16.dp)
+                .fillMaxHeight(0.9f)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 16.dp)
         ) {
             Text(
                 "Mesh Comments",
