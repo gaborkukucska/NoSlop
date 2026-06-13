@@ -31,8 +31,8 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 
 | Packet | Source | Purpose | NoSlop status |
 |---|---|---|---|
-| `EDIT_POST` | gChat | Author edits an existing post's content in place; propagates the new content + original post ID | Absent — NoSlop posts are immutable once gossiped |
-| `DELETE_POST` | gChat | Signed tombstone request; marks a post `isOrphaned` across the mesh ("Nuclear Option" in HAI-Net Vision docs) | Absent |
+| `EDIT_POST` | gChat | Author edits an existing post's content in place; propagates the new content + original post ID | **Done** — Added in recent updates |
+| `DELETE_POST` | gChat | Signed tombstone request; marks a post `isOrphaned` across the mesh ("Nuclear Option" in HAI-Net Vision docs) | **Done** — Added in recent updates |
 | `VOTE` | gChat | Up/down vote on a **post** (distinct from emoji `REACTION`); feeds the Content Health soft/hard-block ratio | Partial — NoSlop folds "downvote" into `REACTION` (`reactionType="downvote"`), but gChat tracks `votes` and `reactions` as separate maps on the post |
 | `COMMENT_VOTE` | gChat | Up/down vote on an individual **comment** | Absent — NoSlop comments have no voting at all |
 | `COMMENT_REACTION` | gChat | Emoji reaction scoped to a comment (not just the parent post) | **Done** — `COMMENT_REACTION` payloads and persistence added in Phase 3 |
@@ -49,10 +49,10 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 
 ### Recommendation
 At minimum, NoSlop should prioritize:
-1. `ANNOUNCE_PEER` (online presence — currently the biggest UX gap vs gChat's "Live Contact Sync")
-2. `COMMENT_REACTION` / `COMMENT_VOTE` (comments currently have zero engagement signals)
-3. `INVENTORY_SYNC_REQUEST`/`RESPONSE` to replace timestamp-based sync (reduces redundant transfer)
-4. `EDIT_POST` / `DELETE_POST` for basic moderation/correction capability
+1. ~~`ANNOUNCE_PEER` (online presence — currently the biggest UX gap vs gChat's "Live Contact Sync")~~ ✅ Resolved.
+2. ~~`COMMENT_REACTION` / `COMMENT_VOTE` (comments currently have zero engagement signals)~~ ✅ Resolved.
+3. ~~`INVENTORY_SYNC_REQUEST`/`RESPONSE` to replace timestamp-based sync (reduces redundant transfer)~~ ✅ Resolved.
+4. ~~`EDIT_POST` / `DELETE_POST` for basic moderation/correction capability~~ ✅ Resolved.
 
 ---
 
