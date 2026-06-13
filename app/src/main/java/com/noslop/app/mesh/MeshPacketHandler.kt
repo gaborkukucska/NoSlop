@@ -23,6 +23,7 @@ class MeshPacketHandler(
     private val messageDao = db.messageDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+    private val notificationDao = db.notificationDao()
 
     suspend fun handleIncomingPacket(packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         val localKeys = repo.getLocalIdentity() ?: return@withContext false
@@ -388,11 +389,27 @@ class MeshPacketHandler(
         val post = postDao.getPostById(commPay.postId)
         val localKeys = repo.getLocalIdentity()
         if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && commPay.comment.authorId != localKeys?.publicKeyB64) {
+            val title = "New Comment"
+            val msg = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}"
+            val route = "post/${commPay.postId}"
+            
+            notificationDao.insertNotification(
+                NotificationItem(
+                    id = UUID.randomUUID().toString(),
+                    type = "COMMENT",
+                    title = title,
+                    body = msg,
+                    targetRoute = route,
+                    iconType = "comment",
+                    senderPub = commPay.comment.authorId
+                )
+            )
+
             com.noslop.app.util.NotificationHelper.showNotification(
                 context = repo.context,
-                title = "New Comment",
-                message = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}",
-                deepLinkRoute = "post/${commPay.postId}"
+                title = title,
+                message = msg,
+                deepLinkRoute = route
             )
         }
         
@@ -554,11 +571,27 @@ class MeshPacketHandler(
             )
             messageDao.insertMessage(msg)
             
+            val title = "New Direct Message"
+            val msgBody = "Message from ${peer?.handle ?: "Anonymous"}"
+            val route = "chat/${packet.senderId}"
+            
+            notificationDao.insertNotification(
+                NotificationItem(
+                    id = UUID.randomUUID().toString(),
+                    type = "DM",
+                    title = title,
+                    body = msgBody,
+                    targetRoute = route,
+                    iconType = "dm",
+                    senderPub = packet.senderId
+                )
+            )
+
             com.noslop.app.util.NotificationHelper.showNotification(
                 context = repo.context,
-                title = "New Direct Message",
-                message = "Message from ${peer?.handle ?: "Anonymous"}",
-                deepLinkRoute = "chat/${packet.senderId}"
+                title = title,
+                message = msgBody,
+                deepLinkRoute = route
             )
             
             if (mediaMetadata != null) {

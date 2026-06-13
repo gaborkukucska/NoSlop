@@ -24,6 +24,7 @@ import com.noslop.app.data.UserProfile
 import com.noslop.app.data.FeedSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.ui.theme.*
+import androidx.compose.ui.graphics.asImageBitmap
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,9 +37,22 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
     var displayName by remember { mutableStateOf(currentProfile.displayName) }
     var bio by remember { mutableStateOf(currentProfile.bio) }
-    var avatarUrl by remember { mutableStateOf(currentProfile.avatarUrl) }
+    var avatarB64 by remember { mutableStateOf(currentProfile.avatarB64) }
     var negativeKeywords by remember { mutableStateOf(currentNegativeKeywords) }
     var language by remember { mutableStateOf(currentLanguage) }
+    var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    if (cropUri != null) {
+        com.noslop.app.ui.components.AvatarCropper(
+            uri = cropUri!!,
+            onCropSuccess = { b64 ->
+                avatarB64 = b64
+                cropUri = null
+            },
+            onCancel = { cropUri = null }
+        )
+        return
+    }
 
     // Categories & genres state
     val interests by viewModel.selectedInterests.collectAsState()
@@ -102,10 +116,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
                     contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
                 ) { uri: android.net.Uri? ->
-                    uri?.let {
-                        avatarUrl = it.toString()
-                        viewModel.updateUserProfileAvatar(context, it)
-                    }
+                    cropUri = uri
                 }
 
                 Box(
@@ -116,13 +127,23 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         .clickable { launcher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    if (avatarUrl.isNotEmpty()) {
-                        coil.compose.AsyncImage(
-                            model = avatarUrl,
-                            contentDescription = "Profile Avatar",
-                            modifier = Modifier.fillMaxSize(),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                        )
+                    if (avatarB64 != null) {
+                        val bitmap = remember(avatarB64) {
+                            try {
+                                val bytes = android.util.Base64.decode(avatarB64, android.util.Base64.DEFAULT)
+                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            } catch (e: Exception) { null }
+                        }
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap,
+                                contentDescription = "Profile Avatar",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
+                        }
                     } else {
                         Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
                     }
@@ -151,18 +172,6 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     onValueChange = { bio = it },
                     label = { Text("Bio") },
                     maxLines = 3,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = avatarUrl,
-                    onValueChange = { avatarUrl = it },
-                    label = { Text("Avatar URL (or local path)") },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                         focusedTextColor = TextLight, unfocusedTextColor = TextLight
@@ -417,7 +426,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
         Button(
             onClick = {
                 viewModel.updateUserProfile(
-                    UserProfile(displayName = displayName, bio = bio, avatarUrl = avatarUrl)
+                    UserProfile(displayName = displayName, bio = bio, avatarB64 = avatarB64)
                 )
                 viewModel.updateContentPreferences(
                     selectedCategories = localInterests.toList(),

@@ -62,6 +62,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val allPeers: Flow<List<Peer>> = peerDao.getAllPeers()
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
+    val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
+    val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
     val conversations: Flow<List<ChatMessage>> = messageDao.getConversations()
 
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
@@ -722,17 +724,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
+            val userProfile = getUserProfile()
+            val avatarB64 = userProfile.avatarB64.takeIf { it.isNotBlank() }
+
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName.split(".")[0],
                 fromDisplayName = myKeys.displayName,
+                authorAvatarB64 = avatarB64,
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
-            val payloadToSign = "${myKeys.publicKeyB64}|${reqPay.fromUsername}|${myKeys.onionAddress}|${reqPay.timestamp}"
+            var payloadToSign = "${myKeys.publicKeyB64}|${reqPay.fromUsername}|${myKeys.onionAddress}|${reqPay.timestamp}"
+            if (avatarB64 != null) {
+                payloadToSign += "|$avatarB64"
+            }
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
@@ -832,6 +841,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             messageDao.deleteMessagesWithPeer(publicKeyB64)
             Logger.info(TAG, "Deleted peer and all associated messages: ${peer.handle}")
         }
+    }
+
+    suspend fun markNotificationAsRead(id: String) = withContext(Dispatchers.IO) {
+        db.notificationDao().markAsRead(id)
+    }
+
+    suspend fun markAllNotificationsAsRead() = withContext(Dispatchers.IO) {
+        db.notificationDao().markAllAsRead()
+    }
+
+    suspend fun clearAllNotifications() = withContext(Dispatchers.IO) {
+        db.notificationDao().clearAllNotifications()
     }
 
     suspend fun sendDirectMessage(

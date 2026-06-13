@@ -110,6 +110,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allNotifications: StateFlow<List<com.noslop.app.data.NotificationItem>> = repository.allNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val unreadNotificationCount: StateFlow<Int> = repository.unreadNotificationCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     val conversations: StateFlow<List<ChatMessage>> = repository.conversations
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -474,48 +480,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun updateUserProfileAvatar(context: android.content.Context, uri: android.net.Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
-                } else {
-                    @Suppress("DEPRECATION")
-                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
-                }
 
-                // Downscale to max 96x96
-                val maxSize = 96
-                val width = bitmap.width
-                val height = bitmap.height
-                val ratio = width.toFloat() / height.toFloat()
-                val (newWidth, newHeight) = if (ratio > 1) {
-                    maxSize to (maxSize / ratio).toInt()
-                } else {
-                    (maxSize * ratio).toInt() to maxSize
-                }
-                
-                val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-                val outputStream = java.io.ByteArrayOutputStream()
-                
-                // Compress as WEBP or JPEG
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP_LOSSY, 70, outputStream)
-                } else {
-                    @Suppress("DEPRECATION")
-                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP, 70, outputStream)
-                }
-                
-                val base64Str = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
-                
-                val currentProfile = _userProfile.value
-                val newProfile = currentProfile.copy(avatarUrl = uri.toString(), avatarB64 = base64Str)
-                updateUserProfile(newProfile)
-            } catch (e: Exception) {
-                com.noslop.app.debug.Logger.error("ViewModel", "Failed to process avatar: ${e.message}")
-            }
-        }
-    }
 
     fun updateContentPreferences(
         selectedCategories: List<String>, 
@@ -612,6 +577,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.updateReadState(id, isRead)
         }
+    }
+
+    fun markNotificationAsRead(id: String) {
+        viewModelScope.launch { repository.markNotificationAsRead(id) }
+    }
+
+    fun clearAllNotifications() {
+        viewModelScope.launch { repository.clearAllNotifications() }
     }
 
     fun toggleItemSavedState(id: String, isSaved: Boolean) {

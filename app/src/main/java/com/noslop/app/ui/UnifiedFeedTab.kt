@@ -103,6 +103,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     val torState by viewModel.torReadyState.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
 
+    val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
+
     LaunchedEffect(initialRoute) {
         if (initialRoute != null) {
             if (initialRoute.startsWith("chat/")) {
@@ -110,6 +112,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 viewModel.selectChatPeer(initialRoute.substringAfter("chat/"))
             } else if (initialRoute.startsWith("post/")) {
                 selectedTab = 0
+            } else if (initialRoute == "notifications") {
+                selectedTab = 4
             }
         }
     }
@@ -152,7 +156,17 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    icon = { Icon(Icons.Default.Email, contentDescription = "DMs", modifier = Modifier.size(20.dp)) },
+                    icon = { 
+                        BadgedBox(
+                            badge = {
+                                if (unreadNotifs > 0) {
+                                    Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
+                                }
+                            }
+                        ) {
+                            Icon(Icons.Default.Email, contentDescription = "DMs", modifier = Modifier.size(20.dp))
+                        }
+                    },
                     label = { Text("DMs", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
@@ -228,6 +242,19 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 if (selectedTab == 3) {
                     SettingsTab(viewModel)
                 }
+                if (selectedTab == 4) {
+                    com.noslop.app.ui.tabs.NotificationsScreen(
+                        viewModel = viewModel,
+                        onNavigateToRoute = { route ->
+                            if (route.startsWith("chat/")) {
+                                selectedTab = 1
+                                viewModel.selectChatPeer(route.substringAfter("chat/"))
+                            } else if (route.startsWith("post/")) {
+                                selectedTab = 0
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -296,6 +323,7 @@ fun UnifiedFeedTab(
     val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
+    val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
     var searchQuery by remember { mutableStateOf("") }
@@ -477,6 +505,34 @@ fun UnifiedFeedTab(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                 }
+                
+                // Notifications button
+                IconButton(
+                    onClick = { onTabChange(4) },
+                    modifier = Modifier
+                        .size(40.dp)
+                        .background(
+                            SurfaceDark.copy(alpha = 0.6f),
+                            RoundedCornerShape(50)
+                        )
+                ) {
+                    BadgedBox(
+                        badge = {
+                            if (unreadNotifs > 0) {
+                                Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = "Notifications",
+                            tint = TextLight.copy(alpha = 0.85f),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.width(8.dp))
                 
                 // The main floating search button
                 IconButton(

@@ -166,3 +166,19 @@ data class AppSetting(
     @PrimaryKey val key: String,
     val value: String
 )
+
+@Entity(
+    tableName = "notifications",
+    indices = [Index(value = ["timestamp"])]
+)
+data class NotificationItem(
+    @PrimaryKey val id: String,
+    val type: String, // "MENTION", "DM", "SYSTEM", "COMMENT", "REACTION"
+    val title: String,
+    val body: String,
+    val targetRoute: String?, // deep link route like "chat/{pub}" or "post/{id}"
+    val timestamp: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false,
+    val iconType: String? = null,
+    val senderPub: String? = null
+)
