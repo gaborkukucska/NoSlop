@@ -39,7 +39,7 @@ fun ChatThreadScreen(
 ) {
     var rawText by remember { mutableStateOf("") }
 
-    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // Thread header
         Row(
             modifier = Modifier

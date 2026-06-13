@@ -54,7 +54,14 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
             if (isVisible) {
                 AndroidView(
                     factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
+                        object : android.webkit.WebView(ctx) {
+                            override fun onWindowVisibilityChanged(visibility: Int) {
+                                // Prevent WebView from automatically pausing media when app goes to background
+                                if (visibility != android.view.View.GONE) {
+                                    super.onWindowVisibilityChanged(android.view.View.VISIBLE)
+                                }
+                            }
+                        }.apply {
                             layoutParams = android.view.ViewGroup.LayoutParams(
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                                 android.view.ViewGroup.LayoutParams.MATCH_PARENT
