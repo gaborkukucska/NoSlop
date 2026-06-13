@@ -113,6 +113,10 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             }
                 
             exoPlayer = player
+            isPlaying = player.isPlaying
+            if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
+                duration = player.duration
+            }
             
             onDispose {
                 player.release()

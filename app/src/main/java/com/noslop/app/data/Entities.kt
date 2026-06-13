@@ -138,6 +138,26 @@ data class CommentReaction(
     val signature: String
 )
 
+@Entity(tableName = "mesh_votes")
+data class MeshVote(
+    @PrimaryKey val id: String,
+    val postId: String,
+    val authorPublicKeyB64: String,
+    val voteType: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+@Entity(tableName = "comment_votes")
+data class CommentVote(
+    @PrimaryKey val id: String,
+    val commentId: String,
+    val authorPublicKeyB64: String,
+    val voteType: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 @Entity(tableName = "app_settings")
 data class AppSetting(
     @PrimaryKey val key: String,

@@ -76,6 +76,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun getReactionsForComment(commentId: String): Flow<List<CommentReaction>> =
         db.commentReactionDao().getReactionsForComment(commentId)
 
+    fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
+        db.voteDao().getVotesForPost(postId)
+
+    fun getVotesForComment(commentId: String): Flow<List<CommentVote>> =
+        db.commentVoteDao().getVotesForComment(commentId)
+
     fun getDownloadProgress(): Flow<Map<String, Int>> =
         com.noslop.app.mesh.MediaManager.downloadProgress
 
@@ -524,6 +530,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         appSettingDao.insertSetting(AppSetting("enable_aggregator", enabled.toString()))
     }
 
+    /**
+     * Check if Opt-in Transparency is enabled.
+     * When enabled, community-flagged (soft-blocked) content shows a non-blocking
+     * warning badge instead of a full overlay, allowing users to interact freely.
+     */
+    suspend fun isContentTransparencyEnabled(): Boolean = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("content_transparency")
+        return@withContext setting == "true"
+    }
+
+    /**
+     * Enable or disable Opt-in Transparency for community-flagged content.
+     */
+    suspend fun setContentTransparencyEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("content_transparency", enabled.toString()))
+    }
+
     // --- Social Mesh & Direct Messages Routing ---
     suspend fun composeAndBroadcastPost(
         content: String,
@@ -650,9 +673,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
+            val payloadToSign = "${myKeys.publicKeyB64}|${reqPay.fromUsername}|${myKeys.onionAddress}|${reqPay.timestamp}"
+            val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
-            val reqJson = gson.toJson(reqPay)
-            val reqSig = CryptoService.sign(reqJson, myKeys.privateKeyB64)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
@@ -685,9 +708,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
+            val payloadToSign = "${myKeys.publicKeyB64}|${handshakePay.fromUsername}|${myKeys.onionAddress}|${handshakePay.timestamp}"
+            val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
-            val handshakeJson = gson.toJson(handshakePay)
-            val handshakeSig = CryptoService.sign(handshakeJson, myKeys.privateKeyB64)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
                 hops = 1,
@@ -915,6 +938,54 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         true
     }
 
+    suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val voteDao = db.voteDao()
+        
+        val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
+        val existingVote = voteDao.getVoteById(voteId)
+        val action = if (existingVote != null) "remove" else "add"
+
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$postId|$voteType|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val votePayload = com.noslop.app.mesh.VotePayload(
+            postId = postId,
+            voteType = voteType,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature,
+            action = action
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "VOTE",
+            payload = com.google.gson.Gson().toJsonTree(votePayload),
+            signature = signature
+        )
+
+        if (action == "remove") {
+            voteDao.deleteVoteById(voteId)
+        } else {
+            val localVote = MeshVote(
+                id = voteId,
+                postId = postId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                voteType = voteType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            voteDao.insertVote(localVote)
+        }
+
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
     suspend fun reactToFeedItem(item: FeedItem) {
         reactToFeedItemWithType(item, "like")
     }
@@ -1038,6 +1109,54 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
             signature = signature
         )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val commentVoteDao = db.commentVoteDao()
+        
+        val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"
+        val existingVote = commentVoteDao.getVoteById(voteId)
+        val action = if (existingVote != null) "remove" else "add"
+
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$commentId|$voteType|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val votePayload = com.noslop.app.mesh.CommentVotePayload(
+            commentId = commentId,
+            voteType = voteType,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature,
+            action = action
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "COMMENT_VOTE",
+            payload = com.google.gson.Gson().toJsonTree(votePayload),
+            signature = signature
+        )
+
+        if (action == "remove") {
+            commentVoteDao.deleteVoteById(voteId)
+        } else {
+            val localVote = com.noslop.app.data.CommentVote(
+                id = voteId,
+                commentId = commentId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                voteType = voteType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            commentVoteDao.insertVote(localVote)
+        }
+
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }

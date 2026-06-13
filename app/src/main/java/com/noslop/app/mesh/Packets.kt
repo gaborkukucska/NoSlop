@@ -137,6 +137,24 @@ data class CommentReactionPayload(
     val action: String = "add"
 )
 
+data class VotePayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add"
+)
+
+data class CommentVotePayload(
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("vote_type") val voteType: String, // "upvote" or "downvote"
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add"
+)
+
 data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
@@ -212,7 +230,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "VOTE", "COMMENT_VOTE", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -284,6 +302,14 @@ data class NetworkPacket(
 
     fun getCommentReactionPayload(): CommentReactionPayload? = if (type == "COMMENT_REACTION" && payload != null) {
         Gson().fromJson(payload, CommentReactionPayload::class.java)
+    } else null
+
+    fun getVotePayload(): VotePayload? = if (type == "VOTE" && payload != null) {
+        Gson().fromJson(payload, VotePayload::class.java)
+    } else null
+
+    fun getCommentVotePayload(): CommentVotePayload? = if (type == "COMMENT_VOTE" && payload != null) {
+        Gson().fromJson(payload, CommentVotePayload::class.java)
     } else null
 
     fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {

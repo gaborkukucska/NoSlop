@@ -33,8 +33,8 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 |---|---|---|---|
 | `EDIT_POST` | gChat | Author edits an existing post's content in place; propagates the new content + original post ID | **Done** — Added in recent updates |
 | `DELETE_POST` | gChat | Signed tombstone request; marks a post `isOrphaned` across the mesh ("Nuclear Option" in HAI-Net Vision docs) | **Done** — Added in recent updates |
-| `VOTE` | gChat | Up/down vote on a **post** (distinct from emoji `REACTION`); feeds the Content Health soft/hard-block ratio | Partial — NoSlop folds "downvote" into `REACTION` (`reactionType="downvote"`), but gChat tracks `votes` and `reactions` as separate maps on the post |
-| `COMMENT_VOTE` | gChat | Up/down vote on an individual **comment** | Absent — NoSlop comments have no voting at all |
+| `VOTE` | gChat | Up/down vote on a **post** (distinct from emoji `REACTION`); feeds the Content Health soft/hard-block ratio | **Done** — `MeshVote` entity + `VoteDao` + `VOTE` packet type + UI integration. Content Health now sources upvote/downvote counts from `mesh_votes` table |
+| `COMMENT_VOTE` | gChat | Up/down vote on an individual **comment** | **Done** — `CommentVote` entity + `CommentVoteDao` + `COMMENT_VOTE` packet type + CommentsBottomSheet integration |
 | `COMMENT_REACTION` | gChat | Emoji reaction scoped to a comment (not just the parent post) | **Done** — `COMMENT_REACTION` payloads and persistence added in Phase 3 |
 | `CHAT_REACTION` | gChat | Emoji reaction on a **direct message** (1:1 chat) | **Done** — `CHAT_REACTION` payloads and DM long-press UI added in Phase 3 |
 | `CHAT_VOTE` | gChat | Up/down vote on a chat message | Absent |
@@ -53,6 +53,7 @@ At minimum, NoSlop should prioritize:
 2. ~~`COMMENT_REACTION` / `COMMENT_VOTE` (comments currently have zero engagement signals)~~ ✅ Resolved.
 3. ~~`INVENTORY_SYNC_REQUEST`/`RESPONSE` to replace timestamp-based sync (reduces redundant transfer)~~ ✅ Resolved.
 4. ~~`EDIT_POST` / `DELETE_POST` for basic moderation/correction capability~~ ✅ Resolved.
+5. ~~`VOTE` / `COMMENT_VOTE` (separate vote data model from emoji reactions)~~ ✅ Resolved.
 
 ---
 
@@ -73,11 +74,19 @@ describes additional behavior not yet present in NoSlop:
   overlay but doesn't mention disabling the underlying action handlers.
 - **Separate `votes` vs `reactions` maps**: gChat's `PostSchema` keeps
   `votes: Record<userId, 'up'|'down'>` and `reactions: Record<emoji,
-  userId[]>` as two independent structures. NoSlop currently overloads
-  `REACTION` (`reactionType` includes `"upvote"`/`"downvote"` alongside emoji
-  reactions like `"😡"`), which conflates the two signals the Content Health
-  algorithm is supposed to combine. Splitting these mirrors gChat's model and
-  makes the "downvotes + 😡 > 66%" formula explicit rather than implicit.
+  userId[]>` as two independent structures.
+
+  > **UPDATE (2026-06-13):** This gap has been **fully closed**. NoSlop now
+  > maintains `MeshVote` / `CommentVote` entities in dedicated Room tables
+  > (`mesh_votes`, `comment_votes`), separate from emoji reactions. `VOTE`
+  > and `COMMENT_VOTE` packet types are defined in `Packets.kt` with
+  > crypto-verified handlers in `MeshPacketHandler`. The ViewModel routes
+  > "upvote"/"downvote" actions to `voteToMeshPost`/`voteToComment` while
+  > emoji reactions continue using the legacy `REACTION` path. Content
+  > Health scoring in `FeedCard`, `MainScreen`, and `CommentsBottomSheet`
+  > now sources upvote/downvote counts from the `mesh_votes` table and
+  > combines them with angry reactions from the `reactions` table for the
+  > soft-block/hard-block ratio calculation.
 
 ---
 
@@ -366,8 +375,8 @@ implementation effort vs. value:
 - [x] Add `clearnet_thumbnail_url` to `PACKET_SCHEMA.md`'s POST table (§11)
 - [x] `ANNOUNCE_PEER` packet + online/offline presence indicator (§4)
 - [x] `COMMENT_REACTION` packets + UI (§1, §2)
-- [ ] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
-- [ ] "Opt-in Transparency" override for soft-blocked content (§2)
+- [x] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
+- [x] "Opt-in Transparency" override for soft-blocked content (§2)
 - [x] Relay state TTL/cleanup in `GossipService.RelayState` (§6)
 - [x] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6)
 - [x] `INVENTORY_SYNC_REQUEST`/`RESPONSE` (hash-based sync) to replace

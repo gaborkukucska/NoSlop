@@ -43,7 +43,8 @@ mnemonic, onion address).
 │  ├─ IdentityRepository (keys, mnemonic, onion, lock state)          │
 │  ├─ MeshPacketHandler  (incoming packet dispatch)                   │
 │  ├─ FeedDao / PostDao / PeerDao / MessageDao / CommentDao /         │
-│  │   ReactionDao / AppSettingDao (Room, v16)                        │
+│  │   MeshVoteDao / CommentVoteDao (Room, v20)                       │
+│  │   ReactionDao / AppSettingDao (Room, v20)                        │
 │  └─ ApiKeyRepository (user-supplied API keys, EncryptedSharedPrefs) │
 └──────┬─────────────────────────────┬───────────────────────────────┘
        │                              │
@@ -73,7 +74,7 @@ com.noslop.app
 ├── data/
 │   ├── ApiKeyRepository.kt       User API keys (EncryptedSharedPreferences)
 │   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media)
-│   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, AppSetting)
+│   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, Vote, AppSetting)
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
 │   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
@@ -193,13 +194,14 @@ net).
   - Post: `"$id|${authorPublicKeyB64}|$content|$timestamp"`
   - Comment: `"$postId|$id|$content|$timestamp"`
   - Reaction: `"$postId|$reactionType|${authorPublicKeyB64}|$timestamp"`
+  - Vote: `"$targetId|$voteType|${authorPublicKeyB64}|$timestamp"`
 
   This means signature verification must reconstruct the exact same
   pipe-delimited string from the received payload fields — any reordering or
   additional fields in a payload do **not** automatically invalidate or
   validate the signature; the verifier must know the precise format per
   packet type. `MeshPacketHandler` reconstructs these strings explicitly in
-  `handlePost`, `handleComment`, `handleReaction`, and `handleSyncResponse`.
+  `handlePost`, `handleComment`, `handleReaction`, `handleVote`, and `handleSyncResponse`.
 
 ### 3.5 Direct Message Encryption
 
@@ -385,6 +387,9 @@ eviction policy** (see Gap Analysis §6).
 | `POST` | `handlePost` | `id\|authorId\|content\|timestamp` | `postDao.insertPost`; triggers `MediaManager.checkAndAutoDownload` if `mediaMetadata != null` |
 | `COMMENT` | `handleComment` | `postId\|commentId\|content\|timestamp` | `commentDao.insertComment` |
 | `REACTION` | `handleReaction` | `postId\|reactionType\|authorId\|timestamp` | `reactionDao.insertReaction` or `deleteReactionById` depending on `action` |
+| `COMMENT_REACTION` | `handleCommentReaction` | `commentId\|reactionType\|authorId\|timestamp` | `commentReactionDao.insertReaction` or `deleteReactionById` |
+| `VOTE` | `handleVote` | `postId\|voteType\|authorId\|timestamp` | `voteDao.insertVote` or `deleteVoteById` depending on `action` |
+| `COMMENT_VOTE` | `handleCommentVote` | `commentId\|voteType\|authorId\|timestamp` | `commentVoteDao.insertVote` or `deleteVoteById` |
 | `MEDIA_REQUEST` | `handleMediaRequest` | none | delegates to `MediaManager.handleMediaRequest` |
 | `MEDIA_CHUNK` | `handleMediaChunk` | none | delegates to `MediaManager.handleMediaChunk` |
 | `MEDIA_RECOVERY_FOUND` | `handleMediaRecoveryFound` | none | delegates to `MediaManager.handleRecoveryFound` |
@@ -452,6 +457,8 @@ data class NetworkPacket(
 | `ReactionPayload` | `REACTION` | `postId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
 | `ChatReactionPayload` | `CHAT_REACTION` | `messageId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
 | `CommentReactionPayload`| `COMMENT_REACTION`| `commentId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
+| `VotePayload` | `VOTE` | `postId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
+| `CommentVotePayload`| `COMMENT_VOTE`| `commentId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
 | `EncryptedPayload` | `MESSAGE` | `id, nonce, ciphertext, groupId?` (groupId reserved, unused — see Gap Analysis §3) |
 | `PeerHandshakePayload` | `CONNECTION_REQUEST`, `USER_HANDSHAKE` | `id, fromUserId, fromUsername, fromDisplayName, fromHomeNode, fromEncryptionPublicKey?, timestamp, signature?` (unified type per milestone 56 — previously two near-duplicate classes) |
 | `SyncRequestPayload` | `SYNC_REQUEST` | `since: Long` |
@@ -761,6 +768,8 @@ the ephemeral onion with the identity-derived one.
 | `chat_messages` | `id` | `chatWithPeerPub`, `senderPub`, `ciphertext`, `nonce`, `timestamp`, `isRead`, `mediaId`, `mediaType` | on `chatWithPeerPub`, on `timestamp` |
 | `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId` | on `postId` |
 | `mesh_reactions` | `id` (format `"${postId}_${authorPubKey}_${reactionType}"`) | `postId`, `authorPublicKeyB64`, `reactionType`, `timestamp`, `signature` | — |
+| `mesh_votes` | `id` (format `"${postId}_${authorPubKey}_${voteType}"`) | `postId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Separates upvotes/downvotes from emoji reactions |
+| `comment_votes` | `id` (format `"${commentId}_${authorPubKey}_${voteType}"`) | `commentId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Votes scoped to comments |
 | `app_settings` | `key` | `value` (string, often JSON) | — |
 
 `app_settings` is the catch-all KV store for: identity public data

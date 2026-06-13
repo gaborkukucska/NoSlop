@@ -206,6 +206,7 @@ Based on recent user testing, the following core features are planned for the ne
 7. ~~**Rich Clearnet Sharing Overhaul**~~: ✅ Resolved in milestone 168. Shared clearnet content (YouTube, Vimeo, Articles) is now seamlessly embedded using `VideoPlayer` directly inside `FullScreenMeshCard`, removing the clunky external link overlays. Background playback of this media is also supported (milestone 170).
 8. ~~**Online Presence Indicators**~~: ✅ Resolved in milestone 156. `ANNOUNCE_PEER` heartbeat broadcasts every 60s with Ed25519 signature verification. Stale peers auto-timeout after 3 minutes. Green online indicator rendered in `PeerItem.kt`.
 9. ~~**Hash-Based Sync (`INVENTORY_SYNC`)**~~: ✅ Resolved in milestone 159. Replaced timestamp-based sync with SHA3-256 hash-based inventory diffing (`INVENTORY_SYNC_REQUEST`). Only genuinely missing posts are transferred.
+10. ~~**Split Votes vs Reactions Data Model**~~: ✅ Resolved. `MeshVote` and `CommentVote` Room entities are now stored in dedicated `mesh_votes` / `comment_votes` tables, distinct from emoji reactions. `VOTE` and `COMMENT_VOTE` packet types handle crypto-verified gossip propagation. `NoSlopViewModel` routes "upvote"/"downvote" to the vote path, while emoji reactions ("like", "fire", "angry", etc.) remain on the legacy `REACTION` path. Content Health scoring in `FeedCard.kt`, `MainScreen.kt`, and `CommentsBottomSheet.kt` now derives upvote/downvote counts from the `mesh_votes` table. Database schema version bumped to 20.
 
 ## Clearnet-to-Mesh Broadcast System
 

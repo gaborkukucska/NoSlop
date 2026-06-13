@@ -82,6 +82,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isAggregatorEnabled = MutableStateFlow(true)
     val isAggregatorEnabled: StateFlow<Boolean> = _isAggregatorEnabled.asStateFlow()
 
+    private val _isContentTransparencyEnabled = MutableStateFlow(false)
+    val isContentTransparencyEnabled: StateFlow<Boolean> = _isContentTransparencyEnabled.asStateFlow()
+
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
 
@@ -126,6 +129,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun getReactionsForComment(commentId: String): Flow<List<com.noslop.app.data.CommentReaction>> =
         repository.getReactionsForComment(commentId)
+
+    fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
+        repository.getVotesForPost(postId)
+
+    fun getVotesForComment(commentId: String): Flow<List<CommentVote>> =
+        repository.getVotesForComment(commentId)
 
     val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
@@ -200,6 +209,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Load aggregator setting
         viewModelScope.launch {
             _isAggregatorEnabled.value = repository.isAggregatorEnabled()
+        }
+
+        // Load content transparency setting
+        viewModelScope.launch {
+            _isContentTransparencyEnabled.value = repository.isContentTransparencyEnabled()
         }
 
         // Update encryption status
@@ -337,6 +351,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (newState) {
                 refreshFeeds()
             }
+        }
+    }
+
+    fun toggleContentTransparency() {
+        viewModelScope.launch {
+            val newState = !_isContentTransparencyEnabled.value
+            repository.setContentTransparencyEnabled(newState)
+            _isContentTransparencyEnabled.value = newState
         }
     }
 
@@ -679,7 +701,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun reactToMeshPost(postId: String, reactionType: String = "like") {
-        viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
+        if (reactionType == "upvote" || reactionType == "downvote") {
+            viewModelScope.launch { repository.voteToMeshPost(postId, reactionType) }
+        } else {
+            viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
+        }
     }
 
     fun getReactionAnchorIdForUrl(url: String): String {
@@ -696,7 +722,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun reactToComment(commentId: String, reactionType: String) {
-        viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
+        if (reactionType == "upvote" || reactionType == "downvote") {
+            viewModelScope.launch { repository.voteToComment(commentId, reactionType) }
+        } else {
+            viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
+        }
     }
 
     /**

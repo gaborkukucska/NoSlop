@@ -64,7 +64,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
 
 @Composable
-fun MainScreen(viewModel: NoSlopViewModel) {
+fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     val context = LocalContext.current
     val imageLoader = remember {
         ImageLoader.Builder(context)
@@ -89,18 +89,29 @@ fun MainScreen(viewModel: NoSlopViewModel) {
     }
 
     CompositionLocalProvider(LocalImageLoader provides imageLoader) {
-        MainScreenContent(viewModel)
+        MainScreenContent(viewModel, initialRoute)
     }
 }
 
 @Composable
-fun MainScreenContent(viewModel: NoSlopViewModel) {
+fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     var selectedTab by remember { mutableStateOf(0) }
     var showComposeDialog by remember { mutableStateOf(false) }
 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
+
+    LaunchedEffect(initialRoute) {
+        if (initialRoute != null) {
+            if (initialRoute.startsWith("chat/")) {
+                selectedTab = 1
+                viewModel.selectChatPeer(initialRoute.substringAfter("chat/"))
+            } else if (initialRoute.startsWith("post/")) {
+                selectedTab = 0
+            }
+        }
+    }
 
     Scaffold(
         modifier = Modifier.fillMaxSize().testTag("main_scaffold"),

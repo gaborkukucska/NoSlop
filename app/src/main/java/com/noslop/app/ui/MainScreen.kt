@@ -254,13 +254,14 @@ fun FullScreenMeshCard(
 
         // 3. Interactions Overlay
         val reactions by (viewModel?.getReactionsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
+        val votes by (viewModel?.getVotesForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
         val comments by (viewModel?.getCommentsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
 
         // Content Health Logic
-        val upvotes = reactions.count { it.reactionType == "upvote" || it.reactionType == "like" }
-        val downvotes = reactions.count { it.reactionType == "downvote" }
+        val upvotes = votes.count { it.voteType == "upvote" }
+        val downvotes = votes.count { it.voteType == "downvote" }
         val angryReactions = reactions.count { it.reactionType == "angry" }
-        val totalSignals = reactions.size
+        val totalSignals = reactions.size + votes.size
         val negativeSignals = downvotes + angryReactions
         val negativeRatio = if (totalSignals > 0) negativeSignals.toFloat() / totalSignals else 0f
 
@@ -272,6 +273,9 @@ fun FullScreenMeshCard(
         }
 
         var revealOverride by remember { mutableStateOf(false) }
+        val isContentTransparencyEnabled by (viewModel?.isContentTransparencyEnabled ?: kotlinx.coroutines.flow.flowOf(false)).collectAsState(initial = false)
+        val showSoftBlockOverlay = isSoftBlocked && !revealOverride && !isContentTransparencyEnabled
+        val showTransparencyBadge = isSoftBlocked && isContentTransparencyEnabled
 
         Box(modifier = Modifier.fillMaxSize()) {
             OverlayInteractions(
@@ -284,7 +288,8 @@ fun FullScreenMeshCard(
                 },
                 onShare = onShareToMesh,
                 onComment = { showComments = true },
-                reactionSummary = reactions.groupBy { it.reactionType }.mapValues { it.value.size },
+                reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
+                    .groupBy { it }.mapValues { it.value.size },
                 commentCount = comments.size,
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
@@ -294,9 +299,22 @@ fun FullScreenMeshCard(
 
             ContentHealthOverlay(
                 isBlocked = isHardBlocked,
-                isSoftBlocked = isSoftBlocked && !revealOverride,
+                isSoftBlocked = showSoftBlockOverlay,
                 onReveal = { revealOverride = true }
             )
+
+            if (showTransparencyBadge && !isHardBlocked) {
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 40.dp), contentAlignment = Alignment.TopCenter) {
+                    Row(
+                        modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Color.Black.copy(alpha = 0.6f)).padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Community Flagged", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 

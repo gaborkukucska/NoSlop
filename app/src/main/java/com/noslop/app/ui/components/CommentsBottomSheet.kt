@@ -113,6 +113,7 @@ fun CommentsBottomSheet(
 @Composable
 fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?) {
     val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
+    val votes by viewModel.getVotesForComment(comment.id).collectAsState(initial = emptyList())
     var showReactionPicker by remember { mutableStateOf(false) }
 
     Column(
@@ -145,10 +146,20 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
             color = TextLight
         )
 
-        if (reactions.isNotEmpty()) {
-            val grouped = reactions.groupBy { it.reactionType }
+        if (reactions.isNotEmpty() || votes.isNotEmpty()) {
+            val allReactions = reactions.map { it.reactionType to it.authorPublicKeyB64 } + 
+                               votes.map { it.voteType to it.authorPublicKeyB64 }
+            val grouped = allReactions.groupBy { it.first }
+            
+            val emojiMap = mapOf(
+                "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
+                "laugh" to "😂", "wow" to "😮", "sad" to "😢",
+                "fire" to "🔥", "angry" to "😡"
+            )
+
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 grouped.forEach { (type, reacts) ->
+                    val displayEmoji = emojiMap[type] ?: type
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
@@ -157,9 +168,9 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
-                            text = "$type ${reacts.size}",
+                            text = "$displayEmoji ${reacts.size}",
                             fontSize = 12.sp,
-                            color = if (reacts.any { it.authorPublicKeyB64 == localKeys?.publicKeyB64 }) AccentGreen else TextMuted
+                            color = if (reacts.any { it.second == localKeys?.publicKeyB64 }) AccentGreen else TextMuted
                         )
                     }
                 }
@@ -167,7 +178,12 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
         }
 
         if (showReactionPicker) {
-            val emojis = listOf("👍", "🔥", "😂", "👎", "👀")
+            val emojis = listOf("upvote", "downvote", "🔥", "😂", "👀")
+            val emojiMap = mapOf(
+                "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
+                "laugh" to "😂", "wow" to "😮", "sad" to "😢",
+                "fire" to "🔥", "angry" to "😡"
+            )
             Row(
                 modifier = Modifier
                     .padding(top = 8.dp)
@@ -178,8 +194,9 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 emojis.forEach { emoji ->
+                    val displayEmoji = emojiMap[emoji] ?: emoji
                     Text(
-                        text = emoji,
+                        text = displayEmoji,
                         fontSize = 20.sp,
                         modifier = Modifier.clickable {
                             viewModel.reactToComment(comment.id, emoji)

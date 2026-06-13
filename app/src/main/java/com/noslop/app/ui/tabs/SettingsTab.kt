@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
+import androidx.compose.ui.graphics.Color
 import com.noslop.app.ui.*
 import com.noslop.app.ui.components.*
 
@@ -219,6 +220,37 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                         checked = mediaSettings.autoDownloadPrivate,
                                         onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPrivate = it)) },
                                         colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+
+                            // Content Transparency Toggle
+                            val isContentTransparencyEnabled by viewModel.isContentTransparencyEnabled.collectAsState()
+                            Column {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Opt-in Transparency", fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text(
+                                            "When enabled, community-flagged content shows a warning badge instead of a blocking overlay, letting you decide what to view.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextMuted
+                                        )
+                                    }
+                                    Switch(
+                                        checked = isContentTransparencyEnabled,
+                                        onCheckedChange = { viewModel.toggleContentTransparency() },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = PrimaryBlack,
+                                            checkedTrackColor = Color.Yellow,
+                                            uncheckedThumbColor = TextMuted,
+                                            uncheckedTrackColor = SurfaceDark
+                                        )
                                     )
                                 }
                             }

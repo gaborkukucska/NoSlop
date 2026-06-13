@@ -40,6 +40,8 @@ class MeshPacketHandler(
             "POST" -> handlePost(packet)
             "COMMENT" -> handleComment(packet)
             "REACTION" -> handleReaction(packet)
+            "VOTE" -> handleVote(packet)
+            "COMMENT_VOTE" -> handleCommentVote(packet)
             "MEDIA_REQUEST" -> handleMediaRequest(packet)
             "MEDIA_CHUNK" -> handleMediaChunk(packet)
             "MEDIA_RECOVERY_FOUND" -> handleMediaRecoveryFound(packet)
@@ -371,7 +373,8 @@ class MeshPacketHandler(
             com.noslop.app.util.NotificationHelper.showNotification(
                 context = repo.context,
                 title = "New Comment",
-                message = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}"
+                message = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}",
+                deepLinkRoute = "post/${commPay.postId}"
             )
         }
         
@@ -405,6 +408,66 @@ class MeshPacketHandler(
             )
             reactionDao.insertReaction(localReaction)
             Logger.info(TAG, "Received and saved mesh reaction: ${payload.reactionType} on ${payload.postId}")
+        }
+        return true
+    }
+
+    private suspend fun handleVote(packet: NetworkPacket): Boolean {
+        val payload = packet.getVotePayload() ?: return false
+        
+        // Verify signature
+        val payloadToVerify = "${payload.postId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
+            Logger.warn(TAG, "Vote signature verification failed for post ${payload.postId} from ${payload.authorId}")
+            return false
+        }
+
+        val voteId = "${payload.postId}_${payload.authorId}_${payload.voteType}"
+        val voteDao = db.voteDao()
+
+        if (payload.action == "remove") {
+            voteDao.deleteVoteById(voteId)
+            Logger.info(TAG, "Removed mesh vote: ${payload.voteType} on ${payload.postId}")
+        } else {
+            val localVote = com.noslop.app.data.MeshVote(
+                id = voteId,
+                postId = payload.postId,
+                authorPublicKeyB64 = payload.authorId,
+                voteType = payload.voteType,
+                timestamp = payload.timestamp,
+                signature = payload.signature
+            )
+            voteDao.insertVote(localVote)
+            Logger.info(TAG, "Received and saved mesh vote: ${payload.voteType} on ${payload.postId}")
+        }
+        return true
+    }
+
+    private suspend fun handleCommentVote(packet: NetworkPacket): Boolean {
+        val payload = packet.getCommentVotePayload() ?: return false
+        
+        // Verify signature
+        val payloadToVerify = "${payload.commentId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
+            Logger.warn(TAG, "Comment Vote signature verification failed for comment ${payload.commentId} from ${payload.authorId}")
+            return false
+        }
+
+        val voteId = "${payload.commentId}_${payload.authorId}_${payload.voteType}"
+        val commentVoteDao = db.commentVoteDao()
+
+        if (payload.action == "remove") {
+            commentVoteDao.deleteVoteById(voteId)
+        } else {
+            val localVote = com.noslop.app.data.CommentVote(
+                id = voteId,
+                commentId = payload.commentId,
+                authorPublicKeyB64 = payload.authorId,
+                voteType = payload.voteType,
+                timestamp = payload.timestamp,
+                signature = payload.signature
+            )
+            commentVoteDao.insertVote(localVote)
         }
         return true
     }
@@ -476,7 +539,8 @@ class MeshPacketHandler(
             com.noslop.app.util.NotificationHelper.showNotification(
                 context = repo.context,
                 title = "New Direct Message",
-                message = "Message from ${peer?.handle ?: "Anonymous"}"
+                message = "Message from ${peer?.handle ?: "Anonymous"}",
+                deepLinkRoute = "chat/${packet.senderId}"
             )
             
             if (mediaMetadata != null) {
@@ -503,7 +567,7 @@ class MeshPacketHandler(
             Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Missing signature")
             return false
         }
-        val payloadToVerify = com.google.gson.Gson().toJson(connPay)
+        val payloadToVerify = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
         val isValid = CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Signature verification failed")
@@ -534,7 +598,7 @@ class MeshPacketHandler(
             Logger.warn(TAG, "Rejected USER_HANDSHAKE: Missing signature")
             return false
         }
-        val payloadToVerify = com.google.gson.Gson().toJson(handPay)
+        val payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
         val isValid = CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected USER_HANDSHAKE: Signature verification failed")

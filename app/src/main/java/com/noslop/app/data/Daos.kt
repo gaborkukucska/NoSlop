@@ -197,6 +197,39 @@ interface CommentReactionDao {
 }
 
 @Dao
+interface VoteDao {
+    @Query("SELECT * FROM mesh_votes WHERE postId = :postId ORDER BY timestamp ASC")
+    fun getVotesForPost(postId: String): Flow<List<MeshVote>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVote(vote: MeshVote)
+
+    @Query("SELECT * FROM mesh_votes WHERE id = :id LIMIT 1")
+    suspend fun getVoteById(id: String): MeshVote?
+
+    @Query("DELETE FROM mesh_votes WHERE id = :id")
+    suspend fun deleteVoteById(id: String)
+
+    @Query("DELETE FROM mesh_votes WHERE postId = :postId")
+    suspend fun deleteVotesForPost(postId: String)
+}
+
+@Dao
+interface CommentVoteDao {
+    @Query("SELECT * FROM comment_votes WHERE commentId = :commentId ORDER BY timestamp ASC")
+    fun getVotesForComment(commentId: String): Flow<List<CommentVote>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVote(vote: CommentVote)
+
+    @Query("SELECT * FROM comment_votes WHERE id = :id LIMIT 1")
+    suspend fun getVoteById(id: String): CommentVote?
+
+    @Query("DELETE FROM comment_votes WHERE id = :id")
+    suspend fun deleteVoteById(id: String)
+}
+
+@Dao
 interface AppSettingDao {
     @Query("SELECT value FROM app_settings WHERE `key` = :key LIMIT 1")
     suspend fun getSetting(key: String): String?

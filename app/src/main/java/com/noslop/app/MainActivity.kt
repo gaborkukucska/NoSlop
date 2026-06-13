@@ -2,6 +2,7 @@
 package com.noslop.app
 
 import android.os.Bundle
+import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -14,6 +15,7 @@ import com.noslop.app.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: NoSlopViewModel
+    private val _routeFlow = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -22,16 +24,19 @@ class MainActivity : ComponentActivity() {
         val factory = NoSlopViewModel.Factory(application)
         viewModel = ViewModelProvider(this, factory).get(NoSlopViewModel::class.java)
 
+        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it }
+
         setContent {
             MyApplicationTheme {
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
+                val targetRoute by _routeFlow.collectAsState()
 
                 LaunchedEffect(isOnboarded) {
                     viewModel.startTor()
                 }
 
                 if (isOnboarded) {
-                    MainScreen(viewModel = viewModel)
+                    MainScreen(viewModel = viewModel, initialRoute = targetRoute)
                 } else {
                     OnboardingScreen(
                         viewModel = viewModel,
@@ -49,5 +54,11 @@ class MainActivity : ComponentActivity() {
         if (this::viewModel.isInitialized) {
             viewModel.refreshTorStatus()
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra("target_route")?.let { _routeFlow.value = it }
     }
 }
