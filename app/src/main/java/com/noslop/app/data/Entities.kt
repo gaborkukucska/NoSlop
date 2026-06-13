@@ -54,7 +54,8 @@ data class Peer(
     val encPublicKeyB64: String = "", // Separate public key for X25519 encryption
     val isTrusted: Boolean = false,
     val isOnline: Boolean = false,
-    val lastSeenAt: Long = System.currentTimeMillis()
+    val lastSeenAt: Long = System.currentTimeMillis(),
+    val authorAvatarB64: String? = null
 )
 
 @Entity(tableName = "mesh_posts")
@@ -63,6 +64,7 @@ data class MeshPost(
     val authorPublicKeyB64: String,
     val authorHandle: String,
     val authorTripcode: String,
+    val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String,
@@ -102,6 +104,7 @@ data class MeshComment(
     val postId: String,
     val authorPublicKeyB64: String,
     val authorHandle: String,
+    val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String,

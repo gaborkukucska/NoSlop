@@ -41,7 +41,7 @@ import androidx.room.RoomDatabase
         MeshVote::class,
         CommentVote::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {

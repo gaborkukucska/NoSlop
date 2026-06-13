@@ -94,15 +94,16 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             val espOnion = prefs.getString("onion", null)
             val espDisplay = prefs.getString("display_name", null)
 
-            if (espPub != null && espEncPub != null && espHandle != null && espTrip != null && espOnion != null && espDisplay != null) {
+            if (espPub != null && espEncPub != null && espHandle != null && espTrip != null && espOnion != null) {
                 Logger.info(TAG, "Room identity wiped — recovering from EncryptedSharedPreferences")
+                val finalDisplay = espDisplay ?: espHandle
                 // Re-seed Room
                 appSettingDao.insertSetting(AppSetting("local_handle", espHandle))
                 appSettingDao.insertSetting(AppSetting("local_pub_ed25519", espPub))
                 appSettingDao.insertSetting(AppSetting("local_pub_enc", espEncPub))
                 appSettingDao.insertSetting(AppSetting("local_tripcode", espTrip))
                 appSettingDao.insertSetting(AppSetting("local_onion", espOnion))
-                appSettingDao.insertSetting(AppSetting("local_display_name", espDisplay))
+                appSettingDao.insertSetting(AppSetting("local_display_name", finalDisplay))
                 appSettingDao.insertSetting(AppSetting("onboarding_complete", "true"))
 
                 return CryptoService.IdentityKeys(
@@ -110,7 +111,7 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
                     privateKeyB64 = privEd,
                     tripcode = espTrip,
                     onionAddress = espOnion,
-                    displayName = espDisplay,
+                    displayName = finalDisplay,
                     encPublicKeyB64 = espEncPub,
                     encPrivateKeyB64 = privEnc
                 )

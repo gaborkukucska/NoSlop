@@ -16,6 +16,7 @@ data class PostPayload(
     @SerializedName("author_id") val authorId: String,
     @SerializedName("author_name") val authorName: String,
     @SerializedName("author_public_key") val authorPublicKey: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     @SerializedName("origin_node") val originNode: String?,
     val content: String,
     val timestamp: Long,
@@ -39,6 +40,7 @@ data class CommentData(
     val id: String,
     @SerializedName("author_id") val authorId: String,
     @SerializedName("author_name") val authorName: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String
@@ -98,6 +100,7 @@ data class PeerHandshakePayload(
     @SerializedName("from_user_id") val fromUserId: String,
     @SerializedName("from_username") val fromUsername: String,
     @SerializedName("from_display_name") val fromDisplayName: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     @SerializedName("from_home_node") val fromHomeNode: String,
     @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
@@ -158,6 +161,7 @@ data class CommentVotePayload(
 data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -203,6 +207,7 @@ data class CommentSyncData(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
     @SerializedName("author_name") val authorName: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
     val signature: String,

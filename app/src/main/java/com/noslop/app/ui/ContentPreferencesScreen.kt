@@ -98,15 +98,34 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
             // ────────────────── PROFILE ──────────────────
             item {
+                val context = LocalContext.current
+                val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+                ) { uri: android.net.Uri? ->
+                    uri?.let {
+                        avatarUrl = it.toString()
+                        viewModel.updateUserProfileAvatar(context, it)
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .size(80.dp)
                         .clip(RoundedCornerShape(50))
                         .background(SurfaceDark)
-                        .fillMaxWidth(),
+                        .clickable { launcher.launch("image/*") },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
+                    if (avatarUrl.isNotEmpty()) {
+                        coil.compose.AsyncImage(
+                            model = avatarUrl,
+                            contentDescription = "Profile Avatar",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                    } else {
+                        Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
+                    }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
             }

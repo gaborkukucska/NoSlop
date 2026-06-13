@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -126,6 +128,22 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
             .padding(12.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (comment.authorAvatarB64 != null) {
+                val bitmap = remember(comment.authorAvatarB64) {
+                    try {
+                        val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                    } catch (e: Exception) { null }
+                }
+                if (bitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap,
+                        contentDescription = "Avatar",
+                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+            }
             Text(
                 comment.authorHandle,
                 style = MaterialTheme.typography.bodyMedium,

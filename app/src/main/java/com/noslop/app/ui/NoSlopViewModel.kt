@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.noslop.app.NoSlopApp
 import com.noslop.app.crypto.CryptoService
+import kotlinx.coroutines.Dispatchers
 import com.noslop.app.data.*
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.BuiltInSource
@@ -115,6 +116,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
+    val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.noslop.app.data.NotificationSettings())
+
+    val isForegroundServiceEnabled: StateFlow<Boolean> = repository.isForegroundServiceEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         repository.getCommentsForPost(postId)
 
@@ -185,6 +192,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Load media settings
         viewModelScope.launch {
             repository.getMediaSettings()
+            repository.getNotificationSettings()
+            repository.initForegroundServiceSetting()
         }
 
         // Load profile and preferences
@@ -458,6 +467,53 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (profile.displayName.isNotBlank() && profile.displayName != currentHandle) {
                 repository.updateLocalHandle(profile.displayName)
             }
+            // If avatar changed, we should probably broadcast IDENTITY_UPDATE too, 
+            // but updateLocalHandle handles the IDENTITY_UPDATE broadcast internally.
+            // We'll let updateLocalHandle broadcast the new avatar since it queries the latest UserProfile.
+            repository.broadcastIdentityUpdate(profile.displayName)
+        }
+    }
+
+    fun updateUserProfileAvatar(context: android.content.Context, uri: android.net.Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri))
+                } else {
+                    @Suppress("DEPRECATION")
+                    android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
+                }
+
+                // Downscale to max 96x96
+                val maxSize = 96
+                val width = bitmap.width
+                val height = bitmap.height
+                val ratio = width.toFloat() / height.toFloat()
+                val (newWidth, newHeight) = if (ratio > 1) {
+                    maxSize to (maxSize / ratio).toInt()
+                } else {
+                    (maxSize * ratio).toInt() to maxSize
+                }
+                
+                val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+                val outputStream = java.io.ByteArrayOutputStream()
+                
+                // Compress as WEBP or JPEG
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP_LOSSY, 70, outputStream)
+                } else {
+                    @Suppress("DEPRECATION")
+                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.WEBP, 70, outputStream)
+                }
+                
+                val base64Str = android.util.Base64.encodeToString(outputStream.toByteArray(), android.util.Base64.NO_WRAP)
+                
+                val currentProfile = _userProfile.value
+                val newProfile = currentProfile.copy(avatarUrl = uri.toString(), avatarB64 = base64Str)
+                updateUserProfile(newProfile)
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.error("ViewModel", "Failed to process avatar: ${e.message}")
+            }
         }
     }
 
@@ -604,6 +660,26 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun updateMediaSettings(settings: MediaSettings) {
         viewModelScope.launch {
             repository.updateMediaSettings(settings)
+        }
+    }
+
+    fun updateNotificationSettings(settings: com.noslop.app.data.NotificationSettings) {
+        viewModelScope.launch {
+            repository.updateNotificationSettings(settings)
+        }
+    }
+
+    fun setForegroundServiceEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setForegroundServiceEnabled(enabled)
+            
+            // Start or stop the actual service based on toggle
+            val context = getApplication<android.app.Application>()
+            if (enabled) {
+                com.noslop.app.mesh.NoSlopForegroundService.start(context)
+            } else {
+                com.noslop.app.mesh.NoSlopForegroundService.stop(context)
+            }
         }
     }
 

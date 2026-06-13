@@ -45,6 +45,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val _mediaSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(MediaSettings())
     val mediaSettingsFlow = _mediaSettingsFlow.asStateFlow()
 
+    private val _notificationSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(NotificationSettings())
+    val notificationSettingsFlow = _notificationSettingsFlow.asStateFlow()
+
+    private val _isForegroundServiceEnabled = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val isForegroundServiceEnabled = _isForegroundServiceEnabled.asStateFlow()
+
     private var presenceJob: kotlinx.coroutines.Job? = null
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
@@ -195,6 +201,28 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun updateMediaSettings(settings: MediaSettings) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting("media_settings", settings.toJson()))
         _mediaSettingsFlow.value = settings
+    }
+
+    suspend fun getNotificationSettings(): NotificationSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("notification_settings")
+        val settings = NotificationSettings.fromJson(json)
+        _notificationSettingsFlow.value = settings
+        settings
+    }
+
+    suspend fun updateNotificationSettings(settings: NotificationSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("notification_settings", settings.toJson()))
+        _notificationSettingsFlow.value = settings
+    }
+
+    suspend fun initForegroundServiceSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("foreground_service_enabled")
+        _isForegroundServiceEnabled.value = setting == "true"
+    }
+
+    suspend fun setForegroundServiceEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("foreground_service_enabled", enabled.toString()))
+        _isForegroundServiceEnabled.value = enabled
     }
 
     // --- Feed Methods ---
@@ -561,8 +589,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
 
-        val payload = "$id|${myKeys.publicKeyB64}|$content|$timestamp"
+        var payload = "$id|${myKeys.publicKeyB64}|$content|$timestamp"
+        if (avatarB64 != null) {
+            payload += "|$avatarB64"
+        }
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val postPay = com.noslop.app.mesh.PostPayload(
@@ -570,6 +603,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             authorId = myKeys.publicKeyB64,
             authorName = handle,
             authorPublicKey = myKeys.publicKeyB64,
+            authorAvatarB64 = avatarB64,
             originNode = myKeys.onionAddress,
             content = content,
             timestamp = timestamp,
@@ -599,6 +633,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             authorPublicKeyB64 = myKeys.publicKeyB64,
             authorHandle = handle,
             authorTripcode = myKeys.tripcode,
+            authorAvatarB64 = avatarB64,
             content = content,
             timestamp = timestamp,
             signature = signature,
@@ -638,6 +673,30 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     suspend fun clearIncomingRequest() {
         _incomingRequestFlow.value = null
+    }
+
+    suspend fun requestConnection(peer: Peer): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+        val connPay = com.noslop.app.mesh.PeerHandshakePayload(
+            id = UUID.randomUUID().toString(),
+            fromUserId = myKeys.publicKeyB64,
+            fromUsername = myKeys.displayName.split(".")[0],
+            fromDisplayName = myKeys.displayName,
+            authorAvatarB64 = avatarB64,
+            fromHomeNode = myKeys.onionAddress,
+            fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+            timestamp = System.currentTimeMillis(),
+            signature = null
+        )
+        
+        var payloadToSign = "${myKeys.publicKeyB64}|${connPay.fromUsername}|${myKeys.onionAddress}|${connPay.timestamp}"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
+        val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        true
     }
 
     suspend fun sendConnectionRequest(
@@ -697,18 +756,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         _incomingRequestFlow.value = null
         
         val myKeys = getLocalIdentity()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
         if (myKeys != null) {
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
                 fromUsername = myKeys.displayName.split(".")[0],
                 fromDisplayName = myKeys.displayName,
+                authorAvatarB64 = avatarB64,
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
-            val payloadToSign = "${myKeys.publicKeyB64}|${handshakePay.fromUsername}|${myKeys.onionAddress}|${handshakePay.timestamp}"
+            var payloadToSign = "${myKeys.publicKeyB64}|${handshakePay.fromUsername}|${myKeys.onionAddress}|${handshakePay.timestamp}"
+            if (avatarB64 != null) {
+                payloadToSign += "|$avatarB64"
+            }
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
@@ -847,14 +912,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = UUID.randomUUID().toString()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
 
-        val payload = "$postId|$id|$content|$timestamp"
+        var payload = "$postId|$id|$content|$timestamp"
+        if (avatarB64 != null) {
+            payload += "|$avatarB64"
+        }
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val commentData = com.noslop.app.mesh.CommentData(
             id = id,
             authorId = myKeys.publicKeyB64,
             authorName = handle,
+            authorAvatarB64 = avatarB64,
             content = content,
             timestamp = timestamp,
             signature = signature
@@ -880,6 +951,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             postId = postId,
             authorPublicKeyB64 = myKeys.publicKeyB64,
             authorHandle = handle,
+            authorAvatarB64 = avatarB64,
             content = content,
             timestamp = timestamp,
             signature = signature,
@@ -1069,13 +1141,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
         val commentReactionDao = db.commentReactionDao()
         val reactionId = "${commentId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = commentReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
-        val payloadToSign = "$commentId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        var payloadToSign = "$commentId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.CommentReactionPayload(
@@ -1163,13 +1240,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun broadcastIdentityUpdate(newHandle: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
+        var payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val updatePayload = com.noslop.app.mesh.IdentityUpdatePayload(
             userId = myKeys.publicKeyB64,
             handle = newHandle,
+            authorAvatarB64 = avatarB64,
             timestamp = timestamp,
             signature = signature
         )

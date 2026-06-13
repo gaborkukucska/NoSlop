@@ -157,6 +157,7 @@ class MeshPacketHandler(
                 authorId = post.authorPublicKeyB64,
                 authorName = post.authorHandle,
                 authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
                 originNode = null,
                 content = post.content,
                 timestamp = post.timestamp,
@@ -179,6 +180,7 @@ class MeshPacketHandler(
                 postId = c.postId,
                 authorId = c.authorPublicKeyB64,
                 authorName = c.authorHandle,
+                authorAvatarB64 = c.authorAvatarB64,
                 content = c.content,
                 timestamp = c.timestamp,
                 signature = c.signature,
@@ -223,7 +225,10 @@ class MeshPacketHandler(
         val syncPay = packet.getSyncResponsePayload() ?: return false
         var stored = 0
         for (postPay in syncPay.posts) {
-            val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+            var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+            if (postPay.authorAvatarB64 != null) {
+                payloadToVerify += "|${postPay.authorAvatarB64}"
+            }
             val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
@@ -236,6 +241,7 @@ class MeshPacketHandler(
                 authorPublicKeyB64 = postPay.authorPublicKey,
                 authorHandle = postPay.authorName,
                 authorTripcode = tripcode,
+                authorAvatarB64 = postPay.authorAvatarB64,
                 content = postPay.content,
                 timestamp = postPay.timestamp,
                 signature = postPay.signature ?: "",
@@ -254,7 +260,10 @@ class MeshPacketHandler(
         // Process synced comments
         var storedComments = 0
         syncPay.comments?.forEach { c ->
-            val payloadToVerify = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
+            var payloadToVerify = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
+            if (c.authorAvatarB64 != null) {
+                payloadToVerify += "|${c.authorAvatarB64}"
+            }
             val isValid = CryptoService.verify(payloadToVerify, c.signature, c.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting comment ${c.id} — invalid signature")
@@ -265,6 +274,7 @@ class MeshPacketHandler(
                 postId = c.postId,
                 authorPublicKeyB64 = c.authorId,
                 authorHandle = c.authorName,
+                authorAvatarB64 = c.authorAvatarB64,
                 content = c.content,
                 timestamp = c.timestamp,
                 signature = c.signature,
@@ -302,7 +312,10 @@ class MeshPacketHandler(
 
     private suspend fun handlePost(packet: NetworkPacket): Boolean {
         val postPay = packet.getPostPayload() ?: return false
-        val payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+        var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+        if (postPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${postPay.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
@@ -319,6 +332,7 @@ class MeshPacketHandler(
             authorPublicKeyB64 = postPay.authorPublicKey,
             authorHandle = handle,
             authorTripcode = tripcode,
+            authorAvatarB64 = postPay.authorAvatarB64,
             content = postPay.content,
             timestamp = postPay.timestamp,
             signature = postPay.signature ?: "",
@@ -348,7 +362,10 @@ class MeshPacketHandler(
 
     private suspend fun handleComment(packet: NetworkPacket): Boolean {
         val commPay = packet.getCommentPayload() ?: return false
-        val payloadToVerify = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
+        var payloadToVerify = "${commPay.postId}|${commPay.comment.id}|${commPay.comment.content}|${commPay.comment.timestamp}"
+        if (commPay.comment.authorAvatarB64 != null) {
+            payloadToVerify += "|${commPay.comment.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, commPay.comment.signature, commPay.comment.authorId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip comment: Signature verification failed")
@@ -359,6 +376,7 @@ class MeshPacketHandler(
             postId = commPay.postId,
             authorPublicKeyB64 = commPay.comment.authorId,
             authorHandle = commPay.comment.authorName,
+            authorAvatarB64 = commPay.comment.authorAvatarB64,
             content = commPay.comment.content,
             timestamp = commPay.comment.timestamp,
             signature = commPay.comment.signature,
@@ -567,7 +585,10 @@ class MeshPacketHandler(
             Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Missing signature")
             return false
         }
-        val payloadToVerify = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
+        var payloadToVerify = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
+        if (connPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${connPay.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected CONNECTION_REQUEST: Signature verification failed")
@@ -583,7 +604,8 @@ class MeshPacketHandler(
             onionAddress = connPay.fromHomeNode,
             encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
             isTrusted = false,
-            lastSeenAt = System.currentTimeMillis()
+            lastSeenAt = System.currentTimeMillis(),
+            authorAvatarB64 = connPay.authorAvatarB64
         )
         peerDao.insertPeer(peer)
         repo.setIncomingRequest(peer)
@@ -598,7 +620,10 @@ class MeshPacketHandler(
             Logger.warn(TAG, "Rejected USER_HANDSHAKE: Missing signature")
             return false
         }
-        val payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
+        var payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
+        if (handPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${handPay.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected USER_HANDSHAKE: Signature verification failed")
@@ -607,7 +632,11 @@ class MeshPacketHandler(
 
         val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer != null) {
-            peerDao.insertPeer(peer.copy(isTrusted = true, lastSeenAt = System.currentTimeMillis()))
+            peerDao.insertPeer(peer.copy(
+                isTrusted = true,
+                lastSeenAt = System.currentTimeMillis(),
+                authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64
+            ))
         } else {
             val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
@@ -618,7 +647,8 @@ class MeshPacketHandler(
                 onionAddress = handPay.fromHomeNode,
                 encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
                 isTrusted = true,
-                lastSeenAt = System.currentTimeMillis()
+                lastSeenAt = System.currentTimeMillis(),
+                authorAvatarB64 = handPay.authorAvatarB64
             )
             peerDao.insertPeer(newPeer)
         }
@@ -694,13 +724,20 @@ class MeshPacketHandler(
 
     private suspend fun handleIdentityUpdate(packet: NetworkPacket): Boolean {
         val identityPay = packet.getIdentityUpdatePayload() ?: return false
-        val payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
+        var payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
+        if (identityPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${identityPay.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)
         if (!isValid) return false
 
         val peer = peerDao.getPeerByPublicKey(identityPay.userId)
         if (peer != null) {
-            peerDao.insertPeer(peer.copy(handle = identityPay.handle, lastSeenAt = System.currentTimeMillis()))
+            peerDao.insertPeer(peer.copy(
+                handle = identityPay.handle,
+                lastSeenAt = System.currentTimeMillis(),
+                authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64
+            ))
             Logger.debug(TAG, "IDENTITY_UPDATE applied for ${identityPay.userId}")
         }
         return true

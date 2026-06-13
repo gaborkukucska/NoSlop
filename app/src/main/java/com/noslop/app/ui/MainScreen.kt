@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -218,6 +220,22 @@ fun FullScreenMeshCard(
                         Text("MESH", color = Color(0xFFB388FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
+                    if (post.authorAvatarB64 != null) {
+                        val bitmap = remember(post.authorAvatarB64) {
+                            try {
+                                val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            } catch (e: Exception) { null }
+                        }
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap,
+                                contentDescription = "Avatar",
+                                modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
+                    }
                     Text(
                         "${post.authorHandle}.${post.authorTripcode}",
                         color = AccentGreen,

@@ -319,6 +319,107 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
+                        text = "SYSTEM & NOTIFICATIONS",
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val isForegroundServiceEnabled by viewModel.isForegroundServiceEnabled.collectAsState()
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Foreground Service", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media playback.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isForegroundServiceEnabled,
+                                    onCheckedChange = { viewModel.setForegroundServiceEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
+                            val notificationSettings by viewModel.notificationSettings.collectAsState()
+                            
+                            Text("Notifications", color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Direct Messages", color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.dms,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(dms = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Comments & Replies", color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.comments,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(comments = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Mentions", color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.mentions,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(mentions = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("System Alerts", color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.system,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(system = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text(
                         text = "DEVELOPER",
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
