@@ -502,8 +502,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         // Clear all database tables
         db.clearAllTables()
         
-        // Reset shared preferences via IdentityRepository
-        identityRepository.logout()
+        // Clear EncryptedSharedPreferences (identity, onboarding flag, etc.)
+        identityRepository.clearAll()
+        
         setOnboardingComplete(false)
         _identityUpdateFlow.emit(Unit)
     }
