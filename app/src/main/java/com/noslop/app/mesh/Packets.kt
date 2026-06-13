@@ -8,7 +8,8 @@ data class EncryptedPayload(
     val id: String,
     val nonce: String,
     val ciphertext: String,
-    @SerializedName("group_id") val groupId: String? = null
+    @SerializedName("group_id") val groupId: String? = null,
+    val timestamp: Long? = null
 )
 
 data class PostPayload(

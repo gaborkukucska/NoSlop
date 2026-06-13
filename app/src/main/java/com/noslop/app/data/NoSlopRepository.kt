@@ -584,8 +584,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
         postIdOverride: String? = null
-    ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
+    ): MeshPost? = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext null
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
@@ -650,7 +650,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         Logger.info(TAG, "Local post created and signed", "postId=${id}")
 
         com.noslop.app.mesh.GossipService.broadcast(packet)
-        true
+        localPost
     }
 
     suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
@@ -879,7 +879,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val msgPay = com.noslop.app.mesh.EncryptedPayload(
             id = localMsg.id,
             nonce = nonce,
-            ciphertext = ciphertext
+            ciphertext = ciphertext,
+            timestamp = localMsg.timestamp
         )
         val gson = com.google.gson.Gson()
         val payloadJson = gson.toJsonTree(msgPay)

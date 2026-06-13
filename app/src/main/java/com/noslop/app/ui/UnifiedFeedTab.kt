@@ -51,6 +51,7 @@ import java.util.UUID
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.viewinterop.AndroidView
@@ -202,16 +203,30 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                when (selectedTab) {
-                    0 -> UnifiedFeedTab(
-                        viewModel, 
-                        showComposeDialog, 
+                // The Feed tab is always composed to preserve VerticalPager scroll position.
+                // It is hidden via alpha=0 when not selected.
+                Box(modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (selectedTab == 0) Modifier
+                        else Modifier.alpha(0f)
+                    )
+                ) {
+                    UnifiedFeedTab(
+                        viewModel,
+                        showComposeDialog,
                         { showComposeDialog = false },
                         { selectedTab = it }
                     )
-                    1 -> DMsTab(viewModel)
-                    2 -> HaiNetTab()
-                    3 -> SettingsTab(viewModel)
+                }
+                if (selectedTab == 1) {
+                    DMsTab(viewModel)
+                }
+                if (selectedTab == 2) {
+                    HaiNetTab()
+                }
+                if (selectedTab == 3) {
+                    SettingsTab(viewModel)
                 }
             }
         }

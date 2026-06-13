@@ -708,7 +708,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null, clearnetThumbnailUrl: String? = null) {
         if (content.isBlank() && mediaMetadata == null && clearnetUrl == null) return
         viewModelScope.launch {
-            repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl)
+            val post = repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl)
+            if (post != null) {
+                // Prepend to unifiedFeed so it shows at the top immediately
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                currentFeed.add(0, UnifiedItem.Mesh(post))
+                _unifiedFeed.value = currentFeed
+                _scrollToTopEvent.emit(Unit)
+            }
         }
     }
 

@@ -548,7 +548,7 @@ class MeshPacketHandler(
                 senderPub = packet.senderId,
                 ciphertext = msgPay.ciphertext,
                 nonce = msgPay.nonce,
-                timestamp = System.currentTimeMillis(),
+                timestamp = msgPay.timestamp ?: System.currentTimeMillis(),
                 mediaId = mediaId,
                 mediaType = mediaType
             )
