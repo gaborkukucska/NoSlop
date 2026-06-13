@@ -190,9 +190,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.updateOnionAddress(repository.getLocalIdentity()?.onionAddress ?: "")
         }
 
-        // Load initial onboarding state
+        // Load initial onboarding state, then recover from destructive migration if needed
         viewModelScope.launch {
             _isOnboardingComplete.value = repository.isOnboardingComplete()
+
+            // If a Room schema bump triggered fallbackToDestructiveMigration(),
+            // all feed_sources and app_settings rows were wiped. Detect this and re-seed.
+            val recovered = repository.recoverSourcesAfterMigration()
+            if (recovered) {
+                Logger.info("VIEWMODEL", "Post-migration recovery: re-seeded sources. Triggering feed refresh...")
+                // Re-load preferences that were just restored
+                _selectedInterests.value = repository.getUserSelectedCategories()
+                _isAggregatorEnabled.value = repository.isAggregatorEnabled()
+                // Trigger a background feed fetch with the recovered sources
+                refreshFeeds()
+            }
         }
 
         // Load media settings
@@ -391,6 +403,65 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun generateMnemonic() {
         _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
+    }
+
+    fun preloadFeedsDuringOnboarding(
+        selectedSources: List<BuiltInSource>, 
+        selectedCategories: List<String>, 
+        selectedMusicGenres: List<String>,
+        selectedVideoGenres: List<String>
+    ) {
+        viewModelScope.launch {
+            // Save chosen feed sources from SourceLibrary
+            for (bs in selectedSources) {
+                repository.insertSource(
+                    FeedSource(
+                        id = bs.id,
+                        url = bs.url,
+                        title = bs.title,
+                        feedType = bs.feedType,
+                        category = bs.category,
+                        addedDuringOnboarding = true
+                    )
+                )
+            }
+
+            // Auto-insert API-backed sources for selected categories
+            val selectedSourceIds = selectedSources.map { it.id }.toSet()
+            val apiSourcesForCategories = SourceLibrary.sources.filter { 
+                it.feedType == "api" && selectedCategories.contains(it.category) && it.id !in selectedSourceIds
+            }
+            for (apiSrc in apiSourcesForCategories) {
+                repository.insertSource(
+                    FeedSource(
+                        id = apiSrc.id,
+                        url = apiSrc.url,
+                        title = apiSrc.title,
+                        feedType = apiSrc.feedType,
+                        category = apiSrc.category,
+                        addedDuringOnboarding = true
+                    )
+                )
+            }
+
+            // Save selected categories for API pipeline inference
+            repository.saveSelectedCategories(selectedCategories)
+            
+            // Save genre preferences
+            if (selectedMusicGenres.isNotEmpty()) {
+                repository.saveSelectedMusicGenres(selectedMusicGenres)
+            }
+            if (selectedVideoGenres.isNotEmpty()) {
+                repository.saveSelectedVideoGenres(selectedVideoGenres)
+            }
+
+            _selectedInterests.value = selectedCategories
+            _selectedMusicGenres.value = selectedMusicGenres
+            _selectedVideoGenres.value = selectedVideoGenres
+
+            // Trigger fetch in background so feed populates early
+            refreshFeeds()
+        }
     }
 
     fun completeOnboarding(

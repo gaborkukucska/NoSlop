@@ -262,6 +262,53 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     /**
+     * Detects when a destructive Room migration has wiped feed sources and user
+     * preferences that were stored only in Room (app_settings, feed_sources).
+     * If onboarding was completed (persisted in EncryptedSharedPreferences) but
+     * Room has zero sources, this re-seeds all built-in sources from SourceLibrary
+     * and restores default category selections so the feed pipeline can operate.
+     *
+     * Returns true if recovery was performed.
+     */
+    suspend fun recoverSourcesAfterMigration(): Boolean = withContext(Dispatchers.IO) {
+        val onboardingDone = isOnboardingComplete()
+        if (!onboardingDone) return@withContext false
+
+        val existingSources = feedDao.getActiveSourcesList()
+        if (existingSources.isNotEmpty()) return@withContext false
+
+        Logger.info(TAG, "Destructive migration detected: onboarding complete but 0 sources in Room. Re-seeding from SourceLibrary...")
+
+        // Re-insert ALL built-in sources so the user starts with a full library
+        for (src in com.noslop.app.feeds.SourceLibrary.sources) {
+            feedDao.insertSource(
+                FeedSource(
+                    id = src.id,
+                    url = src.url,
+                    title = src.title,
+                    feedType = src.feedType,
+                    category = src.category,
+                    addedDuringOnboarding = true
+                )
+            )
+        }
+
+        // Restore default categories (all of them) so the API pipeline has something to work with
+        val allCategories = com.noslop.app.feeds.SourceLibrary.categories
+        val json = com.google.gson.Gson().toJson(allCategories)
+        appSettingDao.insertSetting(AppSetting("selected_categories", json))
+
+        // Also re-mark onboarding as complete in Room (it survived in ESP but Room was wiped)
+        appSettingDao.insertSetting(AppSetting("onboarding_complete", "true"))
+
+        // Restore aggregator enabled setting
+        appSettingDao.insertSetting(AppSetting("aggregator_enabled", "true"))
+
+        Logger.info(TAG, "Recovery complete: re-seeded ${com.noslop.app.feeds.SourceLibrary.sources.size} sources and ${allCategories.size} categories")
+        true
+    }
+
+    /**
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.
      */
@@ -725,7 +772,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
             val userProfile = getUserProfile()
-            val avatarB64 = userProfile.avatarB64.takeIf { it.isNotBlank() }
+            val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
 
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),

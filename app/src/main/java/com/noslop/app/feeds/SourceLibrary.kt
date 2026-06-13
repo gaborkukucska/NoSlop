@@ -65,11 +65,7 @@ object SourceLibrary {
         BuiltInSource("foss-post", "FOSS Post", "https://fosspost.org/feed/", "rss", "Open Source"),
         BuiltInSource("omg-ubuntu", "OMG! Ubuntu!", "https://feeds.feedburner.com/d0od", "rss", "Open Source"),
 
-        // Video Platforms (YouTube RSS)
-        BuiltInSource("yt-veritasium", "Veritasium (YouTube)", "https://www.youtube.com/feeds/videos.xml?channel_id=UCHnyfMqiRRG1u-2MsSQLbXA", "rss", "Video Platforms"),
-        BuiltInSource("yt-kurzgesagt", "Kurzgesagt (YouTube)", "https://www.youtube.com/feeds/videos.xml?channel_id=UCsXVk37bltUXD1iChdg9vqQ", "rss", "Video Platforms"),
-        BuiltInSource("yt-mkbhd", "MKBHD (YouTube)", "https://www.youtube.com/feeds/videos.xml?channel_id=UCBJycsmduvYEL83R_U4JriQ", "rss", "Video Platforms"),
-        BuiltInSource("yt-smartereveryday", "SmarterEveryDay", "https://www.youtube.com/feeds/videos.xml?channel_id=UC6107grRI4m0o2-emgoDnAA", "rss", "Video Platforms"),
+        // Video Platforms (Dynamically populated via API based on user genres)
 
         // Social Clearnet
         BuiltInSource("hackaday", "Hackaday", "https://hackaday.com/blog/feed/", "rss", "Social Clearnet"),

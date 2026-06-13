@@ -209,6 +209,14 @@ fun OnboardingScreen(
                             } else {
                                 currentStep++
                             }
+                            if (currentStep == 6) {
+                                viewModel.preloadFeedsDuringOnboarding(
+                                    selectedSources,
+                                    selectedInterests,
+                                    selectedMusicGenres,
+                                    selectedVideoGenres
+                                )
+                            }
                         },
                         enabled = canProceed,
                         colors = ButtonDefaults.buttonColors(
@@ -593,6 +601,19 @@ fun Step5Feeds(
             (interests.contains(it.category) || searchQuery.isNotBlank()) &&
             (it.title.contains(searchQuery, ignoreCase = true) || 
              it.category.contains(searchQuery, ignoreCase = true))
+        }
+    }
+
+    var hasPreselected by remember { mutableStateOf(false) }
+
+    LaunchedEffect(suggestedSources) {
+        if (!hasPreselected && suggestedSources.isNotEmpty() && searchQuery.isBlank()) {
+            suggestedSources.forEach { src ->
+                if (!selectedSources.contains(src)) {
+                    onToggleSource(src)
+                }
+            }
+            hasPreselected = true
         }
     }
 

@@ -171,7 +171,11 @@ object FeedParser {
         }
 
         // Clean up formatting
-        val cleanedDesc = stripHtml(description).take(600)
+        var cleanedDesc = stripHtml(description).take(600)
+        if (cleanedDesc.trim().equals("Comments", ignoreCase = true) || cleanedDesc.trim().equals("Comment", ignoreCase = true)) {
+            cleanedDesc = ""
+            description = ""
+        }
         val id = guid.ifBlank { link.ifBlank { title + pubDateStr } }
 
         if (mediaUrl == null) {
@@ -272,7 +276,11 @@ object FeedParser {
             eventType = parser.next()
         }
 
-        val cleanedDesc = stripHtml(summary).take(600)
+        var cleanedDesc = stripHtml(summary).take(600)
+        if (cleanedDesc.trim().equals("Comments", ignoreCase = true) || cleanedDesc.trim().equals("Comment", ignoreCase = true)) {
+            cleanedDesc = ""
+            summary = ""
+        }
         val id = idStr.ifBlank { link.ifBlank { title + updatedStr } }
 
         if (mediaUrl == null) {
