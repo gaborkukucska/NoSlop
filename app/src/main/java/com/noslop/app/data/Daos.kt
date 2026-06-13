@@ -264,3 +264,33 @@ interface NotificationDao {
     @Query("DELETE FROM notifications")
     suspend fun clearAllNotifications()
 }
+
+@Dao
+interface ViewedHistoryDao {
+    @Query("SELECT itemId FROM viewed_history")
+    suspend fun getAllViewedIds(): List<String>
+
+    @Query("SELECT * FROM viewed_history ORDER BY viewedAt DESC")
+    fun getAllViewedItems(): Flow<List<ViewedHistoryItem>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertViewedItem(item: ViewedHistoryItem)
+
+    @Query("SELECT COUNT(*) FROM viewed_history")
+    suspend fun getCount(): Int
+
+    @Query("DELETE FROM viewed_history WHERE itemId IN (SELECT itemId FROM viewed_history ORDER BY viewedAt ASC LIMIT :count)")
+    suspend fun pruneOldest(count: Int)
+}
+
+@Dao
+interface SwipeTrackerDao {
+    @Query("SELECT itemId FROM swipe_tracker WHERE swipeCount >= 2")
+    suspend fun getExcludedIds(): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSwipe(tracker: SwipeTracker)
+
+    @Query("SELECT * FROM swipe_tracker WHERE itemId = :itemId LIMIT 1")
+    suspend fun getSwipeForItem(itemId: String): SwipeTracker?
+}

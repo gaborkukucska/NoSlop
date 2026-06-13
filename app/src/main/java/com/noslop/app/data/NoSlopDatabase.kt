@@ -40,9 +40,11 @@ import androidx.room.RoomDatabase
         CommentReaction::class,
         MeshVote::class,
         CommentVote::class,
-        NotificationItem::class
+        NotificationItem::class,
+        ViewedHistoryItem::class,
+        SwipeTracker::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -59,6 +61,8 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun voteDao(): VoteDao
     abstract fun commentVoteDao(): CommentVoteDao
     abstract fun notificationDao(): NotificationDao
+    abstract fun viewedHistoryDao(): ViewedHistoryDao
+    abstract fun swipeTrackerDao(): SwipeTrackerDao
 
     companion object {
         @Volatile

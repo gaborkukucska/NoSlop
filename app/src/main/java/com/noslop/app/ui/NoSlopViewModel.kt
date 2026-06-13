@@ -92,6 +92,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>()
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
+    // --- Viewed History & Swipe Exclusion Caches ---
+    private var cachedViewedIds: Set<String> = emptySet()
+    private var cachedExcludedIds: Set<String> = emptySet()
+
+    /** Reactive set of viewed history IDs for the History filter UI */
+    val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
+        .map { items -> items.map { it.itemId }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
+
+    /** Whether a search query is currently active (bypasses all feed exclusions) */
+    private var activeSearchQuery: String = ""
+
     private var allFeeds = emptyList<FeedItem>()
     private var allMeshes = emptyList<MeshPost>()
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -248,6 +260,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isEncryptionActive.value = repository.isEncryptionActive()
         }
 
+        // Load exclusion caches on startup
+        viewModelScope.launch {
+            refreshExclusionCaches()
+        }
+
         // Build stable append-only mixed feed
         viewModelScope.launch {
             combine(feedItems, meshPosts) { feeds, meshes ->
@@ -288,13 +305,40 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun loadMoreFeedItems(filterMode: String? = null) {
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
+        val localPubKey = localKeys.value?.publicKeyB64
+        val isSearchActive = activeSearchQuery.isNotBlank()
         
-        var unseenFeeds = allFeeds.filter { it.id !in currentIds }
-        var unseenMeshes = allMeshes.filter { it.id !in currentIds }
+        // Establish an "anchor time" to prevent brand new items from being injected into the middle of a scrolling session.
+        // The feed is built downwards chronologically. Any item newer than the top of the feed is held back until refresh.
+        val anchorTime = _unifiedFeed.value.firstOrNull()?.timestamp
+        
+        var unseenFeeds = allFeeds.filter { it.id !in currentIds && (anchorTime == null || it.publishedAt <= anchorTime) }
+        var unseenMeshes = allMeshes.filter { it.id !in currentIds && (anchorTime == null || it.timestamp <= anchorTime) }
+
+        // --- Apply exclusions (all bypassed when a search query is active) ---
+        if (!isSearchActive) {
+            // 1. Exclude self-authored mesh broadcasts unless filtering for Mesh
+            if (filterMode != "Mesh" && localPubKey != null) {
+                unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
+            }
+
+            // 2. Exclude viewed & swiped items from Live Feed and type-specific filters
+            if (filterMode == null || filterMode == "Live Feed" || 
+                filterMode == "Videos" || filterMode == "Audio" || 
+                filterMode == "Images" || filterMode == "Articles") {
+                val hiddenIds = cachedViewedIds + cachedExcludedIds
+                if (hiddenIds.isNotEmpty()) {
+                    unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
+                    unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
+                }
+            }
+        }
         
         if (filterMode == "History") {
-            unseenFeeds = unseenFeeds.filter { it.isRead }
-            unseenMeshes = emptyList() // Meshes aren't tracked as 'read' in DB yet, or we only show clearnet items
+            // History filter: show only items tracked in viewed_history
+            val viewedIds = viewedHistoryIds.value
+            unseenFeeds = unseenFeeds.filter { it.id in viewedIds }
+            unseenMeshes = unseenMeshes.filter { it.id in viewedIds }
         } else if (filterMode == "Liked") {
             unseenFeeds = unseenFeeds.filter { it.isSaved }
             unseenMeshes = emptyList() 
@@ -319,8 +363,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             
             batch.addAll(specificFeeds.take(needed).map { UnifiedItem.Feed(it) })
             batch.addAll(specificMeshes.take(needed - batch.size).map { UnifiedItem.Mesh(it) })
-            
-            batch.shuffle()
+            val isInitialLoad = _unifiedFeed.value.isEmpty()
+            if (isInitialLoad) {
+                batch.shuffle()
+            }
             _unifiedFeed.value = _unifiedFeed.value + batch
             return
         }
@@ -343,12 +389,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         unseenMeshes.take(3).forEach { textImages.add(UnifiedItem.Mesh(it)) }
 
-        videos.shuffle()
-        audios.shuffle()
-        textImages.shuffle()
+        val isInitialLoad = _unifiedFeed.value.isEmpty()
+        if (isInitialLoad) {
+            videos.shuffle()
+            audios.shuffle()
+            textImages.shuffle()
+        }
 
         val batch = mutableListOf<UnifiedItem>()
-        val needed = if (_unifiedFeed.value.isEmpty()) 2 else 5
+        val needed = if (isInitialLoad) 2 else 5
         
         val v = videos.take(2)
         val a = audios.take(1)
@@ -364,7 +413,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         batch.addAll(t)
         batch.addAll(extra)
 
-        batch.shuffle()
+        if (isInitialLoad) {
+            batch.shuffle()
+        }
         _unifiedFeed.value = _unifiedFeed.value + batch
     }
 
@@ -632,9 +683,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isRefreshingFeeds.value = true
             try {
-                _unifiedFeed.value = emptyList() // Clear current feed
-                allFeeds = emptyList() // Clear local cache to prevent instantaneous reload of deleted items
-                repository.clearFeedData() // Wipe local database for unsaved items to fetch fresh
+                // Do not clear the current feed, cache, or database here.
+                // We want to load new items below the current feed instead of resetting it.
                 repository.refreshFeeds()
             } catch (e: Exception) {
                 Logger.error("VM", "Manual refresh exception: ${e.message}")
@@ -647,6 +697,68 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun markItemReadState(id: String, isRead: Boolean) {
         viewModelScope.launch {
             repository.updateReadState(id, isRead)
+        }
+    }
+
+    /**
+     * Mark a content item as viewed (after 5s dwell threshold).
+     * Adds to the persistent viewed_history table and refreshes the exclusion cache.
+     */
+    fun markItemViewed(itemId: String, isMesh: Boolean) {
+        viewModelScope.launch {
+            repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed")
+            cachedViewedIds = repository.getViewedItemIds()
+        }
+    }
+
+    /**
+     * Record that the user swiped past a content item quickly (<5s).
+     * After 2 swipes, the item is excluded from future feeds.
+     * Items already in viewed history are NOT removed.
+     */
+    fun recordItemSwiped(itemId: String) {
+        viewModelScope.launch {
+            repository.recordSwipe(itemId)
+            cachedExcludedIds = repository.getSwipeExcludedIds()
+            // Do NOT remove the item from the in-memory feed immediately.
+            // Deleting items preceding the current pager index causes the list to shrink,
+            // shifting the indices and forcing the UI to snap to the wrong slide.
+            // The item is recorded in the DB and will be excluded from future feed generations.
+        }
+    }
+
+    /**
+     * Refresh the cached sets of viewed and swiped-excluded item IDs from the database.
+     */
+    private suspend fun refreshExclusionCaches() {
+        cachedViewedIds = repository.getViewedItemIds()
+        cachedExcludedIds = repository.getSwipeExcludedIds()
+    }
+
+    /**
+     * Update the active search query state. When a search is active, all feed exclusions
+     * (self-broadcast, viewed history, swipe tracking) are bypassed.
+     */
+    fun updateActiveSearchQuery(query: String) {
+        activeSearchQuery = query
+    }
+
+    /**
+     * Force-insert a specific mesh post into the unified feed (for notification deep links).
+     * Bypasses self-broadcast filtering.
+     */
+    fun ensurePostInFeed(postId: String) {
+        viewModelScope.launch {
+            val alreadyInFeed = _unifiedFeed.value.any { it.id == postId }
+            if (alreadyInFeed) return@launch
+            
+            val meshPost = allMeshes.find { it.id == postId }
+            if (meshPost != null) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                currentFeed.add(0, UnifiedItem.Mesh(meshPost))
+                _unifiedFeed.value = currentFeed
+                _scrollToTopEvent.emit(Unit)
+            }
         }
     }
 
@@ -824,7 +936,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
-        viewModelScope.launch { repository.reactToFeedItemWithType(item, reactionType) }
+        viewModelScope.launch {
+            repository.reactToFeedItemWithType(item, reactionType)
+            // Auto-save to "Liked" list on explicit positive interactions
+            if (reactionType == "like") {
+                repository.updateSavedState(item.id, true)
+            }
+        }
     }
 
     fun reactToMeshPost(postId: String, reactionType: String = "like") {

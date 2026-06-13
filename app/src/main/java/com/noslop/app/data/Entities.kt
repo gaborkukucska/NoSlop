@@ -168,6 +168,26 @@ data class AppSetting(
 )
 
 @Entity(
+    tableName = "viewed_history",
+    indices = [Index(value = ["itemId"], unique = true)]
+)
+data class ViewedHistoryItem(
+    @PrimaryKey val itemId: String,      // UnifiedItem.id (FeedItem.id or MeshPost.id)
+    val itemType: String,                // "feed" or "mesh"
+    val viewedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
+    tableName = "swipe_tracker",
+    indices = [Index(value = ["itemId"], unique = true)]
+)
+data class SwipeTracker(
+    @PrimaryKey val itemId: String,      // UnifiedItem.id
+    val swipeCount: Int = 1,
+    val lastSwipedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(
     tableName = "notifications",
     indices = [Index(value = ["timestamp"])]
 )

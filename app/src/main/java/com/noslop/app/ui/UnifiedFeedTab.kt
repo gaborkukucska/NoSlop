@@ -112,6 +112,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 viewModel.selectChatPeer(initialRoute.substringAfter("chat/"))
             } else if (initialRoute.startsWith("post/")) {
                 selectedTab = 0
+                val postId = initialRoute.substringAfter("post/")
+                viewModel.ensurePostInFeed(postId)
             } else if (initialRoute == "notifications") {
                 selectedTab = 4
             }
@@ -350,6 +352,7 @@ fun UnifiedFeedTab(
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
+    val viewedHistoryIds by viewModel.viewedHistoryIds.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
     var searchQuery by remember { mutableStateOf("") }
@@ -368,11 +371,11 @@ fun UnifiedFeedTab(
     }
 
     // Filter the pre-computed appended list
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
         unifiedFeed.filter { item ->
             val matchesMode = when (filterMode) {
                 "Live Feed" -> true
-                "History" -> item is UnifiedItem.Feed && item.item.isRead
+                "History" -> item.id in viewedHistoryIds
                 "Liked" -> item is UnifiedItem.Feed && item.item.isSaved
                 "Videos" -> item is UnifiedItem.Feed && item.item.mediaType == "video"
                 "Images" -> item is UnifiedItem.Feed && item.item.mediaType == "image"
@@ -385,7 +388,12 @@ fun UnifiedFeedTab(
             val matchesQuery = if (searchQuery.isNotBlank()) {
                 val q = searchQuery.lowercase()
                 when (item) {
-                    is UnifiedItem.Feed -> item.item.title.lowercase().contains(q) || item.item.excerpt?.lowercase()?.contains(q) == true
+                    is UnifiedItem.Feed -> {
+                        // If it's an API source and NOT saved, it was just fetched explicitly for this search query.
+                        // We must let it through, even if the keyword isn't perfectly in the title/excerpt.
+                        if (item.item.apiSource != null && !item.item.isSaved) true
+                        else item.item.title.lowercase().contains(q) || item.item.excerpt?.lowercase()?.contains(q) == true
+                    }
                     is UnifiedItem.Mesh -> item.post.content.lowercase().contains(q) || item.post.clearnetTitle?.lowercase()?.contains(q) == true
                 }
             } else true
@@ -397,6 +405,9 @@ fun UnifiedFeedTab(
     val pagerState = rememberPagerState { unifiedItems.size }
 
     LaunchedEffect(filterMode, searchQuery) {
+        // Sync search query state to the ViewModel so it can bypass exclusions
+        viewModel.updateActiveSearchQuery(searchQuery)
+        
         if (unifiedItems.isNotEmpty()) {
             pagerState.scrollToPage(0)
         }
@@ -439,12 +450,19 @@ fun UnifiedFeedTab(
                 }
 
                 // Prefetch the next slide's media while user is idle on the current one
+                // and track 5-second dwell for viewed history
                 LaunchedEffect(pagerState.settledPage, filterMode) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
                         if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                             viewModel.markItemReadState(currentItem.item.id, true)
                         }
+
+                        // After 5 seconds of dwell, mark the item as viewed in history.
+                        // This LaunchedEffect is keyed on settledPage, so when the user
+                        // swipes to a new page the delay is automatically cancelled.
+                        kotlinx.coroutines.delay(5000L)
+                        viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
                     }
 
                     val limit = if (filterMode == "Live Feed") 10 else 1
@@ -461,6 +479,28 @@ fun UnifiedFeedTab(
                                 break
                             }
                         }
+                    }
+                }
+
+                // Swipe-away detection: track items the user swiped past quickly (<5s)
+                LaunchedEffect(Unit) {
+                    var previousPage = -1
+                    var pageEnteredAt = 0L
+
+                    snapshotFlow { pagerState.settledPage }.collect { currentPage ->
+                        val now = System.currentTimeMillis()
+
+                        // Record swipe for the page we just left (if dwell < 5s = swiped away)
+                        if (previousPage >= 0 && previousPage in unifiedItems.indices) {
+                            val dwellMs = now - pageEnteredAt
+                            if (dwellMs < 5000L) {
+                                val leftItem = unifiedItems[previousPage]
+                                viewModel.recordItemSwiped(leftItem.id)
+                            }
+                        }
+
+                        previousPage = currentPage
+                        pageEnteredAt = now
                     }
                 }
 

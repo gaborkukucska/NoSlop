@@ -31,6 +31,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val appSettingDao = db.appSettingDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+    private val viewedHistoryDao = db.viewedHistoryDao()
+    private val swipeTrackerDao = db.swipeTrackerDao()
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
     private val meshPacketHandler = MeshPacketHandler(this, db)
@@ -54,6 +56,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private var presenceJob: kotlinx.coroutines.Job? = null
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
+
+    companion object {
+        const val HISTORY_LIMIT = 5000   // Max viewed history items before pruning oldest
+    }
 
     // --- State Observables ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
@@ -250,6 +256,65 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun updateSavedState(itemId: String, isSaved: Boolean) = withContext(Dispatchers.IO) {
         feedDao.updateSavedState(itemId, isSaved)
+    }
+
+    // --- Viewed History ---
+
+    /**
+     * Record that a content item has been viewed for >5 seconds.
+     * History items are never removed (except when the cap is reached, oldest are pruned).
+     */
+    suspend fun markAsViewed(itemId: String, itemType: String) = withContext(Dispatchers.IO) {
+        viewedHistoryDao.insertViewedItem(
+            ViewedHistoryItem(itemId = itemId, itemType = itemType)
+        )
+        // Prune oldest items if we exceed the history limit
+        val count = viewedHistoryDao.getCount()
+        if (count > HISTORY_LIMIT) {
+            viewedHistoryDao.pruneOldest(count - HISTORY_LIMIT)
+            Logger.info(TAG, "Pruned ${count - HISTORY_LIMIT} oldest history items (cap=$HISTORY_LIMIT)")
+        }
+    }
+
+    /**
+     * Get all viewed item IDs for feed exclusion.
+     */
+    suspend fun getViewedItemIds(): Set<String> = withContext(Dispatchers.IO) {
+        viewedHistoryDao.getAllViewedIds().toSet()
+    }
+
+    /**
+     * Reactive flow of all viewed history items (for the History filter UI).
+     */
+    val allViewedHistory: Flow<List<ViewedHistoryItem>> = viewedHistoryDao.getAllViewedItems()
+
+    // --- Swipe Tracking ---
+
+    /**
+     * Record that the user swiped away a content item.
+     * If the item has been swiped away twice, it is excluded from future aggregations.
+     * Swiping does NOT remove items from the viewed history.
+     */
+    suspend fun recordSwipe(itemId: String) = withContext(Dispatchers.IO) {
+        val existing = swipeTrackerDao.getSwipeForItem(itemId)
+        val newCount = (existing?.swipeCount ?: 0) + 1
+        swipeTrackerDao.upsertSwipe(
+            SwipeTracker(
+                itemId = itemId,
+                swipeCount = newCount,
+                lastSwipedAt = System.currentTimeMillis()
+            )
+        )
+        if (newCount >= 2) {
+            Logger.info(TAG, "Item $itemId swiped away $newCount times — excluded from future feeds")
+        }
+    }
+
+    /**
+     * Get item IDs that have been swiped away >= 2 times.
+     */
+    suspend fun getSwipeExcludedIds(): Set<String> = withContext(Dispatchers.IO) {
+        swipeTrackerDao.getExcludedIds().toSet()
     }
 
     /**

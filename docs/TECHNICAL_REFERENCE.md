@@ -757,7 +757,7 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 16)
+## 10. Data Model (Room, version 23)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
@@ -770,6 +770,8 @@ the ephemeral onion with the identity-derived one.
 | `mesh_reactions` | `id` (format `"${postId}_${authorPubKey}_${reactionType}"`) | `postId`, `authorPublicKeyB64`, `reactionType`, `timestamp`, `signature` | — |
 | `mesh_votes` | `id` (format `"${postId}_${authorPubKey}_${voteType}"`) | `postId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Separates upvotes/downvotes from emoji reactions |
 | `comment_votes` | `id` (format `"${commentId}_${authorPubKey}_${voteType}"`) | `commentId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Votes scoped to comments |
+| `viewed_history` | `id` (auto-gen) | `itemId`, `itemType`, `viewedAt` | `itemId` |
+| `swipe_tracker` | `itemId` | `swipeCount`, `lastSwipedAt` | — |
 | `app_settings` | `key` | `value` (string, often JSON) | — |
 
 `app_settings` is the catch-all KV store for: identity public data
