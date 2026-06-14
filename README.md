@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge">
   <img alt="Status" src="https://img.shields.io/badge/Status-Iteration_3_Live-orange?style=for-the-badge">
-  <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_Mesh-blue?style=for-the-badge">
+  <img alt="Network" src="https://img.shields.io/badge/Network-HUBs_/_HAI--Net-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
 </p>
 
@@ -34,8 +34,9 @@ A vertical feed purpose-built for signal-to-noise ratio.
 
 ### Serverless Social Mesh
 
-Direct peer-to-peer communication over the HAI-Net gossip network. No central server is ever involved.
+Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No central server is ever involved.
 
+- **Home HUBs (Coming Soon)** — Your dedicated local home hub serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline.
 - **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
 - **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key. Only you and your contact can read them.
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.

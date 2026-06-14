@@ -20,8 +20,10 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -94,11 +96,11 @@ fun AvatarCropper(
                     }
                 }
         ) {
+            // 1. Image Layer
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val canvasWidth = size.width
                 val canvasHeight = size.height
 
-                // Base image bounds to fit inside canvas like ContentScale.Fit
                 val imgAspect = bitmap!!.width.toFloat() / bitmap!!.height
                 val canvasAspect = canvasWidth / canvasHeight
 
@@ -124,6 +126,16 @@ fun AvatarCropper(
                     dstOffset = IntOffset(x.roundToInt(), y.roundToInt()),
                     dstSize = IntSize(bWidth.roundToInt(), bHeight.roundToInt())
                 )
+            }
+
+            // 2. Punch-out Overlay Layer
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            ) {
+                val canvasWidth = size.width
+                val canvasHeight = size.height
 
                 // Dark overlay
                 drawRect(color = Color.Black.copy(alpha = 0.6f))

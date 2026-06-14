@@ -2,6 +2,11 @@
 
 ## Completed Changes (2026-06-14)
 
+### 0. HUBs Rebranding & Home Hub Vision
+*   Renamed "HAI-Net" tab to "HUBs".
+*   Added "HAI-Net (coming soon)" indicator to the HUBs page.
+*   Documented the vision for Home HUBs as the primary backup for mesh Identity, data, and media.
+
 ### 1. Mesh Filtering & Notification Deep-links
 *   Verified self-post filtering in `NoSlopViewModel.kt`.
 *   Confirmed `ensurePostInFeed()` handles notification deep-links correctly by bypassing filters.

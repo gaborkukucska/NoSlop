@@ -817,11 +817,11 @@ migration path defined).
 
 ---
 
-## 13. Future Architecture: HAI-Net Hub Client
+## 13. Future Architecture: HUBs / HAI-Net Hub Client
 
 While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes). 
 
-In this architecture, NoSlop could serve as a `SLAVE_FRONTEND` client. Instead of maintaining a full local mesh stack and embedded Tor daemon, it would connect directly to a user's remote HAI-Net hub via a private, authenticated onion address. This would allow the mobile app to function as a lightweight UI, delegating heavy mesh routing, continuous availability, and media storage to the hub. This model aligns with gChat's dual hidden service architecture and is a planned avenue for long-term scalability.
+In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence.
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
 

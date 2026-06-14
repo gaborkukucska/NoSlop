@@ -211,8 +211,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Hub, contentDescription = "HAI-Net", modifier = Modifier.size(20.dp)) },
-                    label = { Text("HAI-Net", fontSize = 10.sp) },
+                    icon = { Icon(Icons.Default.Hub, contentDescription = "HUBs", modifier = Modifier.size(20.dp)) },
+                    label = { Text("HUBs", fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -400,6 +400,7 @@ fun UnifiedFeedTab(
                 "Audio" -> item is UnifiedItem.Feed && item.item.mediaType == "audio"
                 "Articles" -> item is UnifiedItem.Feed && item.item.mediaType.isNullOrEmpty()
                 "Mesh" -> item is UnifiedItem.Mesh
+                "HUBs" -> false // Placeholder for HUBs tab content filtering if needed
                 else -> true
             }
 

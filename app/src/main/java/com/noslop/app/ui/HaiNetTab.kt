@@ -13,12 +13,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.noslop.app.ui.theme.AccentGreen
 import com.noslop.app.ui.theme.PrimaryBlack
 import com.noslop.app.ui.theme.SurfaceDark
 import com.noslop.app.ui.theme.TextLight
 import com.noslop.app.ui.theme.TextMuted
+
+@Preview(showBackground = true)
+@Composable
+fun HaiNetTabPreview() {
+    HaiNetTab()
+}
 
 @Composable
 fun HaiNetTab() {
@@ -34,7 +41,7 @@ fun HaiNetTab() {
     ) {
         Icon(
             imageVector = Icons.Default.Hub,
-            contentDescription = "HAI-Net",
+            contentDescription = "HUBs",
             tint = AccentGreen,
             modifier = Modifier.size(100.dp)
         )
@@ -42,10 +49,17 @@ fun HaiNetTab() {
         Spacer(modifier = Modifier.height(32.dp))
         
         Text(
-            text = "HAI-Net",
+            text = "HUBs",
             style = MaterialTheme.typography.headlineLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold
+        )
+        
+        Text(
+            text = "HAI-Net (coming soon)",
+            style = MaterialTheme.typography.titleMedium,
+            color = AccentGreen.copy(alpha = 0.8f),
+            fontWeight = FontWeight.Medium
         )
         
         Spacer(modifier = Modifier.height(16.dp))
