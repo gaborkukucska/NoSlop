@@ -1121,14 +1121,37 @@ fun UnifiedFeedTab(
 private fun getPrefetchUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
     return when (item) {
         is UnifiedItem.Feed -> {
+            val mediaUrl = item.item.mediaUrl ?: return null
             if (item.item.mediaType == "video" || item.item.mediaType == "audio") {
-                item.item.mediaUrl
+                // Only preload direct media files — YouTube/Vimeo/embed URLs need async
+                // stream resolution in VideoPlayer before ExoPlayer can touch them.
+                if (isDirectlyPreloadable(mediaUrl)) mediaUrl else null
             } else null
         }
         is UnifiedItem.Mesh -> {
             if (item.post.mediaType == "video" || item.post.mediaType == "audio") {
-                resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
+                val resolved = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
+                if (resolved != null && isDirectlyPreloadable(resolved)) resolved else null
             } else null
         }
     }
+}
+
+/**
+ * Returns true if [url] is a directly-streamable media file that ExoPlayer can
+ * preload without any prior network resolution step.
+ * YouTube, Vimeo, and other embed-based URLs are excluded — they need the async
+ * stream-resolution pass that VideoPlayer performs on first render.
+ */
+private fun isDirectlyPreloadable(url: String): Boolean {
+    if (url.contains("youtube") || url.contains("youtu.be") ||
+        url.contains("youtube-nocookie") || url.contains("vimeo.com") ||
+        url.contains("archive.org/embed") || url.contains("archive.org/details")) {
+        return false
+    }
+    val lower = url.lowercase()
+    return lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.endsWith(".mkv") ||
+           lower.endsWith(".webm") || lower.endsWith(".mpd") || lower.endsWith(".mp3") ||
+           lower.endsWith(".m4a") || lower.endsWith(".ogg") || lower.endsWith(".flac") ||
+           lower.endsWith(".aac") || lower.contains("/download/") || lower.contains("127.0.0.1")
 }

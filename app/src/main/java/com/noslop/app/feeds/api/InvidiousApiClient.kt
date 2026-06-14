@@ -118,6 +118,108 @@ object InvidiousApiClient {
         return cachedInstances?.firstOrNull() ?: FALLBACK_INSTANCES.first()
     }
 
+    /**
+     * Resolve a direct playable stream URL for a YouTube video ID via the Invidious API.
+     *
+     * Invidious's /api/v1/videos/{id} endpoint returns an `adaptiveFormats` array (DASH)
+     * and a `formatStreams` array (muxed audio+video).  We prefer a muxed stream so ExoPlayer
+     * can play it without DASH parsing — no extra complexity, no manifest issues.
+     *
+     * Resolution preference (muxed streams):
+     *   720p → 480p → 360p → first available
+     *
+     * If no muxed streams are available we fall back to the highest-quality adaptive video
+     * stream and let ExoPlayer handle it (it will be video-only, but that's better than nothing).
+     *
+     * Returns null if every instance fails or the video is unavailable, letting the caller
+     * fall back to the Invidious WebView embed.
+     */
+    fun resolveStreamUrl(videoId: String): String? {
+        val instances = cachedInstances?.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+
+        for (instance in instances) {
+            try {
+                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats"
+                val request = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "NoSlop-Android/1.0")
+                    .build()
+
+                val response = client.newCall(request).execute()
+                if (!response.isSuccessful) {
+                    Logger.warn(TAG, "resolveStreamUrl: $instance returned ${response.code}")
+                    continue
+                }
+
+                val body = response.body?.string() ?: continue
+                val root = gson.fromJson(body, JsonObject::class.java)
+
+                // --- Prefer muxed (audio+video) streams ---
+                val formatStreams = root.getAsJsonArray("formatStreams")
+                if (formatStreams != null && formatStreams.size() > 0) {
+                    // Build a map of quality label → url for easy lookup
+                    val byQuality = mutableMapOf<String, String>()
+                    for (el in formatStreams) {
+                        val obj = el.asJsonObject
+                        val quality = obj.get("qualityLabel")?.asString ?: continue
+                        val streamUrl = obj.get("url")?.asString ?: continue
+                        byQuality[quality] = streamUrl
+                    }
+
+                    // Pick preferred resolution
+                    val preferred = listOf("720p", "480p", "360p", "240p")
+                    for (q in preferred) {
+                        val streamUrl = byQuality[q]
+                        if (streamUrl != null) {
+                            Logger.info(TAG, "Resolved muxed stream for $videoId at $q via $instance")
+                            return streamUrl
+                        }
+                    }
+
+                    // Any muxed stream is fine
+                    val fallback = formatStreams[0].asJsonObject.get("url")?.asString
+                    if (fallback != null) {
+                        Logger.info(TAG, "Resolved muxed stream (fallback quality) for $videoId via $instance")
+                        return fallback
+                    }
+                }
+
+                // --- Fall back to adaptive (video-only) streams if no muxed found ---
+                val adaptiveFormats = root.getAsJsonArray("adaptiveFormats")
+                if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
+                    // Pick the best video stream (not audio-only)
+                    var bestUrl: String? = null
+                    var bestBitrate = 0
+                    for (el in adaptiveFormats) {
+                        val obj = el.asJsonObject
+                        val mimeType = obj.get("type")?.asString ?: continue
+                        if (!mimeType.startsWith("video/")) continue
+                        val streamUrl = obj.get("url")?.asString ?: continue
+                        val bitrate = obj.get("bitrate")?.asInt ?: 0
+                        // Prefer mp4 over webm for broader ExoPlayer compatibility
+                        if (mimeType.contains("mp4") && bitrate > bestBitrate) {
+                            bestBitrate = bitrate
+                            bestUrl = streamUrl
+                        } else if (bestUrl == null) {
+                            bestUrl = streamUrl
+                        }
+                    }
+                    if (bestUrl != null) {
+                        Logger.info(TAG, "Resolved adaptive video stream for $videoId via $instance (bitrate=$bestBitrate)")
+                        return bestUrl
+                    }
+                }
+
+                Logger.warn(TAG, "resolveStreamUrl: no usable streams for $videoId from $instance")
+            } catch (e: Exception) {
+                Logger.warn(TAG, "resolveStreamUrl: instance $instance failed: ${e.message}")
+            }
+        }
+
+        Logger.error(TAG, "resolveStreamUrl: all instances exhausted for $videoId", null)
+        return null
+    }
+
     suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val instances = getInstances()
@@ -208,7 +310,8 @@ object InvidiousApiClient {
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
                     publishedAt = published ?: System.currentTimeMillis(),
-                    mediaUrl = "https://www.youtube-nocookie.com/embed/$videoId",
+                    // Store the raw YouTube watch URL — VideoPlayer will resolve the stream
+                    mediaUrl = "https://www.youtube.com/watch?v=$videoId",
                     mediaType = "video",
                     apiSource = "youtube"
                 ))
