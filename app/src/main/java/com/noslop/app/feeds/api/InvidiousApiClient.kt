@@ -21,11 +21,12 @@ object InvidiousApiClient {
 
     // Hardcoded fallback instances (known-good as of June 2026)
     private val FALLBACK_INSTANCES = listOf(
-        "https://inv.thepixora.com",
-        "https://inv.nadeko.net",
+        "https://iv.melmac.space",
+        "https://inv.zzls.xyz",
         "https://invidious.nerdvpn.de",
-        "https://invidious.f5.si",
-        "https://yt.chocolatemoo53.com"
+        "https://invidious.no-logs.com",
+        "https://invidious.io.lol",
+        "https://inv.tux.pizza"
     )
 
     // Cached dynamic instances

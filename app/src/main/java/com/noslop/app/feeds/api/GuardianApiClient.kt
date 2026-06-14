@@ -51,7 +51,7 @@ object GuardianApiClient {
                     items.add(FeedItem(id = "guardian_${contentId.replace("/", "_")}", sourceId = sourceId,
                         title = title, url = webUrl, author = byline, excerpt = excerpt,
                         thumbnailUrl = thumbnail, publishedAt = FeedParser.parseDate(pubDate),
-                        mediaUrl = thumbnail, mediaType = if (thumbnail != null) "image" else null,
+                        mediaUrl = null, mediaType = null,
                         apiSource = "guardian"))
                 } catch (e: Exception) { Logger.debug(TAG, "Skipping Guardian result: ${e.message}") }
             }

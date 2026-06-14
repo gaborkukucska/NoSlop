@@ -41,12 +41,10 @@ object SourceLibrary {
         BuiltInSource("krebs-rss", "Krebs on Security", "https://krebsonsecurity.com/feed/", "rss", "Privacy & Security"),
         BuiltInSource("schneier-rss", "Schneier on Security", "https://www.schneier.com/feed/atom/", "atom", "Privacy & Security"),
         BuiltInSource("eff-rss", "EFF Deeplinks", "https://www.eff.org/rss/updates.xml", "rss", "Privacy & Security"),
-        BuiltInSource("threatpost", "Threatpost", "https://threatpost.com/feed/", "rss", "Privacy & Security"),
 
         // Self-Hosting
         BuiltInSource("r-selfhosted", "r/selfhosted", "https://old.reddit.com/r/selfhosted.rss", "rss", "Self-Hosting"),
         BuiltInSource("r-homelab", "r/homelab", "https://old.reddit.com/r/homelab.rss", "rss", "Self-Hosting"),
-        BuiltInSource("selfhosted-hero", "Self-Hosted Hero", "https://selfhosthero.com/rss", "rss", "Self-Hosting"),
 
         // Science
         BuiltInSource("nasa-news", "NASA News", "https://www.nasa.gov/news-release/feed/", "rss", "Science"),
@@ -137,7 +135,8 @@ object SourceLibrary {
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),
         BuiltInSource("api-nasa-apod", "NASA Picture of the Day", "nasa:apod", "api", "Science"),
         BuiltInSource("api-nasa-library", "NASA Image Library", "nasa:library", "api", "Science"),
-        BuiltInSource("api-vimeo-featured", "Vimeo Featured", "vimeo:featured", "api", "Video Platforms")
+        BuiltInSource("api-vimeo-featured", "Vimeo Featured", "vimeo:featured", "api", "Video Platforms"),
+        BuiltInSource("api-wikimedia-featured", "Wikimedia Featured", "wikimedia:featured", "api", "Photography")
     )
 
     fun getSourcesForCategory(category: String): List<BuiltInSource> {

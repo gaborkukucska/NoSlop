@@ -48,7 +48,7 @@ object NewsApiClient {
                     items.add(FeedItem(id = "newsapi_${artUrl.hashCode()}", sourceId = sourceId, title = title,
                         url = artUrl, author = author, excerpt = desc, thumbnailUrl = imageUrl,
                         publishedAt = FeedParser.parseDate(pubAt),
-                        mediaUrl = imageUrl, mediaType = if (imageUrl != null) "image" else null,
+                        mediaUrl = null, mediaType = null,
                         apiSource = "newsapi"))
                 } catch (e: Exception) { Logger.debug(TAG, "Skipping article: ${e.message}") }
             }

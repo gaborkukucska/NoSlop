@@ -63,6 +63,25 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
 
+private fun getSourceLabel(item: FeedItem): String {
+    return when (item.apiSource) {
+        "youtube" -> "YouTube"
+        "reddit" -> "Reddit"
+        "pexels" -> "Pexels"
+        "internet_archive" -> "Archive.org"
+        "podcast_index" -> "Podcast"
+        "newsapi" -> "News"
+        "guardian" -> "Guardian"
+        "nasa" -> "NASA"
+        "vimeo" -> "Vimeo"
+        "wikimedia" -> "Wikimedia"
+        else -> {
+            if (item.sourceId.contains("rss") || item.sourceId.contains("atom")) "RSS"
+            else "Article"
+        }
+    }
+}
+
 private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
 @Composable
@@ -82,8 +101,10 @@ fun FullScreenImage(url: String) {
 
 @Composable
 fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh: () -> Unit, viewModel: NoSlopViewModel? = null) {
-    val rawContent = item.fullContent ?: item.excerpt ?: "No content available."
-    val content = remember(rawContent) { com.noslop.app.feeds.FeedParser.stripHtml(rawContent) }
+    val rawText = if (!item.fullContent.isNullOrBlank()) item.fullContent 
+                  else if (!item.excerpt.isNullOrBlank()) item.excerpt
+                  else ""
+    val content = remember(rawText) { com.noslop.app.feeds.FeedParser.stripHtml(rawText) }
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(item.mediaUrl, context)
     
@@ -134,69 +155,77 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
                 }
                 else -> {
                     Logger.info("FEED_CARD", "Falling back to article reader for ${item.id}")
-                    SegmentedArticleReader(content = content, imageUrl = resolvedUrl)
+                    val sourceLabel = getSourceLabel(item)
+                    SegmentedArticleReader(
+                        content = content,
+                        title = item.title,
+                        author = item.author,
+                        sourceLabel = sourceLabel,
+                        thumbnailUrl = item.thumbnailUrl ?: resolvedUrl,
+                        articleUrl = item.url
+                    )
                 }
             }
         } else {
-            SegmentedArticleReader(content = content)
+            val sourceLabel = getSourceLabel(item)
+            SegmentedArticleReader(
+                content = content,
+                title = item.title,
+                author = item.author,
+                sourceLabel = sourceLabel,
+                thumbnailUrl = item.thumbnailUrl,
+                articleUrl = item.url
+            )
         }
 
-        // 2. Overlaid description and user badge
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomStart)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
+        // 2. Overlaid description and user badge (Hidden for articles as they have integrated headers)
+        val isArticle = item.mediaType.isNullOrEmpty()
+        if (!isArticle) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomStart)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
+                        )
                     )
-                )
-                .padding(horizontal = 24.dp, vertical = 32.dp)
-        ) {
-            Column(modifier = Modifier.fillMaxWidth(0.8f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(AccentGreen.copy(alpha = 0.15f))
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        val badgeText = when (item.apiSource) {
-                            "youtube" -> "YouTube"
-                            "reddit" -> "Reddit"
-                            "pexels" -> "Pexels"
-                            "internet_archive" -> "Archive.org"
-                            "podcast_index" -> "Podcast"
-                            "newsapi" -> "News"
-                            "guardian" -> "Guardian"
-                            "nasa" -> "NASA"
-                            "vimeo" -> "Vimeo"
-                            else -> "RSS"
+                    .padding(horizontal = 24.dp, vertical = 32.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth(0.8f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(AccentGreen.copy(alpha = 0.15f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            val badgeText = getSourceLabel(item)
+                            Text(badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
-                        Text(badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(item.author ?: "Unknown Source", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(item.author ?: "Unknown Source", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TextLight,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = SimpleDateFormat("MMM dd, yyyy · HH:mm", Locale.getDefault()).format(Date(item.publishedAt)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextMuted
+                    )
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = TextLight,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Text(
-                    text = SimpleDateFormat("MMM dd, yyyy · HH:mm", Locale.getDefault()).format(Date(item.publishedAt)),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextMuted
-                )
             }
         }
 

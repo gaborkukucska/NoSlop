@@ -69,6 +69,7 @@ object PublicApiService {
                     items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
                     items += safeCall("api-vimeo-featured", activeApiSourceIds) { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                    items += safeCall("api-wikimedia-featured", activeApiSourceIds) { WikimediaApiClient.fetchFeaturedPictures() }
                 }
                 "Health" -> {
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.getTopHeadlines("health", apiKeyRepo, language = language) }

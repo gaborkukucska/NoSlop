@@ -335,6 +335,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     }
 }
 
+
 // ==========================================
 // UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
@@ -1113,5 +1114,20 @@ fun UnifiedFeedTab(
                 TextButton(onClick = { showShareDialog = null }) { Text("Cancel", color = TextMuted) }
             }
         )
+    }
+}
+
+private fun getPrefetchUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
+    return when (item) {
+        is UnifiedItem.Feed -> {
+            if (item.item.mediaType == "video" || item.item.mediaType == "audio") {
+                item.item.mediaUrl
+            } else null
+        }
+        is UnifiedItem.Mesh -> {
+            if (item.post.mediaType == "video" || item.post.mediaType == "audio") {
+                resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
+            } else null
+        }
     }
 }

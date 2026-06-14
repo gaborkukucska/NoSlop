@@ -147,10 +147,6 @@ object FeedParser {
                         val thumbUrl = parser.getAttributeValue(null, "url")
                         if (!thumbUrl.isNullOrBlank()) {
                             thumbnailUrl = thumbUrl
-                            if (mediaUrl == null) {
-                                mediaUrl = thumbUrl
-                                mediaType = "image"
-                            }
                         }
                         skip(parser)
                     }
@@ -180,10 +176,11 @@ object FeedParser {
         val id = guid.ifBlank { link.ifBlank { title + pubDateStr } }
 
         if (mediaUrl == null) {
-            mediaUrl = extractFirstImage(description)
-            if (mediaUrl != null) {
-                mediaType = "image"
-                thumbnailUrl = mediaUrl
+            // Extract embedded images for thumbnail display only.
+            // Do NOT promote to mediaType="image" — RSS articles with images are still articles.
+            val embeddedImage = extractFirstImage(description)
+            if (embeddedImage != null) {
+                thumbnailUrl = embeddedImage
             }
         }
 
@@ -264,10 +261,6 @@ object FeedParser {
                         val thumbUrl = parser.getAttributeValue(null, "url")
                         if (!thumbUrl.isNullOrBlank()) {
                             thumbnailUrl = thumbUrl
-                            if (mediaUrl == null) {
-                                mediaUrl = thumbUrl
-                                mediaType = "image"
-                            }
                         }
                         skip(parser)
                     }
@@ -285,10 +278,11 @@ object FeedParser {
         val id = idStr.ifBlank { link.ifBlank { title + updatedStr } }
 
         if (mediaUrl == null) {
-            mediaUrl = extractFirstImage(summary)
-            if (mediaUrl != null) {
-                mediaType = "image"
-                thumbnailUrl = mediaUrl
+            // Extract embedded images for thumbnail display only.
+            // Do NOT promote to mediaType="image" — RSS articles with images are still articles.
+            val embeddedImage = extractFirstImage(summary)
+            if (embeddedImage != null) {
+                thumbnailUrl = embeddedImage
             }
         }
 

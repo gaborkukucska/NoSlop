@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
@@ -175,134 +176,234 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
 }
 
 /**
- * Article reader with tap-to-turn page navigation.
- * Uses invisible tap zones on left/right edges to navigate between article segments,
- * completely avoiding gesture conflicts with the parent VerticalPager.
+ * Article reader with horizontal pagination.
+ * Each segment fits within the viewport, and sideways swiping navigates between pages.
+ * This ensures no gesture conflict with the parent VerticalPager's vertical swiping.
  */
 @Composable
-fun SegmentedArticleReader(content: String, modifier: Modifier = Modifier, imageUrl: String? = null) {
-    val segments: List<String> = remember(content) { splitIntoSegments(content, 600) }
-    var currentPage by remember { mutableIntStateOf(0) }
+fun SegmentedArticleReader(
+    content: String,
+    title: String,
+    author: String?,
+    sourceLabel: String,
+    thumbnailUrl: String?,
+    articleUrl: String?,
+    modifier: Modifier = Modifier
+) {
+    val rawContent = content.ifBlank { "" }
+    val segments: List<String> = remember(rawContent) { splitIntoSegments(rawContent, 800) }
+    // Page count = 1 (Hero) + maxOf(1, segments.size)
+    // We ensure at least one text page even if empty to show the "Read Full Article" button
+    val effectiveSegments = if (segments.isEmpty()) listOf("") else segments
+    val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
 
-    if (imageUrl != null) {
-        com.noslop.app.debug.Logger.debug("ARTICLE", "Loading image: $imageUrl")
-    }
+    var showWebView by remember { mutableStateOf(false) }
+    val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
 
     Column(modifier = modifier.fillMaxSize()) {
-        Box(
+        HorizontalPager(
+            state = pagerState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .testTag("article_tap_reader")
-        ) {
-            // Article content (no verticalScroll to avoid conflicting with VerticalPager)
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 24.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.Start
-            ) {
-                if (currentPage == 0 && imageUrl != null) {
+        ) { page ->
+            if (page == 0) {
+                // Page 0: Hero Layout (Magazine Style)
+                Box(modifier = Modifier.fillMaxSize()) {
                     AsyncImage(
-                        model = imageUrl,
+                        model = thumbnailUrl ?: fallbackImage,
                         contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .padding(bottom = 16.dp),
+                        modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
-                }
-                Text(
-                    text = segments[currentPage],
-                    style = MaterialTheme.typography.bodyLarge.copy(
-                        lineHeight = 28.sp,
-                        letterSpacing = 0.5.sp
-                    ),
-                    color = TextLight,
-                    textAlign = TextAlign.Start
-                )
-            }
 
-            // Tap zones for page navigation (overlaid on edges)
-            if (segments.size > 1) {
-                // Left tap zone — go to previous page
-                if (currentPage > 0) {
+                    // Gradient Scrim (dark -> transparent upward)
                     Box(
                         modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.2f)
-                            .align(Alignment.CenterStart)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                currentPage = (currentPage - 1).coerceAtLeast(0)
-                            },
-                        contentAlignment = Alignment.Center
+                            .fillMaxSize()
+                            .background(
+                                androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    colors = listOf(Color.Black.copy(alpha = 0.9f), Color.Transparent),
+                                    startY = Float.POSITIVE_INFINITY,
+                                    endY = 0f
+                                )
+                            )
+                    )
+
+                    // Title Overlay
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(horizontal = 32.dp, vertical = 64.dp)
                     ) {
-                        Icon(
-                            Icons.Default.ChevronLeft,
-                            contentDescription = "Previous page",
-                            tint = TextMuted.copy(alpha = 0.4f),
-                            modifier = Modifier.size(28.dp)
+                        Surface(
+                            color = AccentGreen,
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                text = sourceLabel.uppercase(),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 38.sp
+                            ),
+                            color = Color.White
                         )
+                        if (author != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "By $author",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextMuted
+                            )
+                        }
                     }
                 }
-                // Right tap zone — go to next page
-                if (currentPage < segments.size - 1) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.2f)
-                            .align(Alignment.CenterEnd)
-                            .clickable(
-                                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                indication = null
-                            ) {
-                                currentPage = (currentPage + 1).coerceAtMost(segments.size - 1)
-                            },
-                        contentAlignment = Alignment.Center
+            } else {
+                // Pages 1 to N: Text Content
+                val segmentIndex = page - 1
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start,
+                        verticalArrangement = Arrangement.Center
                     ) {
-                        Icon(
-                            Icons.Default.ChevronRight,
-                            contentDescription = "Next page",
-                            tint = TextMuted.copy(alpha = 0.4f),
-                            modifier = Modifier.size(28.dp)
-                        )
+                        if (effectiveSegments[segmentIndex].isNotBlank()) {
+                            Text(
+                                text = effectiveSegments[segmentIndex],
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    lineHeight = 30.sp,
+                                    letterSpacing = 0.4.sp,
+                                    fontSize = 17.sp
+                                ),
+                                color = TextLight,
+                                textAlign = TextAlign.Start,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        } else {
+                            Text(
+                                text = "Preview not available.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextMuted,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        // "Read Full Article" Button on the very last segment
+                        if (segmentIndex == effectiveSegments.size - 1 && articleUrl != null) {
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { showWebView = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            ) {
+                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Page indicator dots + page counter
-        if (segments.size > 1) {
-            Column(
+        // Page Indicator
+        if (effectiveSegments.isNotEmpty()) {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 40.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(bottom = 32.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                repeat(effectiveSegments.size + 1) { i ->
+                    val active = pagerState.currentPage == i
+                    Box(
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .size(if (active) 8.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(if (active) AccentGreen else TextMuted.copy(alpha = 0.3f))
+                    )
+                }
+            }
+        }
+    }
+
+    if (showWebView && articleUrl != null) {
+        ArticleWebViewDialog(url = articleUrl, title = title, onDismiss = { showWebView = false })
+    }
+}
+
+
+@Composable
+fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = PrimaryBlack
+        ) {
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Toolbar
                 Row(
-                    horizontalArrangement = Arrangement.Center
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .background(SurfaceDark)
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    repeat(segments.size) { i ->
-                        val active = currentPage == i
-                        Box(
-                            modifier = Modifier
-                                .padding(4.dp)
-                                .size(if (active) 8.dp else 6.dp)
-                                .clip(CircleShape)
-                                .background(if (active) AccentGreen else TextMuted.copy(alpha = 0.3f))
-                        )
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                    }
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = TextLight,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                    )
+                    val context = LocalContext.current
+                    IconButton(onClick = {
+                        try {
+                            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }) {
+                        Icon(Icons.Default.Public, contentDescription = "Open in Browser", tint = AccentGreen)
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${currentPage + 1} / ${segments.size}",
-                    color = TextMuted,
-                    fontSize = 11.sp
+
+                // WebView
+                AndroidView(
+                    factory = { context ->
+                        android.webkit.WebView(context).apply {
+                            settings.javaScriptEnabled = true
+                            webViewClient = android.webkit.WebViewClient()
+                            loadUrl(url)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
             }
         }
@@ -310,30 +411,39 @@ fun SegmentedArticleReader(content: String, modifier: Modifier = Modifier, image
 }
 
 private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
+    if (text.isBlank()) return emptyList()
     if (text.length <= chunkSize) return listOf(text)
+    
     val pages = mutableListOf<String>()
     var start = 0
     while (start < text.length) {
         var end = (start + chunkSize).coerceAtMost(text.length)
         if (end < text.length) {
-            // Try to break at a paragraph or sentence end first
+            // Look for the last paragraph break or sentence break within the chunk
             val searchRange = text.substring(start, end)
-            val lastParagraph = searchRange.lastIndexOf("\n\n")
-            val lastSentence = searchRange.lastIndexOf(". ")
-            val lastSpace = searchRange.lastIndexOf(' ')
             
-            val breakPoint = when {
-                lastParagraph > chunkSize / 2 -> lastParagraph + 2
-                lastSentence > chunkSize / 2 -> lastSentence + 2
-                lastSpace > chunkSize / 2 -> lastSpace + 1
-                else -> chunkSize
+            // Prefer paragraph breaks (\n\n)
+            var breakPoint = searchRange.lastIndexOf("\n\n")
+            if (breakPoint < chunkSize / 2) {
+                // Fallback to sentence break
+                breakPoint = searchRange.lastIndexOf(". ")
             }
-            end = (start + breakPoint).coerceAtMost(text.length)
+            if (breakPoint < chunkSize / 2) {
+                // Fallback to space
+                breakPoint = searchRange.lastIndexOf(" ")
+            }
+            
+            if (breakPoint > 0) {
+                end = start + breakPoint + 1
+            }
         }
-        pages.add(text.substring(start, end).trim())
+        val segment = text.substring(start, end).trim()
+        if (segment.isNotEmpty()) {
+            pages.add(segment)
+        }
         start = end
     }
-    return pages
+    return if (pages.isEmpty()) listOf(text) else pages
 }
 
 @Composable

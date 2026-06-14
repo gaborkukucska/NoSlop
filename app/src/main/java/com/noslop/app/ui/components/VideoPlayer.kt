@@ -77,7 +77,17 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                             settings.loadWithOverviewMode = true
                             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             
+                            // Set a common mobile User-Agent to avoid "unsupported browser" or login walls
+                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
+                            
                             webViewClient = object : android.webkit.WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                    // Prevent navigating away from the embed
+                                    val targetUrl = request?.url?.toString() ?: ""
+                                    return if (targetUrl.contains("youtube.com/watch") || targetUrl.contains("youtube.com/user")) {
+                                        true
+                                    } else false
+                                }
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                                     Logger.info("VIDEO", "WebView page finished: $url")
                                     // Stronger auto-play injection & black background
@@ -104,9 +114,31 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                                     val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
                                                  else if (url.contains("/embed/")) url.substringAfter("/embed/").substringBefore("?")
                                                  else url.substringAfterLast("/")
-                                    val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&enablejsapi=1&origin=https://com.noslop.app"
-                                    val iframeHtml = "<html><head><link rel='icon' href='data:,'><meta name='referrer' content='strict-origin-when-cross-origin'></head><body style='margin:0;padding:0;background-color:black;'><iframe width='100%' height='100%' src='$embedUrl' frameborder='0' allow='autoplay; fullscreen' allowfullscreen></iframe></body></html>"
-                                    Pair("https://com.noslop.app", iframeHtml)
+                                    // Bypassing Error 153:
+                                    // 1. MUST use https://www.youtube.com as origin
+                                    // 2. MUST provide a matching base URL in loadDataWithBaseURL
+                                    // 3. Removed referrerpolicy or extra params that might conflict
+                                    val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&mute=1&enablejsapi=1&rel=0&modestbranding=1&origin=https://www.youtube.com"
+                                    val iframeHtml = """
+                                        <!DOCTYPE html>
+                                        <html>
+                                        <head>
+                                            <style>
+                                                body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: black; overflow: hidden; }
+                                                iframe { border: none; width: 100%; height: 100%; }
+                                            </style>
+                                        </head>
+                                        <body>
+                                            <iframe 
+                                                id="ytplayer"
+                                                src="$embedUrl" 
+                                                allow="autoplay; encrypted-media; fullscreen" 
+                                                allowfullscreen>
+                                            </iframe>
+                                        </body>
+                                        </html>
+                                    """.trimIndent()
+                                    Pair("https://www.youtube.com", iframeHtml)
                                 }
                                 url.contains("vimeo.com") -> {
                                     val videoId = if (url.contains("/video/")) url.substringAfter("/video/").substringBefore("?")
