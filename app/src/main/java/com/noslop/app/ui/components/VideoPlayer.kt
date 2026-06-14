@@ -28,8 +28,10 @@ import kotlinx.coroutines.withContext
 // Composition so we never resolve the same video twice.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** What the player should actually load. */
-private sealed class VideoSource {
+/** What the player should actually load.
+ *  Internal (not private) so [com.noslop.app.ui.PreloadManager] can pattern-match
+ *  on the result of [resolveSource] when pre-warming upcoming feed items. */
+internal sealed class VideoSource {
     /** A direct media URL (mp4, m3u8, webm …) — plays in ExoPlayer. */
     data class Direct(val url: String) : VideoSource()
     /** A web-embeddable URL — plays in a minimal WebView. */
@@ -39,8 +41,16 @@ private sealed class VideoSource {
 }
 
 /** In-memory cache: raw mediaUrl → resolved VideoSource.  Cleared when the app
- *  process dies, which is fine — sources don't need to persist across restarts. */
-private val sourceCache = mutableMapOf<String, VideoSource>()
+ *  process dies, which is fine — sources don't need to persist across restarts.
+ *  Bounded LRU so a long scroll session (with PreloadManager pre-resolving
+ *  ahead-of-time) can't grow this unboundedly; eviction here just means a
+ *  re-resolve next time, not lost playback state. */
+private const val SOURCE_CACHE_CAPACITY = 50
+private val sourceCache = object : LinkedHashMap<String, VideoSource>(SOURCE_CACHE_CAPACITY, 0.75f, true) {
+    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, VideoSource>): Boolean {
+        return size > SOURCE_CACHE_CAPACITY
+    }
+}
 
 /**
  * Determine which [VideoSource] to use for [rawUrl], doing network work on
@@ -54,8 +64,12 @@ private val sourceCache = mutableMapOf<String, VideoSource>()
  *                                                  falls back to player iframe     → Embed
  *  4. archive.org/embed or /details              → Embed (archive's own player)
  *  5. Anything else already http(s)              → Direct (treat as raw stream)
+ *
+ * Internal so [com.noslop.app.ui.PreloadManager.preWarm] can call this ahead of
+ * time for upcoming feed items — the result lands in [sourceCache], so the
+ * later call from [VideoPlayer]'s `LaunchedEffect(url)` returns instantly.
  */
-private suspend fun resolveSource(rawUrl: String): VideoSource {
+internal suspend fun resolveSource(rawUrl: String): VideoSource {
     // Return cached result if available
     sourceCache[rawUrl]?.let { return it }
 

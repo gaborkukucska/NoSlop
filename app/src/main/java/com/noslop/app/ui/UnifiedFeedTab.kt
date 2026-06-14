@@ -63,6 +63,7 @@ import com.noslop.app.net.HttpClientProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
@@ -468,8 +469,8 @@ fun UnifiedFeedTab(
                     }
                 }
 
-                // Prefetch the next slide's media while user is idle on the current one
-                // and track 5-second dwell for viewed history
+                // Track 5-second dwell for viewed history (mark item as read
+                // immediately, mark as "viewed" if the user stays 5s+).
                 LaunchedEffect(pagerState.settledPage, filterMode) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
@@ -483,21 +484,23 @@ fun UnifiedFeedTab(
                         kotlinx.coroutines.delay(5000L)
                         viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
                     }
+                }
 
-                    val limit = if (filterMode == "Live Feed") 10 else 1
-                    val lookAheadLimit = minOf(pagerState.settledPage + 1 + limit, unifiedItems.size)
-                    
+                // Preload upcoming videos/audio as soon as the settled page changes —
+                // no dwell delay, so resolution/buffering starts the instant the user
+                // lands on a page, not 5s later. Covers the next 2 items ahead in
+                // every filter mode. PreloadManager.preWarm() handles both direct
+                // media (buffers an ExoPlayer) and YouTube/Vimeo/archive.org (resolves
+                // the stream source so it's cached by the time the card is visible).
+                LaunchedEffect(pagerState.settledPage, filterMode) {
+                    if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
+
+                    val preloadAheadCount = 2
+                    val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
+
                     for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
-                        val nextItem = unifiedItems[i]
-                        val prefetchUrl = getPrefetchUrlFromItem(nextItem, context)
-                        
-                        if (prefetchUrl != null) {
-                            val shouldPrefetch = filterMode == "Live Feed" || filterMode == "Videos" || filterMode == "Audio"
-                            if (shouldPrefetch) {
-                                PreloadManager.warmUp(context, prefetchUrl)
-                                break
-                            }
-                        }
+                        val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
+                        launch { PreloadManager.preWarm(context, preloadUrl) }
                     }
                 }
 
@@ -1118,40 +1121,23 @@ fun UnifiedFeedTab(
     }
 }
 
-private fun getPrefetchUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
+/**
+ * Returns the raw media URL for [item] if it's something worth preloading
+ * (video or audio). Unlike the old direct-only filter, this now includes
+ * YouTube/Vimeo/archive.org URLs too — [PreloadManager.preWarm] performs the
+ * async source-resolution step for those itself, so by the time the card
+ * becomes visible the resolved source is already cached.
+ */
+private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
     return when (item) {
         is UnifiedItem.Feed -> {
             val mediaUrl = item.item.mediaUrl ?: return null
-            if (item.item.mediaType == "video" || item.item.mediaType == "audio") {
-                // Only preload direct media files — YouTube/Vimeo/embed URLs need async
-                // stream resolution in VideoPlayer before ExoPlayer can touch them.
-                if (isDirectlyPreloadable(mediaUrl)) mediaUrl else null
-            } else null
+            if (item.item.mediaType == "video" || item.item.mediaType == "audio") mediaUrl else null
         }
         is UnifiedItem.Mesh -> {
             if (item.post.mediaType == "video" || item.post.mediaType == "audio") {
-                val resolved = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
-                if (resolved != null && isDirectlyPreloadable(resolved)) resolved else null
+                resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
             } else null
         }
     }
-}
-
-/**
- * Returns true if [url] is a directly-streamable media file that ExoPlayer can
- * preload without any prior network resolution step.
- * YouTube, Vimeo, and other embed-based URLs are excluded — they need the async
- * stream-resolution pass that VideoPlayer performs on first render.
- */
-private fun isDirectlyPreloadable(url: String): Boolean {
-    if (url.contains("youtube") || url.contains("youtu.be") ||
-        url.contains("youtube-nocookie") || url.contains("vimeo.com") ||
-        url.contains("archive.org/embed") || url.contains("archive.org/details")) {
-        return false
-    }
-    val lower = url.lowercase()
-    return lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.endsWith(".mkv") ||
-           lower.endsWith(".webm") || lower.endsWith(".mpd") || lower.endsWith(".mp3") ||
-           lower.endsWith(".m4a") || lower.endsWith(".ogg") || lower.endsWith(".flac") ||
-           lower.endsWith(".aac") || lower.contains("/download/") || lower.contains("127.0.0.1")
 }
