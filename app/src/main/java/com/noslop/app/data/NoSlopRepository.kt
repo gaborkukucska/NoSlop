@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -392,99 +394,138 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             return@withContext
         }
 
-        // Load negative keywords and language
+        // Load preferences
         val userNegative = getUserNegativeKeywords().map { it.lowercase() }
         val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
         val langPrefList = getLanguagePreference().split(",").map { it.trim() }.filter { it.isNotEmpty() }
         val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
+        val creatorKeywordList = getCreatorKeywords()
+        val apiKeyRepo = ApiKeyRepository(context)
 
-        // --- RSS/Atom pipeline (skip API-type sources) ---
-        for (source in activeSources) {
-            if (source.feedType == "api") continue // Handled by API pipeline below
+        // Split sources
+        val rssSources = activeSources.filter { it.feedType != "api" }.toMutableList()
+        val explicitApiSources = activeSources.filter { it.feedType == "api" }
+        val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct().toMutableList()
 
-            try {
-                Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
-                val items = FeedParser.fetchAndParse(source.url, source.id)
-                if (items.isNotEmpty()) {
-                    val filteredItems = items.filter { item ->
-                        val text = "${item.title} ${item.excerpt}".lowercase()
-                        allNegative.none { text.contains(it) }
-                    }
-                    if (filteredItems.isNotEmpty()) {
-                        feedDao.insertItems(filteredItems)
-                    }
-                    val unread = filteredItems.count { !it.isRead }
-                    feedDao.updateSource(source.copy(lastFetchedAt = System.currentTimeMillis(), unreadCount = unread))
-                    Logger.info(TAG, "Fetched ${filteredItems.size} items for ${source.title}")
-                }
-            } catch (e: Exception) {
-                Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
-            }
+        // Limited parallel dispatcher
+        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
+
+        // --- Phase 1: Ramp-Up (Fast diverse fetch) ---
+        val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+
+        val firstRss = rssSources.firstOrNull()
+        if (firstRss != null) {
+            rssSources.remove(firstRss)
+            rampUpJobs.add(async(dispatcher) { fetchRssSource(firstRss, allNegative) })
         }
 
-        // --- Public API pipeline ---
-        try {
-            val apiKeyRepo = ApiKeyRepository(context)
-            // Derive active categories from all active sources + user selected categories
-            val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct()
-            
-            // All explicitly activated API sources
-            val explicitApiSources = activeSources.filter { it.feedType == "api" }
+        val priorityCats = listOf("Video Platforms", "Music", "Photography").mapNotNull { cat -> activeCategories.find { it == cat } }
+        val firstApiCat = priorityCats.firstOrNull() ?: activeCategories.firstOrNull()
+        if (firstApiCat != null) {
+            activeCategories.remove(firstApiCat)
+            rampUpJobs.add(async(dispatcher) {
+                fetchApiCategory(firstApiCat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+            })
+        }
 
-            // Load creator keywords once — applied as extra search terms across all categories
-            val creatorKeywordList = getCreatorKeywords()
+        // Wait for Ramp-Up to finish so UI is populated
+        kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
 
-            // Load user keywords
-            for (category in activeCategories) {
+        // --- Phase 2: Background Sync ---
+        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+
+        for (source in rssSources) {
+            backgroundJobs.add(async(dispatcher) { fetchRssSource(source, allNegative) })
+        }
+
+        for (category in activeCategories) {
+            backgroundJobs.add(async(dispatcher) {
+                fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+            })
+        }
+
+        // --- Phase 3: Creator Specific API searches ---
+        // We pick 5 random creators per sync to avoid massive API spikes
+        val sampledCreators = creatorKeywordList.shuffled().take(5)
+        for (creator in sampledCreators) {
+            backgroundJobs.add(async(dispatcher) {
                 try {
-                    val keywords = getUserKeywordsForCategory(category).toMutableList()
-                    if (category == "Music") {
-                        val genres = getSelectedMusicGenres()
-                        if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
-                    } else if (category == "Video Platforms") {
-                        val genres = getSelectedVideoGenres()
-                        if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
-                    }
-                    // Inject any creator keywords as additional search terms
-                    if (creatorKeywordList.isNotEmpty()) {
-                        keywords.addAll(creatorKeywordList.take(5)) // cap to avoid overly long queries
-                    }
-                    
-                    // Determine which API sources to query for this category
-                    var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
-                    if (categoryApiSourceIds.isEmpty() && userCategories.contains(category)) {
-                        // User selected this category, but hasn't explicitly activated any API sources for it.
-                        // Auto-derive all built-in API sources for this category to ensure content isn't missing.
-                        categoryApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
-                            .filter { it.feedType == "api" && it.category == category }
-                            .map { it.id }
-                    }
+                    searchCustomFeed(creator, null)
+                } catch(e: Exception) { Logger.error(TAG, "Creator sync failed", e.message) }
+            })
+        }
 
-                    if (categoryApiSourceIds.isEmpty()) continue
+        kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
+        Logger.info(TAG, "Feed synchronization completed.")
+    }
 
-                    val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
-                        category = category,
-                        userKeywords = keywords,
-                        apiKeyRepo = apiKeyRepo,
-                        activeApiSourceIds = categoryApiSourceIds,
-                        language = langPref
-                    )
-                    if (apiItems.isNotEmpty()) {
-                        val filteredApiItems = apiItems.filter { item ->
-                            val text = "${item.title} ${item.excerpt}".lowercase()
-                            allNegative.none { text.contains(it) }
-                        }
-                        if (filteredApiItems.isNotEmpty()) {
-                            feedDao.insertItems(filteredApiItems)
-                            Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Logger.error(TAG, "API pipeline failed for $category", e.message)
+    private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
+        try {
+            Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
+            val items = FeedParser.fetchAndParse(source.url, source.id)
+            if (items.isNotEmpty()) {
+                val filteredItems = items.filter { item ->
+                    val text = "${item.title} ${item.excerpt}".lowercase()
+                    allNegative.none { text.contains(it) }
+                }
+                if (filteredItems.isNotEmpty()) {
+                    feedDao.insertItems(filteredItems)
+                }
+                val unread = filteredItems.count { !it.isRead }
+                feedDao.updateSource(source.copy(lastFetchedAt = System.currentTimeMillis(), unreadCount = unread))
+                Logger.info(TAG, "Fetched ${filteredItems.size} items for ${source.title}")
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed syncing source ${source.title}", e.message)
+        }
+    }
+
+    private suspend fun fetchApiCategory(
+        category: String,
+        explicitApiSources: List<FeedSource>,
+        userCategories: List<String>,
+        langPref: String,
+        allNegative: List<String>,
+        apiKeyRepo: ApiKeyRepository
+    ) {
+        try {
+            val keywords = getUserKeywordsForCategory(category).toMutableList()
+            if (category == "Music") {
+                val genres = getSelectedMusicGenres()
+                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+            } else if (category == "Video Platforms") {
+                val genres = getSelectedVideoGenres()
+                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+            }
+            
+            var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
+            if (categoryApiSourceIds.isEmpty() && userCategories.contains(category)) {
+                categoryApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
+                    .filter { it.feedType == "api" && it.category == category }
+                    .map { it.id }
+            }
+
+            if (categoryApiSourceIds.isEmpty()) return
+
+            val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
+                category = category,
+                userKeywords = keywords,
+                apiKeyRepo = apiKeyRepo,
+                activeApiSourceIds = categoryApiSourceIds,
+                language = langPref
+            )
+            if (apiItems.isNotEmpty()) {
+                val filteredApiItems = apiItems.filter { item ->
+                    val text = "${item.title} ${item.excerpt}".lowercase()
+                    allNegative.none { text.contains(it) }
+                }
+                if (filteredApiItems.isNotEmpty()) {
+                    feedDao.insertItems(filteredApiItems)
+                    Logger.info(TAG, "API pipeline: fetched ${filteredApiItems.size} items for $category")
                 }
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "API pipeline initialization failed", e.message)
+            Logger.error(TAG, "API pipeline failed for $category", e.message)
         }
     }
 

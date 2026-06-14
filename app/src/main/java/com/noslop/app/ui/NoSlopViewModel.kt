@@ -679,6 +679,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (creatorKeywords != null) _creatorKeywords.value = creatorKeywords
 
             // Clear old data to ensure new preferences are reflected immediately
+            _unifiedFeed.value = emptyList()
+            allFeeds = emptyList()
+            allMeshes = emptyList()
             repository.clearFeedData()
             
             // Trigger fetch in background
@@ -741,6 +744,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 repository.refreshFeeds()
             } catch (e: Exception) {
                 Logger.error("VM", "Manual refresh exception: ${e.message}")
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
+    fun forceResetFeed() {
+        if (_isRefreshingFeeds.value) return
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                Logger.info("VM", "Force resetting feed")
+                _unifiedFeed.value = emptyList()
+                allFeeds = emptyList()
+                allMeshes = emptyList()
+                repository.clearFeedData()
+                repository.refreshFeeds()
+            } catch (e: Exception) {
+                Logger.error("VM", "Force reset exception: ${e.message}")
             } finally {
                 _isRefreshingFeeds.value = false
             }

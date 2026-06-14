@@ -618,7 +618,12 @@ fun Step5Feeds(
     LaunchedEffect(suggestedSources) {
         if (!hasPreselected && suggestedSources.isNotEmpty() && searchQuery.isBlank()) {
             suggestedSources.forEach { src ->
-                if (!selectedSources.contains(src)) {
+                val isApiSource = src.feedType == "api"
+                val serviceId = if (isApiSource) src.url.split(":").first() else null
+                val requiresKey = serviceId != null && com.noslop.app.data.ApiKeyRepository.SERVICES.find { it.id == serviceId }?.requiresUserKey == true
+                val hasKey = if (requiresKey) apiKeyRepository.hasKey(serviceId!!) else true
+                
+                if (!selectedSources.contains(src) && (!requiresKey || hasKey)) {
                     onToggleSource(src)
                 }
             }

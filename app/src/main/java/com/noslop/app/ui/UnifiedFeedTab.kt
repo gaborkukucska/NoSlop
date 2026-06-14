@@ -822,7 +822,8 @@ fun UnifiedFeedTab(
                     // ── Refresh button ──
                     OutlinedButton(
                         onClick = {
-                            viewModel.refreshFeeds()
+                            viewModel.forceResetFeed()
+                            showSearchModal = false
                         },
                         modifier = Modifier.fillMaxWidth().height(40.dp),
                         shape = RoundedCornerShape(12.dp),
