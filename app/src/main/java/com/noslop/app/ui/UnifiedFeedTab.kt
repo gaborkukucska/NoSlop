@@ -1141,3 +1141,22 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
         }
     }
 }
+
+/**
+ * Returns true if [url] is a directly-streamable media file that ExoPlayer can
+ * preload without any prior network resolution step.
+ * YouTube, Vimeo, and other embed-based URLs are excluded — they need the async
+ * stream-resolution pass that VideoPlayer performs on first render.
+ */
+private fun isDirectlyPreloadable(url: String): Boolean {
+    if (url.contains("youtube") || url.contains("youtu.be") ||
+        url.contains("youtube-nocookie") || url.contains("vimeo.com") ||
+        url.contains("archive.org/embed") || url.contains("archive.org/details")) {
+        return false
+    }
+    val lower = url.lowercase()
+    return lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.endsWith(".mkv") ||
+           lower.endsWith(".webm") || lower.endsWith(".mpd") || lower.endsWith(".mp3") ||
+           lower.endsWith(".m4a") || lower.endsWith(".ogg") || lower.endsWith(".flac") ||
+           lower.endsWith(".aac") || lower.contains("/download/") || lower.contains("127.0.0.1")
+}
