@@ -106,6 +106,18 @@ object InvidiousApiClient {
         }
     }
 
+    /**
+     * Returns the best available Invidious instance synchronously, for use from non-suspending
+     * contexts (e.g. VideoPlayer's WebView factory block).
+     *
+     * Returns the first entry from the cached dynamic list if it has been populated, otherwise
+     * falls back to the first hardcoded fallback instance. This avoids a network call on the
+     * main thread while still benefiting from any prior cache warm-up done by the feed loader.
+     */
+    fun getPrimaryInstance(): String {
+        return cachedInstances?.firstOrNull() ?: FALLBACK_INSTANCES.first()
+    }
+
     suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val instances = getInstances()

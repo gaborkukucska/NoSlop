@@ -82,20 +82,31 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                             
                             webViewClient = object : android.webkit.WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
-                                    // Prevent navigating away from the embed
+                                    // Allow sub-resource loads and navigation within the Invidious instance
+                                    // (its player page loads JS/CSS from the same origin).
+                                    // Only block navigations that would take the user away to an unrelated page.
                                     val targetUrl = request?.url?.toString() ?: ""
-                                    return if (targetUrl.contains("youtube.com/watch") || targetUrl.contains("youtube.com/user")) {
-                                        true
-                                    } else false
+                                    val blocked = targetUrl.contains("youtube.com/watch") ||
+                                                  targetUrl.contains("youtube.com/user") ||
+                                                  targetUrl.contains("youtube.com/channel") ||
+                                                  (targetUrl.contains("youtube.com") && !targetUrl.contains("youtube-nocookie"))
+                                    return blocked
                                 }
                                 override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                                     Logger.info("VIDEO", "WebView page finished: $url")
-                                    // Stronger auto-play injection & black background
+                                    // Inject autoplay for Invidious's own player and Vimeo.
+                                    // Invidious uses <video> elements with a custom JS player.
                                     val playJs = """
                                         (function() {
                                             document.body.style.backgroundColor = 'black';
-                                            var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label="Play"]');
-                                            if (btn) btn.click();
+                                            // Invidious player: click its play button or play the <video> directly
+                                            var invBtn = document.querySelector('#player-container .play-button, .player-container button[title="Play"]');
+                                            if (invBtn) { invBtn.click(); return; }
+                                            var vid = document.querySelector('video');
+                                            if (vid) { vid.play().catch(function(){}); return; }
+                                            // Vimeo fallback
+                                            var vimeoBtn = document.querySelector('.vimeo-play-button, button[aria-label="Play"]');
+                                            if (vimeoBtn) vimeoBtn.click();
                                         })();
                                     """.trimIndent()
                                     view?.evaluateJavascript(playJs, null)
@@ -109,57 +120,70 @@ fun VideoPlayer(url: String, isVisible: Boolean = true, thumbnailUrl: String? = 
                                 }
                             }
                             webChromeClient = android.webkit.WebChromeClient()
-                            val (baseUrlForData, htmlData) = when {
+
+                            // Extract video ID from any YouTube/nocookie URL shape:
+                            //   https://www.youtube.com/watch?v=ID
+                            //   https://youtu.be/ID
+                            //   https://www.youtube-nocookie.com/embed/ID        ← what InvidiousApiClient and FeedParser produce
+                            fun extractYouTubeId(rawUrl: String): String? = when {
+                                rawUrl.contains("v=") -> rawUrl.substringAfter("v=").substringBefore("&").takeIf { it.isNotBlank() }
+                                rawUrl.contains("/embed/") -> rawUrl.substringAfter("/embed/").substringBefore("?").takeIf { it.isNotBlank() }
+                                rawUrl.contains("youtu.be/") -> rawUrl.substringAfter("youtu.be/").substringBefore("?").takeIf { it.isNotBlank() }
+                                else -> null
+                            }
+
+                            when {
                                 url.contains("youtube") || url.contains("youtu.be") -> {
-                                    val videoId = if (url.contains("v=")) url.substringAfter("v=").substringBefore("&") 
-                                                 else if (url.contains("/embed/")) url.substringAfter("/embed/").substringBefore("?")
-                                                 else url.substringAfterLast("/")
-                                    // Bypassing Error 153:
-                                    // 1. MUST use https://www.youtube.com as origin
-                                    // 2. MUST provide a matching base URL in loadDataWithBaseURL
-                                    // 3. Removed referrerpolicy or extra params that might conflict
-                                    val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&mute=1&enablejsapi=1&rel=0&modestbranding=1&origin=https://www.youtube.com"
-                                    val iframeHtml = """
-                                        <!DOCTYPE html>
-                                        <html>
-                                        <head>
-                                            <style>
-                                                body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: black; overflow: hidden; }
-                                                iframe { border: none; width: 100%; height: 100%; }
-                                            </style>
-                                        </head>
-                                        <body>
-                                            <iframe 
-                                                id="ytplayer"
-                                                src="$embedUrl" 
-                                                allow="autoplay; encrypted-media; fullscreen" 
-                                                allowfullscreen>
-                                            </iframe>
-                                        </body>
-                                        </html>
-                                    """.trimIndent()
-                                    Pair("https://www.youtube.com", iframeHtml)
+                                    // FIX: Error 153 is triggered when YouTube's embed player detects
+                                    // the request is coming from a data: URI origin — even when
+                                    // loadDataWithBaseURL sets the base URL to youtube.com. YouTube
+                                    // tightened this check and now rejects the player entirely.
+                                    //
+                                    // Root cause: wrapping youtube-nocookie in an <iframe> inside a
+                                    // data: HTML blob and loading it via loadDataWithBaseURL() cannot
+                                    // fool YouTube's origin check in recent versions.
+                                    //
+                                    // Fix: use an Invidious instance's own /embed/ endpoint instead.
+                                    // Invidious serves a self-contained page with its own player that
+                                    // fetches the stream server-side — no YouTube iframe, no Error 153.
+                                    // We call loadUrl() directly so the WebView origin is the Invidious
+                                    // instance domain, which is fully trusted by Invidious's player.
+                                    val videoId = extractYouTubeId(url)
+                                    if (videoId != null) {
+                                        // Use the same fallback instances already maintained in InvidiousApiClient.
+                                        // Pick the first one; if it fails the user can retry (future work: rotate on error).
+                                        val invidiousInstance = com.noslop.app.feeds.api.InvidiousApiClient.getPrimaryInstance()
+                                        val invidiousEmbedUrl = "$invidiousInstance/embed/$videoId?autoplay=1&listen=0"
+                                        Logger.info("VIDEO", "Loading YouTube via Invidious embed (avoids Error 153): $invidiousEmbedUrl")
+                                        loadUrl(invidiousEmbedUrl)
+                                    } else {
+                                        Logger.warn("VIDEO", "Could not extract YouTube video ID from: $url — falling back to direct load")
+                                        loadUrl(url)
+                                    }
                                 }
                                 url.contains("vimeo.com") -> {
                                     val videoId = if (url.contains("/video/")) url.substringAfter("/video/").substringBefore("?")
                                                  else url.substringAfterLast("/")
                                     val embedUrl = "https://player.vimeo.com/video/$videoId?autoplay=1"
                                     val iframeHtml = "<html><head><link rel='icon' href='data:,'></head><body style='margin:0;padding:0;background-color:black;'><iframe width='100%' height='100%' src='$embedUrl' frameborder='0' allow='autoplay; fullscreen' allowfullscreen></iframe></body></html>"
-                                    Pair("https://vimeo.com", iframeHtml)
+                                    loadDataWithBaseURL("https://vimeo.com", iframeHtml, "text/html", "UTF-8", null)
                                 }
-                                else -> Pair(url, null)
-                            }
-                            
-                            if (htmlData != null) {
-                                loadDataWithBaseURL(baseUrlForData, htmlData, "text/html", "UTF-8", null)
-                            } else {
-                                loadUrl(baseUrlForData)
+                                else -> {
+                                    loadUrl(url)
+                                }
                             }
                         }
                     },
                     update = { view ->
-                        // evaluateJavascript inside update to re-trigger autoplay if needed
-                        view.evaluateJavascript("(function() { var btn = document.querySelector('.ytp-large-play-button, .vimeo-play-button, button[aria-label=\"Play\"]'); if (btn) btn.click(); })();", null)
+                        // Re-trigger autoplay if the slide becomes visible again (e.g. swipe back)
+                        view.evaluateJavascript("""
+                            (function() {
+                                var vid = document.querySelector('video');
+                                if (vid && vid.paused) { vid.play().catch(function(){}); return; }
+                                var invBtn = document.querySelector('#player-container .play-button, .player-container button[title="Play"]');
+                                if (invBtn) invBtn.click();
+                            })();
+                        """.trimIndent(), null)
                     },
                     modifier = Modifier.fillMaxSize(),
                     onRelease = { view ->
