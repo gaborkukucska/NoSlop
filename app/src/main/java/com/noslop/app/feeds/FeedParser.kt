@@ -54,7 +54,7 @@ object FeedParser {
             if (response.isSuccessful && response.body != null) {
                 Logger.info(TAG, "Successfully fetched feed: $feedUrl (HTTP ${response.code})")
                 response.body!!.byteStream().use { stream ->
-                    parseStream(stream, sourceId)
+                    parseStream(stream, sourceId, feedUrl)
                 }
             } else {
                 Logger.warn(TAG, "Server returned HTTP ${response.code} for $feedUrl. Response: ${response.message}")
@@ -69,7 +69,7 @@ object FeedParser {
     /**
      * Parse feed inputs using Android XmlPullParser (handling RSS & Atom formats)
      */
-    fun parseStream(stream: InputStream, sourceId: String): List<FeedItem> {
+    fun parseStream(stream: InputStream, sourceId: String, feedUrl: String? = null): List<FeedItem> {
         val list = mutableListOf<FeedItem>()
         try {
             val parser = Xml.newPullParser()
@@ -93,7 +93,8 @@ object FeedParser {
                 eventType = parser.next()
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "Error parsing XML stream", e.message)
+            val source = feedUrl ?: sourceId
+            Logger.error(TAG, "Error parsing XML stream for $source", e.message)
         }
         return list
     }

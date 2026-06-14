@@ -303,6 +303,38 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Reverses [searchAndCreateCustomFeed]: discards the search-result items that
+     * were injected into the feed/database for the now-cleared search query, and
+     * repopulates the unified feed from the normal aggregation pipeline.
+     *
+     * Without this, clearing the search box left the previously fetched
+     * search-result items sitting in `feed_items` and `_unifiedFeed` forever —
+     * they kept showing up (and kept "passing" the search filter, since an empty
+     * query matches everything) until the user ran a brand new search, which was
+     * the only other code path that calls `clearFeedData()`. A manual
+     * "Refresh Feed" tap didn't help either, since `refreshFeeds()` only adds new
+     * items on top of the existing (still-contaminated) cache.
+     */
+    fun clearSearchAndRestoreFeed() {
+        if (_isRefreshingFeeds.value) return // Prevent concurrent refreshes
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                Logger.info("VM", "Clearing search results and restoring default feed")
+                activeSearchQuery = ""
+                _unifiedFeed.value = emptyList() // Drop search-injected items from the visible feed
+                allFeeds = emptyList() // Clear local cache to prevent instantaneous reload of stale items
+                repository.clearFeedData() // Wipe the unsaved search-result items from the database
+                repository.refreshFeeds() // Repopulate via the normal aggregation pipeline
+            } catch (e: Exception) {
+                Logger.error("VM", "Clear search exception: ${e.message}")
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
     fun loadMoreFeedItems(filterMode: String? = null) {
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64

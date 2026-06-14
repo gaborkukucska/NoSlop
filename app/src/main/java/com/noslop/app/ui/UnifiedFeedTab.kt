@@ -359,6 +359,23 @@ fun UnifiedFeedTab(
     var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
 
+    // Tracks whether the currently displayed feed contains items injected by
+    // searchAndCreateCustomFeed(). Used to know whether clearing the search box
+    // needs to also clear those injected items via clearSearchAndRestoreFeed().
+    var searchResultsActive by remember { mutableStateOf(false) }
+
+    // Applies a new search query, undoing any active custom search results
+    // when the query is cleared back to blank. This prevents a previously
+    // searched term from continuing to influence the aggregated feed after
+    // the search box is cleared.
+    val applySearchQuery: (String) -> Unit = { newQuery ->
+        if (newQuery.isBlank() && searchResultsActive) {
+            searchResultsActive = false
+            viewModel.clearSearchAndRestoreFeed()
+        }
+        searchQuery = newQuery
+    }
+
     // Active filter label for the floating indicator
     val activeFilterLabel = remember(filterMode, searchQuery) {
         buildString {
@@ -564,7 +581,7 @@ fun UnifiedFeedTab(
                                     .size(14.dp)
                                     .clickable {
                                         filterMode = "Live Feed"
-                                        searchQuery = ""
+                                        applySearchQuery("")
                                     }
                             )
                         }
@@ -686,6 +703,7 @@ fun UnifiedFeedTab(
                                 if (localSearchQuery.isNotBlank()) {
                                     searchQuery = localSearchQuery
                                     filterMode = localFilterMode
+                                    searchResultsActive = true
                                     viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
                                     showSearchModal = false
                                 }
@@ -787,6 +805,7 @@ fun UnifiedFeedTab(
                             onClick = {
                                 searchQuery = localSearchQuery
                                 filterMode = localFilterMode
+                                searchResultsActive = true
                                 viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
                                 showSearchModal = false
                             },
@@ -818,7 +837,7 @@ fun UnifiedFeedTab(
             confirmButton = {
                 Button(
                     onClick = {
-                        searchQuery = localSearchQuery
+                        applySearchQuery(localSearchQuery)
                         filterMode = localFilterMode
                         showSearchModal = false
                     },
@@ -831,7 +850,7 @@ fun UnifiedFeedTab(
             dismissButton = {
                 TextButton(onClick = {
                     // Reset everything
-                    searchQuery = ""
+                    applySearchQuery("")
                     filterMode = "Live Feed"
                     showSearchModal = false
                 }) {
@@ -1095,4 +1114,3 @@ fun UnifiedFeedTab(
         )
     }
 }
-

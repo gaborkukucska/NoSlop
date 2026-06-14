@@ -46,7 +46,7 @@ object SourceLibrary {
         // Self-Hosting
         BuiltInSource("r-selfhosted", "r/selfhosted", "https://old.reddit.com/r/selfhosted.rss", "rss", "Self-Hosting"),
         BuiltInSource("r-homelab", "r/homelab", "https://old.reddit.com/r/homelab.rss", "rss", "Self-Hosting"),
-        BuiltInSource("selfhosted-hero", "Self-Hosted Hero", "https://selfhostedhero.com/rss", "rss", "Self-Hosting"),
+        BuiltInSource("selfhosted-hero", "Self-Hosted Hero", "https://selfhosthero.com/rss", "rss", "Self-Hosting"),
 
         // Science
         BuiltInSource("nasa-news", "NASA News", "https://www.nasa.gov/news-release/feed/", "rss", "Science"),
@@ -55,7 +55,10 @@ object SourceLibrary {
         BuiltInSource("nature", "Nature", "https://www.nature.com/nature.rss", "rss", "Science"),
 
         // World News
-        BuiltInSource("ap-top", "Associated Press", "https://feeds.apnews.com/rss/TopNews", "rss", "World News"),
+        // NOTE: Associated Press discontinued feeds.apnews.com RSS feeds entirely
+        // (see https://github.com/rererecursive/associated-press-rss) — the old
+        // "ap-top" source pointed at a dead domain and was removed. World News is
+        // still well covered by Al Jazeera, BBC, Reuters, and the API sources below.
         BuiltInSource("aljazeera", "Al Jazeera", "https://www.aljazeera.com/xml/rss/all.xml", "rss", "World News"),
         BuiltInSource("bbc-world", "BBC World News", "https://feeds.bbci.co.uk/news/world/rss.xml", "rss", "World News"),
         BuiltInSource("reuters-world", "Reuters World", "https://www.reutersagency.com/feed/?best-topics=world-news&post_type=best", "rss", "World News"),
