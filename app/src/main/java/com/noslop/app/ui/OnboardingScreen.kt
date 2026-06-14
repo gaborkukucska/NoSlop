@@ -48,6 +48,7 @@ fun OnboardingScreen(
     val selectedMusicGenres = remember { mutableStateListOf<String>() }
     val selectedVideoGenres = remember { mutableStateListOf<String>() }
     val selectedSources = remember { mutableStateListOf<BuiltInSource>() }
+    var creatorKeywordsText by remember { mutableStateOf("") }
     
     val mnemonic by viewModel.mnemonic.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
@@ -90,13 +91,13 @@ fun OnboardingScreen(
                     modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                 )
 
-                // 7-dot step indicators
+                // 8-dot step indicators
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(7) { index ->
+                    repeat(8) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -158,8 +159,13 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
-                    6 -> Step6Connection(viewModel)
-                    7 -> Step7Finalize(viewModel, handleText, selectedSources, selectedInterests, selectedMusicGenres, selectedVideoGenres, mnemonic)
+                    6 -> Step6Creators(
+                        selectedInterests = selectedInterests,
+                        creatorKeywords = creatorKeywordsText,
+                        onCreatorKeywordsChange = { creatorKeywordsText = it }
+                    )
+                    7 -> Step7Connection(viewModel)
+                    8 -> Step8Finalize(viewModel, handleText, selectedSources, selectedInterests, selectedMusicGenres, selectedVideoGenres, mnemonic)
                 }
             }
 
@@ -169,7 +175,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 7) {
+                if (currentStep > 1 && currentStep < 8) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -196,12 +202,13 @@ fun OnboardingScreen(
                     3 -> selectedInterests.isNotEmpty()
                     4 -> true // Optional genre selection
                     5 -> selectedSources.isNotEmpty()
-                    6 -> true
+                    6 -> true // Creator keywords are optional
                     7 -> true
+                    8 -> true
                     else -> false
                 }
 
-                if (currentStep < 7) {
+                if (currentStep < 8) {
                     Button(
                         onClick = {
                             if (currentStep == 3 && !selectedInterests.contains("Music") && !selectedInterests.contains("Video Platforms")) {
@@ -209,12 +216,13 @@ fun OnboardingScreen(
                             } else {
                                 currentStep++
                             }
-                            if (currentStep == 6) {
+                            if (currentStep == 7) {
                                 viewModel.preloadFeedsDuringOnboarding(
                                     selectedSources,
                                     selectedInterests,
                                     selectedMusicGenres,
-                                    selectedVideoGenres
+                                    selectedVideoGenres,
+                                    creatorKeywordsText
                                 )
                             }
                         },
@@ -247,7 +255,8 @@ fun OnboardingScreen(
                                 selectedInterests, 
                                 selectedMusicGenres,
                                 selectedVideoGenres,
-                                mnemonic!!
+                                mnemonic!!,
+                                creatorKeywordsText
                             )
                             onComplete()
                         },
@@ -740,8 +749,144 @@ fun Step5Feeds(
     }
 }
 
+}
+
+/**
+ * Onboarding Step 6 — Creator & Channel Filters
+ *
+ * Shows a free-text entry area for creator/channel names and a "word cloud" of
+ * curated suggestions derived from the user's selected interest categories and
+ * chosen feeds. Tapping a suggestion chip toggles it into the text field.
+ * The collected names are later passed as extra search keywords into the API
+ * aggregation pipeline so content from those creators surfaces in the feed.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Step6Connection(viewModel: NoSlopViewModel) {
+fun Step6Creators(
+    selectedInterests: List<String>,
+    creatorKeywords: String,
+    onCreatorKeywordsChange: (String) -> Unit
+) {
+    // Derive suggestions from selected categories using the SourceLibrary map
+    val suggestions = remember(selectedInterests) {
+        com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(selectedInterests)
+    }
+
+    // Parse the current keyword text into a set for chip highlighting
+    val currentKeywords = remember(creatorKeywords) {
+        creatorKeywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Who do you follow?",
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Text(
+            text = "Add creators, channels, or outlets you love. NoSlop will surface their content across all your feeds. Tap suggestions or type your own.",
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        OutlinedTextField(
+            value = creatorKeywords,
+            onValueChange = onCreatorKeywordsChange,
+            label = { Text("Creators, channels, outlets (comma separated)") },
+            placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
+            minLines = 2,
+            maxLines = 4,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentGreen,
+                unfocusedBorderColor = BorderSubtle,
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight,
+                focusedLabelColor = AccentGreen,
+                unfocusedLabelColor = TextMuted
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        if (suggestions.isNotEmpty()) {
+            Text(
+                text = "SUGGESTED FOR YOUR INTERESTS",
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 8.dp, bottom = 6.dp)
+            )
+
+            // Word-cloud: wrapping flow of suggestion chips
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+            ) {
+                // Group chips into rows of ~3 so they wrap naturally within a LazyColumn
+                val chunked = suggestions.chunked(3)
+                items(chunked) { row ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row.forEach { creator ->
+                            val isSelected = currentKeywords.contains(creator)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    val updated = if (isSelected) {
+                                        currentKeywords - creator
+                                    } else {
+                                        currentKeywords + creator
+                                    }
+                                    onCreatorKeywordsChange(updated.joinToString(", "))
+                                },
+                                label = {
+                                    Text(
+                                        text = creator,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = PrimaryBlack,
+                                    labelColor = TextLight,
+                                    selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
+                                    selectedLabelColor = AccentGreen
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = if (isSelected) AccentGreen else BorderSubtle,
+                                    selectedBorderColor = AccentGreen
+                                ),
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                        }
+                        // Fill remainder so the row aligns left
+                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Step7Connection(viewModel: NoSlopViewModel) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -787,7 +932,7 @@ fun Step6Connection(viewModel: NoSlopViewModel) {
 }
 
 @Composable
-fun Step7Finalize(
+fun Step8Finalize(
     viewModel: NoSlopViewModel,
     handle: String,
     selectedSources: List<BuiltInSource>,

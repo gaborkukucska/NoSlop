@@ -431,6 +431,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             // All explicitly activated API sources
             val explicitApiSources = activeSources.filter { it.feedType == "api" }
 
+            // Load creator keywords once — applied as extra search terms across all categories
+            val creatorKeywordList = getCreatorKeywords()
+
             // Load user keywords
             for (category in activeCategories) {
                 try {
@@ -441,6 +444,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     } else if (category == "Video Platforms") {
                         val genres = getSelectedVideoGenres()
                         if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                    }
+                    // Inject any creator keywords as additional search terms
+                    if (creatorKeywordList.isNotEmpty()) {
+                        keywords.addAll(creatorKeywordList.take(5)) // cap to avoid overly long queries
                     }
                     
                     // Determine which API sources to query for this category
@@ -625,6 +632,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             } catch (_: Exception) {}
         }
         emptyList()
+    }
+
+    /**
+     * Save the user's creator/channel keyword list.
+     * These are passed directly as search terms into the API pipeline alongside category keywords.
+     * Stored as a flat comma-separated string (same scheme as negative_keywords) for simplicity.
+     */
+    suspend fun saveCreatorKeywords(keywords: String) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("creator_keywords", keywords))
+    }
+
+    /**
+     * Get the user's creator/channel keyword list as a parsed List<String>.
+     * Returns empty list if not set.
+     */
+    suspend fun getCreatorKeywords(): List<String> = withContext(Dispatchers.IO) {
+        val str = appSettingDao.getSetting("creator_keywords") ?: ""
+        str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {

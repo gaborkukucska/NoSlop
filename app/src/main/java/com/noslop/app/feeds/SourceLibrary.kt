@@ -51,7 +51,9 @@ object SourceLibrary {
         // Science
         BuiltInSource("nasa-news", "NASA News", "https://www.nasa.gov/news-release/feed/", "rss", "Science"),
         BuiltInSource("physorg", "Phys.org", "https://phys.org/rss-feed/", "rss", "Science"),
-        BuiltInSource("sci-daily", "ScienceDaily", "https://www.sciencedaily.com/rss/top.xml", "rss", "Science"),
+        // NOTE: sciencedaily.com/rss/top.xml intermittently returns non-XML content;
+        // replaced with Phys.org breaking news which covers the same topics reliably.
+        BuiltInSource("science-news", "Science News", "https://www.sciencenews.org/feed", "rss", "Science"),
         BuiltInSource("nature", "Nature", "https://www.nature.com/nature.rss", "rss", "Science"),
 
         // World News
@@ -94,7 +96,8 @@ object SourceLibrary {
 
         // Health
         BuiltInSource("healthline", "Healthline", "https://www.healthline.com/feed", "rss", "Health"),
-        BuiltInSource("webmd", "WebMD", "https://rssfeeds.webmd.com/rss/rss.aspx?RSSSource=RSS_PUBLIC", "rss", "Health"),
+        // NOTE: rssfeeds.webmd.com was retired; replaced with Medical Xpress general health feed
+        BuiltInSource("medicalxpress", "Medical Xpress", "https://medicalxpress.com/rss-feed/", "rss", "Health"),
         BuiltInSource("mayo-clinic", "Mayo Clinic", "https://www.mayoclinic.org/rss/all-health-information-topics", "rss", "Health"),
 
         // Automotive
@@ -140,4 +143,113 @@ object SourceLibrary {
     fun getSourcesForCategory(category: String): List<BuiltInSource> {
         return sources.filter { it.category == category }
     }
-}
+
+    /**
+     * Curated list of well-known creators, channels, YouTubers, podcasters, subreddits,
+     * and content personalities per category. Used to seed the word-cloud suggestion UI
+     * on the onboarding "Creator Filter" step and in the Settings preferences screen.
+     *
+     * These names are passed as search keywords to the API pipeline so the aggregator
+     * surfaces content from/about them — e.g. "Linus Tech Tips" → YouTube search,
+     * "Lex Fridman" → podcast search.
+     */
+    val creatorSuggestionsByCategory: Map<String, List<String>> = mapOf(
+        "Technology" to listOf(
+            "Linus Tech Tips", "Marques Brownlee", "Fireship", "ThePrimeagen",
+            "NetworkChuck", "Hacker News", "TechLinked", "Chris Titus Tech",
+            "Jeff Geerling", "Wolfgang's Channel", "Dave2D"
+        ),
+        "Privacy & Security" to listOf(
+            "Naomi Brockwell", "Mental Outlaw", "Rob Braxman", "The Hated One",
+            "SecurityNow", "Troy Hunt", "Bruce Schneier", "Krebs on Security",
+            "Techlore", "The New Oil", "Side of Burritos"
+        ),
+        "Self-Hosting" to listOf(
+            "TechnoTim", "Christian Lempa", "Jeff Geerling", "Wolfgang's Channel",
+            "Lawrence Systems", "Craft Computing", "Raid Owl", "DB Tech",
+            "Jim's Garage", "Ibracorp", "Anand IAS"
+        ),
+        "Science" to listOf(
+            "Veritasium", "Kurzgesagt", "SciShow", "PBS Space Time",
+            "Anton Petrov", "Scott Manley", "Lex Fridman", "Sabine Hossenfelder",
+            "Real Engineering", "MinutePhysics", "SEA"
+        ),
+        "World News" to listOf(
+            "Al Jazeera", "BBC World Service", "DW News", "FRANCE 24",
+            "Reuters", "Associated Press", "The Guardian", "Axios",
+            "Democracy Now", "Tagesschau", "NHK World"
+        ),
+        "Open Source" to listOf(
+            "The Linux Foundation", "Brodie Robertson", "DistroTube", "Luke Smith",
+            "Mental Outlaw", "Chris Titus Tech", "Learn Linux TV", "Veronica Explains",
+            "Wolfgang's Channel", "Average Linux User", "Linux Experiment"
+        ),
+        "Video Platforms" to listOf(
+            "Corridor Crew", "Wendover Productions", "CGP Grey", "Tom Scott",
+            "Johnny Harris", "Neo", "Solar Sands", "PolyMatter",
+            "RealLifeLore", "Half as Interesting", "Economics Explained"
+        ),
+        "Social Clearnet" to listOf(
+            "Cory Doctorow", "Electronic Frontier Foundation", "Techdirt",
+            "Wired", "The Intercept", "404 Media", "Pluralistic",
+            "Slashdot", "Hackaday", "Hacker News"
+        ),
+        "Lifestyle" to listOf(
+            "Matt D'Avella", "Thomas Frank", "Ali Abdaal", "Better Ideas",
+            "Mark Manson", "Struthless", "Mike and Matty", "Psych2Go",
+            "Nathaniel Drew", "Mike Boyd", "CGP Grey"
+        ),
+        "Gaming" to listOf(
+            "Dunkey", "ACG", "Skill Up", "SkillUp", "Asmongold",
+            "penguinz0", "SomeOrdinaryGamers", "NakeyJakey", "MauLer",
+            "Girlfriend Reviews", "AngryJoeShow", "Game Maker's Toolkit"
+        ),
+        "Health" to listOf(
+            "Andrew Huberman", "Peter Attia", "Rhonda Patrick",
+            "Mike Israetel", "Jeff Nippard", "Paul Saladino", "Mark Hyman",
+            "Bryan Johnson", "Layne Norton", "Ben Greenfield"
+        ),
+        "Automotive" to listOf(
+            "Donut Media", "Throttle House", "Savagegeese", "Edd China",
+            "Daily Driven Exotics", "Hoovies Garage", "ChrisFix",
+            "Scotty Kilmer", "Engineering Explained", "Lemmy Caution"
+        ),
+        "Art" to listOf(
+            "Proko", "Marco Bucci", "James Gurney", "ARTEZA",
+            "Draw with Jazza", "David Finch", "Sycra", "Sinix Design",
+            "Ctrl+Paint", "Mark Crilley", "Trent Kaniuga"
+        ),
+        "Photography" to listOf(
+            "Peter McKinnon", "Thomas Heaton", "Kai W", "DSLR Video Shooter",
+            "Ted Forbes", "Simon d'Entremont", "Matt Granger",
+            "Jamie Windsor", "Attilio Ruffo", "Nigel Danson"
+        ),
+        "Music" to listOf(
+            "Rick Beato", "Adam Neely", "Nahre Sol", "12tone",
+            "David Bennett Piano", "Charles Cornell", "Adam Ragusea",
+            "Sideways", "Set Yourself On Fire", "Classical MPR"
+        ),
+        "Reddit" to listOf(
+            "r/technology", "r/worldnews", "r/science", "r/programming",
+            "r/linux", "r/privacy", "r/selfhosted", "r/gaming",
+            "r/photography", "r/music", "r/videos"
+        )
+    )
+
+    /**
+     * Returns suggested creator/channel names for a given list of selected categories.
+     * Deduplicates and returns a flat list sorted by frequency across all selected categories
+     * (those appearing in more selected categories rank first), giving a meaningful word cloud
+     * even when the user's category mix is unusual.
+     */
+    fun getSuggestedCreatorsForCategories(selectedCategories: List<String>): List<String> {
+        val freq = mutableMapOf<String, Int>()
+        for (cat in selectedCategories) {
+            creatorSuggestionsByCategory[cat]?.forEach { creator ->
+                freq[creator] = (freq[creator] ?: 0) + 1
+            }
+        }
+        return freq.entries
+            .sortedByDescending { it.value }
+            .map { it.key }
+    }

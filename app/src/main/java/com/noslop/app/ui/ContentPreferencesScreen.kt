@@ -33,6 +33,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     val currentProfile by viewModel.userProfile.collectAsState()
     val currentNegativeKeywords by viewModel.negativeKeywords.collectAsState()
     val currentLanguage by viewModel.languagePreference.collectAsState()
+    val currentCreatorKeywords by viewModel.creatorKeywords.collectAsState()
     val isUsingInsecureStorage by viewModel.isUsingInsecureStorage.collectAsState()
 
     var displayName by remember { mutableStateOf(currentProfile.displayName) }
@@ -40,6 +41,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     var avatarB64 by remember { mutableStateOf(currentProfile.avatarB64) }
     var negativeKeywords by remember { mutableStateOf(currentNegativeKeywords) }
     var language by remember { mutableStateOf(currentLanguage) }
+    var creatorKeywords by remember { mutableStateOf(currentCreatorKeywords) }
     var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     if (cropUri != null) {
@@ -325,6 +327,101 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
+            // ────────────────── CREATOR FILTERS ──────────────────
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "CREATOR & CHANNEL FILTERS",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Creators, channels, or outlets whose content you want surfaced in your feed. Used as search keywords across all active API sources.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = creatorKeywords,
+                    onValueChange = { creatorKeywords = it },
+                    label = { Text("Creators / channels (comma separated)") },
+                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
+                    minLines = 2,
+                    maxLines = 4,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            // Creator word-cloud suggestion chips (derived from current selected interests)
+            run {
+                val suggestions = SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
+                if (suggestions.isNotEmpty()) {
+                    item {
+                        Text(
+                            "SUGGESTED",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+                    val chunked = suggestions.chunked(3)
+                    items(chunked) { row ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            row.forEach { creator ->
+                                val currentSet = creatorKeywords.split(",")
+                                    .map { it.trim() }
+                                    .filter { it.isNotEmpty() }
+                                    .toSet()
+                                val isSelected = currentSet.contains(creator)
+                                FilterChip(
+                                    selected = isSelected,
+                                    onClick = {
+                                        val updated = if (isSelected) currentSet - creator else currentSet + creator
+                                        creatorKeywords = updated.joinToString(", ")
+                                    },
+                                    label = {
+                                        Text(
+                                            text = creator,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            maxLines = 1
+                                        )
+                                    },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        containerColor = PrimaryBlack,
+                                        labelColor = TextLight,
+                                        selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
+                                        selectedLabelColor = AccentGreen
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = isSelected,
+                                        borderColor = if (isSelected) AccentGreen else BorderSubtle,
+                                        selectedBorderColor = AccentGreen
+                                    ),
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                            }
+                            repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
+                        }
+                    }
+                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                }
+            }
+
             // ────────────────── LANGUAGE ──────────────────
             item {
                 var expanded by remember { mutableStateOf(false) }
@@ -433,7 +530,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     selectedMusicGenres = localMusicGenres.toList(),
                     selectedVideoGenres = localVideoGenres.toList(),
                     negativeKeywords = negativeKeywords,
-                    languagePreference = language
+                    languagePreference = language,
+                    creatorKeywords = creatorKeywords
                 )
                 onBack()
             },

@@ -183,6 +183,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _languagePreference = MutableStateFlow("en")
     val languagePreference: StateFlow<String> = _languagePreference.asStateFlow()
 
+    private val _creatorKeywords = MutableStateFlow("")
+    val creatorKeywords: StateFlow<String> = _creatorKeywords.asStateFlow()
+
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
     val isUsingInsecureStorage = repository.isUsingInsecureStorage
 
@@ -234,6 +237,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _selectedVideoGenres.value = repository.getSelectedVideoGenres()
             _negativeKeywords.value = repository.getUserNegativeKeywords().joinToString(", ")
             _languagePreference.value = repository.getLanguagePreference()
+            _creatorKeywords.value = repository.getCreatorKeywords().joinToString(", ")
         }
 
         // Automatically refresh Tor status when daemon state transitions to READY or PROXY_READY
@@ -492,7 +496,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         selectedSources: List<BuiltInSource>, 
         selectedCategories: List<String>, 
         selectedMusicGenres: List<String>,
-        selectedVideoGenres: List<String>
+        selectedVideoGenres: List<String>,
+        creatorKeywords: String = ""
     ) {
         viewModelScope.launch {
             // Save chosen feed sources from SourceLibrary
@@ -538,6 +543,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 repository.saveSelectedVideoGenres(selectedVideoGenres)
             }
 
+            // Save creator keywords
+            if (creatorKeywords.isNotBlank()) {
+                repository.saveCreatorKeywords(creatorKeywords)
+                _creatorKeywords.value = creatorKeywords
+            }
+
             _selectedInterests.value = selectedCategories
             _selectedMusicGenres.value = selectedMusicGenres
             _selectedVideoGenres.value = selectedVideoGenres
@@ -553,7 +564,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         selectedCategories: List<String>, 
         selectedMusicGenres: List<String>,
         selectedVideoGenres: List<String>,
-        mnemonic: String
+        mnemonic: String,
+        creatorKeywords: String = ""
     ) {
         viewModelScope.launch {
             // 1. Generate identity cryptographically (Ed25519 & ECDH)
@@ -604,6 +616,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 repository.saveSelectedVideoGenres(selectedVideoGenres)
             }
 
+            // Save creator keywords
+            if (creatorKeywords.isNotBlank()) {
+                repository.saveCreatorKeywords(creatorKeywords)
+                _creatorKeywords.value = creatorKeywords
+            }
+
             _selectedInterests.value = selectedCategories
             _selectedMusicGenres.value = selectedMusicGenres
             _selectedVideoGenres.value = selectedVideoGenres
@@ -641,7 +659,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         selectedMusicGenres: List<String>,
         selectedVideoGenres: List<String>,
         negativeKeywords: String? = null,
-        languagePreference: String? = null
+        languagePreference: String? = null,
+        creatorKeywords: String? = null
     ) {
         viewModelScope.launch {
             repository.saveSelectedCategories(selectedCategories)
@@ -650,12 +669,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             
             if (negativeKeywords != null) repository.saveUserNegativeKeywords(negativeKeywords)
             if (languagePreference != null) repository.saveLanguagePreference(languagePreference)
+            if (creatorKeywords != null) repository.saveCreatorKeywords(creatorKeywords)
 
             _selectedInterests.value = selectedCategories
             _selectedMusicGenres.value = selectedMusicGenres
             _selectedVideoGenres.value = selectedVideoGenres
             if (negativeKeywords != null) _negativeKeywords.value = negativeKeywords
             if (languagePreference != null) _languagePreference.value = languagePreference
+            if (creatorKeywords != null) _creatorKeywords.value = creatorKeywords
 
             // Clear old data to ensure new preferences are reflected immediately
             repository.clearFeedData()
