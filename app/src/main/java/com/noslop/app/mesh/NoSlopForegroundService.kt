@@ -14,7 +14,6 @@ import com.noslop.app.MainActivity
 import com.noslop.app.NoSlopApp
 import com.noslop.app.debug.Logger
 import com.noslop.app.tor.TorService
-import kotlinx.coroutines.runBlocking
 
 class NoSlopForegroundService : Service() {
 
@@ -64,15 +63,12 @@ class NoSlopForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Logger.info(TAG, "NoSlopForegroundService destroyed")
-        
-        // Broadcast USER_EXIT gracefully before the app is fully terminated
-        runBlocking {
-            try {
-                NoSlopApp.repository.broadcastUserExit()
-            } catch (e: Exception) {
-                Logger.error(TAG, "Failed to broadcast USER_EXIT on destroy: ${e.message}")
-            }
-        }
+
+        // Broadcast USER_EXIT gracefully before the app is fully terminated.
+        // Fire-and-forget with an internal timeout — onDestroy() must not block,
+        // peers that aren't reached in time fall back to the ANNOUNCE_PEER
+        // staleness timeout.
+        NoSlopApp.repository.broadcastUserExitAsync()
     }
 
     private fun createNotificationChannel() {

@@ -770,43 +770,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         _incomingRequestFlow.value = peer
     }
 
-    suspend fun addPeerAndHandshake(
-        handle: String,
-        publicKeyB64: String,
-        onionAddress: String,
-        encPublicKeyB64: String = "",
-        autoTrust: Boolean = false
-    ): Boolean = withContext(Dispatchers.IO) {
-        // Legacy method kept for fallback
-        true
-    }
-    
     suspend fun clearIncomingRequest() {
         _incomingRequestFlow.value = null
-    }
-
-    suspend fun requestConnection(peer: Peer): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
-        val userProfile = getUserProfile()
-        val avatarB64 = userProfile.avatarB64
-        val connPay = com.noslop.app.mesh.PeerHandshakePayload(
-            id = UUID.randomUUID().toString(),
-            fromUserId = myKeys.publicKeyB64,
-            fromUsername = myKeys.displayName.split(".")[0],
-            fromDisplayName = myKeys.displayName,
-            authorAvatarB64 = avatarB64,
-            fromHomeNode = myKeys.onionAddress,
-            fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-            timestamp = System.currentTimeMillis(),
-            signature = null
-        )
-        
-        var payloadToSign = "${myKeys.publicKeyB64}|${connPay.fromUsername}|${myKeys.onionAddress}|${connPay.timestamp}"
-        if (avatarB64 != null) {
-            payloadToSign += "|$avatarB64"
-        }
-        val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-        true
     }
 
     suspend fun sendConnectionRequest(
@@ -1402,18 +1367,43 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val timestamp = System.currentTimeMillis()
 
+        val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
         val exitPayload = com.noslop.app.mesh.UserExitPayload(
             userId = myKeys.publicKeyB64,
-            timestamp = timestamp
+            timestamp = timestamp,
+            signature = signature
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
             hops = 6,
             senderId = myKeys.publicKeyB64,
             type = "USER_EXIT",
-            payload = com.google.gson.Gson().toJsonTree(exitPayload)
+            payload = com.google.gson.Gson().toJsonTree(exitPayload),
+            signature = signature
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
+    }
+
+    /**
+     * Fire-and-forget variant of [broadcastUserExit] for use from places that
+     * cannot block (e.g. Service.onDestroy()). Launches on the repository's
+     * own supervised scope and bounds the whole broadcast to 3 seconds so a
+     * slow/unreachable peer over Tor can't delay process teardown. Any peers
+     * not reached in time will still fall back to the existing 3-minute
+     * ANNOUNCE_PEER staleness timeout.
+     */
+    fun broadcastUserExitAsync() {
+        repositoryScope.launch {
+            try {
+                kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                    broadcastUserExit()
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to broadcast USER_EXIT: ${e.message}")
+            }
+        }
     }
 }

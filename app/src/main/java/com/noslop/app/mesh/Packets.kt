@@ -169,7 +169,8 @@ data class IdentityUpdatePayload(
 
 data class UserExitPayload(
     @SerializedName("user_id") val userId: String,
-    val timestamp: Long
+    val timestamp: Long,
+    val signature: String
 )
 
 data class EditPostPayload(

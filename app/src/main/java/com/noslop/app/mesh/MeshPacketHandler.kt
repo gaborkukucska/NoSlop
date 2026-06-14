@@ -778,6 +778,19 @@ class MeshPacketHandler(
 
     private suspend fun handleUserExit(packet: NetworkPacket): Boolean {
         val exitPay = packet.getUserExitPayload() ?: return false
+
+        if (exitPay.userId != packet.senderId) {
+            Logger.warn(TAG, "Rejected USER_EXIT: userId does not match packet sender")
+            return false
+        }
+
+        val payloadToVerify = "${exitPay.userId}|${exitPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, exitPay.signature, exitPay.userId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected USER_EXIT: Signature verification failed")
+            return false
+        }
+
         val peer = peerDao.getPeerByPublicKey(exitPay.userId)
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))

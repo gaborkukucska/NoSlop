@@ -191,15 +191,15 @@ object MediaManager {
                     accessKey = dl.metadata.accessKey
                 )
                 
-                val packet = NetworkPacket(
-                    id = UUID.randomUUID().toString(),
-                    hops = 1,
-                    senderId = repo.peerDao.hashCode().toString(), // Will be re-stamped anyway
-                    type = "MEDIA_REQUEST",
-                    payload = com.google.gson.Gson().toJsonTree(payload)
-                )
-                
                 scope.launch {
+                    val localPublicKeyB64 = repo.getLocalIdentity()?.publicKeyB64 ?: ""
+                    val packet = NetworkPacket(
+                        id = UUID.randomUUID().toString(),
+                        hops = 1,
+                        senderId = localPublicKeyB64,
+                        type = "MEDIA_REQUEST",
+                        payload = com.google.gson.Gson().toJsonTree(payload)
+                    )
                     repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
                 }
                 
