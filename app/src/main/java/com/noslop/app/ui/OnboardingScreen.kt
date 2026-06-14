@@ -749,8 +749,6 @@ fun Step5Feeds(
     }
 }
 
-}
-
 /**
  * Onboarding Step 6 — Creator & Channel Filters
  *
