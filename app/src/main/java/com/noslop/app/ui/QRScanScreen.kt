@@ -3,7 +3,10 @@ package com.noslop.app.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -17,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -67,6 +71,21 @@ fun QRScanScreen(
     var scannedRawData by remember { mutableStateOf<String?>(null) }
     var parsedPeer by remember { mutableStateOf<QRScannedPeer?>(null) }
     var showConfirmDialog by remember { mutableStateOf(false) }
+
+    // Image picker launcher for gallery QR scanning
+    val imagePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null && scannedRawData == null) {
+            decodeQrFromUri(context, uri) { result ->
+                if (result != null) {
+                    scannedRawData = result
+                } else {
+                    Toast.makeText(context, "No QR code found in this image", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     // Parse payload once scanned
     LaunchedEffect(scannedRawData) {
@@ -162,6 +181,39 @@ fun QRScanScreen(
                                 )
                             }
                         }
+
+                        // Gallery picker button at the bottom
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .zIndex(2f)
+                                .padding(bottom = 48.dp)
+                                .navigationBarsPadding(),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Button(
+                                onClick = { imagePickerLauncher.launch("image/*") },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = SurfaceDark.copy(alpha = 0.9f),
+                                    contentColor = AccentGreen
+                                ),
+                                border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.PhotoLibrary,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "Select from Gallery",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                            }
+                        }
                     } else {
                         // Keep camera frozen (blurred/hidden background) or black during confirm dialog
                         Box(
@@ -209,6 +261,23 @@ fun QRScanScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
                             Text("Grant Access", fontWeight = FontWeight.Bold)
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Gallery option even without camera permission
+                        OutlinedButton(
+                            onClick = { imagePickerLauncher.launch("image/*") },
+                            border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
+                        ) {
+                            Icon(
+                                Icons.Default.PhotoLibrary,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Select QR from Gallery", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -310,6 +379,28 @@ fun QRScanScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Decode a QR code from a content URI (gallery image) using ML Kit.
+ */
+private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> Unit) {
+    try {
+        val inputImage = InputImage.fromFilePath(context, uri)
+        val scanner = BarcodeScanning.getClient()
+        scanner.process(inputImage)
+            .addOnSuccessListener { barcodes ->
+                val qrValue = barcodes.firstOrNull()?.rawValue
+                onResult(qrValue)
+            }
+            .addOnFailureListener {
+                Logger.warn("QR_SCAN", "Failed to decode QR from gallery image: ${it.message}")
+                onResult(null)
+            }
+    } catch (e: Exception) {
+        Logger.error("QR_SCAN", "Error reading gallery image for QR decode: ${e.message}")
+        onResult(null)
     }
 }
 

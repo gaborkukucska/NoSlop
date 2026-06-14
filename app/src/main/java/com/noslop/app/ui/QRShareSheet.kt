@@ -29,12 +29,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.FileProvider
 import com.google.gson.Gson
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import com.google.zxing.common.BitMatrix
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.ui.theme.*
+import java.io.File
+import java.io.FileOutputStream
 
 @Composable
 fun QRShareSheet(
@@ -181,12 +184,11 @@ fun QRShareSheet(
 
                     Button(
                         onClick = {
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(Intent.EXTRA_SUBJECT, "NoSlop Contact Identity")
-                                putExtra(Intent.EXTRA_TEXT, qrPayload)
+                            if (qrBitmap != null) {
+                                shareQrImage(context, qrBitmap, handle)
+                            } else {
+                                Toast.makeText(context, "QR code not available", Toast.LENGTH_SHORT).show()
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Identity"))
                         },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
@@ -205,5 +207,36 @@ fun QRShareSheet(
                 }
             }
         }
+    }
+}
+
+private fun shareQrImage(context: Context, bitmap: Bitmap, handle: String) {
+    try {
+        // Save bitmap to cache directory
+        val imagesDir = File(context.cacheDir, "shared_images")
+        imagesDir.mkdirs()
+        val imageFile = File(imagesDir, "noslop_contact_${handle}.png")
+        FileOutputStream(imageFile).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+
+        // Get content URI via FileProvider
+        val contentUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            imageFile
+        )
+
+        // Build share intent with the image
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "image/png"
+            putExtra(Intent.EXTRA_STREAM, contentUri)
+            putExtra(Intent.EXTRA_SUBJECT, "NoSlop Contact Card — $handle")
+            putExtra(Intent.EXTRA_TEXT, "Scan this QR code with NoSlop to connect with $handle")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share Contact Card"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Failed to share QR image", Toast.LENGTH_SHORT).show()
     }
 }
