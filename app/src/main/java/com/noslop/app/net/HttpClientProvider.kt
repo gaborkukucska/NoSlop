@@ -73,7 +73,7 @@ object HttpClientProvider {
      * exist, DoH won't help). Only network-level failures (timeout, IOException)
      * cascade to the next resolver.
      */
-    private val cascadingDns = object : Dns {
+    internal val cascadingDns = object : Dns {
         override fun lookup(hostname: String): List<InetAddress> {
             // 1. System DNS — fast path; works on almost every network
             try {

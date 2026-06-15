@@ -20,6 +20,30 @@ object InvidiousApiClient {
     private val gson = Gson()
     private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
 
+    /**
+     * Dedicated probe client for resolveStreamUrl().
+     *
+     * Built once from scratch (not from clearnetClient.newBuilder()) so it has
+     * NO interceptors — in particular, clearnetClient's browser User-Agent
+     * interceptor does NOT apply here.  OkHttpClient.Builder.interceptors()
+     * returns an unmodifiable snapshot, so calling .clear() on it throws
+     * UnsupportedOperationException silently caught by the JVM, meaning the
+     * workaround of `client.newBuilder().apply { interceptors().clear() }` is
+     * a no-op and the browser UA leaks through.  Building from scratch avoids
+     * this entirely.
+     *
+     * Short per-instance timeouts (5 s) so dead instances are skipped quickly.
+     * Shares clearnetClient's DNS resolver for DoH fallback support.
+     */
+    private val probeClient: okhttp3.OkHttpClient by lazy {
+        okhttp3.OkHttpClient.Builder()
+            .dns(com.noslop.app.net.HttpClientProvider.cascadingDns)
+            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
+
     // Hardcoded fallback instances (known-good as of June 2026)
     private val FALLBACK_INSTANCES = listOf(
         "https://iv.melmac.space",
@@ -27,7 +51,11 @@ object InvidiousApiClient {
         "https://invidious.nerdvpn.de",
         "https://invidious.no-logs.com",
         "https://invidious.io.lol",
-        "https://inv.tux.pizza"
+        "https://inv.tux.pizza",
+        "https://invidious.privacydev.net",
+        "https://inv.nadeko.net",
+        "https://invidious.lunar.icu",
+        "https://yt.drgnz.club"
     )
 
     // Cached dynamic instances
@@ -103,9 +131,13 @@ object InvidiousApiClient {
                     // Prefer instances with API enabled
                     val apiEnabled = try { details.get("api")?.asBoolean ?: false } catch (_: Exception) { false }
 
-                    // Check if monitor says it's up
+                    // Check if monitor says it's up.
+                    // The "down" key is only present when the instance IS down.
+                    // Absent monitor or absent "down" key → assume the instance is up
+                    // (the registry sorts by health, so instances at the top of the
+                    // list without a monitor are still healthy candidates).
                     val monitor = details.getAsJsonObject("monitor")
-                    val isDown = try { monitor?.get("down")?.asBoolean ?: true } catch (_: Exception) { true }
+                    val isDown = try { monitor?.get("down")?.asBoolean ?: false } catch (_: Exception) { false }
 
                     if (!isDown) {
                         if (apiEnabled) {
@@ -120,8 +152,8 @@ object InvidiousApiClient {
             }
 
             if (liveInstances.isNotEmpty()) {
-                // Take top 8 to avoid too many retries
-                val result = liveInstances.take(8)
+                // Take top 12 to give more candidates without excessive retry cost
+                val result = liveInstances.take(12)
                 cachedInstances = result
                 cacheTimestamp = now
                 Logger.info(TAG, "Fetched ${result.size} live Invidious instances from registry")
@@ -182,18 +214,9 @@ object InvidiousApiClient {
         // Hard wall-clock deadline for the entire resolution attempt.
         // Per-instance timeout = 5 s; if ALL instances are unreachable (e.g. device
         // is briefly offline, VPN is reconnecting, Tor proxy is down) this caps the
-        // total wait to ~15 s rather than 5 s × N instances, after which we return
+        // total wait to ~20 s rather than 5 s × N instances, after which we return
         // null quickly and the caller falls through to the youtube-nocookie embed.
-        val deadlineMs = System.currentTimeMillis() + 15_000L
-
-        // Short per-instance connect+read timeout so a dead instance is skipped quickly
-        // Short per-instance connect+read timeout so a dead instance is skipped quickly.
-        // Clear interceptors so clearnetClient's browser User-Agent doesn't override our explicit one.
-        val probeClient = client.newBuilder()
-            .apply { interceptors().clear() }
-            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
+        val deadlineMs = System.currentTimeMillis() + 20_000L
 
         for (instance in instances) {
             if (System.currentTimeMillis() >= deadlineMs) {
@@ -201,11 +224,28 @@ object InvidiousApiClient {
                 break
             }
             try {
-                // `local=1` rewrites googlevideo.com stream URLs to proxy through the
-                // Invidious instance itself — without this, ExoPlayer gets HTTP 403
-                // because the raw googlevideo.com URL is signed to the instance's IP,
-                // not to the Android device.
-                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats&local=1"
+                // Do NOT use local=1 here.
+                //
+                // local=1 rewrites stream URLs so they proxy through the Invidious
+                // instance rather than going straight to googlevideo.com.  While this
+                // sounds appealing (avoids a 403 that was once observed on raw
+                // googlevideo.com URLs), in practice it causes far worse problems:
+                //
+                //  • ExoPlayer issues many parallel byte-range requests; proxying them
+                //    all through a single Invidious instance quickly hits that
+                //    instance's rate-limit / connection cap, producing the
+                //    "all instances exhausted" errors seen in the logs.
+                //
+                //  • The proxied URL is session-scoped to the instance — if it
+                //    restarts or the session expires, the URL stops working mid-stream
+                //    even though the video is fine.
+                //
+                //  • Modern Invidious instances (2024+) sign googlevideo.com URLs with
+                //    `alr=yes` which suppresses the 403 for direct device requests.
+                //
+                // Omitting local=1 lets ExoPlayer fetch from googlevideo.com directly,
+                // which is dramatically faster and more reliable.
+                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats"
                 val request = Request.Builder()
                     .url(url)
                     .header("User-Agent", "NoSlop-Android/1.0")
