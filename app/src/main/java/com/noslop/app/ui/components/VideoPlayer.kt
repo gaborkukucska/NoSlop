@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
@@ -61,6 +62,7 @@ private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.M
  * [Dispatchers.IO] so the caller can run inside a [LaunchedEffect].
  *
  * Concurrent calls for the same [rawUrl] are coalesced using a Mutex.
+ * Now supports [forceRefresh] to bypass the cache when the user clicks Retry.
  *
  * Routing priority:
  *  1. Direct file extensions / 127.0.0.1 proxy  → Direct (no lookup needed)
@@ -75,20 +77,25 @@ private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.M
  * time for upcoming feed items — the result lands in [sourceCache], so the
  * later call from [VideoPlayer]'s `LaunchedEffect(url)` returns instantly.
  */
-internal suspend fun resolveSource(rawUrl: String): VideoSource {
-    // Fast path: already resolved.
-    sourceCache[rawUrl]?.let { return it }
+internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false): VideoSource {
+    // Fast path: already resolved (if we aren't forcing a refresh).
+    if (!forceRefresh) {
+        sourceCache[rawUrl]?.let { return it }
+    }
 
     // Coalesce concurrent resolves for the same URL safely without leaking scopes.
     val mutex = resolveMutexes.computeIfAbsent(rawUrl) { kotlinx.coroutines.sync.Mutex() }
     
     return mutex.withLock {
         // Check cache again after acquiring lock
-        sourceCache[rawUrl]?.let { return@withLock it }
+        if (!forceRefresh) {
+            sourceCache[rawUrl]?.let { return@withLock it }
+        }
         
         try {
             val result = doResolve(rawUrl)
-            sourceCache.putIfAbsent(rawUrl, result)
+            // Update the cache (overwrite if forceRefresh is true)
+            sourceCache[rawUrl] = result
             result
         } finally {
             resolveMutexes.remove(rawUrl)
@@ -266,12 +273,14 @@ fun VideoPlayer(
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
+    var retryTrigger by remember { mutableStateOf(0) }
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
 
-    LaunchedEffect(url) {
-        source = null // Reset while resolving
-        Logger.info("VIDEO", "Resolving source for: $url")
-        source = resolveSource(url)
+    // Trigger resolve on load or when retryTrigger increments
+    LaunchedEffect(url, retryTrigger) {
+        source = null // Show loading shimmer while resolving
+        Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
+        source = resolveSource(url, forceRefresh = retryTrigger > 0)
         Logger.info("VIDEO", "Resolved source for $url → ${source?.javaClass?.simpleName}")
     }
 
@@ -306,14 +315,18 @@ fun VideoPlayer(
                         url = resolved.url,
                         isLandscape = isLandscape,
                         thumbnailUrl = thumbnailUrl,
-                        thumbnailB64 = thumbnailB64
+                        thumbnailB64 = thumbnailB64,
+                        onRetry = { retryTrigger++ } // Force complete re-resolve
                     )
                 }
             }
 
             is VideoSource.Embed -> {
                 if (isVisible) {
-                    EmbedWebViewPlayer(url = resolved.url)
+                    EmbedWebViewPlayer(
+                        url = resolved.url,
+                        onRetry = { retryTrigger++ } // Force complete re-resolve
+                    )
                 }
             }
 
@@ -339,6 +352,13 @@ fun VideoPlayer(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 32.dp)
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = { retryTrigger++ },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                    ) {
+                        Text("Retry", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -355,7 +375,8 @@ private fun ExoVideoPlayer(
     url: String,
     isLandscape: Boolean,
     thumbnailUrl: String? = null,
-    thumbnailB64: String? = null
+    thumbnailB64: String? = null,
+    onRetry: () -> Unit
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
@@ -473,6 +494,13 @@ private fun ExoVideoPlayer(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(horizontal = 32.dp)
                 )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                ) {
+                    Text("Retry Playback", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
@@ -484,122 +512,175 @@ private fun ExoVideoPlayer(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun EmbedWebViewPlayer(url: String) {
+private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit) {
     Logger.info("VIDEO", "Loading embed in WebView: $url")
+    
+    // If the WebView hits a connection/SSL error, we unmount the AndroidView and display this Compose overlay
+    var webError by remember { mutableStateOf<String?>(null) }
 
-    AndroidView(
-        factory = { ctx ->
-            object : android.webkit.WebView(ctx) {
-                override fun onWindowVisibilityChanged(visibility: Int) {
-                    if (visibility != android.view.View.GONE) {
-                        super.onWindowVisibilityChanged(android.view.View.VISIBLE)
-                    }
-                }
-            }.apply {
-                layoutParams = android.view.ViewGroup.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                setBackgroundColor(android.graphics.Color.BLACK)
-
-                with(settings) {
-                    javaScriptEnabled = true
-                    mediaPlaybackRequiresUserGesture = false
-                    domStorageEnabled = true
-                    databaseEnabled = true
-                    allowFileAccess = false
-                    allowContentAccess = false
-                    useWideViewPort = true
-                    loadWithOverviewMode = true
-                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                }
-
-                webChromeClient = android.webkit.WebChromeClient()
-
-                webViewClient = object : android.webkit.WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: android.webkit.WebView?,
-                        request: android.webkit.WebResourceRequest?
-                    ): Boolean {
-                        val targetUri = request?.url ?: return false
-                        val scheme = targetUri.scheme ?: return false
-
-                        // Always allow data: and blob: URIs (used by players internally)
-                        if (scheme == "data" || scheme == "blob") return false
-
-                        val targetHost = targetUri.host ?: return false
-                        val currentHost = android.net.Uri.parse(url).host ?: return false
-
-                        // Allow same-host navigation
-                        if (targetHost == currentHost) return false
-
-                        // Allow the YouTube/Google family so youtube-nocookie embeds work:
-                        // the player navigates between youtube-nocookie.com, youtube.com,
-                        // and googlevideo.com for API calls and playback token refreshes.
-                        val youtubeFamily = setOf(
-                            "youtube-nocookie.com", "youtube.com", "www.youtube.com",
-                            "googlevideo.com", "yt3.ggpht.com", "i.ytimg.com"
-                        )
-                        if (youtubeFamily.any { targetHost.endsWith(it) }) return false
-
-                        // Block all other outbound navigation (ads, trackers, external links)
-                        Logger.info("VIDEO", "Blocked outbound navigation to $targetHost")
-                        return true
-                    }
-
-                    override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
-                        Logger.info("VIDEO", "Embed page loaded: $pageUrl")
-                        val js = """
-                            (function() {
-                                document.body.style.backgroundColor = 'black';
-                                var vid = document.querySelector('video');
-                                if (vid) { vid.play().catch(function(){}); return; }
-                                var btn = document.querySelector(
-                                    '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
-                                );
-                                if (btn) btn.click();
-                            })();
-                        """.trimIndent()
-                        view?.evaluateJavascript(js, null)
-                    }
-
-                    override fun onReceivedError(
-                        view: android.webkit.WebView?,
-                        request: android.webkit.WebResourceRequest?,
-                        error: android.webkit.WebResourceError?
-                    ) {
-                        Logger.error("VIDEO", "Embed WebView error: ${error?.description} for ${request?.url}")
-                        if (request?.isForMainFrame == true) {
-                            val html = """
-                                <html><body style='background:black;color:#777;display:flex;
-                                justify-content:center;align-items:center;height:100vh;margin:0;
-                                font-family:sans-serif;'><div style='text-align:center;'>
-                                <h2 style='color:#fff;'>Video unavailable</h2>
-                                <p>${error?.description ?: "Unknown error"}</p>
-                                </div></body></html>
-                            """.trimIndent()
-                            view?.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
+    if (webError != null) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxSize()
+                .background(PrimaryBlack.copy(alpha = 0.7f))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
+            Text("Embed unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+            Text(
+                webError!!,
+                color = TextMuted,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 32.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = onRetry,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+            ) {
+                Text("Retry Embed", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+            }
+        }
+    } else {
+        AndroidView(
+            factory = { ctx ->
+                object : android.webkit.WebView(ctx) {
+                    override fun onWindowVisibilityChanged(visibility: Int) {
+                        if (visibility != android.view.View.GONE) {
+                            super.onWindowVisibilityChanged(android.view.View.VISIBLE)
                         }
                     }
-                }
+                }.apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    setBackgroundColor(android.graphics.Color.BLACK)
 
-                loadUrl(url)
-            }
-        },
-        update = { view ->
-            view.evaluateJavascript("""
-                (function() {
-                    var vid = document.querySelector('video');
-                    if (vid && vid.paused) { vid.play().catch(function(){}); }
-                })();
-            """.trimIndent(), null)
-        },
-        onRelease = { view ->
-            view.stopLoading()
-            view.loadUrl("about:blank")
-            view.destroy()
-        },
-        modifier = Modifier.fillMaxSize()
-    )
+                    with(settings) {
+                        javaScriptEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                    }
+
+                    webChromeClient = android.webkit.WebChromeClient()
+
+                    // FIX: Replaced "app.noslop.com" with a valid user-owned domain "noslop.me". 
+                    // This prevents net::ERR_SSL_UNRECOGNIZED_NAME_ALERT crashes because Cloudflare serves a real cert for it.
+                    // YouTube detects youtube.com inside a WebView as a spoofed session and 
+                    // blocks it with Error 153. A neutral domain acts as a clean 3rd-party embed.
+                    val baseUrl = when {
+                        url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie") -> "https://noslop.me/"
+                        url.contains("vimeo") -> "https://vimeo.com/"
+                        else -> "https://archive.org/"
+                    }
+
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): Boolean {
+                            val targetUri = request?.url ?: return false
+                            val scheme = targetUri.scheme ?: return false
+
+                            // Always allow data: and blob: URIs (used by players internally)
+                            if (scheme == "data" || scheme == "blob") return false
+
+                            val targetHost = targetUri.host ?: return false
+                            val currentHost = android.net.Uri.parse(baseUrl).host ?: return false
+
+                            // Allow same-host navigation (relative to the neutral baseUrl)
+                            if (targetHost == currentHost) return false
+
+                            // Allow the YouTube/Google family so youtube-nocookie embeds work:
+                            // the player navigates between youtube-nocookie.com, youtube.com,
+                            // and googlevideo.com for API calls and playback token refreshes.
+                            val mediaFamily = setOf(
+                                "youtube-nocookie.com", "youtube.com", "www.youtube.com",
+                                "googlevideo.com", "yt3.ggpht.com", "i.ytimg.com",
+                                "vimeo.com", "player.vimeo.com", "archive.org",
+                                "noslop.me"
+                            )
+                            if (mediaFamily.any { targetHost.endsWith(it) }) return false
+
+                            // Block all other outbound navigation (ads, trackers, external links)
+                            Logger.info("VIDEO", "Blocked outbound navigation to $targetHost")
+                            return true
+                        }
+
+                        override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                            Logger.info("VIDEO", "Embed page loaded: $pageUrl")
+                            val js = """
+                                (function() {
+                                    document.body.style.backgroundColor = 'black';
+                                    var vid = document.querySelector('video');
+                                    if (vid) { vid.play().catch(function(){}); return; }
+                                    var btn = document.querySelector(
+                                        '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
+                                    );
+                                    if (btn) btn.click();
+                                })();
+                            """.trimIndent()
+                            view?.evaluateJavascript(js, null)
+                        }
+
+                        override fun onReceivedError(
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                            error: android.webkit.WebResourceError?
+                        ) {
+                            Logger.error("VIDEO", "Embed WebView error: ${error?.description} for ${request?.url}")
+                            if (request?.isForMainFrame == true) {
+                                // Elevate the error into the Compose layer to show the Retry UI
+                                webError = error?.description?.toString() ?: "Unknown Network/SSL Error"
+                            }
+                        }
+                    }
+
+                    // FIX: Wrapped the embed URL in a strict-origin HTML iframe.
+                    // This injects a valid `Referer` origin and completely fixes Error 153.
+                    val htmlContent = """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                            <meta name="referrer" content="strict-origin-when-cross-origin">
+                            <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
+                        </head>
+                        <body>
+                            <iframe width="100%" height="100%" src="$url" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
+                        </body>
+                        </html>
+                    """.trimIndent()
+                    
+                    loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
+                }
+            },
+            update = { view ->
+                view.evaluateJavascript("""
+                    (function() {
+                        var vid = document.querySelector('video');
+                        if (vid && vid.paused) { vid.play().catch(function(){}); }
+                    })();
+                """.trimIndent(), null)
+            },
+            onRelease = { view ->
+                view.stopLoading()
+                view.loadUrl("about:blank")
+                view.destroy()
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
