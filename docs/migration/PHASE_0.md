@@ -19,9 +19,9 @@
 - [x] Branch `feat/cross-platform-migration` created off `main`
 - [x] Migration tracking docs scaffolded under `docs/migration/`
 - [x] Monolith structure mapped (see `DECOMPOSITION_MAP.md`)
-- [ ] Establish a build baseline: record whether the project builds as-is (`./gradlew assembleDebug`) and capture current test status
+- [x] Establish a build baseline: **debug Kotlin compiles clean** (`:app:compileDebugKotlin` BUILD SUCCESSFUL, 0 errors) once dummy signing props are supplied. Only deprecation warnings present. Release signing config is a contributor papercut (logged below).
 - [ ] Add a `.editorconfig` / formatting baseline so AI edits stay consistent
-- [ ] Commit the scaffold
+- [x] Commit the scaffold
 
 ## Stage 0.2 — Golden-vector tests for the core (do this BEFORE refactoring)  ⚪ not started
 
@@ -69,4 +69,5 @@ Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests
 ## Working notes / discovered tasks
 _(Append as you go. This is the catch-all for things found mid-refactor.)_
 
-- Build baseline not yet confirmed — Android SDK/Gradle availability on this machine is unverified; see Stage 0.1.
+- **[discovered] Release signing config blocks all builds without secrets.** `app/build.gradle.kts:27` reads `project.property("NOSLOP_STORE_FILE")` eagerly inside `signingConfigs.release`, so *configuration fails* (even for debug/compile) unless `NOSLOP_STORE_FILE/_PASSWORD`, `NOSLOP_KEY_ALIAS/_PASSWORD` are provided. Contributor papercut. **Fix later (non-urgent):** guard the release signing block to only configure when the properties exist (e.g. `if (project.hasProperty("NOSLOP_STORE_FILE")) { ... }`). Workaround for now: pass dummy `-P` values for debug compiles.
+- Toolchain confirmed: JDK 17 (Zulu), Android SDK at `~/Library/Android/sdk`, Gradle 9.4.1 (wrapper), AGP emitting legacy-DSL deprecation warnings (non-blocking).

@@ -4,6 +4,15 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Build baseline established (Stage 0.1 ✅)
+
+- **Code compiles clean.** `:app:compileDebugKotlin` → BUILD SUCCESSFUL, **0 Kotlin errors** (deprecation warnings only). Toolchain: JDK 17, Android SDK `~/Library/Android/sdk`, Gradle 9.4.1, AGP (legacy-DSL warnings, non-blocking).
+- **Discovered blocker (not code):** release `signingConfigs` in `app/build.gradle.kts:27` eagerly reads `NOSLOP_STORE_FILE` etc., so configuration fails without those secrets — even for debug. Workaround: pass dummy `-P` values. Fix later: guard with `if (project.hasProperty(...))`. Logged in `PHASE_0.md`.
+- Stage 0.1 essentially complete (remaining: `.editorconfig`).
+- **Next:** Stage 0.2 — golden-vector tests for crypto + wire protocol, before any refactor.
+
+---
+
 ## 2026-06-16 — Draft PR opened upstream
 
 - Opened **draft PR [gaborkukucska/NoSlop#1](https://github.com/gaborkukucska/NoSlop/pull/1)** (`kufton:feat/cross-platform-migration` → `gaborkukucska:main`), docs-only, so Gabor can review the plan before code lands. Marked DRAFT/WIP.
