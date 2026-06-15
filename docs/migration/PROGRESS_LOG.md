@@ -4,6 +4,20 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Fork created, branch pushed, remotes wired
+
+**Done:**
+- Forked `gaborkukucska/NoSlop` → **`kufton/NoSlop`**.
+- Reconfigured remotes: `origin` = fork (push), `upstream` = Gabor's repo (fetch/sync).
+- Pushed `feat/cross-platform-migration` to the fork → **work is now backed up to a remote.**
+- Updated ADR-003 (fork→PR workflow) and added ADR-006 (small phase-scoped PRs); updated README repo facts.
+
+**Merge plan (agreed):** push to fork; when Gabor is happy, open PR → `gaborkukucska:main`; he merges (he holds write). Keep branch rebased on `upstream/main` since Gabor is actively developing.
+
+**Next:** baseline build result (running), then Stage 0.2 golden-vector tests.
+
+---
+
 ## 2026-06-16 — Project kickoff & Phase 0 setup
 
 **Done:**

@@ -36,4 +36,5 @@ Every new or refactored file must have:
 
 - **Working clone:** `~/Documents/NoSlop-xplatform`
 - **Branch:** `feat/cross-platform-migration` (off `main`)
-- **Upstream:** `gaborkukucska/NoSlop` — **current access is READ-only**, so pushing/PRing requires a fork (see ADR-003 in `DECISIONS.md`). All work to date is local-only.
+- **Remotes:** `origin` = `kufton/NoSlop` (your fork — push here) · `upstream` = `gaborkukucska/NoSlop` (Gabor's repo — fetch to stay current)
+- **Merge path:** push to the fork → when Gabor approves, open a PR `kufton:<branch>` → `gaborkukucska:main`; Gabor merges. Prefer small phase-scoped PRs (ADR-006). Sync regularly: `git fetch upstream && git rebase upstream/main`.

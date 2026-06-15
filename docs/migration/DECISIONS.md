@@ -16,17 +16,23 @@ Append-only. Each ADR records a binding choice and *why*, so it isn't re-litigat
 - **Decision:** iOS connects *outbound* to an always-on Home HUB (a desktop/server build) that holds its hidden service and relays inbound traffic. The desktop build (Phase 3) is therefore part of making iOS viable, not optional.
 - **Consequences:** Mesh design must support leaf↔HUB relaying. Desktop is prioritized right after iOS. Pure-mobile (no HUB) iOS operation is degraded by design.
 
-## ADR-003 — Branch-only for now; fork required before any push/PR
-- **Status:** Accepted (2026-06-16)
-- **Context:** Authenticated GitHub account `kufton` has **READ-only** permission on `gaborkukucska/NoSlop`; no fork exists. Owner is hands-off but wants the work on a branch.
-- **Decision:** All work proceeds locally on branch `feat/cross-platform-migration` in `~/Documents/NoSlop-xplatform`. No push/PR until the maintainer either (a) grants write access, or (b) approves creating a fork under `kufton/NoSlop`.
-- **Consequences:** Work is not backed up to a remote yet — local clone is the only copy. **Open question for the user/owner:** fork now, or get write access? Until resolved, commit often locally.
+## ADR-003 — Fork-based workflow; merge upstream via PR when Gabor approves
+- **Status:** Accepted (2026-06-16, updated same day)
+- **Context:** Authenticated GitHub account `kufton` has **READ-only** permission on `gaborkukucska/NoSlop`. Owner (Gabor) is actively committing to `main` and is hands-off on the migration.
+- **Decision:** Use the standard fork → PR flow. Forked to **`kufton/NoSlop`**. Remotes: `origin` = the fork (`git@github.com:kufton/NoSlop.git`, push), `upstream` = Gabor's repo (fetch, for syncing). Work pushes to the fork; when Gabor is happy, open a PR from `kufton:<branch>` → `gaborkukucska:main`. **Gabor performs the merge** (only he has write on his repo) — nothing lands without his approval.
+- **Consequences:** Work is now backed up to the fork. Must periodically `git fetch upstream && rebase`/merge to stay current with Gabor's active `main`. PR can be opened as a draft early for visibility.
 
 ## ADR-004 — Phase 0 (decompose + test) before any platform work
 - **Status:** Accepted (2026-06-16)
 - **Context:** Monolith files (up to 1,474 lines) are the biggest obstacle to AI-maintainability and safe refactoring. The crypto/protocol core is AI-written and unverified.
 - **Decision:** No KMP conversion or iOS code until files are decomposed (~300-line rule) and the crypto/wire-protocol core is locked behind golden-vector tests. Tests are written *before* refactoring so equivalence is provable.
 - **Consequences:** Slower start, but every later phase is safer and AI can work on small, tested units. Tests double as the conformance suite for an optional future Rust/Arti port (Phase 5).
+
+## ADR-006 — Ship the migration as small, phase-scoped PRs (not one mega-PR)
+- **Status:** Accepted (2026-06-16)
+- **Context:** Gabor's `main` is moving (active development). A single 19k-line refactor PR would be near-impossible to review and would constantly conflict with his changes.
+- **Decision:** Open small, self-contained PRs scoped to a stage/unit (e.g. "Phase 0: golden-vector tests", "Phase 0: split NoSlopRepository"). Each is behavior-preserving and independently reviewable/mergeable. Keep the branch rebased on `upstream/main`.
+- **Consequences:** More PRs, but each is digestible and low-conflict. The migration docs can land first as their own PR so Gabor has the plan before the code arrives.
 
 ## ADR-005 — The JSON wire protocol is the immutable interop contract
 - **Status:** Accepted (2026-06-16)
