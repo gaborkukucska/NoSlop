@@ -20,7 +20,11 @@ import com.noslop.app.feeds.api.InvidiousApiClient
 import com.noslop.app.net.HttpClientProvider
 import com.noslop.app.ui.PreloadManager
 import com.noslop.app.ui.theme.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
@@ -41,25 +45,40 @@ internal sealed class VideoSource {
     object Unavailable : VideoSource()
 }
 
-/** In-memory cache: raw mediaUrl → resolved VideoSource.  Cleared when the app
- *  process dies, which is fine — sources don't need to persist across restarts.
+/** In-memory cache: raw mediaUrl → resolved VideoSource.
  *
- *  Uses ConcurrentHashMap so that PreloadManager.preWarm() (which runs in a
- *  background coroutine) and VideoPlayer's LaunchedEffect (which runs on the
- *  composition coroutine) can both read/write safely without corrupting the map.
- *  The old access-ordered LinkedHashMap was not thread-safe: its get() mutates
- *  internal link pointers, so two concurrent readers (let alone a concurrent
- *  reader + writer) could silently corrupt it, causing cache misses or stale
- *  entries that broke clearnet video playback after the preload feature landed.
- *
- *  ConcurrentHashMap has no LRU eviction, but in practice the number of
- *  distinct video URLs visible in a single session is small; if memory pressure
- *  becomes an issue a Guava Cache or manual trimming can be added later. */
+ *  Uses ConcurrentHashMap so that PreloadManager.preWarm() (background coroutine)
+ *  and VideoPlayer's LaunchedEffect (composition coroutine) can both read/write
+ *  safely without corrupting the map. */
 private val sourceCache = ConcurrentHashMap<String, VideoSource>(64)
+
+/**
+ * In-flight deduplication map: raw mediaUrl → Deferred<VideoSource>.
+ *
+ * When multiple coroutines call resolveSource() for the same URL concurrently
+ * (e.g. PreloadManager preWarm() AND VideoPlayer's LaunchedEffect racing for
+ * the same newly-visible card), only the FIRST call does the actual work —
+ * every subsequent call awaits the same Deferred rather than launching its own
+ * full Invidious instance loop.  This was the root cause of the "4× all
+ * instances exhausted for the same videoId within 5 seconds" log entries.
+ *
+ * Entries are removed once the Deferred completes (result goes into sourceCache).
+ */
+private val inFlight = ConcurrentHashMap<String, Deferred<VideoSource>>(16)
+
+/**
+ * Dedicated coroutine scope for resolution work.
+ * SupervisorJob so that one failed resolution doesn't cancel sibling resolves.
+ * Dispatchers.IO is appropriate — all work inside is blocking network I/O.
+ */
+private val resolveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 /**
  * Determine which [VideoSource] to use for [rawUrl], doing network work on
  * [Dispatchers.IO] so the caller can run inside a [LaunchedEffect].
+ *
+ * Concurrent calls for the same [rawUrl] are coalesced: only one resolution
+ * runs at a time; all others await its result via [inFlight].
  *
  * Routing priority:
  *  1. Direct file extensions / 127.0.0.1 proxy  → Direct (no lookup needed)
@@ -75,47 +94,59 @@ private val sourceCache = ConcurrentHashMap<String, VideoSource>(64)
  * later call from [VideoPlayer]'s `LaunchedEffect(url)` returns instantly.
  */
 internal suspend fun resolveSource(rawUrl: String): VideoSource {
-    // Return cached result if available — ConcurrentHashMap.get() is safe to call
-    // from any thread/coroutine without holding a lock.
+    // Fast path: already resolved — return immediately without touching inFlight.
     sourceCache[rawUrl]?.let { return it }
 
-    val result: VideoSource = withContext(Dispatchers.IO) {
-        when {
-            // ── 1. Direct file / local proxy ─────────────────────────────────
-            isDirectFileUrl(rawUrl) -> VideoSource.Direct(rawUrl)
-
-            // ── 2. YouTube ───────────────────────────────────────────────────
-            isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl)
-
-            // ── 3. Vimeo ─────────────────────────────────────────────────────
-            isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl)
-
-            // ── 4. Archive.org embed / details ───────────────────────────────
-            rawUrl.contains("archive.org/embed") ||
-            rawUrl.contains("archive.org/details") -> {
-                // Convert /details/ to /embed/ for the cleanest WebView experience
-                val embedUrl = if (rawUrl.contains("/details/")) {
-                    val id = rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
-                    "https://archive.org/embed/$id"
-                } else {
-                    rawUrl
+    // Coalesce concurrent resolves for the same URL.
+    // computeIfAbsent is atomic on ConcurrentHashMap: exactly one caller's async{}
+    // block wins the slot; all others get the same Deferred back.
+    val deferred = inFlight.computeIfAbsent(rawUrl) {
+        resolveScope.async {
+            try {
+                doResolve(rawUrl).also { result ->
+                    // Cache the result so future calls skip all of this.
+                    sourceCache.putIfAbsent(rawUrl, result)
                 }
-                VideoSource.Embed(embedUrl)
+            } finally {
+                // Always clean up the in-flight entry so the slot is freed.
+                inFlight.remove(rawUrl)
             }
-
-            // ── 5. Generic http(s) — treat as direct stream ─────────────────
-            rawUrl.startsWith("http") -> VideoSource.Direct(rawUrl)
-
-            else -> VideoSource.Unavailable
         }
     }
 
-    // putIfAbsent so that if two coroutines raced to resolve the same URL, the
-    // first writer wins and the second is silently discarded — both results
-    // should be equivalent, and this avoids overwriting a previously-cached
-    // successful resolution with a transient failure from the slower racer.
-    sourceCache.putIfAbsent(rawUrl, result)
-    return sourceCache[rawUrl] ?: result
+    return deferred.await()
+}
+
+/** Performs the actual resolution work — called exactly once per unique URL
+ *  even under concurrent access, thanks to [resolveSource]'s [inFlight] guard. */
+private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatchers.IO) {
+    when {
+        // ── 1. Direct file / local proxy ─────────────────────────────────
+        isDirectFileUrl(rawUrl) -> VideoSource.Direct(rawUrl)
+
+        // ── 2. YouTube ───────────────────────────────────────────────────
+        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl)
+
+        // ── 3. Vimeo ─────────────────────────────────────────────────────
+        isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl)
+
+        // ── 4. Archive.org embed / details ───────────────────────────────
+        rawUrl.contains("archive.org/embed") ||
+        rawUrl.contains("archive.org/details") -> {
+            val embedUrl = if (rawUrl.contains("/details/")) {
+                val id = rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
+                "https://archive.org/embed/$id"
+            } else {
+                rawUrl
+            }
+            VideoSource.Embed(embedUrl)
+        }
+
+        // ── 5. Generic http(s) — treat as direct stream ─────────────────
+        rawUrl.startsWith("http") -> VideoSource.Direct(rawUrl)
+
+        else -> VideoSource.Unavailable
+    }
 }
 
 private fun isDirectFileUrl(url: String): Boolean {
@@ -162,12 +193,20 @@ private fun resolveYouTubeSource(url: String): VideoSource {
         return VideoSource.Direct(streamUrl)
     }
 
-    // Invidious stream resolution failed — fall back to Invidious web embed.
-    // This is the WebView path: Invidious serves its own player (no YouTube iframe,
-    // no Error 153, no login wall).
-    val instance = InvidiousApiClient.getPrimaryInstance()
-    val embedUrl = "$instance/embed/$videoId?autoplay=1&listen=0"
-    Logger.warn("VIDEO_RESOLVE", "YouTube stream resolution failed, using Invidious embed: $embedUrl")
+    // Invidious stream resolution failed — fall back to youtube-nocookie embed.
+    //
+    // Why not Invidious embed? The Invidious embed page loads the actual video as a
+    // cross-origin subresource from googlevideo.com, which returns no CORS headers.
+    // Android WebView's ORB (Opaque Response Blocking) treats this as a blocked
+    // cross-origin media fetch and logs "ERR_BLOCKED_BY_ORB", leaving a black screen.
+    //
+    // youtube-nocookie.com/embed/ avoids this entirely: the WebView navigates to it
+    // as a top-level (main frame) page. YouTube's own player runs inside that page and
+    // fetches the video via its own origin — no cross-origin subresource, no ORB.
+    // It also has no tracking cookies (hence "nocookie") and allows autoplay via
+    // the autoplay=1 parameter when mediaPlaybackRequiresUserGesture=false is set.
+    val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1"
+    Logger.warn("VIDEO_RESOLVE", "YouTube stream resolution failed, using youtube-nocookie embed: $embedUrl")
     return VideoSource.Embed(embedUrl)
 }
 
@@ -179,8 +218,6 @@ private fun resolveVimeoSource(url: String): VideoSource {
 
     Logger.info("VIDEO_RESOLVE", "Resolving Vimeo stream for videoId=$videoId")
 
-    // Vimeo's unofficial config endpoint returns progressive download URLs — no API key needed.
-    // This is the same endpoint the Vimeo web player uses internally.
     return try {
         val configUrl = "https://player.vimeo.com/video/$videoId/config"
         val request = okhttp3.Request.Builder()
@@ -198,14 +235,12 @@ private fun resolveVimeoSource(url: String): VideoSource {
         val body = response.body?.string() ?: return fallbackVimeoEmbed(url)
         val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
 
-        // Path: request.files.progressive[] — sorted by quality desc
         val progressive = root
             ?.getAsJsonObject("request")
             ?.getAsJsonObject("files")
             ?.getAsJsonArray("progressive")
 
         if (progressive != null && progressive.size() > 0) {
-            // Pick highest quality progressive stream (they come pre-sorted by Vimeo)
             var bestUrl: String? = null
             var bestQuality = 0
             for (el in progressive) {
@@ -252,7 +287,6 @@ fun VideoPlayer(
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
-    // Resolve the video source asynchronously — null means "still loading"
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
 
     LaunchedEffect(url) {
@@ -264,10 +298,6 @@ fun VideoPlayer(
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
 
-        // Thumbnail shown only while the source is still being resolved (source == null).
-        // Once a Direct source is known, the ExoVideoPlayer renders on top and handles
-        // its own buffering indicator — keeping the thumbnail underneath would waste a
-        // GPU layer and was the cause of visual artefacts on low-end devices.
         val showThumbnail = source == null
         if (showThumbnail && (thumbnailUrl != null || thumbnailB64 != null)) {
             val model = thumbnailUrl ?: thumbnailB64?.let {
@@ -286,7 +316,6 @@ fun VideoPlayer(
 
         when (val resolved = source) {
             null -> {
-                // Still resolving — show a spinner if no thumbnail
                 if (thumbnailUrl == null && thumbnailB64 == null) {
                     com.noslop.app.ui.LoadingShimmer()
                 }
@@ -374,9 +403,6 @@ private fun ExoVideoPlayer(
                         Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
                     }
                 })
-                // Sync isBuffering from the player's current state — the preloaded player
-                // may already be in STATE_READY (buffered ahead), in which case we must
-                // clear the initial isBuffering=true so the shimmer doesn't stay visible.
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
             }
         } else {
@@ -485,8 +511,6 @@ private fun EmbedWebViewPlayer(url: String) {
     AndroidView(
         factory = { ctx ->
             object : android.webkit.WebView(ctx) {
-                // Prevent the WebView from pausing media when the system briefly
-                // hides the window (e.g. notification shade drop-down).
                 override fun onWindowVisibilityChanged(visibility: Int) {
                     if (visibility != android.view.View.GONE) {
                         super.onWindowVisibilityChanged(android.view.View.VISIBLE)
@@ -504,12 +528,11 @@ private fun EmbedWebViewPlayer(url: String) {
                     mediaPlaybackRequiresUserGesture = false
                     domStorageEnabled = true
                     databaseEnabled = true
-                    allowFileAccess = false         // not needed for remote embeds
+                    allowFileAccess = false
                     allowContentAccess = false
                     useWideViewPort = true
                     loadWithOverviewMode = true
                     mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    // Identify as a modern mobile Chrome so embed pages render correctly
                     userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
                 }
 
@@ -520,15 +543,34 @@ private fun EmbedWebViewPlayer(url: String) {
                         view: android.webkit.WebView?,
                         request: android.webkit.WebResourceRequest?
                     ): Boolean {
-                        // Only allow navigation within the same host — block outbound links
-                        val targetHost = request?.url?.host ?: return false
+                        val targetUri = request?.url ?: return false
+                        val scheme = targetUri.scheme ?: return false
+
+                        // Always allow data: and blob: URIs (used by players internally)
+                        if (scheme == "data" || scheme == "blob") return false
+
+                        val targetHost = targetUri.host ?: return false
                         val currentHost = android.net.Uri.parse(url).host ?: return false
-                        return targetHost != currentHost
+
+                        // Allow same-host navigation
+                        if (targetHost == currentHost) return false
+
+                        // Allow the YouTube/Google family so youtube-nocookie embeds work:
+                        // the player navigates between youtube-nocookie.com, youtube.com,
+                        // and googlevideo.com for API calls and playback token refreshes.
+                        val youtubeFamily = setOf(
+                            "youtube-nocookie.com", "youtube.com", "www.youtube.com",
+                            "googlevideo.com", "yt3.ggpht.com", "i.ytimg.com"
+                        )
+                        if (youtubeFamily.any { targetHost.endsWith(it) }) return false
+
+                        // Block all other outbound navigation (ads, trackers, external links)
+                        Logger.info("VIDEO", "Blocked outbound navigation to $targetHost")
+                        return true
                     }
 
                     override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
                         Logger.info("VIDEO", "Embed page loaded: $pageUrl")
-                        // Generic autoplay injection — works for Invidious and archive.org
                         val js = """
                             (function() {
                                 document.body.style.backgroundColor = 'black';
@@ -567,7 +609,6 @@ private fun EmbedWebViewPlayer(url: String) {
             }
         },
         update = { view ->
-            // Re-trigger autoplay if the slide becomes visible again
             view.evaluateJavascript("""
                 (function() {
                     var vid = document.querySelector('video');

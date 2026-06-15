@@ -7,6 +7,7 @@ import com.google.gson.JsonObject
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
 import okhttp3.Request
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Invidious API client (YouTube alternative frontend).
@@ -33,6 +34,33 @@ object InvidiousApiClient {
     @Volatile private var cachedInstances: List<String>? = null
     @Volatile private var cacheTimestamp: Long = 0L
     private const val CACHE_DURATION_MS = 3600_000L // 1 hour
+
+    /**
+     * Per-instance failure tracking for the current session.
+     * Maps instance URL → timestamp of first consecutive failure.
+     * An instance is skipped (blacklisted) for INSTANCE_COOLDOWN_MS after its
+     * first failure — this stops a dead instance from being hammered by every
+     * concurrent resolveStreamUrl call in the same scroll session.
+     * The cooldown is intentionally short (5 min) so a transiently-down
+     * instance is retried eventually rather than permanently excluded.
+     */
+    private val instanceFailureTime = ConcurrentHashMap<String, Long>()
+    private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L // 5 minutes
+
+    private fun isInstanceCoolingDown(instance: String): Boolean {
+        val t = instanceFailureTime[instance] ?: return false
+        return (System.currentTimeMillis() - t) < INSTANCE_COOLDOWN_MS
+    }
+
+    private fun markInstanceFailed(instance: String) {
+        // putIfAbsent so the first failure timestamp is preserved (not overwritten
+        // by a later concurrent call that also saw this instance fail).
+        instanceFailureTime.putIfAbsent(instance, System.currentTimeMillis())
+    }
+
+    private fun markInstanceOk(instance: String) {
+        instanceFailureTime.remove(instance)
+    }
 
     /**
      * Fetch healthy Invidious instances from the official registry.
@@ -110,12 +138,13 @@ object InvidiousApiClient {
      * Returns the best available Invidious instance synchronously, for use from non-suspending
      * contexts (e.g. VideoPlayer's WebView factory block).
      *
-     * Returns the first entry from the cached dynamic list if it has been populated, otherwise
-     * falls back to the first hardcoded fallback instance. This avoids a network call on the
-     * main thread while still benefiting from any prior cache warm-up done by the feed loader.
+     * Returns the first non-cooling-down entry from the cached dynamic list if it has been
+     * populated, otherwise falls back to the first hardcoded fallback instance.
      */
     fun getPrimaryInstance(): String {
-        return cachedInstances?.firstOrNull() ?: FALLBACK_INSTANCES.first()
+        val instances = cachedInstances ?: FALLBACK_INSTANCES
+        return instances.firstOrNull { !isInstanceCoolingDown(it) }
+            ?: FALLBACK_INSTANCES.first()
     }
 
     /**
@@ -133,34 +162,44 @@ object InvidiousApiClient {
      *
      * Returns null if every instance fails or the video is unavailable, letting the caller
      * fall back to the Invidious WebView embed.
+     *
+     * Instance failures update [instanceFailureTime] so subsequent calls in the same
+     * session skip dead instances immediately rather than timing out against them.
      */
     fun resolveStreamUrl(videoId: String): String? {
-        // Use the dynamic, registry-backed instance list (refreshed hourly and cached)
-        // rather than only the hardcoded fallback. The hardcoded list goes stale as
-        // public Invidious instances disappear, which was a major contributor to
-        // "all instances exhausted" — getInstances() falls back to FALLBACK_INSTANCES
-        // itself if the registry is unreachable, so this is strictly more resilient.
-        val instances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        val allInstances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
 
-        // The default clearnetClient timeout is 30s. Trying several dead/slow
-        // instances at 30s each could make a single video take minutes to resolve
-        // (or never resolve before the user swiped away) — the main source of
-        // "inconsistent" playback. Use a short timeout here so a dead instance is
-        // skipped quickly and we move on to the next one.
+        // Partition: prefer instances that haven't recently failed, try the rest as last resort
+        val (healthy, cooling) = allInstances.partition { !isInstanceCoolingDown(it) }
+        val instances = healthy + cooling   // healthy first, then retry cooling ones as fallback
+
+        if (healthy.isEmpty()) {
+            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, trying anyway")
+        }
+
+        // Hard wall-clock deadline for the entire resolution attempt.
+        // Per-instance timeout = 5 s; if ALL instances are unreachable (e.g. device
+        // is briefly offline, VPN is reconnecting, Tor proxy is down) this caps the
+        // total wait to ~15 s rather than 5 s × N instances, after which we return
+        // null quickly and the caller falls through to the youtube-nocookie embed.
+        val deadlineMs = System.currentTimeMillis() + 15_000L
+
+        // Short per-instance connect+read timeout so a dead instance is skipped quickly
         val probeClient = client.newBuilder()
-            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .build()
 
         for (instance in instances) {
+            if (System.currentTimeMillis() >= deadlineMs) {
+                Logger.warn(TAG, "resolveStreamUrl: deadline exceeded for $videoId, aborting")
+                break
+            }
             try {
-                // "local=1" asks the instance to return formatStreams/adaptiveFormats
-                // URLs that are proxied through the instance itself (host rewritten to
-                // the instance's own domain) instead of raw googlevideo.com URLs.
-                // Without this, the returned googlevideo.com URL is signed/restricted
-                // to the Invidious server's IP address, and ExoPlayer (a different IP)
-                // gets HTTP 403 when it tries to play it directly — this was the cause
-                // of the ExoPlayer "Response code: 403" errors in the logs.
+                // `local=1` rewrites googlevideo.com stream URLs to proxy through the
+                // Invidious instance itself — without this, ExoPlayer gets HTTP 403
+                // because the raw googlevideo.com URL is signed to the instance's IP,
+                // not to the Android device.
                 val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats&local=1"
                 val request = Request.Builder()
                     .url(url)
@@ -170,6 +209,7 @@ object InvidiousApiClient {
                 val response = probeClient.newCall(request).execute()
                 if (!response.isSuccessful) {
                     Logger.warn(TAG, "resolveStreamUrl: $instance returned ${response.code}")
+                    markInstanceFailed(instance)
                     continue
                 }
 
@@ -179,7 +219,6 @@ object InvidiousApiClient {
                 // --- Prefer muxed (audio+video) streams ---
                 val formatStreams = root.getAsJsonArray("formatStreams")
                 if (formatStreams != null && formatStreams.size() > 0) {
-                    // Build a map of quality label → url for easy lookup
                     val byQuality = mutableMapOf<String, String>()
                     for (el in formatStreams) {
                         val obj = el.asJsonObject
@@ -188,20 +227,20 @@ object InvidiousApiClient {
                         byQuality[quality] = streamUrl
                     }
 
-                    // Pick preferred resolution
                     val preferred = listOf("720p", "480p", "360p", "240p")
                     for (q in preferred) {
                         val streamUrl = byQuality[q]
                         if (streamUrl != null) {
                             Logger.info(TAG, "Resolved muxed stream for $videoId at $q via $instance")
+                            markInstanceOk(instance)
                             return streamUrl
                         }
                     }
 
-                    // Any muxed stream is fine
                     val fallback = formatStreams[0].asJsonObject.get("url")?.asString
                     if (fallback != null) {
                         Logger.info(TAG, "Resolved muxed stream (fallback quality) for $videoId via $instance")
+                        markInstanceOk(instance)
                         return fallback
                     }
                 }
@@ -209,7 +248,6 @@ object InvidiousApiClient {
                 // --- Fall back to adaptive (video-only) streams if no muxed found ---
                 val adaptiveFormats = root.getAsJsonArray("adaptiveFormats")
                 if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-                    // Pick the best video stream (not audio-only)
                     var bestUrl: String? = null
                     var bestBitrate = 0
                     for (el in adaptiveFormats) {
@@ -218,7 +256,6 @@ object InvidiousApiClient {
                         if (!mimeType.startsWith("video/")) continue
                         val streamUrl = obj.get("url")?.asString ?: continue
                         val bitrate = obj.get("bitrate")?.asInt ?: 0
-                        // Prefer mp4 over webm for broader ExoPlayer compatibility
                         if (mimeType.contains("mp4") && bitrate > bestBitrate) {
                             bestBitrate = bitrate
                             bestUrl = streamUrl
@@ -228,13 +265,16 @@ object InvidiousApiClient {
                     }
                     if (bestUrl != null) {
                         Logger.info(TAG, "Resolved adaptive video stream for $videoId via $instance (bitrate=$bestBitrate)")
+                        markInstanceOk(instance)
                         return bestUrl
                     }
                 }
 
                 Logger.warn(TAG, "resolveStreamUrl: no usable streams for $videoId from $instance")
+                // Don't blacklist — the instance responded fine, just no streams for this video
             } catch (e: Exception) {
                 Logger.warn(TAG, "resolveStreamUrl: instance $instance failed: ${e.message}")
+                markInstanceFailed(instance)
             }
         }
 
@@ -258,12 +298,15 @@ object InvidiousApiClient {
                     val array = gson.fromJson(body, JsonArray::class.java)
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious search successful via $instance. Fetched ${items.size} videos")
+                    markInstanceOk(instance)
                     return items
                 } else {
                     Logger.warn(TAG, "Instance $instance returned HTTP ${response.code}")
+                    markInstanceFailed(instance)
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Instance $instance failed: ${e.message}")
+                markInstanceFailed(instance)
             }
         }
 
@@ -286,10 +329,14 @@ object InvidiousApiClient {
                     val array = gson.fromJson(body, JsonArray::class.java)
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious trending successful via $instance. Fetched ${items.size} videos")
+                    markInstanceOk(instance)
                     return items
+                } else {
+                    markInstanceFailed(instance)
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Instance $instance failed: ${e.message}")
+                markInstanceFailed(instance)
             }
         }
 
@@ -332,7 +379,6 @@ object InvidiousApiClient {
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
                     publishedAt = published ?: System.currentTimeMillis(),
-                    // Store the raw YouTube watch URL — VideoPlayer will resolve the stream
                     mediaUrl = "https://www.youtube.com/watch?v=$videoId",
                     mediaType = "video",
                     apiSource = "youtube"
