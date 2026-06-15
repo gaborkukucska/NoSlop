@@ -17,6 +17,12 @@ object PreloadManager {
     // player for the currently-playing item (claimed via claim()) doesn't get
     // evicted before VideoPlayer has a chance to take it.
     private const val MAX_PRELOAD = 3
+
+    // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
+    // from the main thread: preWarm() is called via launch{} from a Composable
+    // (which executes on Dispatchers.Main), warmUp() is called from preWarm(),
+    // and claim()/evictAll() are called from DisposableEffect / onDispose which
+    // also run on the main thread.  No synchronization is needed here.
     private val preloadedPlayers = object : LinkedHashMap<String, ExoPlayer>(MAX_PRELOAD, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ExoPlayer>): Boolean {
             if (size > MAX_PRELOAD) {
@@ -36,14 +42,18 @@ object PreloadManager {
      *   the old [warmUp] — buffers an [ExoPlayer] ready for [claim].
      * - YouTube / Vimeo / archive.org URLs: runs the same [resolveSource] step
      *   VideoPlayer would normally only run once the card becomes visible. The
-     *   result is cached in VideoPlayer's `sourceCache` (keyed by [rawUrl]), so
-     *   when the card *does* become visible, `resolveSource(rawUrl)` returns
-     *   immediately from cache. If resolution lands on a Direct stream (e.g. an
-     *   Invidious-resolved YouTube URL or a Vimeo progressive URL), that stream
-     *   is *also* buffered into an ExoPlayer here, so [claim] works for it too.
+     *   result is cached in VideoPlayer's `sourceCache` (a [ConcurrentHashMap]
+     *   keyed by [rawUrl]), so when the card *does* become visible,
+     *   `resolveSource(rawUrl)` returns immediately from cache. If resolution
+     *   lands on a Direct stream (e.g. an Invidious-resolved YouTube URL or a
+     *   Vimeo progressive URL), that stream is *also* buffered into an ExoPlayer
+     *   here, so [claim] works for it too.
      *
      * Safe to call repeatedly for the same URL — both [resolveSource]'s cache
      * and [warmUp]'s `containsKey` check make this a no-op on repeat calls.
+     *
+     * Note: [resolveSource] uses a [ConcurrentHashMap] internally, so concurrent
+     * calls from this coroutine and from VideoPlayer's own LaunchedEffect are safe.
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String) {

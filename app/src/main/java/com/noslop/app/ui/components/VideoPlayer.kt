@@ -22,6 +22,7 @@ import com.noslop.app.ui.PreloadManager
 import com.noslop.app.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VideoSource — resolved once per unique URL, cached for the lifetime of the
@@ -42,15 +43,19 @@ internal sealed class VideoSource {
 
 /** In-memory cache: raw mediaUrl → resolved VideoSource.  Cleared when the app
  *  process dies, which is fine — sources don't need to persist across restarts.
- *  Bounded LRU so a long scroll session (with PreloadManager pre-resolving
- *  ahead-of-time) can't grow this unboundedly; eviction here just means a
- *  re-resolve next time, not lost playback state. */
-private const val SOURCE_CACHE_CAPACITY = 50
-private val sourceCache = object : LinkedHashMap<String, VideoSource>(SOURCE_CACHE_CAPACITY, 0.75f, true) {
-    override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, VideoSource>): Boolean {
-        return size > SOURCE_CACHE_CAPACITY
-    }
-}
+ *
+ *  Uses ConcurrentHashMap so that PreloadManager.preWarm() (which runs in a
+ *  background coroutine) and VideoPlayer's LaunchedEffect (which runs on the
+ *  composition coroutine) can both read/write safely without corrupting the map.
+ *  The old access-ordered LinkedHashMap was not thread-safe: its get() mutates
+ *  internal link pointers, so two concurrent readers (let alone a concurrent
+ *  reader + writer) could silently corrupt it, causing cache misses or stale
+ *  entries that broke clearnet video playback after the preload feature landed.
+ *
+ *  ConcurrentHashMap has no LRU eviction, but in practice the number of
+ *  distinct video URLs visible in a single session is small; if memory pressure
+ *  becomes an issue a Guava Cache or manual trimming can be added later. */
+private val sourceCache = ConcurrentHashMap<String, VideoSource>(64)
 
 /**
  * Determine which [VideoSource] to use for [rawUrl], doing network work on
@@ -70,7 +75,8 @@ private val sourceCache = object : LinkedHashMap<String, VideoSource>(SOURCE_CAC
  * later call from [VideoPlayer]'s `LaunchedEffect(url)` returns instantly.
  */
 internal suspend fun resolveSource(rawUrl: String): VideoSource {
-    // Return cached result if available
+    // Return cached result if available — ConcurrentHashMap.get() is safe to call
+    // from any thread/coroutine without holding a lock.
     sourceCache[rawUrl]?.let { return it }
 
     val result: VideoSource = withContext(Dispatchers.IO) {
@@ -104,8 +110,12 @@ internal suspend fun resolveSource(rawUrl: String): VideoSource {
         }
     }
 
-    sourceCache[rawUrl] = result
-    return result
+    // putIfAbsent so that if two coroutines raced to resolve the same URL, the
+    // first writer wins and the second is silently discarded — both results
+    // should be equivalent, and this avoids overwriting a previously-cached
+    // successful resolution with a transient failure from the slower racer.
+    sourceCache.putIfAbsent(rawUrl, result)
+    return sourceCache[rawUrl] ?: result
 }
 
 private fun isDirectFileUrl(url: String): Boolean {
@@ -254,8 +264,11 @@ fun VideoPlayer(
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
 
-        // Thumbnail shown while resolving or while player buffers
-        val showThumbnail = source == null || (source is VideoSource.Direct && isVisible)
+        // Thumbnail shown only while the source is still being resolved (source == null).
+        // Once a Direct source is known, the ExoVideoPlayer renders on top and handles
+        // its own buffering indicator — keeping the thumbnail underneath would waste a
+        // GPU layer and was the cause of visual artefacts on low-end devices.
+        val showThumbnail = source == null
         if (showThumbnail && (thumbnailUrl != null || thumbnailB64 != null)) {
             val model = thumbnailUrl ?: thumbnailB64?.let {
                 try {
@@ -267,9 +280,7 @@ fun VideoPlayer(
                 model = model,
                 contentDescription = "Video Thumbnail",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                // Dim thumbnail when the actual player is mounted
-                alpha = if (source is VideoSource.Direct) 0.3f else 1.0f
+                contentScale = ContentScale.Crop
             )
         }
 
@@ -363,6 +374,9 @@ private fun ExoVideoPlayer(
                         Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
                     }
                 })
+                // Sync isBuffering from the player's current state — the preloaded player
+                // may already be in STATE_READY (buffered ahead), in which case we must
+                // clear the initial isBuffering=true so the shimmer doesn't stay visible.
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
             }
         } else {
