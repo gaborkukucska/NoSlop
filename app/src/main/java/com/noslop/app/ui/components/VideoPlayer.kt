@@ -20,11 +20,8 @@ import com.noslop.app.feeds.api.InvidiousApiClient
 import com.noslop.app.net.HttpClientProvider
 import com.noslop.app.ui.PreloadManager
 import com.noslop.app.ui.theme.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
@@ -52,33 +49,18 @@ internal sealed class VideoSource {
  *  safely without corrupting the map. */
 private val sourceCache = ConcurrentHashMap<String, VideoSource>(64)
 
-/**
- * In-flight deduplication map: raw mediaUrl → Deferred<VideoSource>.
- *
- * When multiple coroutines call resolveSource() for the same URL concurrently
- * (e.g. PreloadManager preWarm() AND VideoPlayer's LaunchedEffect racing for
- * the same newly-visible card), only the FIRST call does the actual work —
- * every subsequent call awaits the same Deferred rather than launching its own
- * full Invidious instance loop.  This was the root cause of the "4× all
- * instances exhausted for the same videoId within 5 seconds" log entries.
- *
- * Entries are removed once the Deferred completes (result goes into sourceCache).
- */
-private val inFlight = ConcurrentHashMap<String, Deferred<VideoSource>>(16)
+internal fun isSourceCached(url: String): Boolean = sourceCache.containsKey(url)
 
 /**
- * Dedicated coroutine scope for resolution work.
- * SupervisorJob so that one failed resolution doesn't cancel sibling resolves.
- * Dispatchers.IO is appropriate — all work inside is blocking network I/O.
+ * Mutexes for in-flight resolutions to prevent duplicate network calls for the same URL.
  */
-private val resolveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
 /**
  * Determine which [VideoSource] to use for [rawUrl], doing network work on
  * [Dispatchers.IO] so the caller can run inside a [LaunchedEffect].
  *
- * Concurrent calls for the same [rawUrl] are coalesced: only one resolution
- * runs at a time; all others await its result via [inFlight].
+ * Concurrent calls for the same [rawUrl] are coalesced using a Mutex.
  *
  * Routing priority:
  *  1. Direct file extensions / 127.0.0.1 proxy  → Direct (no lookup needed)
@@ -94,27 +76,24 @@ private val resolveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
  * later call from [VideoPlayer]'s `LaunchedEffect(url)` returns instantly.
  */
 internal suspend fun resolveSource(rawUrl: String): VideoSource {
-    // Fast path: already resolved — return immediately without touching inFlight.
+    // Fast path: already resolved.
     sourceCache[rawUrl]?.let { return it }
 
-    // Coalesce concurrent resolves for the same URL.
-    // computeIfAbsent is atomic on ConcurrentHashMap: exactly one caller's async{}
-    // block wins the slot; all others get the same Deferred back.
-    val deferred = inFlight.computeIfAbsent(rawUrl) {
-        resolveScope.async {
-            try {
-                doResolve(rawUrl).also { result ->
-                    // Cache the result so future calls skip all of this.
-                    sourceCache.putIfAbsent(rawUrl, result)
-                }
-            } finally {
-                // Always clean up the in-flight entry so the slot is freed.
-                inFlight.remove(rawUrl)
-            }
+    // Coalesce concurrent resolves for the same URL safely without leaking scopes.
+    val mutex = resolveMutexes.computeIfAbsent(rawUrl) { kotlinx.coroutines.sync.Mutex() }
+    
+    return mutex.withLock {
+        // Check cache again after acquiring lock
+        sourceCache[rawUrl]?.let { return@withLock it }
+        
+        try {
+            val result = doResolve(rawUrl)
+            sourceCache.putIfAbsent(rawUrl, result)
+            result
+        } finally {
+            resolveMutexes.remove(rawUrl)
         }
     }
-
-    return deferred.await()
 }
 
 /** Performs the actual resolution work — called exactly once per unique URL

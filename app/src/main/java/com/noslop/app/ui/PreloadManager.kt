@@ -11,6 +11,8 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.net.HttpClientProvider
 import com.noslop.app.ui.components.VideoSource
 import com.noslop.app.ui.components.resolveSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
@@ -72,7 +74,9 @@ object PreloadManager {
                 // YouTube/Vimeo URLs that resolved to a direct stream — buffer an
                 // ExoPlayer keyed by the *resolved* URL, since that's the URL
                 // ExoVideoPlayer will call claim() with.
-                warmUp(context, resolved.url)
+                withContext(Dispatchers.Main) {
+                    warmUp(context, resolved.url)
+                }
             }
             is VideoSource.Embed -> {
                 // Embed-only sources (Invidious/Vimeo iframe fallback,

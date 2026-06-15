@@ -67,6 +67,7 @@ object InvidiousApiClient {
      * Filters for HTTPS instances that are up and have API enabled.
      * Falls back to hardcoded list on failure.
      */
+    @Synchronized
     private fun getInstances(): List<String> {
         val now = System.currentTimeMillis()
         val cached = cachedInstances
@@ -81,6 +82,7 @@ object InvidiousApiClient {
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
+                response.close()
                 Logger.warn(TAG, "Instance registry returned ${response.code}, using fallback")
                 return FALLBACK_INSTANCES
             }
@@ -185,7 +187,10 @@ object InvidiousApiClient {
         val deadlineMs = System.currentTimeMillis() + 15_000L
 
         // Short per-instance connect+read timeout so a dead instance is skipped quickly
+        // Short per-instance connect+read timeout so a dead instance is skipped quickly.
+        // Clear interceptors so clearnetClient's browser User-Agent doesn't override our explicit one.
         val probeClient = client.newBuilder()
+            .apply { interceptors().clear() }
             .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .build()
@@ -208,12 +213,17 @@ object InvidiousApiClient {
 
                 val response = probeClient.newCall(request).execute()
                 if (!response.isSuccessful) {
+                    response.close()
                     Logger.warn(TAG, "resolveStreamUrl: $instance returned ${response.code}")
                     markInstanceFailed(instance)
                     continue
                 }
 
-                val body = response.body?.string() ?: continue
+                val body = response.body?.string()
+                if (body == null) {
+                    response.close()
+                    continue
+                }
                 val root = gson.fromJson(body, JsonObject::class.java)
 
                 // --- Prefer muxed (audio+video) streams ---
@@ -294,13 +304,18 @@ object InvidiousApiClient {
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: continue
+                    val body = response.body?.string()
+                    if (body == null) {
+                        response.close()
+                        continue
+                    }
                     val array = gson.fromJson(body, JsonArray::class.java)
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious search successful via $instance. Fetched ${items.size} videos")
                     markInstanceOk(instance)
                     return items
                 } else {
+                    response.close()
                     Logger.warn(TAG, "Instance $instance returned HTTP ${response.code}")
                     markInstanceFailed(instance)
                 }
@@ -325,13 +340,18 @@ object InvidiousApiClient {
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
-                    val body = response.body?.string() ?: continue
+                    val body = response.body?.string()
+                    if (body == null) {
+                        response.close()
+                        continue
+                    }
                     val array = gson.fromJson(body, JsonArray::class.java)
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious trending successful via $instance. Fetched ${items.size} videos")
                     markInstanceOk(instance)
                     return items
                 } else {
+                    response.close()
                     markInstanceFailed(instance)
                 }
             } catch (e: Exception) {

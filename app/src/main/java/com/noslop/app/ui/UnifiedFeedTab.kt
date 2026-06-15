@@ -423,6 +423,7 @@ fun UnifiedFeedTab(
     }
 
     val pagerState = rememberPagerState { unifiedItems.size }
+    val preWarmedUrls = remember { mutableSetOf<String>() }
 
     LaunchedEffect(filterMode, searchQuery) {
         // Sync search query state to the ViewModel so it can bypass exclusions
@@ -500,7 +501,9 @@ fun UnifiedFeedTab(
 
                     for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
                         val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
-                        launch { PreloadManager.preWarm(context, preloadUrl) }
+                        if (preWarmedUrls.add(preloadUrl)) {
+                            launch { PreloadManager.preWarm(context, preloadUrl) }
+                        }
                     }
                 }
 
