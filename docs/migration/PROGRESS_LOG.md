@@ -4,6 +4,14 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Draft PR opened upstream
+
+- Opened **draft PR [gaborkukucska/NoSlop#1](https://github.com/gaborkukucska/NoSlop/pull/1)** (`kufton:feat/cross-platform-migration` → `gaborkukucska:main`), docs-only, so Gabor can review the plan before code lands. Marked DRAFT/WIP.
+- Body summarizes approach (KMP, iOS leaf + Home HUB, Phase-0-first, small phase-scoped PRs) and points to the key docs.
+- **Next:** baseline build result, then Stage 0.2 tests.
+
+---
+
 ## 2026-06-16 — Fork created, branch pushed, remotes wired
 
 **Done:**
