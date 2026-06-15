@@ -135,17 +135,39 @@ object InvidiousApiClient {
      * fall back to the Invidious WebView embed.
      */
     fun resolveStreamUrl(videoId: String): String? {
-        val instances = cachedInstances?.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        // Use the dynamic, registry-backed instance list (refreshed hourly and cached)
+        // rather than only the hardcoded fallback. The hardcoded list goes stale as
+        // public Invidious instances disappear, which was a major contributor to
+        // "all instances exhausted" — getInstances() falls back to FALLBACK_INSTANCES
+        // itself if the registry is unreachable, so this is strictly more resilient.
+        val instances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+
+        // The default clearnetClient timeout is 30s. Trying several dead/slow
+        // instances at 30s each could make a single video take minutes to resolve
+        // (or never resolve before the user swiped away) — the main source of
+        // "inconsistent" playback. Use a short timeout here so a dead instance is
+        // skipped quickly and we move on to the next one.
+        val probeClient = client.newBuilder()
+            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
 
         for (instance in instances) {
             try {
-                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats"
+                // "local=1" asks the instance to return formatStreams/adaptiveFormats
+                // URLs that are proxied through the instance itself (host rewritten to
+                // the instance's own domain) instead of raw googlevideo.com URLs.
+                // Without this, the returned googlevideo.com URL is signed/restricted
+                // to the Invidious server's IP address, and ExoPlayer (a different IP)
+                // gets HTTP 403 when it tries to play it directly — this was the cause
+                // of the ExoPlayer "Response code: 403" errors in the logs.
+                val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats&local=1"
                 val request = Request.Builder()
                     .url(url)
                     .header("User-Agent", "NoSlop-Android/1.0")
                     .build()
 
-                val response = client.newCall(request).execute()
+                val response = probeClient.newCall(request).execute()
                 if (!response.isSuccessful) {
                     Logger.warn(TAG, "resolveStreamUrl: $instance returned ${response.code}")
                     continue

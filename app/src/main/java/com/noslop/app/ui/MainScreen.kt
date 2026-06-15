@@ -259,7 +259,16 @@ fun FullScreenMeshCard(
 
 internal fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String? {
     if (mediaUrl == null) return null
-    if (mediaUrl.startsWith("http")) return mediaUrl
+    if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) return mediaUrl
+    // Protocol-relative URLs (e.g. "//player.vimeo.com/video/123?title=0&byline=0&portrait=0")
+    // come straight from some feeds' <media:content url="..."> elements. They're full
+    // clearnet URLs, just missing the scheme — treat them the same as an http(s) URL.
+    // Without this check they fell through to the mesh-proxy branch below, which wrapped
+    // them as "http://127.0.0.1:8080/stream?id=//player.vimeo.com/...". The proxy's naive
+    // query-string parser then split on the "=" and "&" *inside* the embedded Vimeo URL,
+    // never found a valid "id" param, and returned HTTP 400 — this was the cause of the
+    // intermittent Vimeo playback failures.
+    if (mediaUrl.startsWith("//")) return "https:$mediaUrl"
     // Assuming mesh proxy
     return "http://127.0.0.1:8080/stream?id=$mediaUrl"
 }
