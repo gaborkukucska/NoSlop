@@ -66,7 +66,10 @@ Robolectric split is recorded in **ADR-007**.
 
 Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests after each split. Order (lowest-risk / highest-value first):
 
-- [~] `data/NoSlopRepository.kt` (1,474 → **1,355**) → split by domain. **In progress, extracted so far:**
+- [x] `data/NoSlopRepository.kt` (1,474 → **396**) → split by domain. **DONE — DECOMPOSITION_MAP item #1
+      complete.** The remaining 396 lines are a thin orchestrator: identity delegations + lifecycle wiring,
+      `meshTransport`/`meshPacketHandler` + `handleIncomingPacket`, notifications, `factoryReset`, and
+      peer/feed observables. Five focused repositories extracted:
   - [x] `data/PreferencesRepository.kt` — categories, per-category keywords, negative keywords, language,
         music/video genres, creator keywords, `UserProfile` (over `AppSettingDao` + `FeedDao` fallback).
   - [x] `data/EngagementRepository.kt` — viewed history + swipe tracking (over `ViewedHistoryDao` +
@@ -80,16 +83,22 @@ Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests
         Preferences; onboarding check injected as a lambda. **Tested** (toggles + recovery branches);
         the network pipeline (`refreshFeeds`/`searchCustomFeed`) is deferred to Phase 1 — needs
         `FeedParser`/`PublicApiService` made injectable before it can be unit-tested.
-  - [ ] `data/MeshSocialRepository.kt` — the last and most entangled (~400 lines). **Extraction plan
-        finalized 2026-06-16 — see "MeshSocialRepository — finalized extraction plan" below.** Not yet
-        executed (awaiting greenlight).
+  - [x] `data/MeshSocialRepository.kt` (798 lines) — post/comment/reaction/vote/DM compose+sign+persist+
+        broadcast, peer handshakes, identity/exit announcements, presence heartbeat; owns
+        `_incomingRequestFlow`. Executed per the finalized plan below (presence moved in; constructor takes
+        `db`; notifications stayed on the facade; identity/profile injected as suspend accessors). Verbatim
+        move via brace-matched extraction + identifier-preserving param names. **Tested** (6 Robolectric
+        tests: reaction/vote toggle, signed-post persist, DM encrypt+store+send, connection request pending
+        peer, accept trusts + clears flow). *Follow-up: 798 lines > 300 target — candidate for a later split
+        of its repetitive broadcast helpers.*
   - Each extraction is mechanical + behavior-preserving (ADR-004): logic moved verbatim, the facade keeps
     identical public methods that delegate, full suite re-run green after each.
 
   **Testing approach (added 2026-06-16):** extractions now ship WITH unit tests. Repositories are tested
   pure-JVM against stateful in-memory DAO fakes (`app/src/test/.../data/FakeDaos.kt`) — no Robolectric,
   no SQLite. This asserts the *logic* (JSON round-trips, fallbacks, prune-on-cap, flow-sync) without
-  depending on Room's SQL. Suite is now **60 tests** (was 31 at end of Stage 0.2).
+  depending on Room's SQL. Suite is now **66 tests** (was 31 at end of Stage 0.2). The security-critical
+  `MeshSocialRepository` additionally uses Robolectric (signing/encryption → `android.util.Base64`).
 
 #### MeshSocialRepository — finalized extraction plan
 _Decisions agreed 2026-06-16. Recorded so they are not re-litigated. Status: **planned, not executed.**_

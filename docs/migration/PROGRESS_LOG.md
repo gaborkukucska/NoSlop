@@ -4,6 +4,38 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.3: MeshSocialRepository extracted + tested — NoSlopRepository decomposition COMPLETE 🟢
+
+Executed the final, most-entangled repository split per the recorded plan (two commits).
+
+- **Extract (commit `33c1833`):** moved the social/mesh heart — post/comment/reaction/vote/DM
+  compose+sign+persist+broadcast, peer handshakes, identity/exit announcements, the presence heartbeat —
+  into `data/MeshSocialRepository.kt` (798 lines). Owns `_incomingRequestFlow` (facade re-exposes it).
+  Per the agreed decisions: presence moved in; constructor takes `db`; notifications stayed on the facade;
+  identity/profile injected as suspend accessors (decoupled from Identity/Preferences). **Verbatim** move —
+  bodies extracted by brace-matching and transferred byte-for-byte by naming the new repo's params/fields to
+  match existing identifiers (`repositoryScope`, `meshTransport`, `TAG`, DAO fields). Removed 8 dead imports.
+- **Tests (commit `f4f7cce`):** first-ever coverage of this hot path — `MeshSocialRepositoryTest` (6,
+  Robolectric `@Config sdk=34`): reaction/vote add↔remove toggle, signed-post persist, DM encrypt+store+send,
+  connection-request pending peer, accept trusts+clears flow. Added `Fake{Reaction,Vote,Peer,Post,Message}Dao`.
+
+**Bug found + fixed (the full-suite rerun earned its keep):** `CryptoServiceRobolectricTest`'s tamper helper
+flipped the *last* base64 char of the signature, but a 64-byte Ed25519 sig's final data char has 4 ignored
+padding bits — flipping there can mutate only padding → identical decoded bytes → a "tampered" sig that still
+verifies, intermittently, depending on the random per-run key. Now flips the *first* (always-significant)
+char. Confirmed stable across 3 consecutive full-suite reruns.
+
+**Milestone:** `NoSlopRepository` **1,474 → 396 lines** — a thin orchestrator. DECOMPOSITION_MAP item #1 DONE.
+Five single-responsibility repositories (Preferences, Engagement, Settings, Feed, MeshSocial), each tested.
+Suite **31 → 66 tests**, green across repeated runs. All pushed.
+
+**Next (Stage 0.3 continues):** item #2 — `mesh/MeshPacketHandler.kt` (840 lines) → dispatcher + per-packet-
+type handlers. Then the UI monoliths (`NoSlopViewModel`, `OnboardingScreen`, `UnifiedFeedTab`, `MediaComponents`).
+Also a noted follow-up: `MeshSocialRepository` (798 lines) > 300-line target — split its repetitive broadcast
+helpers later.
+
+---
+
 ## 2026-06-16 — Stage 0.3: FeedRepository extracted + tested (4 of ~5) 🟡
 
 Extracted the clearnet aggregator into `data/FeedRepository.kt` — the largest split so far: source/item
