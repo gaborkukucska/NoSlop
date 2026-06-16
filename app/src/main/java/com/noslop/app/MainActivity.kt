@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.ViewModelProvider
 import com.noslop.app.ui.MainScreen
 import com.noslop.app.ui.NoSlopViewModel
@@ -31,15 +32,17 @@ class MainActivity : ComponentActivity() {
                 val isOnboarded by viewModel.isOnboardingComplete.collectAsState()
                 val targetRoute by _routeFlow.collectAsState()
                 
-                // Track if onboarding was shown during this app session
-                var didJustFinishOnboarding by remember { mutableStateOf(false) }
+                // Track if onboarding was shown during this app session, using rememberSaveable 
+                // to survive any unavoidable Activity recreation (like uiMode/Dark Mode toggles).
+                var didJustFinishOnboarding by rememberSaveable { mutableStateOf(false) }
 
                 LaunchedEffect(isOnboarded) {
                     viewModel.startTor()
                 }
 
                 if (isOnboarded) {
-                    var showSplash by remember { mutableStateOf(!didJustFinishOnboarding) }
+                    // Remember the splash screen state across configuration changes
+                    var showSplash by rememberSaveable { mutableStateOf(!didJustFinishOnboarding) }
 
                     LaunchedEffect(Unit) {
                         if (showSplash) {
