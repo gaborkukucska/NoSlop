@@ -4,6 +4,33 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.3: MeshPacketHandler split into dispatcher + 7 handlers (item #2 DONE) 🟢
+
+Decomposed the 840-line `MeshPacketHandler` (DECOMPOSITION_MAP item #2). It was a dispatcher fused to 21
+private `handleX` methods; now a slim ~70-line dispatcher (keeps the cross-cutting gate — local-identity
+check + `GossipService` TTL/dedup/rate-limit/firewall — and routes by packet type) delegating to 7
+single-responsibility handler classes, each constructed `(repo, db)` exactly like the original:
+
+  SyncPacketHandler 274 · HandshakePacketHandler 161 · ReactionPacketHandler 161 · PostPacketHandler 113 ·
+  DmPacketHandler 104 · CommentPacketHandler 80 · MediaPacketHandler 41 · MeshPacketHandler (dispatcher) 69.
+
+Verbatim move (ADR-004): handler bodies extracted by brace-matching, only `private suspend fun` →
+`suspend fun` so the dispatcher can route. Same package (`com.noslop.app.mesh`) for now — package reorg is
+Stage 0.4. **Every file is now ≤ 274 lines (was one 840-line file).**
+
+- **Tests** (`PostPacketHandlerTest`, 3, Robolectric `@Config sdk=34`): the security-critical signature gate
+  on the highest-volume path — validly-signed POST stored; tampered body rejected & not persisted; packet
+  re-attributed to a wrong author key rejected. Full per-handler matrix is a noted follow-up.
+
+Commit `3a19ad9`. Suite **66 → 69**, green. Behavior preserved (verbatim + identical routing).
+
+**Stage 0.3 remaining (the UI monoliths):** `ui/NoSlopViewModel.kt` (1,102), `ui/OnboardingScreen.kt` (1,236),
+`ui/UnifiedFeedTab.kt` (1,164), `ui/MediaComponents.kt` (821), then the second-tier >300-line files. These
+are Compose UI — different testing story (no pure-JVM unit tests; behavior preservation rests on compile +
+manual smoke). Worth a planning checkpoint before starting.
+
+---
+
 ## 2026-06-16 — Stage 0.3: MeshSocialRepository extracted + tested — NoSlopRepository decomposition COMPLETE 🟢
 
 Executed the final, most-entangled repository split per the recorded plan (two commits).

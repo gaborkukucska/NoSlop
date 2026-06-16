@@ -139,7 +139,14 @@ _Decisions agreed 2026-06-16. Recorded so they are not re-litigated. Status: **p
   (2) add `MeshSocialRepositoryTest` (Robolectric + new fakes). Then update the hub and push.
 - **Completes DECOMPOSITION_MAP item #1** (`NoSlopRepository`). Next Stage 0.3 target: `MeshPacketHandler`.
 
-- [ ] `mesh/MeshPacketHandler.kt` (840) → one handler per packet type behind a dispatcher
+- [x] `mesh/MeshPacketHandler.kt` (840) → **DONE.** Slim ~70-line dispatcher (keeps the local-identity +
+      GossipService gate, routes by type) + 7 single-responsibility handler classes, each `(repo, db)`:
+      `SyncPacketHandler` (274), `HandshakePacketHandler` (161), `ReactionPacketHandler` (161),
+      `PostPacketHandler` (113), `DmPacketHandler` (104), `CommentPacketHandler` (80), `MediaPacketHandler`
+      (41). Verbatim move (brace-matched extraction; `private suspend fun`→`suspend fun`). Same package for
+      now (package reorg is Stage 0.4). Every file now ≤ 274 lines. **Tested**: `PostPacketHandlerTest` (3,
+      Robolectric) pins the signature gate on the highest-volume path (valid stored / tampered & wrong-key
+      rejected). *Follow-up: full per-handler test matrix.*
 - [ ] `ui/NoSlopViewModel.kt` (1,102) → split by feature (feed, social, peers, identity/lock, tor, settings)
 - [ ] `ui/OnboardingScreen.kt` (1,236) → one composable per step + shared components
 - [ ] `ui/UnifiedFeedTab.kt` (1,164) → feed list, card host, interaction handlers
