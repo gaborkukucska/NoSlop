@@ -74,15 +74,19 @@ Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests
   - [x] `data/SettingsRepository.kt` — media/notification settings + foreground-service flag. Owns the
         `mediaSettingsFlow` / `notificationSettingsFlow` / `isForegroundServiceEnabled` StateFlows; the
         facade re-exposes them so UI subscribers are unchanged.
-  - [ ] `data/FeedRepository.kt` — sources/items CRUD, `refreshFeeds` + private `fetchRssSource`/
-        `fetchApiCategory` helpers, `searchCustomFeed`, read/saved state, `clearFeedData`, aggregator
-        toggle, source recovery/migration. *(Depends on Preferences for keyword/category/lang lookups.
-        Testability caveat: the refresh pipeline calls `FeedParser`/`PublicApiService` static objects —
-        network. Unit-testable parts are the aggregator/transparency flags, `recoverSourcesAfterMigration`,
-        and CRUD; the pipeline itself wants `FeedParser`/`PublicApiService` made injectable — a Phase-1 item.)*
+  - [x] `data/FeedRepository.kt` — sources/items CRUD + observable flows, `refreshFeeds` + private
+        `fetchRssSource`/`fetchApiCategory`, `searchCustomFeed`, `clearFeedData`, aggregator/transparency
+        toggles, `recoverSourcesAfterMigration`, the `OFFICIAL_NEGATIVE_KEYWORDS` floor. Depends on
+        Preferences; onboarding check injected as a lambda. **Tested** (toggles + recovery branches);
+        the network pipeline (`refreshFeeds`/`searchCustomFeed`) is deferred to Phase 1 — needs
+        `FeedParser`/`PublicApiService` made injectable before it can be unit-tested.
   - [ ] `data/MeshSocialRepository.kt` — post/comment/reaction/vote/DM compose+broadcast, connection
-        handshakes, presence heartbeat. *(~400 lines, the most entangled: needs identity, `meshTransport`,
-        `GossipService`, `repositoryScope`, and many DAOs — extract last.)*
+        handshakes, presence heartbeat. **The last and most entangled (~400 lines):** needs identity
+        (`getLocalIdentity`/`getLocalHandle`/`getUserProfile`), `meshTransport`, `GossipService`,
+        `repositoryScope`, the `_incomingRequestFlow`/`_identityUpdateFlow`, and many DAOs. Has circular
+        lifecycle touchpoints (`logout` → `broadcastUserExit`; `saveLocalIdentity` → presence heartbeat),
+        so it needs a deliberate plan, not a mechanical sweep. Tests will need Robolectric (signs packets
+        via `CryptoService` → `android.util.Base64`). **Recommended as its own focused session.**
   - Each extraction is mechanical + behavior-preserving (ADR-004): logic moved verbatim, the facade keeps
     identical public methods that delegate, full suite re-run green after each.
 
@@ -118,3 +122,4 @@ _(Append as you go. This is the catch-all for things found mid-refactor.)_
 
 - **[discovered] Release signing config blocks all builds without secrets.** `app/build.gradle.kts:27` reads `project.property("NOSLOP_STORE_FILE")` eagerly inside `signingConfigs.release`, so *configuration fails* (even for debug/compile) unless `NOSLOP_STORE_FILE/_PASSWORD`, `NOSLOP_KEY_ALIAS/_PASSWORD` are provided. Contributor papercut. **Fix later (non-urgent):** guard the release signing block to only configure when the properties exist (e.g. `if (project.hasProperty("NOSLOP_STORE_FILE")) { ... }`). Workaround for now: pass dummy `-P` values for debug compiles.
 - Toolchain confirmed: JDK 17 (Zulu), Android SDK at `~/Library/Android/sdk`, Gradle 9.4.1 (wrapper), AGP emitting legacy-DSL deprecation warnings (non-blocking).
+- **[discovered, environmental] Cloud-sync pollutes `app/build/` with `"<name> 2.ext"` duplicate files**, which fails `parseDebugLocalResources` ("Failed file name validation" — the space is illegal in Android resource names). Not a code issue; the working dir is under a syncing folder. Workaround: `find app/build -name "* 2.*" -delete` before building (≈255 such files appeared once). Longer-term: stop syncing `build/`, or `./gradlew clean`.

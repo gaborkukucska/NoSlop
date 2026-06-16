@@ -4,6 +4,33 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.3: FeedRepository extracted + tested (4 of ~5) 🟡
+
+Extracted the clearnet aggregator into `data/FeedRepository.kt` — the largest split so far: source/item
+CRUD + observable flows, the multi-phase `refreshFeeds` pipeline (with private `fetchRssSource`/
+`fetchApiCategory`), `searchCustomFeed`, aggregator/transparency toggles, `recoverSourcesAfterMigration`,
+and the `OFFICIAL_NEGATIVE_KEYWORDS` floor. Decoupled from identity by injecting the onboarding check as a
+suspend lambda; depends on `PreferencesRepository` for the pipeline's user signals. Commit `5060120`.
+
+- **Tests** (`FeedRepositoryTest`, 7): aggregator/transparency toggles incl. their non-symmetric defaults
+  (aggregator ON, transparency OFF) and all three `recoverSourcesAfterMigration` branches. A relaxed mockk
+  `Context` stands in for the untested-here pipeline; `FakeFeedDao.insertSource` made stateful to observe reseeding.
+- **Deferred (Phase 1):** `refreshFeeds`/`searchCustomFeed` aren't unit-tested — they call the `FeedParser`/
+  `PublicApiService` singletons over the network. Making those injectable is the Phase-1 seam.
+
+Suite: 53 → **60 tests, all green**. `NoSlopRepository`: 1,335 → **1,060** lines (4 of ~5 domains out).
+
+**Discovered (environmental, logged in `PHASE_0.md`):** a cloud-sync process pollutes `app/build/` with
+`"<name> 2.ext"` duplicates that break `parseDebugLocalResources` (illegal space in resource names). Not a
+code issue — `find app/build -name "* 2.*" -delete` clears it (≈255 files appeared once).
+
+**Last extraction — `MeshSocialRepository` — is a different risk tier:** ~400 lines, tightly coupled to
+identity lifecycle, `meshTransport`, `GossipService`, `repositoryScope`, and the request/identity flows, with
+circular touchpoints (`logout`→`broadcastUserExit`, `saveLocalIdentity`→presence heartbeat). Recommended as
+its own focused session with a deliberate plan; its tests will need Robolectric (packet signing → Base64).
+
+---
+
 ## 2026-06-16 — Stage 0.3: SettingsRepository extracted + repositories now tested (3 of ~5) 🟡
 
 Adopted **"tests as we go"** (user call, and good practice): every repository extraction now ships with
