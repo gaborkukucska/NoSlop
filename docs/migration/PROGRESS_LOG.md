@@ -4,6 +4,31 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.3: SettingsRepository extracted + repositories now tested (3 of ~5) 🟡
+
+Adopted **"tests as we go"** (user call, and good practice): every repository extraction now ships with
+its own unit tests. Backfilled the first two, and `SettingsRepository` landed test-first-style.
+
+- Added `app/src/test/.../data/FakeDaos.kt` — stateful in-memory fakes of `AppSettingDao` / `FeedDao` /
+  `ViewedHistoryDao` / `SwipeTrackerDao`. Repositories are now tested **pure-JVM** (no Robolectric, no
+  SQLite); the fakes model only the query semantics the repos rely on (REPLACE/IGNORE, count, oldest-first
+  prune, >=2 exclusion). This asserts repo *logic*, not Room's SQL.
+- `PreferencesRepositoryTest` (11) + `EngagementRepositoryTest` (6) — commit `9ea7959`.
+- `data/SettingsRepository.kt` extracted (media/notification settings + foreground flag; owns the
+  StateFlows, facade re-exposes them) **with** `SettingsRepositoryTest` (5). Commit `ab91932`.
+
+Suite: 31 → **53 tests, all green**. `NoSlopRepository`: 1,355 → **1,335** lines (3 of ~5 domains out).
+
+**Heads-up for the next two:** `FeedRepository`'s refresh pipeline calls `FeedParser`/`PublicApiService`
+static objects (network) — not unit-testable without making them injectable (a Phase-1 seam), so its tests
+will cover the aggregator/transparency flags, migration recovery, and CRUD. `MeshSocialRepository` (last,
+~400 lines) is the most entangled (identity, transport, gossip, scope).
+
+**Flake note:** one combined `compileDebugKotlin + testDebugUnitTest` invocation failed once, then passed
+clean on `--rerun-tasks` (53/0). Looks like a Robolectric first-run timing flake, not a real failure.
+
+---
+
 ## 2026-06-16 — Stage 0.3 begun: NoSlopRepository decomposition (2 of ~5 extracted) 🟡
 
 Started splitting the 1,474-line `NoSlopRepository` god-object per `DECOMPOSITION_MAP.md`, lowest-

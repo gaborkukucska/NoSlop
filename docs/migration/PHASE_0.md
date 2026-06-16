@@ -71,17 +71,25 @@ Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests
         music/video genres, creator keywords, `UserProfile` (over `AppSettingDao` + `FeedDao` fallback).
   - [x] `data/EngagementRepository.kt` — viewed history + swipe tracking (over `ViewedHistoryDao` +
         `SwipeTrackerDao`, incl. the `HISTORY_LIMIT` prune cap).
-  - [ ] `data/SettingsRepository.kt` — media/notification settings + foreground-service flag. *(Owns the
-        `mediaSettingsFlow` / `notificationSettingsFlow` / `isForegroundServiceEnabled` StateFlows — the
-        facade must re-expose them; slightly more entangled than the two above.)*
+  - [x] `data/SettingsRepository.kt` — media/notification settings + foreground-service flag. Owns the
+        `mediaSettingsFlow` / `notificationSettingsFlow` / `isForegroundServiceEnabled` StateFlows; the
+        facade re-exposes them so UI subscribers are unchanged.
   - [ ] `data/FeedRepository.kt` — sources/items CRUD, `refreshFeeds` + private `fetchRssSource`/
         `fetchApiCategory` helpers, `searchCustomFeed`, read/saved state, `clearFeedData`, aggregator
-        toggle, source recovery/migration. *(Depends on Preferences for keyword/category/lang lookups.)*
+        toggle, source recovery/migration. *(Depends on Preferences for keyword/category/lang lookups.
+        Testability caveat: the refresh pipeline calls `FeedParser`/`PublicApiService` static objects —
+        network. Unit-testable parts are the aggregator/transparency flags, `recoverSourcesAfterMigration`,
+        and CRUD; the pipeline itself wants `FeedParser`/`PublicApiService` made injectable — a Phase-1 item.)*
   - [ ] `data/MeshSocialRepository.kt` — post/comment/reaction/vote/DM compose+broadcast, connection
         handshakes, presence heartbeat. *(~400 lines, the most entangled: needs identity, `meshTransport`,
         `GossipService`, `repositoryScope`, and many DAOs — extract last.)*
   - Each extraction is mechanical + behavior-preserving (ADR-004): logic moved verbatim, the facade keeps
-    identical public methods that delegate, full 31-test suite re-run green after each.
+    identical public methods that delegate, full suite re-run green after each.
+
+  **Testing approach (added 2026-06-16):** extractions now ship WITH unit tests. Repositories are tested
+  pure-JVM against stateful in-memory DAO fakes (`app/src/test/.../data/FakeDaos.kt`) — no Robolectric,
+  no SQLite. This asserts the *logic* (JSON round-trips, fallbacks, prune-on-cap, flow-sync) without
+  depending on Room's SQL. Suite is now **53 tests** (was 31 at end of Stage 0.2).
 - [ ] `mesh/MeshPacketHandler.kt` (840) → one handler per packet type behind a dispatcher
 - [ ] `ui/NoSlopViewModel.kt` (1,102) → split by feature (feed, social, peers, identity/lock, tor, settings)
 - [ ] `ui/OnboardingScreen.kt` (1,236) → one composable per step + shared components
