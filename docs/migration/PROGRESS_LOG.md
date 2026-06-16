@@ -4,6 +4,41 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.2 golden-vector suite landed (core behavior locked) 🟢
+
+**Done — 31 unit tests, all green** (`./gradlew :app:testDebugUnitTest` + dummy `-PNOSLOP_*` props):
+- `crypto/CryptoDerivationTest` (4, pure JVM) — tripcode + onion v3 golden vectors vs. an **independent
+  Python reference** (SHA3-256 + custom Base32). These are the cross-language conformance vectors (ADR-005).
+- `crypto/MnemonicGeneratorTest` (5, pure JVM) — PBKDF2-HMAC-SHA512 seed golden vector + determinism +
+  salt sensitivity + 12-word generation.
+- `crypto/CryptoServiceRobolectricTest` (5, Robolectric `@Config(sdk=34)`) — sign→verify with tamper/
+  wrong-key rejection; X25519+ChaCha20-Poly1305 DM round-trip; wrong-key decrypt → `null`; identity shape;
+  `deriveSeedB64` matches the same golden seed.
+- `mesh/WireProtocolTest` (8, pure JVM) — envelope + POST/REACTION round-trips, snake_case wire keys,
+  typed-accessor type safety, unknown-field tolerance. *(This file was drafted earlier and is now green.)*
+- `mesh/GossipServiceTest` (9, pure JVM) — table-driven TTL / dedup (bounded-LRU eviction) / per-sender
+  rate-limit (20 / 10s).
+
+**Test strategy decision → ADR-007:** independent reference values + a pure-JVM vs. Robolectric split, plus
+`unitTests.isReturnDefaultValues=true` so `Logger`→`android.util.Log` no-ops in pure tests. The Android
+coupling these tests had to route around (`Base64`, `Build`, logging) is an early, concrete inventory of the
+Phase-1 `expect`/`actual` surface.
+
+**Discoveries (logged, not "fixed" — Stage 0.2 pins current behavior):**
+1. **Gson ignores Kotlin defaults** → `ReactionPayload.action` is `null` (not `"add"`) when absent from the
+   wire. Safe today (handlers only test `== "remove"`), but the contract is "absent ⇒ treated as add". Pinned.
+2. **Plan had the wrong location** for dedup/TTL/rate-limit: it's in `GossipService.processIncoming`, not
+   `MeshPacketHandler` (a pure dispatcher). Corrected in `PHASE_0.md`.
+
+**Not done (non-blocking, noted in `PHASE_0.md`):** vectors for the remaining payload types (COMMENT/VOTE/
+handshake/SYNC/media) beyond the POST+REACTION representatives; rate-limit *window-expiry* test (needs an
+injectable clock — candidate refactor for Stage 0.3/Phase 1).
+
+**Next:** Stage 0.3 — begin decomposing the monolith files per `DECOMPOSITION_MAP.md`, lowest-risk first
+(`data/NoSlopRepository.kt`), re-running this suite after each extraction to prove behavior is preserved.
+
+---
+
 ## 2026-06-16 — Build baseline established (Stage 0.1 ✅)
 
 - **Code compiles clean.** `:app:compileDebugKotlin` → BUILD SUCCESSFUL, **0 Kotlin errors** (deprecation warnings only). Toolchain: JDK 17, Android SDK `~/Library/Android/sdk`, Gradle 9.4.1, AGP (legacy-DSL warnings, non-blocking).

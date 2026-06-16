@@ -39,3 +39,12 @@ Append-only. Each ADR records a binding choice and *why*, so it isn't re-litigat
 - **Context:** Mesh is signed JSON over TCP/Tor. Existing Android nodes are already on this network.
 - **Decision:** The wire format and crypto scheme are not changed without an ADR + passing conformance tests. New clients (iOS, desktop, a future Rust HUB) must interoperate with existing Android nodes.
 - **Consequences:** Stack/language choices are reversible at the component level; the network is never broken by a refactor. This is what makes ADR-001 low-risk and Phase 5 possible.
+
+## ADR-007 — Golden-vector test strategy: independent reference + a pure-JVM / Robolectric split
+- **Status:** Accepted (2026-06-16)
+- **Context:** Stage 0.2 locks the crypto + wire-protocol core before refactoring (ADR-004/005). Two frictions surfaced: (1) parts of `CryptoService`/`MnemonicGenerator` call Android APIs (`android.util.Base64`, `android.os.Build`, and `Logger` → `android.util.Log`) that don't exist in a plain JVM unit test; (2) "golden" values are only trustworthy if they come from outside the code under test.
+- **Decision:**
+  1. **Independent reference values.** Expected tripcode/onion/seed vectors are computed by a second implementation (Python `hashlib`: SHA3-256 + the same custom Base32, and `pbkdf2_hmac`), then pinned in Kotlin. This is also the cross-language conformance vector a future non-Kotlin client must satisfy (ADR-005).
+  2. **Split tests by Android coupling.** Pure functions (`deriveTripcode`, `deriveOnionAddress`, `MnemonicGenerator.deriveSeed`, all Gson wire round-trips, and the `GossipService` TTL/dedup/rate-limit pipeline) run as fast plain-JUnit tests. Functions that genuinely need framework APIs (`sign`/`verify`, `encryptDM`/`decryptDM`, `generateIdentity`, `deriveSeedB64`) run under **Robolectric** pinned to `@Config(sdk=[34])` so the modern (API 33+, JDK-default Ed25519) code path is exercised.
+  3. **`unitTests.isReturnDefaultValues = true`** so incidental `android.util.Log` calls from `Logger` no-op instead of throwing "not mocked", letting core logic be tested without dragging Robolectric into every suite.
+- **Consequences:** The suite is fast where it can be and faithful where it must be. The Android coupling these tests had to work around is precisely the surface Phase 1 must move behind `expect`/`actual` (`Base64`, `Build`, logging) — the test split is an early, concrete inventory of that work. First-run Robolectric downloads an `android-all` jar (network needed once).

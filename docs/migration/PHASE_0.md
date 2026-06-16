@@ -23,20 +23,44 @@
 - [ ] Add a `.editorconfig` / formatting baseline so AI edits stay consistent
 - [x] Commit the scaffold
 
-## Stage 0.2 — Golden-vector tests for the core (do this BEFORE refactoring)  ⚪ not started
+## Stage 0.2 — Golden-vector tests for the core (do this BEFORE refactoring)  🟢 substantially done
 
-Lock current behavior so refactors are provably safe. Tests live in `app/src/test/`.
+Lock current behavior so refactors are provably safe. Tests live in `app/src/test/`. **31 tests, all green**
+(`./gradlew :app:testDebugUnitTest` with dummy `-PNOSLOP_*` signing props). Strategy + the pure-JVM /
+Robolectric split is recorded in **ADR-007**.
 
-- [ ] **Crypto vectors** (`CryptoService`): fixed-input expected outputs for
-  - [ ] Ed25519 sign → verify (and verify rejects tampered payloads/sigs)
-  - [ ] X25519 key agreement (deterministic shared secret)
-  - [ ] DM encrypt → decrypt round-trip (ChaCha20-Poly1305), incl. wrong-key failure
-  - [ ] Onion v3 address derivation from a known pubkey
-  - [ ] Tripcode (SHA3-256 Base32) from a known pubkey
-- [ ] **Mnemonic vectors** (`MnemonicGenerator`): BIP39 12-word generate/restore round-trip; identity-from-mnemonic determinism
-- [ ] **Wire-protocol vectors** (`Packets` / `NetworkPacket`): JSON serialize → deserialize round-trip for every packet type (POST, REACTION, DM, handshake, etc.); signature survives round-trip; unknown fields tolerated
-- [ ] **Packet handling**: `MeshPacketHandler` dedup (LRU), TTL decrement, rate-limit enforcement — table-driven tests
-- [ ] Record any behavior that looks like a *bug* (don't fix yet — log in `PROGRESS_LOG.md` and raise an ADR if it affects the protocol contract)
+- [x] **Crypto vectors** (`CryptoService`) — `CryptoDerivationTest` (pure JVM) + `CryptoServiceRobolectricTest`:
+  - [x] Ed25519 sign → verify (rejects tampered payload, tampered sig, and wrong public key)
+  - [x] X25519 key agreement (A↔B DM round-trip proves the shared secret is symmetric/deterministic)
+  - [x] DM encrypt → decrypt round-trip (ChaCha20-Poly1305), incl. wrong-key → `null` (AEAD auth fail, never throws)
+  - [x] Onion v3 address derivation from a known pubkey — golden vector vs. independent Python reference
+  - [x] Tripcode (SHA3-256 Base32) from a known pubkey — golden vector vs. independent Python reference
+- [x] **Mnemonic vectors** (`MnemonicGenerator`) — `MnemonicGeneratorTest` + Robolectric `deriveSeedB64`:
+      PBKDF2WithHmacSHA512 seed golden vector, determinism, salt sensitivity, 12-word generation.
+- [x] **Wire-protocol vectors** (`Packets` / `NetworkPacket`) — `WireProtocolTest`: envelope + POST/REACTION
+      round-trips, snake_case wire keys pinned, typed-accessor type safety, unknown fields tolerated.
+- [x] **Packet handling**: TTL / dedup (bounded LRU) / per-sender rate limit — `GossipServiceTest`, table-driven.
+      *(Note: this logic lives in `GossipService.processIncoming`, NOT `MeshPacketHandler` — the original
+      plan had the location wrong. `MeshPacketHandler` is a pure type-dispatcher.)*
+- [x] Record any behavior that looks like a *bug* (logged below + in `PROGRESS_LOG.md`)
+
+**Remaining (optional hardening, not blocking Stage 0.3):**
+- [ ] Round-trip vectors for the *remaining* packet payload types (COMMENT, VOTE, handshake, SYNC_*, media) —
+      `WireProtocolTest` currently pins POST + REACTION as representatives; extend if a type proves fragile.
+- [ ] Rate-limit *window expiry* (entries older than 10s are dropped) is not tested — would need injectable
+      time to avoid a real 10s sleep. Refactor `GossipService` to take a clock in Phase 0.3/1, then test.
+
+### Discovered behaviors (Stage 0.2)
+- **[behavior, pinned] Gson bypasses Kotlin constructor defaults.** A field declared with a default (e.g.
+  `ReactionPayload.action = "add"`) deserializes to **`null`** when absent from the JSON — Gson uses Unsafe
+  allocation and never runs the Kotlin constructor. Currently SAFE: every consumer in `MeshPacketHandler`
+  tests `action == "remove"`, so `null` behaves as "add" (the intent). But the contract is "absent ⇒ treated
+  as add", not "absent ⇒ value 'add'". A re-implementation must replicate null-on-absent. Pinned in
+  `WireProtocolTest.reactionPayload_actionToggle_roundTrips`.
+- **[plan correction] dedup/TTL/rate-limit location.** These guards are in `GossipService`, not
+  `MeshPacketHandler` (corrected above and in the Stage 0.3 list).
+- **[infra] `Logger` couples core logic to `android.util.Log`.** Forced `unitTests.isReturnDefaultValues=true`
+  (see ADR-007). This logging coupling is part of the `expect`/`actual` surface for Phase 1.
 
 ## Stage 0.3 — Decompose the monolith files  ⚪ not started
 
