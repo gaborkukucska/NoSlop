@@ -51,14 +51,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val _incomingRequestFlow = kotlinx.coroutines.flow.MutableStateFlow<Peer?>(null)
     val incomingRequestFlow = _incomingRequestFlow.asStateFlow()
 
-    private val _mediaSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(MediaSettings())
-    val mediaSettingsFlow = _mediaSettingsFlow.asStateFlow()
-
-    private val _notificationSettingsFlow = kotlinx.coroutines.flow.MutableStateFlow(NotificationSettings())
-    val notificationSettingsFlow = _notificationSettingsFlow.asStateFlow()
-
-    private val _isForegroundServiceEnabled = kotlinx.coroutines.flow.MutableStateFlow(false)
-    val isForegroundServiceEnabled = _isForegroundServiceEnabled.asStateFlow()
+    // WHY: media/notification/foreground settings (and their StateFlows) live in SettingsRepository
+    // (Stage 0.3). The facade re-exposes the flows below so existing UI subscribers are unchanged.
+    private val settingsRepository = SettingsRepository(appSettingDao)
+    val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
+    val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
+    val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
 
     private var presenceJob: kotlinx.coroutines.Job? = null
 
@@ -201,40 +199,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    // --- Media Settings ---
-    suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("media_settings")
-        val settings = MediaSettings.fromJson(json)
-        _mediaSettingsFlow.value = settings
-        settings
-    }
+    // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---
+    suspend fun getMediaSettings(): MediaSettings = settingsRepository.getMediaSettings()
 
-    suspend fun updateMediaSettings(settings: MediaSettings) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("media_settings", settings.toJson()))
-        _mediaSettingsFlow.value = settings
-    }
+    suspend fun updateMediaSettings(settings: MediaSettings) =
+        settingsRepository.updateMediaSettings(settings)
 
-    suspend fun getNotificationSettings(): NotificationSettings = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("notification_settings")
-        val settings = NotificationSettings.fromJson(json)
-        _notificationSettingsFlow.value = settings
-        settings
-    }
+    suspend fun getNotificationSettings(): NotificationSettings =
+        settingsRepository.getNotificationSettings()
 
-    suspend fun updateNotificationSettings(settings: NotificationSettings) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("notification_settings", settings.toJson()))
-        _notificationSettingsFlow.value = settings
-    }
+    suspend fun updateNotificationSettings(settings: NotificationSettings) =
+        settingsRepository.updateNotificationSettings(settings)
 
-    suspend fun initForegroundServiceSetting() = withContext(Dispatchers.IO) {
-        val setting = appSettingDao.getSetting("foreground_service_enabled")
-        _isForegroundServiceEnabled.value = setting == "true"
-    }
+    suspend fun initForegroundServiceSetting() = settingsRepository.initForegroundServiceSetting()
 
-    suspend fun setForegroundServiceEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("foreground_service_enabled", enabled.toString()))
-        _isForegroundServiceEnabled.value = enabled
-    }
+    suspend fun setForegroundServiceEnabled(enabled: Boolean) =
+        settingsRepository.setForegroundServiceEnabled(enabled)
 
     // --- Feed Methods ---
     suspend fun insertSource(source: FeedSource) = withContext(Dispatchers.IO) {
