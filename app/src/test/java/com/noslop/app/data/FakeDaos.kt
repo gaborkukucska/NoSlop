@@ -79,3 +79,63 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
     override suspend fun upsertSwipe(tracker: SwipeTracker) { swipes[tracker.itemId] = tracker }
     override suspend fun getSwipeForItem(itemId: String): SwipeTracker? = swipes[itemId]
 }
+
+/** Fake [ReactionDao] with the get-by-id / insert / delete semantics the toggle logic relies on. */
+class FakeReactionDao : ReactionDao {
+    val store = linkedMapOf<String, MeshReaction>()
+    override suspend fun insertReaction(reaction: MeshReaction) { store[reaction.id] = reaction }
+    override suspend fun getReactionById(id: String): MeshReaction? = store[id]
+    override suspend fun deleteReactionById(id: String) { store.remove(id) }
+    override fun getReactionsForPost(postId: String): Flow<List<MeshReaction>> =
+        flowOf(store.values.filter { it.postId == postId })
+    override fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> = flowOf(emptyList())
+    override suspend fun getReactionCountForPost(postId: String): Int = store.values.count { it.postId == postId }
+    override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
+    override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
+}
+
+/** Fake [VoteDao] with get-by-id / insert / delete semantics for the vote toggle logic. */
+class FakeVoteDao : VoteDao {
+    val store = linkedMapOf<String, MeshVote>()
+    override suspend fun insertVote(vote: MeshVote) { store[vote.id] = vote }
+    override suspend fun getVoteById(id: String): MeshVote? = store[id]
+    override suspend fun deleteVoteById(id: String) { store.remove(id) }
+    override fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
+        flowOf(store.values.filter { it.postId == postId })
+    override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
+}
+
+/** Fake [PeerDao] keyed by public key (REPLACE on insert). */
+class FakePeerDao : PeerDao {
+    val peers = linkedMapOf<String, Peer>()
+    override suspend fun getPeerByPublicKey(pubKey: String): Peer? = peers[pubKey]
+    override suspend fun insertPeer(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    override suspend fun updatePeer(peer: Peer) { peers[peer.publicKeyB64] = peer }
+    override suspend fun deletePeer(peer: Peer) { peers.remove(peer.publicKeyB64) }
+    override suspend fun getAllPeersList(): List<Peer> = peers.values.toList()
+    override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
+    override fun getTrustedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTrusted })
+}
+
+/** Fake [PostDao] keyed by id (REPLACE on insert). */
+class FakePostDao : PostDao {
+    val posts = linkedMapOf<String, MeshPost>()
+    override suspend fun insertPost(post: MeshPost) { posts[post.id] = post }
+    override suspend fun hasPost(id: String): Int = if (posts.containsKey(id)) 1 else 0
+    override suspend fun getPostById(id: String): MeshPost? = posts[id]
+    override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
+    override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
+    override suspend fun markPostOrphaned(id: String) {}
+    override suspend fun updatePostContent(id: String, newContent: String) {}
+}
+
+/** Fake [MessageDao] collecting stored messages. */
+class FakeMessageDao : MessageDao {
+    val messages = mutableListOf<ChatMessage>()
+    override suspend fun insertMessage(message: ChatMessage) { messages.add(message) }
+    override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
+        flowOf(messages.filter { it.chatWithPeerPub == peerPub })
+    override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())
+    override suspend fun markAsRead(peerPub: String) {}
+    override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }
+}

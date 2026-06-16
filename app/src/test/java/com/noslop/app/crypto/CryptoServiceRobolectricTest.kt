@@ -54,7 +54,7 @@ class CryptoServiceRobolectricTest {
             CryptoService.verify(payload + "!", sig, id.publicKeyB64))
 
         // Tampered signature must NOT verify.
-        val brokenSig = flipLastBase64Char(sig)
+        val brokenSig = flipFirstBase64Char(sig)
         assertFalse("tampered signature rejected",
             CryptoService.verify(payload, brokenSig, id.publicKeyB64))
 
@@ -112,11 +112,15 @@ class CryptoServiceRobolectricTest {
         assertEquals(goldenSeedHex, seedHex)
     }
 
-    /** Flips the final non-padding Base64 char so the decoded signature bytes change. */
-    private fun flipLastBase64Char(b64: String): String {
-        val i = b64.indexOfLast { it != '=' }
-        val c = b64[i]
+    /**
+     * Flips the FIRST Base64 char so the decoded signature bytes are guaranteed to change.
+     * WHY first, not last: the last data-carrying Base64 char of a 64-byte signature holds only 2
+     * significant bits + 4 padding bits, so flipping its low bit can mutate only padding and decode
+     * to identical bytes (a flaky "tamper" that still verifies). The first char is always significant.
+     */
+    private fun flipFirstBase64Char(b64: String): String {
+        val c = b64[0]
         val replacement = if (c == 'A') 'B' else 'A'
-        return b64.substring(0, i) + replacement + b64.substring(i + 1)
+        return replacement + b64.substring(1)
     }
 }
