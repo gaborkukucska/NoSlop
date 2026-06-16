@@ -37,6 +37,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val swipeTrackerDao = db.swipeTrackerDao()
 
     private val identityRepository = IdentityRepository(context, appSettingDao)
+    // WHY: content-preference persistence was extracted to its own cohesive, stateless repository
+    // (Phase 0, Stage 0.3). The methods below delegate to it so external call sites stay unchanged.
+    private val preferencesRepository = PreferencesRepository(appSettingDao, feedDao)
     private val meshPacketHandler = MeshPacketHandler(this, db)
 
     // Reactive flow for local identity updates (keys, onion address, etc)
@@ -577,136 +580,57 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    // --- User Preferences for API Pipeline ---
+    // --- User Preferences for API Pipeline (delegated to PreferencesRepository) ---
+    // These thin pass-throughs preserve the repository's public API while the persistence logic
+    // lives in the extracted, single-responsibility PreferencesRepository (Stage 0.3).
 
-    /**
-     * Save the user's selected categories during onboarding.
-     */
-    suspend fun saveSelectedCategories(categories: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(categories)
-        appSettingDao.insertSetting(AppSetting("selected_categories", json))
-        Logger.info(TAG, "Saved ${categories.size} user categories")
-    }
+    suspend fun saveSelectedCategories(categories: List<String>) =
+        preferencesRepository.saveSelectedCategories(categories)
 
-    /**
-     * Get the user's selected categories.
-     * Falls back to deriving from active feed sources if not explicitly stored.
-     */
-    suspend fun getUserSelectedCategories(): List<String> = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("selected_categories")
-        if (!json.isNullOrBlank()) {
-            try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
-        }
-        // Fallback: derive from active sources
-        feedDao.getActiveSourcesList().mapNotNull { it.category }.distinct()
-    }
+    suspend fun getUserSelectedCategories(): List<String> =
+        preferencesRepository.getUserSelectedCategories()
 
-    /**
-     * Save user keywords for a specific category (for targeted API searches).
-     */
-    suspend fun saveKeywordsForCategory(category: String, keywords: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(keywords)
-        appSettingDao.insertSetting(AppSetting("keywords_$category", json))
-    }
+    suspend fun saveKeywordsForCategory(category: String, keywords: List<String>) =
+        preferencesRepository.saveKeywordsForCategory(category, keywords)
 
-    /**
-     * Get user keywords for a category. Returns empty list if none set.
-     */
-    suspend fun getUserKeywordsForCategory(category: String): List<String> = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("keywords_$category")
-        if (!json.isNullOrBlank()) {
-            try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
-        }
-        emptyList()
-    }
+    suspend fun getUserKeywordsForCategory(category: String): List<String> =
+        preferencesRepository.getUserKeywordsForCategory(category)
 
-    suspend fun saveUserNegativeKeywords(keywords: String) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("negative_keywords", keywords))
-    }
+    suspend fun saveUserNegativeKeywords(keywords: String) =
+        preferencesRepository.saveUserNegativeKeywords(keywords)
 
-    suspend fun getUserNegativeKeywords(): List<String> = withContext(Dispatchers.IO) {
-        val str = appSettingDao.getSetting("negative_keywords") ?: ""
-        str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-    }
+    suspend fun getUserNegativeKeywords(): List<String> =
+        preferencesRepository.getUserNegativeKeywords()
 
-    suspend fun saveLanguagePreference(language: String) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("language_preference", language))
-    }
+    suspend fun saveLanguagePreference(language: String) =
+        preferencesRepository.saveLanguagePreference(language)
 
-    suspend fun getLanguagePreference(): String = withContext(Dispatchers.IO) {
-        appSettingDao.getSetting("language_preference") ?: "en"
-    }
+    suspend fun getLanguagePreference(): String =
+        preferencesRepository.getLanguagePreference()
 
-    suspend fun saveSelectedMusicGenres(genres: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(genres)
-        appSettingDao.insertSetting(AppSetting("selected_music_genres", json))
-    }
+    suspend fun saveSelectedMusicGenres(genres: List<String>) =
+        preferencesRepository.saveSelectedMusicGenres(genres)
 
-    suspend fun getSelectedMusicGenres(): List<String> = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("selected_music_genres")
-        if (!json.isNullOrBlank()) {
-            try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
-        }
-        emptyList()
-    }
+    suspend fun getSelectedMusicGenres(): List<String> =
+        preferencesRepository.getSelectedMusicGenres()
 
-    suspend fun saveSelectedVideoGenres(genres: List<String>) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(genres)
-        appSettingDao.insertSetting(AppSetting("selected_video_genres", json))
-    }
+    suspend fun saveSelectedVideoGenres(genres: List<String>) =
+        preferencesRepository.saveSelectedVideoGenres(genres)
 
-    suspend fun getSelectedVideoGenres(): List<String> = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("selected_video_genres")
-        if (!json.isNullOrBlank()) {
-            try {
-                val type = object : com.google.gson.reflect.TypeToken<List<String>>() {}.type
-                return@withContext com.google.gson.Gson().fromJson<List<String>>(json, type)
-            } catch (_: Exception) {}
-        }
-        emptyList()
-    }
+    suspend fun getSelectedVideoGenres(): List<String> =
+        preferencesRepository.getSelectedVideoGenres()
 
-    /**
-     * Save the user's creator/channel keyword list.
-     * These are passed directly as search terms into the API pipeline alongside category keywords.
-     * Stored as a flat comma-separated string (same scheme as negative_keywords) for simplicity.
-     */
-    suspend fun saveCreatorKeywords(keywords: String) = withContext(Dispatchers.IO) {
-        appSettingDao.insertSetting(AppSetting("creator_keywords", keywords))
-    }
+    suspend fun saveCreatorKeywords(keywords: String) =
+        preferencesRepository.saveCreatorKeywords(keywords)
 
-    /**
-     * Get the user's creator/channel keyword list as a parsed List<String>.
-     * Returns empty list if not set.
-     */
-    suspend fun getCreatorKeywords(): List<String> = withContext(Dispatchers.IO) {
-        val str = appSettingDao.getSetting("creator_keywords") ?: ""
-        str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-    }
+    suspend fun getCreatorKeywords(): List<String> =
+        preferencesRepository.getCreatorKeywords()
 
-    suspend fun saveUserProfile(profile: UserProfile) = withContext(Dispatchers.IO) {
-        val json = com.google.gson.Gson().toJson(profile)
-        appSettingDao.insertSetting(AppSetting("user_profile", json))
-    }
+    suspend fun saveUserProfile(profile: UserProfile) =
+        preferencesRepository.saveUserProfile(profile)
 
-    suspend fun getUserProfile(): UserProfile = withContext(Dispatchers.IO) {
-        val json = appSettingDao.getSetting("user_profile")
-        if (!json.isNullOrBlank()) {
-            try {
-                return@withContext com.google.gson.Gson().fromJson(json, UserProfile::class.java)
-            } catch (_: Exception) {}
-        }
-        UserProfile() // Default empty profile
-    }
+    suspend fun getUserProfile(): UserProfile =
+        preferencesRepository.getUserProfile()
 
     suspend fun factoryReset() = withContext(Dispatchers.IO) {
         // Clear all database tables
