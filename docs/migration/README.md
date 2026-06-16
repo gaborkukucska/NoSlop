@@ -13,6 +13,7 @@ This folder is the **single source of truth** for the migration of NoSlop from a
 | [`PHASE_0.md`](PHASE_0.md) | Detailed stages + todo checklist for the current phase | When doing the work |
 | [`DECOMPOSITION_MAP.md`](DECOMPOSITION_MAP.md) | Concrete plan for splitting the monolith files | During Phase 0 refactoring |
 | [`DECISIONS.md`](DECISIONS.md) | Architecture Decision Records (ADRs) — every binding choice + its reasoning | Before re-litigating a decision |
+| [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) | Execution runway for the owner's iOS MVP goal (identity + feed reader; CMP) | When building the iOS MVP |
 | [`PROGRESS_LOG.md`](PROGRESS_LOG.md) | Reverse-chronological journal of what was done each session | **Every time you resume** |
 
 ## How to use this hub (the working loop)

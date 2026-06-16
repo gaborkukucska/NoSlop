@@ -18,7 +18,8 @@ Adopt **Kotlin Multiplatform + Compose Multiplatform** (one language for logic *
 
 | Phase | Goal | Status | Detail doc |
 |---|---|---|---|
-| **0 — Decompose & test the core** | Split monolith files; extract `:core-*` modules; golden-vector tests for crypto/protocol. *No behavior change.* | 🟡 **In progress** | [`PHASE_0.md`](PHASE_0.md) |
+| **0 — Decompose & test the core** | Split monolith files; extract `:core-*` modules; golden-vector tests for crypto/protocol. *No behavior change.* | 🟡 **In progress** (both god-objects done; UI monoliths remain) | [`PHASE_0.md`](PHASE_0.md) |
+| **0.5 — iOS MVP (identity + feed)** | **Owner goal (2026-06-16): a runnable iOS MVP.** Scoped slice of Phase 1/2 — CMP app: generate identity + clearnet feed reader. No mesh/Tor. Free-provisioning sideload. | 🟡 **In progress** | [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) · ADR-008 |
 | **1 — KMP-ify the core** | Move core modules to `commonMain`; Room→SQLDelight; define platform seams. Android still runs on shared core. | ⚪ Not started | _TBD `PHASE_1.md`_ |
 | **2 — iOS leaf client** | Compose MP UI on iOS; `actual` Tor, Keychain, AVPlayer, QR. Pairs to a HUB. App Store compliance. | ⚪ Not started | _TBD_ |
 | **3 — Desktop / Home HUB** | JVM desktop = always-on HUB that keeps iOS reachable. Win/macOS/Linux. | ⚪ Not started | _TBD_ |
