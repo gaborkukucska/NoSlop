@@ -55,5 +55,14 @@ avoid RSS/XML parsing in the MVP. RSS (needs a multiplatform XML parser) is a fa
 - **CryptoKit ↔ Kotlin/Native interop** for Ed25519 (cinterop or a Swift bridge) — the fiddliest seam; the golden-vector test de-risks correctness once wired.
 - Free-provisioning **7-day expiry** — fine for testing; document the re-install step.
 
+## Version triple (verified from the existing build — pin the scaffold to these)
+- **Kotlin** `2.2.10` · **AGP** `9.2.1` · **Gradle** `9.4.1` · JDK 17 (Zulu) · Compose BOM `2024.09.00`.
+- ⇒ Use **Compose Multiplatform `1.9.x`** (the line that pairs with Kotlin 2.2.x) and the bundled
+  `org.jetbrains.kotlin.plugin.compose` compiler plugin. Pinning these avoids the #1 early-friction risk.
+
 ## Status
-Planning recorded (ADR-008 + this doc). Execution not yet begun — next: step 0 (scaffold).
+Planning recorded (ADR-008 + this doc); version triple pinned. **Next: step 0 — scaffold the CMP project**
+(self-contained `mvp/` so it can't destabilize the mid-refactor Android build). That step begins the heavier
+iOS toolchain work (first Kotlin/Native + Compose-iOS build downloads a large toolchain — several
+build-verify cycles expected). Steps 1–2 (portable identity core + golden `commonTest`, then the Ed25519
+`expect`/`actual`) are verifiable on JVM/Android before any iOS compile.
