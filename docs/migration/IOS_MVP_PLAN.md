@@ -60,8 +60,17 @@ avoid RSS/XML parsing in the MVP. RSS (needs a multiplatform XML parser) is a fa
 - ⇒ Use **Compose Multiplatform `1.9.x`** (the line that pairs with Kotlin 2.2.x) and the bundled
   `org.jetbrains.kotlin.plugin.compose` compiler plugin. Pinning these avoids the #1 early-friction risk.
 
-## Status — BUILT (2026-06-16). Runs need two user/env steps (below).
-The CMP MVP exists under `mvp/` and is **verified building**:
+## Status — BUILT + RUNNING ON iOS SIMULATOR + iOS-TESTED (2026-06-16). Physical iPhone = your Apple-ID signing.
+- ✅ **RUNS on the iOS 26.5 simulator** — installed & launched `com.noslop.mvp.ios`; the shared Compose UI
+  (Identity + Feed tabs) renders natively. (Downloaded the 8.5 GB iOS 26.5 sim runtime to do this.)
+- ✅ **iOS unit tests green on Kotlin/Native** (`iosSimulatorArm64Test`): `IdentityDerivationTest` (3) +
+  `IdentityGenTest` (2) — the full iOS identity pipeline (SecRandomCopyBytes keygen → SHA3 → Base32) verified,
+  golden vectors matching Android byte-for-byte.
+- **Sim build recipe** (CLI): `xcodebuild ... build`, then `xattr -cr <app>` + `codesign --force --deep
+  --sign - <app>` (cloud-sync xattrs block ad-hoc signing), then `simctl install`/`launch`. Do NOT pass
+  `CODE_SIGNING_ALLOWED=NO` — it breaks the Kotlin script phase with `undefined_arch`; ad-hoc sign instead.
+
+The CMP MVP under `mvp/` is **verified building + running + tested on iOS**:
 - ✅ **Android** compiles + assembles a debug **APK** (real BouncyCastle Ed25519 identity + live HN feed). Installable.
 - ✅ **commonTest golden vectors PASS** on the multiplatform port (`aufeq4` + onion match Android + the Python
   reference byte-for-byte) — `IdentityDerivation` is provably equivalent cross-platform.
