@@ -25,12 +25,15 @@ class FakeAppSettingDao : AppSettingDao {
  * `getUserSelectedCategories` fallback); set [activeSources] in a test. The rest are inert stubs.
  */
 class FakeFeedDao : FeedDao {
+    // Settable directly by tests, and appended to by insertSource (REPLACE-on-conflict by id).
     var activeSources: List<FeedSource> = emptyList()
 
     override suspend fun getActiveSourcesList(): List<FeedSource> = activeSources
 
     override fun getAllSources(): Flow<List<FeedSource>> = flowOf(activeSources)
-    override suspend fun insertSource(source: FeedSource) {}
+    override suspend fun insertSource(source: FeedSource) {
+        activeSources = activeSources.filterNot { it.id == source.id } + source
+    }
     override suspend fun updateSource(source: FeedSource) {}
     override suspend fun deleteSource(source: FeedSource) {}
     override fun getAllItems(): Flow<List<FeedItem>> = flowOf(emptyList())
