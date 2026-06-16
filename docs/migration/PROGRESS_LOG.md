@@ -4,6 +4,34 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — Stage 0.3 begun: NoSlopRepository decomposition (2 of ~5 extracted) 🟡
+
+Started splitting the 1,474-line `NoSlopRepository` god-object per `DECOMPOSITION_MAP.md`, lowest-
+entanglement domains first. Each extraction is mechanical + behavior-preserving (ADR-004) — logic moved
+verbatim, the facade keeps identical public methods that delegate, and the full 31-test suite is re-run
+green after each. **Pushed to the fork.**
+
+**Extracted (committed):**
+- `data/PreferencesRepository.kt` (177 lines) — content prefs: categories, per-category keywords, negative
+  keywords, language, music/video genres, creator keywords, `UserProfile`. Pure `AppSettingDao` (+ `FeedDao`
+  for the `getUserSelectedCategories` fallback). Commit `fe0cb14`.
+- `data/EngagementRepository.kt` (88 lines) — viewed history + swipe tracking over `ViewedHistoryDao` /
+  `SwipeTrackerDao` (incl. `HISTORY_LIMIT` prune cap). Commit `3ca9d58`.
+
+`NoSlopRepository`: 1,474 → **1,355** lines so far.
+
+**Remaining extractions (increasing entanglement, see `PHASE_0.md` for the list):** `SettingsRepository`
+(owns StateFlows the facade must re-expose) → `FeedRepository` (the `refreshFeeds` pipeline + private RSS/API
+fetch helpers; depends on Preferences) → `MeshSocialRepository` (~400 lines; needs identity, `meshTransport`,
+`GossipService`, `repositoryScope` — extract last). Then the other five monoliths (`MeshPacketHandler`,
+`NoSlopViewModel`, `OnboardingScreen`, `UnifiedFeedTab`, `MediaComponents`).
+
+**Note on the safety net:** the repository has no direct unit tests, so "behavior preserved" here rests on:
+verbatim moves + unchanged public method signatures + clean compile + the 31-test core suite staying green.
+A repo-level integration test is a candidate before the riskier `MeshSocialRepository` split.
+
+---
+
 ## 2026-06-16 — Stage 0.2 golden-vector suite landed (core behavior locked) 🟢
 
 **Done — 31 unit tests, all green** (`./gradlew :app:testDebugUnitTest` + dummy `-PNOSLOP_*` props):

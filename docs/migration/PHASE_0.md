@@ -62,11 +62,26 @@ Robolectric split is recorded in **ADR-007**.
 - **[infra] `Logger` couples core logic to `android.util.Log`.** Forced `unitTests.isReturnDefaultValues=true`
   (see ADR-007). This logging coupling is part of the `expect`/`actual` surface for Phase 1.
 
-## Stage 0.3 — Decompose the monolith files  ⚪ not started
+## Stage 0.3 — Decompose the monolith files  🟡 in progress
 
 Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests after each split. Order (lowest-risk / highest-value first):
 
-- [ ] `data/NoSlopRepository.kt` (1,474) → split by domain (identity, settings, feeds, preferences, mesh-social, tracking)
+- [~] `data/NoSlopRepository.kt` (1,474 → **1,355**) → split by domain. **In progress, extracted so far:**
+  - [x] `data/PreferencesRepository.kt` — categories, per-category keywords, negative keywords, language,
+        music/video genres, creator keywords, `UserProfile` (over `AppSettingDao` + `FeedDao` fallback).
+  - [x] `data/EngagementRepository.kt` — viewed history + swipe tracking (over `ViewedHistoryDao` +
+        `SwipeTrackerDao`, incl. the `HISTORY_LIMIT` prune cap).
+  - [ ] `data/SettingsRepository.kt` — media/notification settings + foreground-service flag. *(Owns the
+        `mediaSettingsFlow` / `notificationSettingsFlow` / `isForegroundServiceEnabled` StateFlows — the
+        facade must re-expose them; slightly more entangled than the two above.)*
+  - [ ] `data/FeedRepository.kt` — sources/items CRUD, `refreshFeeds` + private `fetchRssSource`/
+        `fetchApiCategory` helpers, `searchCustomFeed`, read/saved state, `clearFeedData`, aggregator
+        toggle, source recovery/migration. *(Depends on Preferences for keyword/category/lang lookups.)*
+  - [ ] `data/MeshSocialRepository.kt` — post/comment/reaction/vote/DM compose+broadcast, connection
+        handshakes, presence heartbeat. *(~400 lines, the most entangled: needs identity, `meshTransport`,
+        `GossipService`, `repositoryScope`, and many DAOs — extract last.)*
+  - Each extraction is mechanical + behavior-preserving (ADR-004): logic moved verbatim, the facade keeps
+    identical public methods that delegate, full 31-test suite re-run green after each.
 - [ ] `mesh/MeshPacketHandler.kt` (840) → one handler per packet type behind a dispatcher
 - [ ] `ui/NoSlopViewModel.kt` (1,102) → split by feature (feed, social, peers, identity/lock, tor, settings)
 - [ ] `ui/OnboardingScreen.kt` (1,236) → one composable per step + shared components
