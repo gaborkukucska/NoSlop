@@ -40,6 +40,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // WHY: content-preference persistence was extracted to its own cohesive, stateless repository
     // (Phase 0, Stage 0.3). The methods below delegate to it so external call sites stay unchanged.
     private val preferencesRepository = PreferencesRepository(appSettingDao, feedDao)
+    // WHY: viewed-history + swipe engagement tracking extracted to its own repository (Stage 0.3).
+    private val engagementRepository = EngagementRepository(viewedHistoryDao, swipeTrackerDao)
     private val meshPacketHandler = MeshPacketHandler(this, db)
 
     // Reactive flow for local identity updates (keys, onion address, etc)
@@ -61,10 +63,6 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private var presenceJob: kotlinx.coroutines.Job? = null
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
-
-    companion object {
-        const val HISTORY_LIMIT = 5000   // Max viewed history items before pruning oldest
-    }
 
     // --- State Observables ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
@@ -263,64 +261,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         feedDao.updateSavedState(itemId, isSaved)
     }
 
-    // --- Viewed History ---
+    // --- Engagement: viewed history & swipe tracking (delegated to EngagementRepository) ---
+    // Thin pass-throughs preserving the repository's public API; logic lives in the extracted,
+    // single-responsibility EngagementRepository (Stage 0.3).
 
-    /**
-     * Record that a content item has been viewed for >5 seconds.
-     * History items are never removed (except when the cap is reached, oldest are pruned).
-     */
-    suspend fun markAsViewed(itemId: String, itemType: String) = withContext(Dispatchers.IO) {
-        viewedHistoryDao.insertViewedItem(
-            ViewedHistoryItem(itemId = itemId, itemType = itemType)
-        )
-        // Prune oldest items if we exceed the history limit
-        val count = viewedHistoryDao.getCount()
-        if (count > HISTORY_LIMIT) {
-            viewedHistoryDao.pruneOldest(count - HISTORY_LIMIT)
-            Logger.info(TAG, "Pruned ${count - HISTORY_LIMIT} oldest history items (cap=$HISTORY_LIMIT)")
-        }
-    }
+    suspend fun markAsViewed(itemId: String, itemType: String) =
+        engagementRepository.markAsViewed(itemId, itemType)
 
-    /**
-     * Get all viewed item IDs for feed exclusion.
-     */
-    suspend fun getViewedItemIds(): Set<String> = withContext(Dispatchers.IO) {
-        viewedHistoryDao.getAllViewedIds().toSet()
-    }
+    suspend fun getViewedItemIds(): Set<String> =
+        engagementRepository.getViewedItemIds()
 
-    /**
-     * Reactive flow of all viewed history items (for the History filter UI).
-     */
-    val allViewedHistory: Flow<List<ViewedHistoryItem>> = viewedHistoryDao.getAllViewedItems()
+    val allViewedHistory: Flow<List<ViewedHistoryItem>> = engagementRepository.allViewedHistory
 
-    // --- Swipe Tracking ---
+    suspend fun recordSwipe(itemId: String) =
+        engagementRepository.recordSwipe(itemId)
 
-    /**
-     * Record that the user swiped away a content item.
-     * If the item has been swiped away twice, it is excluded from future aggregations.
-     * Swiping does NOT remove items from the viewed history.
-     */
-    suspend fun recordSwipe(itemId: String) = withContext(Dispatchers.IO) {
-        val existing = swipeTrackerDao.getSwipeForItem(itemId)
-        val newCount = (existing?.swipeCount ?: 0) + 1
-        swipeTrackerDao.upsertSwipe(
-            SwipeTracker(
-                itemId = itemId,
-                swipeCount = newCount,
-                lastSwipedAt = System.currentTimeMillis()
-            )
-        )
-        if (newCount >= 2) {
-            Logger.info(TAG, "Item $itemId swiped away $newCount times — excluded from future feeds")
-        }
-    }
-
-    /**
-     * Get item IDs that have been swiped away >= 2 times.
-     */
-    suspend fun getSwipeExcludedIds(): Set<String> = withContext(Dispatchers.IO) {
-        swipeTrackerDao.getExcludedIds().toSet()
-    }
+    suspend fun getSwipeExcludedIds(): Set<String> =
+        engagementRepository.getSwipeExcludedIds()
 
     /**
      * Clears feed items and dynamically generated API sources to prepare for a fresh fetch
