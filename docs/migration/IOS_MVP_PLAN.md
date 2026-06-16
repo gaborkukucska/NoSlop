@@ -91,9 +91,15 @@ The CMP MVP under `mvp/` is **verified building + running + tested on iOS**:
      *Settings → General → VPN & Device Management → trust* the developer cert.
    - Free provisioning ⇒ the app **expires after 7 days**; just re-run from Xcode to refresh.
 
+### Done since (2026-06-17)
+- ✅ **Real iOS Ed25519 via CryptoKit** (`Curve25519.Signing`), bridged Swift→Kotlin (`Ed25519KeyProvider`
+  injected at `iOSApp.init`). Verified on the simulator: the identity renders a genuine CryptoKit public key
+  (no demo-key warning). iOS is now real, like Android.
+- ✅ **Fixed a Compose crash** found by running on-device: added `CADisableMinimumFrameDurationOnPhone` to
+  Info.plist (PlistSanityCheck threw on a background thread → intermittent home-screen crashes).
+
 ### Known follow-ups
-- **Real iOS Ed25519** via CryptoKit `Curve25519.Signing` (a small Swift/@objc bridge) — replaces the iOS
-  demo key so the identity is fully real on iPhone. (Android is already real.)
-- RSS feed sources (multiplatform XML) beyond the JSON HN feed; persist identity to Keychain.
+- RSS feed sources (multiplatform XML) beyond the JSON HN feed; persist the keypair to **Keychain** (the
+  CryptoKit bridge currently returns a fresh public key each call — wire it to a stored private key next).
 - The xcodegen↔Xcode-26.5 CLI-destination quirk (`SUPPORTED_PLATFORMS` empty from `xcodebuild`) — opening in
   the Xcode GUI is the supported path; revisit a newer generator if CLI builds are wanted in CI.
