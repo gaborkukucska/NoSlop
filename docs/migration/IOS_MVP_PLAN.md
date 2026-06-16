@@ -60,9 +60,31 @@ avoid RSS/XML parsing in the MVP. RSS (needs a multiplatform XML parser) is a fa
 - ⇒ Use **Compose Multiplatform `1.9.x`** (the line that pairs with Kotlin 2.2.x) and the bundled
   `org.jetbrains.kotlin.plugin.compose` compiler plugin. Pinning these avoids the #1 early-friction risk.
 
-## Status
-Planning recorded (ADR-008 + this doc); version triple pinned. **Next: step 0 — scaffold the CMP project**
-(self-contained `mvp/` so it can't destabilize the mid-refactor Android build). That step begins the heavier
-iOS toolchain work (first Kotlin/Native + Compose-iOS build downloads a large toolchain — several
-build-verify cycles expected). Steps 1–2 (portable identity core + golden `commonTest`, then the Ed25519
-`expect`/`actual`) are verifiable on JVM/Android before any iOS compile.
+## Status — BUILT (2026-06-16). Runs need two user/env steps (below).
+The CMP MVP exists under `mvp/` and is **verified building**:
+- ✅ **Android** compiles + assembles a debug **APK** (real BouncyCastle Ed25519 identity + live HN feed). Installable.
+- ✅ **commonTest golden vectors PASS** on the multiplatform port (`aufeq4` + onion match Android + the Python
+  reference byte-for-byte) — `IdentityDerivation` is provably equivalent cross-platform.
+- ✅ **iOS targets compile** (`iosArm64`, `iosSimulatorArm64`): shared Compose UI + Ktor Darwin + Security cinterop.
+- ✅ **`iosApp` Xcode project** generated (xcodegen) with the Gradle `embedAndSignAppleFrameworkForXcode` phase wired.
+
+### Finish line — get it onto the iPhone (the 2 steps I can't do for you)
+1. **Install the iOS platform component.** Xcode 26.5 here has the iOS 26.5 *SDK* but not the *runtime/device
+   support*, which blocks all iOS runs. Fix: **Xcode → Settings → Components → install iOS 26.5** (or run
+   `xcodebuild -downloadPlatform iOS`). This is a large download.
+2. **Open, sign, run.**
+   - Open `mvp/iosApp/iosApp.xcodeproj` in Xcode. *(If destinations look empty from CLI, the GUI resolves
+     them; if needed, re-run `cd mvp/iosApp && xcodegen generate`.)*
+   - Select the **iosApp** target → **Signing & Capabilities** → check *Automatically manage signing* →
+     **Team = your personal Apple ID** (add it under Xcode → Settings → Accounts). If the bundle id
+     `com.noslop.mvp.ios` is taken, change it to something unique.
+   - Plug in your iPhone, pick it as the run destination, **⌘R**. First launch: on the phone,
+     *Settings → General → VPN & Device Management → trust* the developer cert.
+   - Free provisioning ⇒ the app **expires after 7 days**; just re-run from Xcode to refresh.
+
+### Known follow-ups
+- **Real iOS Ed25519** via CryptoKit `Curve25519.Signing` (a small Swift/@objc bridge) — replaces the iOS
+  demo key so the identity is fully real on iPhone. (Android is already real.)
+- RSS feed sources (multiplatform XML) beyond the JSON HN feed; persist identity to Keychain.
+- The xcodegen↔Xcode-26.5 CLI-destination quirk (`SUPPORTED_PLATFORMS` empty from `xcodebuild`) — opening in
+  the Xcode GUI is the supported path; revisit a newer generator if CLI builds are wanted in CI.

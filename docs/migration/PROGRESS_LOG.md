@@ -4,6 +4,31 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-16 — iOS MVP BUILT: runnable Compose Multiplatform app (identity + feed) 🟢
+
+Owner goal "an iOS MVP I can test on my iPhone" → built the CMP app under `mvp/` (Phase 0.5, ADR-008).
+Commit `4a8a5b4`. **Verified this session:**
+- **Android**: compiles + assembles a debug **APK** — real BouncyCastle Ed25519 identity + live Hacker News
+  feed (Ktor/OkHttp). A real, installable app.
+- **Golden vectors PASS on the multiplatform port** (`commonTest`): `deriveTripcode`→`aufeq4` + onion match
+  the Android suite and the Python reference byte-for-byte. `IdentityDerivation` (SHA3 via KotlinCrypto +
+  Base32) is provably equivalent cross-platform — the ADR-005/008 conformance guarantee, realized.
+- **iOS compiles** (`iosArm64` + `iosSimulatorArm64`): shared Compose UI, Ktor Darwin, Security cinterop —
+  Kotlin/Native toolchain downloaded and built clean.
+- **`iosApp` Xcode project** generated (xcodegen) with the Gradle embed/sign framework phase.
+
+Stack: KMP + Compose Multiplatform; Kotlin 2.2.10 / AGP 9.2.1 / Gradle 9.4.1 / Compose MP 1.9.0
+(`android.builtInKotlin=false` for the AGP-9 + KMP-application combo). `expect`/`actual` seams: `KeyProvider`
+(Android real Ed25519; iOS labeled secure-random **demo key** — real CryptoKit Curve25519 is the next step)
+and the Ktor engine. The existing `app/` Android monolith is untouched; `mvp/` is the cross-platform seed.
+
+**To actually run on the iPhone — 2 user/env steps (I can't do these):** (1) install the iOS 26.5 platform
+component in Xcode (this Xcode has the SDK but not the runtime/device-support — blocks all iOS runs; large
+download, kicked off this session), (2) open `iosApp.xcodeproj`, set signing Team to a free Apple ID, Run on
+device (trust the cert on-phone; 7-day expiry). Steps + follow-ups in `IOS_MVP_PLAN.md`.
+
+---
+
 ## 2026-06-16 — Stage 0.3: MeshPacketHandler split into dispatcher + 7 handlers (item #2 DONE) 🟢
 
 Decomposed the 840-line `MeshPacketHandler` (DECOMPOSITION_MAP item #2). It was a dispatcher fused to 21
