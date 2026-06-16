@@ -80,20 +80,56 @@ Follow `DECOMPOSITION_MAP.md`. One file → many, mechanically, re-running tests
         Preferences; onboarding check injected as a lambda. **Tested** (toggles + recovery branches);
         the network pipeline (`refreshFeeds`/`searchCustomFeed`) is deferred to Phase 1 — needs
         `FeedParser`/`PublicApiService` made injectable before it can be unit-tested.
-  - [ ] `data/MeshSocialRepository.kt` — post/comment/reaction/vote/DM compose+broadcast, connection
-        handshakes, presence heartbeat. **The last and most entangled (~400 lines):** needs identity
-        (`getLocalIdentity`/`getLocalHandle`/`getUserProfile`), `meshTransport`, `GossipService`,
-        `repositoryScope`, the `_incomingRequestFlow`/`_identityUpdateFlow`, and many DAOs. Has circular
-        lifecycle touchpoints (`logout` → `broadcastUserExit`; `saveLocalIdentity` → presence heartbeat),
-        so it needs a deliberate plan, not a mechanical sweep. Tests will need Robolectric (signs packets
-        via `CryptoService` → `android.util.Base64`). **Recommended as its own focused session.**
+  - [ ] `data/MeshSocialRepository.kt` — the last and most entangled (~400 lines). **Extraction plan
+        finalized 2026-06-16 — see "MeshSocialRepository — finalized extraction plan" below.** Not yet
+        executed (awaiting greenlight).
   - Each extraction is mechanical + behavior-preserving (ADR-004): logic moved verbatim, the facade keeps
     identical public methods that delegate, full suite re-run green after each.
 
   **Testing approach (added 2026-06-16):** extractions now ship WITH unit tests. Repositories are tested
   pure-JVM against stateful in-memory DAO fakes (`app/src/test/.../data/FakeDaos.kt`) — no Robolectric,
   no SQLite. This asserts the *logic* (JSON round-trips, fallbacks, prune-on-cap, flow-sync) without
-  depending on Room's SQL. Suite is now **53 tests** (was 31 at end of Stage 0.2).
+  depending on Room's SQL. Suite is now **60 tests** (was 31 at end of Stage 0.2).
+
+#### MeshSocialRepository — finalized extraction plan
+_Decisions agreed 2026-06-16. Recorded so they are not re-litigated. Status: **planned, not executed.**_
+
+- **Scope (moves out of the facade):** `composeAndBroadcastPost`, `reactToFeedItem(WithType)`,
+  `composeAndBroadcastComment`, `reactToMeshPost`, `voteToMeshPost`, `reactToComment`, `voteToComment`,
+  `reactToChat`, `sendDirectMessage`, `markMessagesAsRead`, `sendConnectionRequest`,
+  `acceptConnectionRequest`, `togglePeerTrust`, `deletePeer`, `setIncomingRequest`/`clearIncomingRequest`,
+  `broadcastIdentityUpdate`, `broadcastUserExit`, `broadcastUserExitAsync`, **and the presence heartbeat**
+  (`startPresenceHeartbeat` + `presenceJob` — DECISION: moves). Also the social observable flows
+  (`allMeshPosts`, `conversations`, `getCommentsForPost`/`getReactionsFor*`/`getVotesFor*`/`getMessagesWithPeer`).
+  **Owns** `_incomingRequestFlow` (facade re-exposes `incomingRequestFlow`).
+- **Constructor (DECISION: pass `db`, not 10 explicit DAOs):**
+  `MeshSocialRepository(db: NoSlopDatabase, meshTransport: MeshTransport, scope: CoroutineScope,
+  getLocalIdentity: suspend () -> CryptoService.IdentityKeys?, getLocalHandle: suspend () -> String,
+  getUserProfile: suspend () -> UserProfile)`. Shares the facade's `repositoryScope` (preserves
+  cancellation semantics). `GossipService` stays a global object; `broadcast()` calls move as-is.
+- **Stays in the facade (~250–350-line orchestrator after this):** identity delegations + `_identityUpdateFlow`;
+  lifecycle wiring in `saveLocalIdentity` (GossipService/MediaManager/Tor init); `meshTransport`;
+  `meshPacketHandler` + `handleIncomingPacket` (MeshPacketHandler is its own later split); `factoryReset`;
+  peer observables; **notifications** (`markNotification*` + `allNotifications`/`unreadNotificationCount` —
+  DECISION: leave on facade, not mesh-social). The facade's `logout`/`updateLocalHandle`/`saveLocalIdentity`/
+  `unlock` delegate their broadcast/presence triggers into the new repo.
+- **Why injected accessors:** identity lifecycle *triggers* mesh broadcasts (`logout`→`broadcastUserExit`,
+  `updateLocalHandle`→`broadcastIdentityUpdate`, `saveLocalIdentity`/`unlock`→presence). Passing
+  identity/handle/profile as suspend lambdas keeps MeshSocial decoupled from `IdentityRepository`/
+  `PreferencesRepository` (same pattern as `FeedRepository`'s injected onboarding check).
+- **Tests (need Robolectric `@Config(sdk=[34])` — signing/encrypt → `android.util.Base64`):** new stateful
+  fakes for the toggle-semantics DAOs (reaction/vote/chatReaction/commentVote: `getById`→`insert`/`delete`)
+  plus peer/post/message fakes. High-value assertions (first coverage of this code): reaction/vote add↔remove
+  toggle by existing-row presence; signed local `MeshPost` persisted; DM encrypt→store→`sendPacket`;
+  `sendConnectionRequest` creates a *pending* peer + sends handshake; `acceptConnectionRequest` flips
+  `isTrusted` and clears `_incomingRequestFlow`; `reactToFeedItemWithType` lazily creates the clearnet anchor.
+  DM round-trip uses two real `generateIdentity()` parties. `GossipService.broadcast` is a safe no-op when
+  uninitialized, so broadcast-path methods are asserted via their local DB writes.
+- **Execution (two commits, given it's the security hot path with weak prior coverage):**
+  (1) verbatim extract → compile + existing 60 tests green + public API unchanged;
+  (2) add `MeshSocialRepositoryTest` (Robolectric + new fakes). Then update the hub and push.
+- **Completes DECOMPOSITION_MAP item #1** (`NoSlopRepository`). Next Stage 0.3 target: `MeshPacketHandler`.
+
 - [ ] `mesh/MeshPacketHandler.kt` (840) → one handler per packet type behind a dispatcher
 - [ ] `ui/NoSlopViewModel.kt` (1,102) → split by feature (feed, social, peers, identity/lock, tor, settings)
 - [ ] `ui/OnboardingScreen.kt` (1,236) → one composable per step + shared components
