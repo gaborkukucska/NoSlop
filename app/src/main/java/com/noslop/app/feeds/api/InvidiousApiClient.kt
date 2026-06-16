@@ -20,23 +20,14 @@ object InvidiousApiClient {
     private val gson = Gson()
     private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
 
-    // FIX: Standard Browser User-Agent to prevent Cloudflare 403 Forbidden blocks on public instances.
     private const val BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     /**
      * Dedicated probe client for resolveStreamUrl().
-     *
      * Built once from scratch (not from clearnetClient.newBuilder()) so it has
      * NO interceptors — in particular, clearnetClient's browser User-Agent
-     * interceptor does NOT apply here.  OkHttpClient.Builder.interceptors()
-     * returns an unmodifiable snapshot, so calling .clear() on it throws
-     * UnsupportedOperationException silently caught by the JVM, meaning the
-     * workaround of `client.newBuilder().apply { interceptors().clear() }` is
-     * a no-op and the browser UA leaks through.  Building from scratch avoids
-     * this entirely.
-     *
+     * interceptor does NOT apply here. Building from scratch avoids UA leakage.
      * Short per-instance timeouts so dead instances are skipped quickly.
-     * Shares clearnetClient's DNS resolver for DoH fallback support.
      */
     private val probeClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
@@ -70,10 +61,7 @@ object InvidiousApiClient {
      * Per-instance failure tracking for the current session.
      * Maps instance URL → timestamp of first consecutive failure.
      * An instance is skipped (blacklisted) for INSTANCE_COOLDOWN_MS after its
-     * first failure — this stops a dead instance from being hammered by every
-     * concurrent resolveStreamUrl call in the same scroll session.
-     * The cooldown is intentionally short (5 min) so a transiently-down
-     * instance is retried eventually rather than permanently excluded.
+     * first failure.
      */
     private val instanceFailureTime = ConcurrentHashMap<String, Long>()
     private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L // 5 minutes
@@ -84,8 +72,6 @@ object InvidiousApiClient {
     }
 
     private fun markInstanceFailed(instance: String) {
-        // putIfAbsent so the first failure timestamp is preserved (not overwritten
-        // by a later concurrent call that also saw this instance fail).
         instanceFailureTime.putIfAbsent(instance, System.currentTimeMillis())
     }
 
@@ -130,8 +116,6 @@ object InvidiousApiClient {
                     if (type != "https") continue
 
                     val uri = details.get("uri")?.asString ?: continue
-
-                    // Prefer instances with API enabled
                     val apiEnabled = try { details.get("api")?.asBoolean ?: false } catch (_: Exception) { false }
 
                     val monitor = details.getAsJsonObject("monitor")
@@ -139,9 +123,9 @@ object InvidiousApiClient {
 
                     if (!isDown) {
                         if (apiEnabled) {
-                            liveInstances.add(0, uri) // API-enabled instances first
+                            liveInstances.add(0, uri)
                         } else {
-                            liveInstances.add(uri) // Non-API instances as backup
+                            liveInstances.add(uri)
                         }
                     }
                 } catch (e: Exception) {
@@ -150,7 +134,6 @@ object InvidiousApiClient {
             }
 
             if (liveInstances.isNotEmpty()) {
-                // Take top 12 to give more candidates without excessive retry cost
                 val result = liveInstances.take(12)
                 cachedInstances = result
                 cacheTimestamp = now
@@ -168,7 +151,7 @@ object InvidiousApiClient {
 
     /**
      * Returns the best available Invidious instance synchronously, for use from non-suspending
-     * contexts (e.g. VideoPlayer's WebView factory block).
+     * contexts.
      */
     fun getPrimaryInstance(): String {
         val instances = cachedInstances ?: FALLBACK_INSTANCES
@@ -182,16 +165,19 @@ object InvidiousApiClient {
     fun resolveStreamUrl(videoId: String): String? {
         val allInstances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
 
-        val (healthy, cooling) = allInstances.partition { !isInstanceCoolingDown(it) }
-        val instances = healthy + cooling
+        // FIX: Only try healthy instances. If all instances have failed recently (cooldown),
+        // fast-fail immediately to the WebView embed. This prevents the UI from locking up 
+        // for 45 seconds per video trying to probe dead instances!
+        val healthy = allInstances.filter { !isInstanceCoolingDown(it) }
 
         if (healthy.isEmpty()) {
-            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, trying anyway")
+            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, fast-failing to WebView embed")
+            return null
         }
 
         val deadlineMs = System.currentTimeMillis() + 45_000L
 
-        for (instance in instances) {
+        for (instance in healthy) {
             if (System.currentTimeMillis() >= deadlineMs) {
                 Logger.warn(TAG, "resolveStreamUrl: deadline exceeded for $videoId, aborting")
                 break
@@ -380,20 +366,18 @@ object InvidiousApiClient {
                     if (desc != null) append(desc)
                 }
 
-                // FIX: Actually construct the canonical YouTube URL so the VideoPlayer and 
-                // "View on Clearnet" mechanisms know what to do with the feed item! 
                 val ytUrl = "https://www.youtube.com/watch?v=$videoId"
 
                 items.add(FeedItem(
-                    id = "invidious_$videoId",
+                    id = "yt_api_v2_$videoId",
                     sourceId = sourceId,
                     title = title,
-                    url = ytUrl,      // <--- Used to be hardcoded ""
+                    url = ytUrl,
                     author = author,
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
                     publishedAt = published ?: System.currentTimeMillis(),
-                    mediaUrl = ytUrl, // <--- Used to be hardcoded ""
+                    mediaUrl = ytUrl,
                     mediaType = "video",
                     apiSource = "youtube"
                 ))
