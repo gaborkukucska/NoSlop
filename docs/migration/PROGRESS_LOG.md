@@ -4,6 +4,35 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 begins: wire protocol ported to shared code (byte-identical on iOS + Android) 🟢
+
+Toward Android parity. The CMP MVP (`mvp/`) grew real capabilities and now holds the first piece of the
+**shared mesh core**: the signed-JSON **wire protocol** (the ADR-005 interop contract) lives in `commonMain`.
+
+- `mvp/.../commonMain/Packets.kt` — `NetworkPacket` envelope + core payloads (Post, Media, Encrypted/DM,
+  Reaction, Vote, Comment, PeerHandshake), mirroring the Android `mesh/Packets.kt` with the SAME snake_case
+  wire keys, via kotlinx.serialization. `WireJson` config matches Gson's on-the-wire behavior
+  (`encodeDefaults=true`, `explicitNulls=false`, `ignoreUnknownKeys`). Commit `4ddc3bd`.
+- `WireProtocolTest` (8 golden vectors) ported from the Android suite, **green on BOTH JVM/Android and
+  iosSimulatorArm64/Kotlin-Native** — a cross-platform node is byte-compatible with existing Android nodes.
+  Documented improvement: absent `action` now yields its default (kotlinx runs the constructor) vs Gson's
+  null; wire format unchanged → still conformant.
+
+**MVP capabilities to date** (all on real iPhone hardware, verified): persistent CryptoKit Ed25519 identity
+(Keychain) + editable persistent handle (NSUserDefaults), a real RSS/Atom feed aggregator (dependency-free
+multiplatform parser), and now the shared wire protocol. **17 tests** green on both JVM and Kotlin/Native.
+
+**Next toward parity (per the plan):** (2) Ed25519 **sign/verify** as expect/actual (iOS CryptoKit / Android
+BouncyCastle), proven against golden vectors — makes an iOS node's posts verifiable by Android nodes; then
+(3) DM crypto + the gossip TTL/dedup/rate-limit logic; then persistence (SQLDelight); then transport + the
+always-on **HUB** (ADR-002, the hard infra piece that makes a working iOS mesh possible).
+
+**Recurring papercut:** cloud-sync keeps creating `"<name> 2.kt"` duplicate source files (one broke the Native
+build this session: `Platform.ios 2.kt`). Sweep `find composeApp/src -name "* [0-9].*" -delete` if the build
+hits "Redeclaration"/"Conflicting overloads".
+
+---
+
 ## 2026-06-16 — iOS MVP BUILT: runnable Compose Multiplatform app (identity + feed) 🟢
 
 Owner goal "an iOS MVP I can test on my iPhone" → built the CMP app under `mvp/` (Phase 0.5, ADR-008).
