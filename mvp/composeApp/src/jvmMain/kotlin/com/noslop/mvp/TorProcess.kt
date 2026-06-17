@@ -25,8 +25,9 @@ class TorProcess(
         torBinary
             ?: System.getenv("NOSLOP_TOR_BINARY")
             ?: sequenceOf(
-                File("build/tor/tor"),
-                File(System.getProperty("user.dir"), "build/tor/tor"),
+                File("build/tor/tor/tor"),                                   // bundled by the downloadTor task
+                File(System.getProperty("user.dir"), "build/tor/tor/tor"),
+                File(System.getProperty("user.dir"), "composeApp/build/tor/tor/tor"),
             ).firstOrNull { it.canExecute() }?.absolutePath
             ?: "tor" // last resort: PATH
 

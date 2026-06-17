@@ -4,6 +4,31 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 9e: `downloadTor` Gradle task — tor is bundled reproducibly 🟢
+
+Packaging for the bundled tor (owner's choice over committing per-OS binaries): a Gradle task fetches the
+**pinned Tor Expert Bundle** for the host platform, so each machine downloads only the binary it needs and
+nothing heavyweight is committed.
+
+- `downloadTor` task (`composeApp/build.gradle.kts`): resolves host platform (`macos/linux/windows` ×
+  `aarch64/x86_64`), downloads `tor-expert-bundle-<platform>-14.5.1.tar.gz`, extracts the `tor/` subtree
+  (binary + `libevent` dylib + pluggable transports) into `build/tor/`, marks executable, and on macOS
+  **ad-hoc codesigns** the binary + dylib + PTs (Gatekeeper SIGKILLs unsigned downloads — `exit=137` until
+  signed). Written with plain `java.io` + `ProcessBuilder` (no Project execution-time APIs → Gradle-9 safe).
+- `runHub` now `dependsOn(downloadTor)` and sets `NOSLOP_TOR_BINARY` to the bundled path, so
+  `./gradlew :composeApp:runHub --args="9876 tor"` works out-of-the-box. `build/` is gitignored — the 16 MB
+  binary is never committed. Version pinned for reproducibility (bump deliberately; sha256/signature
+  verification is a noted hardening TODO).
+- **Verified end-to-end:** `downloadTor` → bundled `build/tor/tor/tor` runs (`Tor version 0.4.8.16`); then
+  `runHub … tor` with **no override** launched that bundled binary, bootstrapped 0→100% on the real network,
+  and published a fresh onion `xxoeamuelpwgq…qdxdvqd.onion:9876`.
+
+Desktop Tor (ADR-009 piece 2) is now complete: bundled, reproducible, and producing live onions. **Remaining
+for full phone-over-Tor: iOS Tor.framework/iCepa** (start Tor on launch → feed its SOCKS port + the hub onion
+to `MeshClient.connect`; the dialing side is done).
+
+---
+
 ## 2026-06-18 — Phase 1 step 9d: HUB launches bundled `tor` + publishes a LIVE onion 🟢
 
 The desktop HUB now stands up Tor itself and publishes a **real v3 hidden service on the live Tor network** —
