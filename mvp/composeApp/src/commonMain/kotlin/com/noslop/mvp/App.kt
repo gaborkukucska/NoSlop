@@ -88,6 +88,13 @@ private fun IdentityScreen() {
                     fontWeight = FontWeight.Bold,
                     color = if (signOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )
+                val dmOk = remember { DmSelfTest.run() }
+                Text(
+                    if (dmOk) "DM crypto ✓ (X25519 · SHA3-256 · ChaCha20-Poly1305)" else "DM crypto self-test failed",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (dmOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
                 if (!identity.isRealKeypair) {
                     Text(
                         "⚠︎ ephemeral fallback key — secure storage not wired here.",

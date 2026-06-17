@@ -100,4 +100,37 @@ actual object Signer {
     } catch (e: Exception) { false }
 }
 
+/**
+ * Android DM crypto via BouncyCastle: X25519 key agreement + ChaCha20-Poly1305 (IETF, 12-byte nonce).
+ * Raw bytes only — SHA3 / base64 / UTF-8 are handled in commonMain ([DmCrypto] / [encryptDM]).
+ */
+actual object DmCrypto {
+    private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()
+    actual val isAvailable: Boolean = true
+
+    actual fun x25519SharedSecret(myPrivPkcs8: ByteArray, theirPubX509: ByteArray): ByteArray = try {
+        val kf = java.security.KeyFactory.getInstance("X25519", bc)
+        val priv = kf.generatePrivate(java.security.spec.PKCS8EncodedKeySpec(myPrivPkcs8))
+        val pub = kf.generatePublic(java.security.spec.X509EncodedKeySpec(theirPubX509))
+        javax.crypto.KeyAgreement.getInstance("X25519", bc).run {
+            init(priv); doPhase(pub, true); generateSecret()
+        }
+    } catch (e: Exception) { ByteArray(0) }
+
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray = try {
+        cipher(javax.crypto.Cipher.ENCRYPT_MODE, key, nonce).doFinal(plaintext) // out = ciphertext || 16-byte tag
+    } catch (e: Exception) { ByteArray(0) }
+
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? = try {
+        cipher(javax.crypto.Cipher.DECRYPT_MODE, key, nonce).doFinal(ciphertextAndTag)
+    } catch (e: Exception) { null }
+
+    actual fun randomBytes(n: Int): ByteArray = ByteArray(n).also { SecureRandom().nextBytes(it) }
+
+    private fun cipher(mode: Int, key: ByteArray, nonce: ByteArray): javax.crypto.Cipher =
+        javax.crypto.Cipher.getInstance("ChaCha20-Poly1305", bc).apply {
+            init(mode, javax.crypto.spec.SecretKeySpec(key, "ChaCha20"), javax.crypto.spec.IvParameterSpec(nonce))
+        }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)

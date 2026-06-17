@@ -99,10 +99,58 @@ actual object Signer {
         val s = IosSignerBridge.signer ?: return false
         return s.verifyBase64(Base64.encode(payload), Base64.encode(signature), Base64.encode(raw32(x509PublicKey)))
     }
+}
 
-    /** The raw 32-byte Ed25519 key is the last 32 bytes of a PKCS#8 (48-byte) / X.509 (44-byte) encoding. */
-    private fun raw32(encoded: ByteArray): ByteArray =
-        if (encoded.size >= 32) encoded.copyOfRange(encoded.size - 32, encoded.size) else encoded
+/** The raw 32-byte Curve25519 key is the last 32 bytes of a PKCS#8 (48-byte) / X.509 (44-byte) encoding. */
+private fun raw32(encoded: ByteArray): ByteArray =
+    if (encoded.size >= 32) encoded.copyOfRange(encoded.size - 32, encoded.size) else encoded
+
+/**
+ * Swift→Kotlin bridge for CryptoKit DM crypto: X25519 key agreement + ChaCha20-Poly1305. Like [IosSigner],
+ * CryptoKit takes RAW 32-byte keys and we exchange base64 strings across the bridge. SHA3 stays in commonMain.
+ */
+interface IosDm {
+    /** Raw 32-byte X25519 shared secret (base64), from my raw private key + their raw public key. "" on failure. */
+    fun sharedSecretBase64(myPrivRawBase64: String, theirPubRawBase64: String): String
+    /** ChaCha20-Poly1305 seal → base64(ciphertext || 16-byte tag). "" on failure. */
+    fun sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String): String
+    /** ChaCha20-Poly1305 open of base64(ciphertext||tag) → base64(plaintext); null on auth failure. */
+    fun openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String): String?
+}
+
+object IosDmBridge {
+    var dm: IosDm? = null
+}
+
+/** iOS DM crypto: strip PKCS#8/X.509 headers to raw 32-byte keys, then CryptoKit via the bridge. */
+@OptIn(ExperimentalEncodingApi::class)
+actual object DmCrypto {
+    actual val isAvailable: Boolean get() = IosDmBridge.dm != null
+
+    actual fun x25519SharedSecret(myPrivPkcs8: ByteArray, theirPubX509: ByteArray): ByteArray {
+        val d = IosDmBridge.dm ?: return ByteArray(0)
+        val out = d.sharedSecretBase64(Base64.encode(raw32(myPrivPkcs8)), Base64.encode(raw32(theirPubX509)))
+        return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
+    }
+
+    actual fun chachaSeal(key: ByteArray, nonce: ByteArray, plaintext: ByteArray): ByteArray {
+        val d = IosDmBridge.dm ?: return ByteArray(0)
+        val out = d.sealBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(plaintext))
+        return if (out.isEmpty()) ByteArray(0) else Base64.decode(out)
+    }
+
+    actual fun chachaOpen(key: ByteArray, nonce: ByteArray, ciphertextAndTag: ByteArray): ByteArray? {
+        val d = IosDmBridge.dm ?: return null
+        val out = d.openBase64(Base64.encode(key), Base64.encode(nonce), Base64.encode(ciphertextAndTag)) ?: return null
+        return Base64.decode(out)
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    actual fun randomBytes(n: Int): ByteArray {
+        val bytes = ByteArray(n)
+        bytes.usePinned { SecRandomCopyBytes(kSecRandomDefault, n.convert(), it.addressOf(0)) }
+        return bytes
+    }
 }
 
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)

@@ -74,12 +74,49 @@ class CryptoKitSigner: IosSigner {
     }
 }
 
+/// CryptoKit DM crypto, bridged into the shared core: X25519 key agreement + ChaCha20-Poly1305 (IETF,
+/// 12-byte nonce). Keys arrive as raw 32-byte values; SHA3 of the shared secret is done in Kotlin commonMain.
+class CryptoKitDm: IosDm {
+    func sharedSecretBase64(myPrivRawBase64: String, theirPubRawBase64: String) -> String {
+        guard let privData = Data(base64Encoded: myPrivRawBase64),
+              let pubData = Data(base64Encoded: theirPubRawBase64),
+              let priv = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: privData),
+              let pub = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: pubData),
+              let secret = try? priv.sharedSecretFromKeyAgreement(with: pub) else { return "" }
+        // Raw X25519 output (not the HKDF-derived form) to match BouncyCastle / the Python golden vector.
+        return secret.withUnsafeBytes { Data($0).base64EncodedString() }
+    }
+
+    func sealBase64(keyBase64: String, nonceBase64: String, plaintextBase64: String) -> String {
+        guard let keyData = Data(base64Encoded: keyBase64),
+              let nonceData = Data(base64Encoded: nonceBase64),
+              let plaintext = Data(base64Encoded: plaintextBase64),
+              let nonce = try? ChaChaPoly.Nonce(data: nonceData),
+              let box = try? ChaChaPoly.seal(plaintext, using: SymmetricKey(data: keyData), nonce: nonce)
+        else { return "" }
+        return (box.ciphertext + box.tag).base64EncodedString()
+    }
+
+    func openBase64(keyBase64: String, nonceBase64: String, ciphertextAndTagBase64: String) -> String? {
+        guard let keyData = Data(base64Encoded: keyBase64),
+              let nonceData = Data(base64Encoded: nonceBase64),
+              let ctAndTag = Data(base64Encoded: ciphertextAndTagBase64), ctAndTag.count >= 16,
+              let nonce = try? ChaChaPoly.Nonce(data: nonceData) else { return nil }
+        let ciphertext = ctAndTag.prefix(ctAndTag.count - 16)
+        let tag = ctAndTag.suffix(16)
+        guard let box = try? ChaChaPoly.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag),
+              let plaintext = try? ChaChaPoly.open(box, using: SymmetricKey(data: keyData)) else { return nil }
+        return plaintext.base64EncodedString()
+    }
+}
+
 @main
 struct iOSApp: App {
     init() {
         // Wire the CryptoKit bridges before any identity / signing happens.
         IosKeychainBridge.shared.keychain = KeychainIdentity()
         IosSignerBridge.shared.signer = CryptoKitSigner()
+        IosDmBridge.shared.dm = CryptoKitDm()
     }
 
     var body: some Scene {
