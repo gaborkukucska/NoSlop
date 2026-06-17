@@ -4,6 +4,39 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 5: mesh routing engine + leaf↔HUB relay model (transport-agnostic) 🟢
+
+The shared core can now **route**. A node ingests a packet, runs it through the firewall + signature
+check, persists it, and gossips it onward — and two "leaf" nodes that aren't directly connected reach each
+other only through a "hub", which is exactly the ADR-002 model. This is the hard *conceptual* half of the
+transport work, proven in pure shared code before any socket/Tor exists. **This first slice deliberately does
+NOT include real networking** (Tor hidden service, sockets, the desktop HUB build) — those plug in behind the
+`Transport` seam next.
+
+- **`Transport`** (seam): `send(toLink)` / `onReceive` / `links`. A "HUB" is not a type — it's just a node
+  with many links; a leaf has one. Real Tor/socket transports become `actual`s later; routing is unchanged.
+- **`InMemoryTransport`**: in-process transport (no sockets) — delivers synchronously, so a whole
+  leaf→hub→leaf propagation completes within the originating `suspend` call → deterministic tests.
+- **`MeshNode`**: the engine that finally wires together the whole Phase-1 stack — wire protocol +
+  [MeshFirewall] (TTL/dedup/rate-limit) + signature verify + a pluggable [MeshSink] for persistence. Receive
+  path mirrors Android `GossipService.processIncoming`+`forwardPacket`: admit → verify → deliver → forward
+  (re-stamp hop sender for privacy, decrement hops). "Forward to all links except source" makes a leaf an
+  edge and a hub a relay with no special-casing. Added `MeshFirewall.remember()` so an origin dedups its own echo.
+- **Tests** (`MeshNodeTest`, **8/8 green on JVM + Kotlin/Native**): leaf→hub→leaf relay; TTL boundary (1 hop
+  dies at the hub, 2 hops reaches the far leaf); dedup kills a relay loop in a fully-connected triangle;
+  MESSAGE relay (cross-platform); real-Ed25519 signature accept + tamper-reject (JVM); **a DM relayed through
+  a hub that provably cannot decrypt it** (JVM); two-hub linear chain. Full MVP suite now **50 tests** on both
+  targets.
+- **On-device proof:** an in-app `MeshSelfTest` builds leafA/hub/leafB over InMemoryTransport (leaves linked
+  only to the hub) and relays a post; the identity card shows **"Mesh ✓ — post relayed leafA→hub→leafB"**,
+  screenshotted next to the Ed25519 / DM / SQLDelight ✓ lines.
+
+**Next (the remaining transport work, now de-risked):** real `Transport` actuals — an iOS↔HUB outbound link
+(ktor sockets first, Tor later) and a **desktop HUB build** (the always-on node with the hidden service that
+relays for iOS leaves). The routing/relay engine they feed is done and tested.
+
+---
+
 ## 2026-06-17 — Phase 1 step 4: shared persistence (SQLDelight) — posts/DMs/peers survive restarts 🟢
 
 The app now has a real database. Posts, encrypted DMs, and peers persist locally via **SQLDelight**, with
