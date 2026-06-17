@@ -2,6 +2,13 @@
 
 This document defines the JSON structure of each packet type used in NoSlop's HAI-Net mesh wire protocol. All peer-to-peer gossip broadcasts, encrypted direct messages, connection requests, and history synchronizations use these packet formats. Packets are transmitted as newline-delimited JSON over Tor-routed SOCKS5 TCP connections.
 
+> **Related docs**: this file covers field-naming/JSON shape only. For the
+> full 19-type packet catalog, dispatch/handler table, signed-string formats,
+> and inventory-sync/media-relay protocol details, see
+> [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) (current) and
+> [TECHNICAL_REFERENCE.md §5](TECHNICAL_REFERENCE.md#5-wire-protocol--networkpacket-and-payloads)
+> (envelope-level detail, packet-table superseded by WIRE_PROTOCOL_REFERENCE.md).
+
 ## Base Container (NetworkPacket)
 All packets broadcast or sent over DM are wrapped in this JSON container.
 
@@ -26,6 +33,7 @@ All packets broadcast or sent over DM are wrapped in this JSON container.
 | `author_id` | String | Yes | Author's unique identifier / handle |
 | `author_name` | String | Yes | Display name |
 | `author_public_key` | String | Yes | Base64 Ed25519 identity key |
+| `author_avatar_b64` | String | No | Base64-encoded small avatar image for the author, if set |
 | `origin_node` | String | No | Network node where post originated |
 | `content` | String | Yes | Text content of the post |
 | `timestamp` | Long | Yes | Epoch time in milliseconds |
@@ -37,6 +45,10 @@ All packets broadcast or sent over DM are wrapped in this JSON container.
 | `clearnet_url` | String | No | Original URL if sharing a clearnet article |
 | `clearnet_title` | String | No | Original title if sharing a clearnet article |
 | `clearnet_thumbnail_url` | String | No | URL of the thumbnail for the clearnet article |
+
+> For the signed-string format used to verify `POST` signatures, and the full
+> 19-type packet catalog this schema is part of, see
+> [WIRE_PROTOCOL_REFERENCE.md §2 and §6](WIRE_PROTOCOL_REFERENCE.md).
 
 ---
 

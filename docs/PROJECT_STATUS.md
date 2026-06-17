@@ -44,3 +44,7 @@
 *   Add more no-auth image and video sources.
 *   Enhance WebView with ad-blocking or reader mode if possible.
 *   Further optimize preloading for diverse media types.
+
+---
+
+**Related docs**: [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for the longer-term feature backlog vs. gChat/HAI-Net · [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) for how these changes fit into the overall architecture · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for the next major planned phase of work.

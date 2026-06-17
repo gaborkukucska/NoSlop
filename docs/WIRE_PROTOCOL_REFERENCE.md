@@ -3,12 +3,12 @@
 **Scope**: This document is a from-scratch, code-derived technical reference
 for NoSlop's mesh wire protocol as it exists today in `Packets.kt` and
 `MeshPacketHandler.kt`/`GossipService.kt`. It supersedes
-`docs/TECHNICAL_REFERENCE.md` §4.2 (packet dispatch table), §4.5 (sync
-protocol), and §5.2 (payload type table), which describe an earlier,
-11-handler/14-payload version of the protocol. It should be read alongside
-`docs/PACKET_SCHEMA.md` (field-naming conventions) and
-`docs/NOSLOP_DOC_ADDENDUM.md` (cross-project notes and rationale for why this
-document exists).
+`docs/TECHNICAL_REFERENCE.md` §4.2, §4.5, and §5.2 (packet dispatch table,
+sync protocol, and payload type table respectively), which describe an
+earlier, 11-handler/14-payload version of the protocol. It should be read
+alongside `docs/PACKET_SCHEMA.md` (field-naming conventions) and
+`docs/GAP_ANALYSIS.md` §1, §6, §7 (the protocol-parity backlog that this
+document's content was, in part, written to close out).
 
 ---
 
@@ -267,9 +267,10 @@ The following remain accurately described by the existing
 - §1–3 (system overview, package layout, identity/crypto derivation —
   tripcode, onion address, BIP39 mnemonic, DM encryption) — all still
   accurate.
-- §6.2–6.5 (media storage layout, auto-download policy, `MediaProxyService`,
-  thumbnail pipeline) — still accurate; only §6.1's concurrency model is
-  superseded (see §5 above).
+- §6.1 (AIMD media congestion control) and §6.2–6.5 (media storage layout,
+  auto-download policy, `MediaProxyService`, thumbnail pipeline) — all now
+  accurate (§6.1 has since been updated to document the AIMD controller
+  described in §5 above, rather than contradicting it).
 - §7 (clearnet aggregator: HTTP client separation, source library, API client
   roster, feed sync pipeline, RSS parsing) — still accurate.
 - §8 (clearnet-to-mesh bridge: deterministic anchor IDs) — still accurate;
@@ -280,4 +281,13 @@ The following remain accurately described by the existing
   document map onto existing tables (`mesh_votes`, `comment_votes`,
   `mesh_reactions`, `peers.isOnline`, `mesh_posts.isOrphaned`) that §10
   already lists.
-- §11–12 (background work, build configuration) — still accurate.
+- §11–14 (background work, build configuration, future HUB architecture,
+  known discrepancies) — still accurate.
+
+---
+
+**Related docs**: [PACKET_SCHEMA.md](PACKET_SCHEMA.md) for plain JSON field
+tables of the payloads referenced here · [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md)
+for everything outside the wire protocol (identity, Tor, clearnet aggregator,
+build config) · [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for the backlog this
+protocol surface was built against.

@@ -38,7 +38,7 @@ Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No cen
 
 - **Home HUBs (Coming Soon)** — Your dedicated local home hub serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline.
 - **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
-- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key. Only you and your contact can read them.
+- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key (see [TECHNICAL_REFERENCE.md §3.5](docs/TECHNICAL_REFERENCE.md#35-direct-message-encryption) for the exact derivation). Only you and your contact can read them.
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
 - **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
 

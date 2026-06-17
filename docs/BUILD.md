@@ -12,7 +12,7 @@ To build and run NoSlop locally, ensure your development environment has the fol
 *   **Android Studio (Koala or newer)**: Standard IDE for Android developers. It supplies the required compilation Android SDK, tools, and virtual emulators.
 *   **Android SDK (API Level 35)**:
     *   `compileSdk = 35`
-    *   `minSdk = 26` (Android 8.0 Oreo — required for cryptographic APIs, EncryptedSharedPreferences, and background networking routines)
+    *   `minSdk = 24` (Android 7.0 Nougat — see [`app/build.gradle.kts`](../app/build.gradle.kts) for the authoritative value; cryptographic APIs and `EncryptedSharedPreferences` are available from API 23+, with the Ed25519 KeyPairGenerator path using Bouncy Castle on API 24–32 and the platform Conscrypt provider on API 33+, see [TECHNICAL_REFERENCE.md §3.2](TECHNICAL_REFERENCE.md#32-key-generation-cryptoservicegenerateidentity))
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
@@ -146,3 +146,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 *   **Symptom**: Custom RSS clearnet feeds fail to fetch with `IOException: Cleartext HTTP traffic not permitted`.
 *   **Cause**: Android blocks standard non-HTTPS traffic (`http://`) by default to prevent injection attacks.
 *   **Fix**: Update your feed source URLs to use secure `https://` schemas, or use a network security configuration file.
+
+---
+
+**Related docs**: [TECHNICAL_REFERENCE.md §12](TECHNICAL_REFERENCE.md#12-build-configuration) for the full build-config/dependency reference · [DEBUG.md](DEBUG.md) if a build succeeds but the app misbehaves at runtime · [SUPPORT.md](SUPPORT.md) for user-facing troubleshooting once the app is running.

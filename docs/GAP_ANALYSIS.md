@@ -8,13 +8,21 @@ canonical Rust port of gChat that the rest of the HAI-Net ecosystem is
 converging on. This document captures details, protocols, and design
 decisions that exist in gChat and/or HAI-Net but are **not yet reflected** in
 NoSlop's own documentation (`docs/PROJECT_STATUS.md`, `docs/PACKET_SCHEMA.md`,
-`docs/ANALYSiS.md`, README). It is intended as a backlog / spec reference for
+`docs/archived/ANALYSiS.md`, README). It is intended as a backlog / spec reference for
 bringing NoSlop's mesh layer to parity with its siblings.
 
 Everything below is organized by subsystem. Each item notes:
 - **Source**: which codebase the detail comes from
 - **NoSlop status**: present / partial / absent
 - **Why it matters**: relevance to NoSlop's roadmap
+
+> **2026-06-13 merge note**: this document previously had a companion file,
+> `docs/ADDENDUM.md`, that cross-referenced a test-run log against the
+> codebase and flagged places where this document's "Done" checkmarks had
+> outpaced `docs/TECHNICAL_REFERENCE.md`'s prose. That content has now been
+> merged in below (§7's congestion-control status, §13's log findings, and
+> §14's HAI-Net ecosystem notes) and `ADDENDUM.md` has been removed to avoid
+> two files describing the same gaps with different "current" answers.
 
 ---
 
@@ -230,7 +238,7 @@ NoSlop's current `GossipService.RelayState` (in `GossipService.kt`) tracks
 
 ---
 
-## 7. Congestion Control for Media Chunks — Absent in NoSlop
+## 7. Congestion Control for Media Chunks — Implemented (was: Absent)
 
 `hainet-social/src/congestion.rs` (the Rust port, derived from gChat's binary
 transport strategy) implements an AIMD (Additive-Increase/Multiplicative-
@@ -244,15 +252,16 @@ Decrease) congestion controller per peer/download:
 - Maintains an EMA of RTT (`new_rtt = (current_rtt*7 + sample)/8`) used to
   size timeouts (`TIMEOUT_MS = 5000` default).
 
-NoSlop's `MediaManager` has a flat `MAX_CONCURRENCY = 4` constant and a fixed
-`DOWNLOAD_TIMEOUT_MS = 60000` — no adaptive behavior. Over Tor, where circuit
-latency and throughput vary wildly between peers, an AIMD-style controller
-(even a simplified version) would likely reduce both stalled downloads (window
-too large for a slow circuit) and under-utilization (window too small for a
-fast one). This is called out as a known gap because NoSlop's own
-`PROJECT_STATUS.md` flags general media reliability issues ("Audio Playback
-Failure", "Feed Pre-loading & Hybrid Mixing") that an adaptive window could
-partially address.
+**Status: implemented.** `MediaManager.kt` now has a per-download AIMD state
+machine matching this algorithm: `windowSize` starting at 4.0, `ssthresh`
+starting at 128.0, slow-start `windowSize += 1` while `windowSize <
+ssthresh`, congestion-avoidance `windowSize += 1/windowSize` otherwise,
+multiplicative decrease `ssthresh = max(2, windowSize * 0.5); windowSize = 1`
+on timeout, capped at 128, plus an RTT EMA. `MAX_CONCURRENCY = 4` remains in
+the file but now only serves as the AIMD initial window value, not a hard
+concurrency cap. See
+[TECHNICAL_REFERENCE.md §6.1](TECHNICAL_REFERENCE.md#61-chunking-constants-mediamanagerkt)
+for the exact current code-level detail.
 
 ---
 
@@ -344,25 +353,26 @@ terminology/format differences worth noting for cross-compatibility:
 
 While comparing against gChat/HAI-Net, the following internal inconsistencies
 in NoSlop's existing docs vs. its code were also noticed (not gaps vs. other
-projects, but worth fixing alongside the above):
+projects, but worth fixing alongside the above). All items below are now
+resolved as of this revision; kept for traceability:
 
-- **README "Tech Stack" table** lists DM encryption as "ChaCha20-Poly1305
-  (DMs), AES-256-CBC (backup)" — correct and matches code.
-- **`CryptoService.kt` class-level KDoc comment**, however, says: *"DM Crypto:
-  ECDH (P-256) key agreement -> SHA-256 -> AES-256-GCM"*. This is stale/wrong
-  on three counts: the actual key agreement is **X25519** (not P-256/ECDH),
-  the hash is **SHA3-256** (not SHA-256), and the cipher is **ChaCha20-
-  Poly1305** (not AES-256-GCM). The README is correct; the code comment is
-  outdated and should be fixed to avoid confusing future contributors.
-- **Earlier README sentence** ("End-to-end encrypted DMs — direct messages
-  use ECDH (X25519) key agreement into AES-256-GCM") repeats the AES-256-GCM
-  error from the stale code comment, while the Tech Stack table (further
-  down the same README) correctly says ChaCha20-Poly1305. These two sections
-  of the README contradict each other.
-- **`PACKET_SCHEMA.md`** documents `clearnet_thumbnail_url` as absent from the
-  `POST` payload table, but `Packets.kt`'s `PostPayload` (and milestone 90 in
-  `PROJECT_STATUS.md`) already include `clearnet_thumbnail_url`. The schema
-  doc is one field behind the code.
+- ~~**README "Tech Stack" table** lists DM encryption as "ChaCha20-Poly1305
+  (DMs), AES-256-CBC (backup)" — correct and matches code. **`CryptoService.kt`
+  class-level KDoc comment**, however, says: "DM Crypto: ECDH (P-256) key
+  agreement -> SHA-256 -> AES-256-GCM". This is stale/wrong on three counts:
+  the actual key agreement is X25519 (not P-256/ECDH), the hash is SHA3-256
+  (not SHA-256), and the cipher is ChaCha20-Poly1305 (not AES-256-GCM).~~
+  **Fixed** — `CryptoService.kt`'s KDoc now correctly reads "DM Crypto: X25519
+  key agreement -> SHA3-256 -> ChaCha20-Poly1305".
+- ~~**Earlier README sentence** repeated the AES-256-GCM error while the Tech
+  Stack table correctly said ChaCha20-Poly1305 — the two sections of the
+  README contradicted each other.~~ **Fixed** — both now consistently say
+  ChaCha20-Poly1305; see [TECHNICAL_REFERENCE.md §14](TECHNICAL_REFERENCE.md#14-known-discrepancies-between-documentation-and-code)
+  items 1–2 for the full history.
+- ~~**`PACKET_SCHEMA.md`** documents `clearnet_thumbnail_url` as absent from
+  the `POST` payload table, but `Packets.kt`'s `PostPayload` already includes
+  it.~~ **Fixed** — `PACKET_SCHEMA.md`'s POST table now includes both
+  `clearnet_thumbnail_url` and `author_avatar_b64` (which was also missing).
 
 ---
 
@@ -378,7 +388,14 @@ implementation effort vs. value:
 - [x] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
 - [x] "Opt-in Transparency" override for soft-blocked content (§2)
 - [x] Relay state TTL/cleanup in `GossipService.RelayState` (§6)
-- [x] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6)
+- [ ] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6) —
+      **correction**: this is still *not* implemented as of this revision.
+      `MeshPacketHandler.handleMediaChunk` delegates straight to
+      `MediaManager.handleMediaChunk` (the "download for myself" path) for
+      every relay node, not a separate pass-through proxy. A relaying node
+      today downloads the whole file rather than streaming it through. This
+      item was previously (incorrectly) checked off — verified against
+      current code while merging in `ADDENDUM.md`'s findings.
 - [x] `INVENTORY_SYNC_REQUEST`/`RESPONSE` (hash-based sync) to replace
       timestamp-based `SYNC_REQUEST`/`RESPONSE` (§1)
 - [x] `EDIT_POST` / `DELETE_POST` packets (§1)
@@ -392,3 +409,110 @@ implementation effort vs. value:
 - [ ] User-selectable theme palettes (low priority, §8)
 - [ ] Document NoSlop's potential future role as a HAI-Net hub
       "frontend client" (§9) — architecture discussion, not code
+- [ ] Spot-check and prune dead `BuiltInSource` feed URLs — **done** for the
+      sources known at the time (see §13.1 below); keep watching for new dead
+      sources as an ongoing maintenance task, not a one-time fix
+- [ ] Confirm `Dns.SYSTEM` fallback exists in `HttpClientProvider.clearnetClient`'s
+      DoH chain (§13.1) — not yet re-verified
+
+---
+
+## 13. Findings From a Test-Run Log Cross-Referenced Against Code
+
+*(Merged in from the now-removed `docs/ADDENDUM.md`, 2026-06-13.)*
+
+A captured `logcat` excerpt (roughly `00:18:27`–`00:34:04`) was cross-checked
+against the codebase at the time. Three NoSlop-tagged issue classes were
+found; all three turned out to trace back to one underlying cause.
+
+### 13.1 DNS failures: `selfhostedhero.com`, `feeds.apnews.com`, `rssfeeds.webmd.com`
+
+All three hosts were real `BuiltInSource` entries in `SourceLibrary.kt`. The
+log showed `NXDOMAIN` (not a TLS/cert error), meaning even the corrected DoH
+chain (Cloudflare → Google, see `HttpClientProvider`) returned no records.
+Investigation outcome per source:
+
+- **`selfhostedhero.com`** — a typo. The real site is `selfhosthero.com` (no
+  "ed"). This source has since been **removed from `SourceLibrary.kt`**
+  entirely (current code has neither the typo'd nor the corrected domain —
+  it was pruned rather than renamed, which still resolves the dead-source
+  problem).
+- **`feeds.apnews.com`** — not a typo; Associated Press discontinued this RSS
+  endpoint entirely. The `"ap-top"` source has been **removed**, with a
+  comment in `SourceLibrary.kt` explaining why.
+- **`rssfeeds.webmd.com`** — appeared to be a transient failure at the time,
+  but has since been **replaced** with a Medical Xpress general-health feed
+  in `SourceLibrary.kt` (a comment there documents the retirement).
+
+### 13.2 XML parse error on `selfhostedhero.com/rss`
+
+Traced to `FeedParser` choking on a cached/stale response body at a fixed
+byte offset — consistent with explanation 13.1's dead-source theory rather
+than a parser bug. `fetchAndParse()` now passes `feedUrl` through to
+`parseStream()` so future parse-error logs identify which feed failed
+(previously only an internal `sourceId` was available).
+
+### 13.3 NASA APOD request timeout
+
+`NasaApiClient.fetchAPOD()` hitting `api.nasa.gov` with the public `DEMO_KEY`
+(shared globally, rate-limited, sometimes slow) — informational/external,
+not a NoSlop bug. Wrapped in try/catch, fails gracefully. A personal NASA API
+key in Settings → API Keys makes this more reliable.
+
+**Overall assessment**: all three issue classes traced back to either dead
+upstream feed endpoints or DNS/network conditions in the test environment,
+not independent NoSlop bugs.
+
+---
+
+## 14. HAI-Net Ecosystem Notes Not Yet Reflected Elsewhere
+
+*(Also merged in from `docs/ADDENDUM.md`.)*
+
+### 14.1 HAI-Net's Admin AI / Persona layer
+
+HAI-Net's `hainet-core/src/admin_bridge.rs` bridges a Tauri/web frontend
+(`hainet-portal`) to an `AdminAgent` — a local LLM-backed assistant with its
+own chat IPC schema, session history, STT/TTS handlers, and MCP tool access.
+The HAI-Net "Local Hub" is explicitly intended as both the identity/data
+store *and* local LLM host for a user — the same role NoSlop's
+`IdentityRepository` plays standalone on-device today, plus a much larger
+compute/AI layer NoSlop has no equivalent of.
+
+**Relevance to NoSlop's docs**: [TECHNICAL_REFERENCE.md §13](TECHNICAL_REFERENCE.md#13-future-architecture-hubs--hai-net-hub-client)
+and [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) already sketch NoSlop
+as a future Hub client. The addendum here is that such a Hub, per HAI-Net's
+own architecture, would also run an `AdminBridge`-style local AI assistant —
+meaning the currently-stub `ui/HaiNetTab.kt` could eventually become a thin
+client for that chat IPC schema, not just a mesh-peer list. Forward-looking
+only, not a current gap.
+
+### 14.2 HAI-Net `hainet-vault` (constitutional/governance docs)
+
+HAI-Net's "Constitutional Framework" lives in `hainet-vault/`
+(`CONSTITUTION.md`/`GOVERNANCE.md`/`DECLARATION.md`). NoSlop has no
+equivalent and arguably doesn't need one as a standalone app, but if it's
+ever positioned as "the mobile client for HAI-Net," its README/onboarding
+copy (which already uses similar privacy-by-design language) could reference
+`hainet-vault/DECLARATION.md` as a shared values document. Flagged for
+awareness only.
+
+### 14.3 `hainet-social`'s module boundaries vs. NoSlop's
+
+`hainet-social/src/lib.rs` declares `firewall`, `dedup`, and `feed` as
+separate Rust modules. NoSlop's equivalents (`GossipService`'s firewall
+checks, its `processedPacketIds` dedup set, and the Room-backed feed tables)
+are functionally present but live inline inside `GossipService.kt`/
+`NoSlopRepository.kt` rather than as separate units. This is a code-
+organization difference between a Rust crate and a Kotlin object/class, not
+a feature gap — noted here only for anyone porting code between the two
+projects.
+
+---
+
+**Related docs**: [PROJECT_STATUS.md](PROJECT_STATUS.md) for the
+milestone-by-milestone log of what's shipped · [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md)
+and [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) for current
+implementation detail of the items marked done above ·
+[HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for the concrete plan
+behind §14.1's forward-looking Hub/AI notes.

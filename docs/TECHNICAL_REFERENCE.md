@@ -2,13 +2,25 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.1.0`, Room schema version 16, compileSdk/targetSdk 35,
-minSdk 24). It is intended to complement — not replace — `README.md`,
+versionName `0.1.0`, Room schema version 23 — see §10, compileSdk/targetSdk
+35, minSdk 24). It is intended to complement — not replace — `README.md`,
 `docs/PROJECT_STATUS.md`, and `docs/PACKET_SCHEMA.md`. Where this document
 and those files overlap, this document goes deeper into implementation
 detail (file paths, function names, data flow, constants).
 
+**A note on staleness**: this is the oldest and most detailed reference doc
+in the project, and parts of it describe earlier states of the wire protocol
+that have since moved on. Sections below are marked "Superseded" inline
+wherever a newer doc — almost always
+[WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) — is now the
+authoritative source for that specific topic. Unmarked sections are still
+believed accurate as of this revision; the architecture/identity/Tor/
+clearnet-aggregator material (§1–3, §6.2–6.5, §7–9, §11) is generally
+longer-lived than the wire-protocol tables (§4, §5), which change every time
+a new packet type ships.
+
 ---
+
 
 ## 1. System Overview
 
@@ -79,7 +91,7 @@ com.noslop.app
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
 │   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
 │   ├── NoSlopDatabase.kt          Room database, version 16
-│   ├── NoSlopRepository.kt        Central data/business logic facade (869 LOC)
+│   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
 ├── debug/
 │   └── Logger.kt                  Ring-buffer + async file-backed structured logger
@@ -353,11 +365,17 @@ data class RelayState(
     val mediaId: String,
     val listeners: MutableSet<String> = ConcurrentHashMap.newKeySet(),
     var sourceNode: String? = null,
-    val metadata: MediaMetadata? = null
+    val metadata: MediaMetadata? = null,
+    val establishedAt: Long = System.currentTimeMillis(),
+    var lastActivity: Long = System.currentTimeMillis()
 )
 ```
-Stored in `relayStates: ConcurrentHashMap<String, RelayState>` — **no
-eviction policy** (see Gap Analysis §6).
+Stored in `relayStates: ConcurrentHashMap<String, RelayState>`. **Has TTL
+cleanup**: a periodic 60-second sweeper evicts any entry whose
+`lastActivity` is more than 5 minutes stale, and `MeshPacketHandler` calls
+`GossipService.touchRelayState(mediaId)` on every `MEDIA_CHUNK` to refresh
+`lastActivity`. This closes the unbounded-memory-growth gap noted in
+[GAP_ANALYSIS.md §6](GAP_ANALYSIS.md#6-trusted-media-relay--conceptually-present-streaming-semantics-differ).
 
 - **`handleRelayRequest(senderId, packet)`**: checks
   `File(transport.repository.context.filesDir, "media")` for a file named
@@ -372,13 +390,22 @@ eviction policy** (see Gap Analysis §6).
 
 ### 4.4 Incoming Packet Dispatch (`MeshPacketHandler.kt`)
 
+> **Superseded**: the table below documents the original 11-handler version of
+> `MeshPacketHandler`. The current code dispatches **21 packet-type cases**
+> (19 catalog entries per `WIRE_PROTOCOL_REFERENCE.md`, counting the 6
+> `MEDIA_*` types individually). For the authoritative, current dispatch
+> table see [WIRE_PROTOCOL_REFERENCE.md §2](WIRE_PROTOCOL_REFERENCE.md#2-full-packet-type-catalog-19-types).
+> The general dispatch *mechanism* described below (steps 1–2) is still
+> accurate.
+
 `handleIncomingPacket(packet)`:
 1. Fetches local identity (`repo.getLocalIdentity()`) — bails (`false`) if no
    identity yet.
 2. Delegates to `GossipService.processIncoming(packet)` — if it returns
    `false`, stop here (packet was forwarded-only, deduped, rate-limited, or
    firewalled).
-3. `when (packet.type)` dispatches to one of 11 handlers:
+3. `when (packet.type)` dispatches to the relevant handler. The original 11
+   handlers (now superseded by the 19-type table linked above) were:
 
 | Type | Handler | Signature verification | Persistence |
 |---|---|---|---|
@@ -397,14 +424,29 @@ eviction policy** (see Gap Analysis §6).
 | `CONNECTION_REQUEST` | `handleConnectionRequest` | none | inserts untrusted `Peer`, sets `_incomingRequestFlow` (UI prompt) |
 | `USER_HANDSHAKE` | `handleUserHandshake` | none | upserts `Peer` with `isTrusted = true` |
 
+**Since this table was written**, 10 more types were added:
+`INVENTORY_SYNC_REQUEST`, `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT`,
+`EDIT_POST`, `DELETE_POST`, `CHAT_REACTION`, `COMMENT_REACTION` (already
+listed above), `COMMENT_VOTE` (already listed above), `VOTE` (already listed
+above) — see WIRE_PROTOCOL_REFERENCE.md for all of them in one place.
+
 Notably: **`CONNECTION_REQUEST` and `USER_HANDSHAKE` packets are not
 signature-checked** in `MeshPacketHandler` even though both
 `PeerHandshakePayload`s carry a `signature` field populated by the sender
 (`NoSlopRepository.sendConnectionRequest`/`acceptConnectionRequest` both call
 `CryptoService.sign(...)` before sending). This is a latent verification gap —
-the signature is computed and transmitted but never checked on receipt.
+the signature is computed and transmitted but never checked on receipt. This
+is still an open issue as of `WIRE_PROTOCOL_REFERENCE.md §2`'s notes.
 
 ### 4.5 Sync Protocol
+
+> **Superseded**: this section describes the original timestamp-only sync
+> flow. `INVENTORY_SYNC_REQUEST` (hash-based diffing) was added later as the
+> *primary* reconciliation mechanism, with the timestamp-based flow below
+> still present and still used as the reply vehicle for both. See
+> [WIRE_PROTOCOL_REFERENCE.md §3](WIRE_PROTOCOL_REFERENCE.md#3-inventory-based-sync-inventory_sync_request)
+> for the current, complete picture, including the extended
+> `SyncResponsePayload` (`comments`/`reactions` fields, not shown below).
 
 - **`SYNC_REQUEST`** (`{ since: Long }`) is sent automatically by
   `acceptConnectionRequest` immediately after a `USER_HANDSHAKE`, with
@@ -420,8 +462,11 @@ the signature is computed and transmitted but never checked on receipt.
   (Room `OnConflictStrategy` determines overwrite-vs-ignore behavior, defined
   in `Daos.kt`).
 
-This is **timestamp-based**, not hash/inventory-based (contrast with gChat's
-`INVENTORY_SYNC_REQUEST`/`RESPONSE` — see Gap Analysis §1).
+This timestamp-based flow is still present in the code, but
+`INVENTORY_SYNC_REQUEST` (hash/inventory-based — `{id, hash}` pairs, only the
+diff is returned) now exists alongside it and is preferred for reducing
+redundant transfer; see WIRE_PROTOCOL_REFERENCE.md §3 for the diffing
+algorithm.
 
 ---
 
@@ -449,9 +494,21 @@ data class NetworkPacket(
 
 ### 5.2 Payload Types (all in `Packets.kt`)
 
+> **Superseded**: this table predates several payload types/fields. See
+> [WIRE_PROTOCOL_REFERENCE.md §6](WIRE_PROTOCOL_REFERENCE.md#6-cryptographic-signed-string-formats--consolidated-table)
+> for the current signed-string formats and
+> [PACKET_SCHEMA.md](PACKET_SCHEMA.md) for the current field-by-field JSON
+> shape of each payload (both are kept in sync with `Packets.kt`; this table
+> is not). Known gaps in the table below: `PostPayload` is missing
+> `authorAvatarB64`; `SyncResponsePayload` is missing the `comments`/
+> `reactions` fields added later (see WIRE_PROTOCOL_REFERENCE.md §3.3); and
+> the table omits `INVENTORY_SYNC_REQUEST`'s `InventorySyncRequestPayload`,
+> `ANNOUNCE_PEER`'s presence payload, `UserExitPayload`, and the `EDIT_POST`/
+> `DELETE_POST` payloads entirely.
+
 | Data class | Used by packet type(s) | Key fields |
 |---|---|---|
-| `PostPayload` | `POST`, embedded in `SyncResponsePayload.posts` | `id, authorId, authorName, authorPublicKey, originNode?, content, timestamp, privacy, hashtags?, signature?, mediaId?, mediaMetadata?, clearnetUrl?, clearnetTitle?, clearnetThumbnailUrl?` |
+| `PostPayload` | `POST`, embedded in `SyncResponsePayload.posts` | `id, authorId, authorName, authorPublicKey, authorAvatarB64?, originNode?, content, timestamp, privacy, hashtags?, signature?, mediaId?, mediaMetadata?, clearnetUrl?, clearnetTitle?, clearnetThumbnailUrl?` |
 | `CommentPayload` | `COMMENT` | `postId, comment: CommentData, parentCommentId?` |
 | `CommentData` | nested in `CommentPayload` | `id, authorId, authorName, content, timestamp, signature` |
 | `ReactionPayload` | `REACTION` | `postId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
@@ -459,10 +516,10 @@ data class NetworkPacket(
 | `CommentReactionPayload`| `COMMENT_REACTION`| `commentId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
 | `VotePayload` | `VOTE` | `postId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
 | `CommentVotePayload`| `COMMENT_VOTE`| `commentId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
-| `EncryptedPayload` | `MESSAGE` | `id, nonce, ciphertext, groupId?` (groupId reserved, unused — see Gap Analysis §3) |
+| `EncryptedPayload` | `MESSAGE` | `id, nonce, ciphertext, groupId?` (groupId reserved, unused — group chats are not implemented, see [GAP_ANALYSIS.md §3](GAP_ANALYSIS.md#3-group-chats--full-spec-exists-in-gchat-absent-in-noslop)) |
 | `PeerHandshakePayload` | `CONNECTION_REQUEST`, `USER_HANDSHAKE` | `id, fromUserId, fromUsername, fromDisplayName, fromHomeNode, fromEncryptionPublicKey?, timestamp, signature?` (unified type per milestone 56 — previously two near-duplicate classes) |
 | `SyncRequestPayload` | `SYNC_REQUEST` | `since: Long` |
-| `SyncResponsePayload` | `SYNC_RESPONSE` | `posts: List<PostPayload>` |
+| `SyncResponsePayload` | `SYNC_RESPONSE` | `posts: List<PostPayload>` — **extended** with `comments: List<CommentSyncEntry>?` and `reactions: List<ReactionSyncEntry>?`, used by the `INVENTORY_SYNC_REQUEST` reply path; see WIRE_PROTOCOL_REFERENCE.md §3.3 |
 | `MediaMetadata` | embedded in `PostPayload`, `MediaRelayRequestPayload` | `id, type ("audio"\|"video"\|"file"\|"image"), mimeType, size, chunkCount, accessKey?, filename?, originNode?, ownerId?, thumbnailB64?` |
 | `MediaRequestPayload` | `MEDIA_REQUEST` | `mediaId, chunkIndex, chunkSize, accessKey?, hlsFile?` |
 | `MediaChunkPayload` | `MEDIA_CHUNK` | `mediaId, chunkIndex, totalChunks, data` (Base64) |
@@ -492,6 +549,31 @@ private const val DOWNLOAD_TIMEOUT_MS = 60000L  // 60s
 ```
 256 KB matches gChat's documented chunk size exactly (`docs/ARCHITECTURE.md`
 §2: "Files are split into 256KB chunks").
+
+**Concurrency is no longer a flat cap.** `MAX_CONCURRENCY = 4` remains in the
+file, but only as the *initial* AIMD (Additive-Increase/Multiplicative-
+Decrease) window value — it no longer hard-caps in-flight chunk requests at
+steady state. Each download tracks a per-download AIMD state machine:
+
+- `windowSize` starts at `4.0`, `ssthresh` starts at `128.0`.
+- **Slow start**: while `windowSize < ssthresh`, each received chunk does
+  `windowSize += 1`.
+- **Congestion avoidance**: once `windowSize >= ssthresh`, each received
+  chunk does `windowSize += 1 / windowSize` (sub-linear growth).
+- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(2.0,
+  windowSize * 0.5)` and `windowSize` resets to `1.0` (classic Reno-style
+  AIMD).
+- `windowSize` is capped at `128.0`.
+- New `MEDIA_REQUEST`s for additional chunks are only issued while
+  `inflight.size < windowSize.toInt()` — i.e. `windowSize` (rounded down) is
+  the live concurrency cap.
+
+This mirrors the algorithm documented for `hainet-social/src/congestion.rs`
+and directly resolves the gap flagged in
+[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop)
+(that section's prose is now historical — see its own checklist in §12,
+which already marks this item done). For full detail see
+[WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
 
 ### 6.2 Storage Layout
 
@@ -809,19 +891,11 @@ migration path defined).
 |---|---|
 | `applicationId` | `com.noslop.app` |
 | `compileSdk` / `targetSdk` | 35 |
-| `minSdk` | 24 (build.gradle.kts) — **note**: `docs/BUILD.md` states `minSdk = 26`; the build file as read says 24. Verify which is authoritative before release. |
+| `minSdk` | 24 (`app/build.gradle.kts`) — matches [BUILD.md](BUILD.md), which previously stated 26; that doc has been corrected to 24. |
 | `versionCode` / `versionName` | 1 / `0.1.0` |
 | ABIs | `armeabi-v7a, arm64-v8a, x86, x86_64` (`useLegacyPackaging = true` for jniLibs — required by `tor-android`) |
 | Java/Kotlin target | 11 |
 | Compose | enabled, via Compose BOM |
-
----
-
-## 13. Future Architecture: HUBs / HAI-Net Hub Client
-
-While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes). 
-
-In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence.
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
 
@@ -831,8 +905,10 @@ In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **H
   `info.guardianproject:jtorctl:0.4.5.7`,
   `info.guardianproject.netcipher:netcipher:2.1.0`
 - **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`
-- **Networking**: `okhttp:4.10.0`, `okhttp-dnsoverhttps:4.12.0` (version
-  mismatch noted in `docs/ANALYSiS.md`), `gson:2.10.1`
+- **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
+  `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
+  a genuine, currently-real minor version mismatch between the two OkHttp
+  artifacts (confirmed by reading both files directly), `gson:2.10.1`
 - **Media**: `androidx.media3` 1.3.1 (`exoplayer`, `exoplayer-hls`,
   `exoplayer-dash`, `ui`, `datasource-okhttp`)
 - **Security**: `androidx.security.crypto` (alpha, per `libs.versions.toml`)
@@ -845,39 +921,70 @@ In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **H
 ### Permissions (`AndroidManifest.xml`)
 
 `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (API 33+ WorkManager
-notifications), `CAMERA` (optional feature, for QR scanning), `RECEIVE_BOOT_COMPLETED`
-(WorkManager rescheduling). `android:allowBackup="false"` — OS-level backup is
-disabled in favor of the app's own encrypted export. `org.torproject.jni.TorService`
-is declared as a non-exported `<service>`. A custom `network_security_config.xml`
-is referenced for strict TLS with whitelisted cleartext exceptions (milestone 8).
+notifications), `CAMERA` (optional feature, for QR scanning),
+`RECEIVE_BOOT_COMPLETED` (WorkManager rescheduling), `FOREGROUND_SERVICE` and
+`FOREGROUND_SERVICE_DATA_SYNC` (required for `NoSlopForegroundService`, see
+§11). `android:allowBackup="false"` — OS-level backup is disabled in favor of
+the app's own encrypted export. Two services are declared, both
+non-exported: `org.torproject.jni.TorService` and
+`.mesh.NoSlopForegroundService` (`foregroundServiceType="dataSync"`). A
+custom `network_security_config.xml` is referenced for strict TLS with
+whitelisted cleartext exceptions (milestone 8).
 
 ---
 
-## 13. Known Discrepancies Between Documentation and Code
+## 13. Future Architecture: HUBs / HAI-Net Hub Client
 
-(Cross-referenced in more detail in the companion gap-analysis document.)
+While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes).
 
-1. README's "End-to-end encrypted DMs" prose says **AES-256-GCM**; the README
-   Tech Stack table and the actual `CryptoService.encryptDM` implementation
-   use **ChaCha20-Poly1305**. The Tech Stack table and code agree; the prose
-   sentence is stale.
-2. `CryptoService.kt`'s class KDoc says DM crypto is "ECDH (P-256) ... ->
-   SHA-256 -> AES-256-GCM" — the implementation is X25519 → SHA3-256 →
-   ChaCha20-Poly1305. The KDoc comment is stale on all three points.
+In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); none of its phases are implemented in the current codebase as of this writing.
+
+---
+
+## 14. Known Discrepancies Between Documentation and Code
+
+(Cross-referenced in more detail in [GAP_ANALYSIS.md](GAP_ANALYSIS.md).)
+
+Several discrepancies previously tracked here have since been **resolved in
+the code or in the relevant doc** — kept below, struck through, so the fix
+is traceable rather than silently disappearing:
+
+1. ~~README's "End-to-end encrypted DMs" prose says AES-256-GCM; Tech Stack
+   table says ChaCha20-Poly1305.~~ **Fixed** — the README prose now also says
+   ChaCha20-Poly1305; both sections agree.
+2. ~~`CryptoService.kt`'s class KDoc says DM crypto is "ECDH (P-256) ... ->
+   SHA-256 -> AES-256-GCM".~~ **Fixed** — the KDoc now correctly reads
+   "X25519 key agreement -> SHA3-256 -> ChaCha20-Poly1305", matching §3.5.
 3. `docs/PROJECT_STATUS.md` milestone 14 describes MeshTransport retries as
    "up to 3 times with 2s/4s backoff"; the code implements 5 attempts with
-   `attempt*3000ms` backoff.
-4. `docs/ANALYSiS.md` item 6 states `CookieAuthentication 0`; `TorService.writeTorrc`
-   writes `CookieAuthentication 1`, while `registerHiddenService` authenticates
-   with a bare `AUTHENTICATE\r\n` (no cookie) — this combination should be
-   verified against the running `tor-android` behavior.
-5. `docs/BUILD.md` states `minSdk = 26`; `app/build.gradle.kts` sets `minSdk = 24`.
-6. `docs/PACKET_SCHEMA.md`'s `POST` field table omits `clearnet_thumbnail_url`,
-   which exists in `Packets.kt`'s `PostPayload` and is actively used (milestone 90).
-7. README's Phase 2 / "Clearnet-to-Mesh Broadcast System (Planned)" section
-   describes `REACTION` packet support, reaction gossip handling, and
-   canonical anchor-ID derivation as **not yet built** — all three are, in
-   fact, already implemented (`ReactionPayload`, `MeshPacketHandler.handleReaction`,
-   `reactToFeedItemWithType`'s SHA3-256 `anchorId` derivation). The README's
-   "What needs to be built" list for items 1, 2, and 6 appears to be out of
-   date relative to the code.
+   `attempt*3000ms` backoff (see §4.1). **Still open** — PROJECT_STATUS.md's
+   milestone log is a historical record of what shipped *at the time* and
+   isn't being retroactively edited; §4.1 above is the authoritative current
+   description.
+4. `docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
+   `TorService.writeTorrc` writes `CookieAuthentication 1`, while
+   `registerHiddenService` authenticates with a bare `AUTHENTICATE\r\n` (no
+   cookie) — this combination should still be verified against the running
+   `tor-android` behavior. **Still open** (ANALYSiS.md is archived/historical
+   and not being edited; flagging here is the live tracking mechanism).
+5. ~~`docs/BUILD.md` states `minSdk = 26`; `app/build.gradle.kts` sets
+   `minSdk = 24`.~~ **Fixed** — BUILD.md now states 24.
+6. ~~`docs/PACKET_SCHEMA.md`'s `POST` field table omits
+   `clearnet_thumbnail_url`.~~ **Fixed** — PACKET_SCHEMA.md now includes it
+   (and `author_avatar_b64`, which was also missing).
+7. README's "Implemented" callout under Clearnet-to-Mesh Broadcasts now
+   correctly states that the `REACTION`/anchor-ID pipeline is live — this
+   item, previously flagged as the README being out of date, **is fixed**.
+8. The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version mismatch
+   noted in §12 is **still real** — not a doc error, an actual dependency
+   skew worth aligning at some point.
+
+---
+
+**Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
+the current, authoritative wire-protocol detail that supersedes §4/§5 here ·
+[PACKET_SCHEMA.md](PACKET_SCHEMA.md) for plain JSON field tables ·
+[GAP_ANALYSIS.md](GAP_ANALYSIS.md) for the feature backlog vs. gChat/HAI-Net ·
+[PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
+log · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for §13's planned
+HUB-client transition in full detail.
