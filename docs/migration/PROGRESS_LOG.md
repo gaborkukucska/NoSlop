@@ -4,6 +4,27 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 9a: SOCKS5 client dialing (the Tor seam) 🟢
+
+First piece of the Tor layer (ADR-009): a leaf can now dial through a **SOCKS5 proxy** — the exact mechanism
+for reaching a HUB's `.onion` via Tor (point the proxy at Tor's SOCKS port, pass the onion as the host; Tor
+resolves + tunnels). Built and tested with **no Tor daemon required**.
+
+- `SocketTransport.connect(host, port, proxy: SocksProxy? = null)` — optional SOCKS5 (RFC 1928) CONNECT, no
+  auth, **domain ATYP** (so the proxy resolves `.onion`/DNS, not us). Plain-TCP and SOCKS paths coexist, so
+  loopback/LAN demos keep working. Refactor: a socket's ktor channels can only be opened once, so the handshake
+  opens them and `handle()` reuses them (fixed an "reading channel has already been set" along the way).
+- `SocksProxyTest` (JVM, real sockets): a **mock SOCKS5 proxy** asserts the exact greeting + CONNECT bytes the
+  client sends, then bridges to a real HUB; leafA dials the hub *through the proxy*, leafB connects directly,
+  and a post relays leafA→(SOCKS)→hub→leafB. Same topology as Tor (leaf → Tor SOCKS → onion HUB). Green; the
+  SOCKS client also compiles for iOS/Native.
+
+**Next (gated on external deps — see ADR-009):** (9b) desktop HUB launches Tor + registers a v3 onion (needs a
+`tor` binary); (9c) iOS Tor (needs Tor.framework/Arti — an owner dependency decision). The dialing client they
+both feed is done.
+
+---
+
 ## 2026-06-17 — Phase 1 step 8: the iOS app talks to the HUB — real phone ↔ real hub 🟢
 
 The whole stack closes the loop: **the actual iOS app dials the actual desktop HUB and gossips through it.**
