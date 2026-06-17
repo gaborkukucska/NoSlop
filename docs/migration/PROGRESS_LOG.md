@@ -4,6 +4,45 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 4: shared persistence (SQLDelight) — posts/DMs/peers survive restarts 🟢
+
+The app now has a real database. Posts, encrypted DMs, and peers persist locally via **SQLDelight**, with
+the exact same queries on iOS and Android — the storage prerequisite for the transport/HUB work (you need
+somewhere to put what you receive).
+
+- **Schema** (`commonMain/sqldelight/.../db/*.sq`): `meshPost`, `message`, `peer`, `appMeta`, mirroring the
+  Android Room tables (`MeshPost`/`ChatMessage`/`Peer`) column-for-column so a future data bridge is a straight
+  copy. DMs store **ciphertext + nonce only** (from `encryptDM`) — plaintext is never persisted. Post writes
+  are dedup-by-id with a gossip-count bump on re-seen ids, mirroring `GossipService` semantics.
+- **`MeshStore`** (commonMain) wraps the generated queries; `DbDriverFactory` is expect/actual (Android =
+  `AndroidSqliteDriver` via the existing context holder; iOS = `NativeSqliteDriver`).
+- **Tests:** `MeshStoreTest` **9/9 green on BOTH JVM/Android and iosSimulatorArm64/Kotlin-Native** — round-trip,
+  gossip dedup+bump, thread ordering, peer upsert, counter-survives-reopen, wipe. Test drivers are expect/actual
+  (JVM JdbcSqliteDriver IN_MEMORY; Native in-memory `NativeSqliteDriver`). Full MVP suite now **42 tests** green
+  on both targets.
+- **On-device proof:** an in-app line shows `SQLDelight ✓ — launch #N · 1 post (gossip×N) · 1 peer`. Across a
+  full app restart (terminate + relaunch, no reinstall) it climbed **#1→#2 with gossip×1→×2** — the counter
+  persisting and the re-seeded welcome post deduping-but-bumping is live proof persistence + dedup + update all
+  work on the real NativeSqliteDriver. Screenshotted both launches.
+
+**Integration gotchas (documented for the rest of the migration):**
+1. SQLDelight's Gradle plugin drags Gradle's embedded Kotlin, which strictly pins `org.jetbrains:annotations`
+   to 13.0; AGP 9.2.1 needs 23.0.0. Fix: `buildscript { configurations.classpath { resolutionStrategy { force(
+   "org.jetbrains:annotations:23.0.0") } } }` in `composeApp/build.gradle.kts`. (Project already had
+   `android.newDsl=false`, the other documented AGP-9 workaround.)
+2. `INTEGER AS Boolean` must be written **fully-qualified** (`AS kotlin.Boolean`) or SQLDelight emits a bogus
+   `import Boolean`. `kotlin.Boolean` is native (no adapter); `kotlin.Int` needs `IntColumnAdapter` from
+   `app.cash.sqldelight:primitive-adapters`.
+3. iOS link: the static framework needs **`-lsqlite3`** in the Xcode target's `OTHER_LDFLAGS` (added to the
+   pbxproj for Debug+Release) — otherwise `iosApp.debug.dylib` fails to link the native driver's SQLite symbols.
+4. Native test isolation: SQLiter shares an in-memory DB **keyed by name**, so a fixed name leaks rows between
+   tests (JVM's `jdbc:sqlite:` is per-connection, so it didn't). Use a per-call unique name.
+
+**Next:** transport + the always-on **HUB** (ADR-002) — moving signed/encrypted packets between devices and
+landing them in this store. That's the hard infra piece that turns the shared core into a working iOS mesh node.
+
+---
+
 ## 2026-06-17 — Phase 1 step 3: encrypted DMs + gossip firewall in shared code 🟢
 
 Two more pieces of the Android mesh core now run identically on both platforms — an iOS node can hold a
