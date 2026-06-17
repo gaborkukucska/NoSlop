@@ -35,6 +35,14 @@ kotlin {
         }
     }
 
+    // Headless JVM target — the always-on desktop HUB (ADR-002) that iOS leaves dial into.
+    jvm {
+        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_17)
+        }
+    }
+
     listOf(
         iosArm64(),
         iosSimulatorArm64(),
@@ -78,11 +86,30 @@ kotlin {
         androidUnitTest.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
         }
+        // The desktop HUB: BouncyCastle crypto, JDBC SQLite, OkHttp — the JVM actuals of the shared expects.
+        jvmMain.dependencies {
+            implementation(libs.bouncycastle)
+            implementation(libs.sqldelight.sqlite.driver)
+            implementation(libs.ktor.client.okhttp)
+        }
+        jvmTest.dependencies {
+            implementation(libs.sqldelight.sqlite.driver)
+        }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
             implementation(libs.sqldelight.native.driver)
         }
     }
+}
+
+// Run the HUB:  ./gradlew :composeApp:runHub  (optional port arg: --args="9999")
+tasks.register<JavaExec>("runHub") {
+    group = "application"
+    description = "Run the NoSlop desktop HUB (always-on relay node)."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.HubMainKt")
 }
 
 android {
