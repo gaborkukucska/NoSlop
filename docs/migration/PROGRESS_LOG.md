@@ -4,6 +4,34 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 6: real TCP transport — packets leave the process 🟢
+
+First non-in-memory [Transport]: `SocketTransport` moves packets over real TCP. The first time a NoSlop
+packet crosses a process boundary in the cross-platform core.
+
+- **`SocketTransport`** (commonMain, ktor-network → runs on JVM/Android and Kotlin/Native incl. iOS): a
+  node `listen`s to accept inbound links (the HUB/desktop role — iOS can't, per ADR-002) and/or `connect`s
+  to dial outbound links (the leaf role; this is how iOS will reach the HUB). One-line `NetworkPacket` JSON
+  framing per packet, matching the Android `MeshTransport` wire format. On link-up the ends swap node ids in
+  a one-line handshake, so the link id is the peer's node id — identical to [InMemoryTransport], so
+  [MeshNode]'s "forward to all links except source" routing is byte-for-byte the same over either transport.
+  Per-connection write [Mutex] (a hub relays to one link from many read-loops at once) + a map [Mutex].
+- **`SocketTransportTest`** (JVM, real localhost TCP, `runBlocking`): three nodes — hub listening, leafA &
+  leafB dialing in, leaves NOT connected to each other — and leafA's post arrives at leafB, **proving the hub
+  relayed it over the wire** (the ADR-002 path, now over real sockets). Green. The class itself also
+  **compiles clean for iosSimulatorArm64**, so the iOS leaf can use it; cross-platform routing stays covered
+  by `MeshNodeTest` (in-memory). Full suite remains 50 tests + this JVM integration test.
+
+**Why JVM-only test:** real socket timing wants `runBlocking` (the desktop/HUB platform anyway). The routing
+correctness is platform-independent and already proven on Native via `MeshNodeTest`; this test only adds the
+real-I/O framing/handshake path.
+
+**Next:** the **desktop HUB build** — add a `jvm()` target with a runnable `main()` that stands up a
+`SocketTransport.listen()` hub node, so a real iOS leaf can dial a real always-on hub (loopback/LAN first,
+Tor later). The transport it needs now exists and is tested.
+
+---
+
 ## 2026-06-17 — Phase 1 step 5: mesh routing engine + leaf↔HUB relay model (transport-agnostic) 🟢
 
 The shared core can now **route**. A node ingests a packet, runs it through the firewall + signature
