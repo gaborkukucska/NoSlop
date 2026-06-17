@@ -4,6 +4,37 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 3: encrypted DMs + gossip firewall in shared code 🟢
+
+Two more pieces of the Android mesh core now run identically on both platforms — an iOS node can hold a
+**private conversation** with an Android node, and both apply the **same admission rules** to gossip traffic.
+
+**DM crypto** (`commonMain/DmCrypto.kt`, actuals in `Platform.{android,ios}.kt`, `CryptoKitDm` in
+`iOSApp.swift`). The Android scheme — **X25519 key agreement → SHA3-256(shared secret) → ChaCha20-Poly1305**
+(IETF, 12-byte nonce) — as expect/actual:
+- Android = BouncyCastle (`KeyAgreement "X25519"`, `Cipher "ChaCha20-Poly1305"`); iOS = CryptoKit
+  (`Curve25519.KeyAgreement` + `ChaChaPoly`) via the Swift bridge, reusing the raw-32 header-strip from the
+  signer. **SHA3 deliberately stays in commonMain** (`KotlinCrypto`) — CryptoKit has no SHA3 — so the bridges
+  only do X25519 + AEAD on raw bytes; base64/UTF-8 also stay shared.
+- Conformance anchored on an **independently-computed Python golden vector** (`cryptography`): X25519 raw
+  shared secret, SHA3-256, IETF ChaCha20-Poly1305, plaintext `"hello dm 🔐"`. Decrypting the golden ciphertext
+  proves a platform derives the SAME key + AEAD as the reference (hence as Android). `DmCryptoTest` **4/4 green
+  on JVM/BouncyCastle** (golden decrypt + round-trip + wrong-nonce → null + self-test); iOS proven by the
+  in-app `DmSelfTest` line, **screenshotted ✓ on the simulator** alongside the Ed25519 ✓.
+- Note: used the **raw** X25519 shared secret (not CryptoKit's HKDF-derived `SharedSecret`) to match
+  BouncyCastle/the reference — `secret.withUnsafeBytes { Data($0) }` before the Kotlin-side SHA3.
+
+**Gossip firewall** (`commonMain/MeshFirewall.kt`, commit `347fec2`). Pure TTL / duplicate-suppression /
+per-sender rate-limit ported from the Android `GossipService.processIncoming` (same thresholds: maxHops 6,
+dedup cap 1000 / evict 100, 20 pkts / 10 s / sender). The clock is **injected** so the sliding window is
+testable — an improvement on the Android original's `System.currentTimeMillis()`. `MeshFirewallTest` **10/10
+green on JVM + Kotlin/Native**, including the window-expiry case the Android suite couldn't reach.
+
+**Next:** persistence (SQLDelight — store identity, posts, DMs, peers); then transport + the always-on **HUB**
+(ADR-002), the hard infra piece that makes a working iOS mesh node possible.
+
+---
+
 ## 2026-06-17 — Phase 1 step 2: cross-platform Ed25519 sign/verify (Android ↔ iOS interop) 🟢
 
 A node can now **sign a packet on one platform that the other verifies** — the real interoperability
