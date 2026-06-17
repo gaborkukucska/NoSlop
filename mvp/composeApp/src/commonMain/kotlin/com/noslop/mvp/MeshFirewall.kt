@@ -45,4 +45,12 @@ class MeshFirewall(
         window.add(t)
         return true
     }
+
+    /**
+     * Record a locally-originated packet's id so its own gossip echo (relayed back from a hub) is
+     * recognised as a duplicate and dropped — without this an origin node re-processes its own packet.
+     */
+    fun remember(packet: NetworkPacket) {
+        packet.id?.let { seen.add(it) }
+    }
 }

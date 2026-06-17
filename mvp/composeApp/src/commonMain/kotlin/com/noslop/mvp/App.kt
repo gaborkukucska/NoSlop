@@ -103,6 +103,15 @@ private fun IdentityScreen() {
                     color = if (storage.startsWith("SQLDelight ✓")) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.error,
                 )
+                var mesh by remember { mutableStateOf("Mesh self-test running…") }
+                LaunchedEffect(Unit) { mesh = MeshSelfTest.run() }
+                Text(
+                    mesh,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (mesh.startsWith("Mesh ✓")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                )
                 if (!identity.isRealKeypair) {
                     Text(
                         "⚠︎ ephemeral fallback key — secure storage not wired here.",
