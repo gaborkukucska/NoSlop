@@ -4,6 +4,42 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 8: the iOS app talks to the HUB — real phone ↔ real hub 🟢
+
+The whole stack closes the loop: **the actual iOS app dials the actual desktop HUB and gossips through it.**
+First time the phone app touches real networking.
+
+- **`MeshClient`** (commonMain): a leaf for the app — identity + `SocketTransport` + `MeshNode` + a
+  `MeshStore`-backed sink that surfaces received posts to the UI. `connect(host, port)` / `publish(text)`.
+  Same engine the hub runs; this is the leaf side of ADR-002 (iOS dials out, can't host inbound).
+- **Mesh tab** in the app: hub host/port, Connect, a post box + Broadcast, and a live "Received from mesh"
+  list. Auto-connects to the default hub on open (the "just install the app" path — a shipping build puts a
+  default/public hub address here; see the product note below). `nowMillis()`/`randomId()` added as
+  expect/actual (JVM/Android `System`/`UUID`; iOS `NSDate`/`NSUUID`).
+- **Proven on the simulator against a real running hub** (`runHub` on :9876):
+  - **iOS → hub:** app auto-connected — phone shows "Connected ✓ — 1 link"; the hub log independently shows
+    `heartbeat — links=1` (the phone's link).
+  - **hub → iOS:** an external desktop client posted; the hub relayed it and the **phone displayed
+    "DesktopUser: gm from the desktop"** under "Received from mesh (1)". Screenshotted both.
+- No regression: full suite still green (Android/JVM unit tests + Native).
+
+**Product note (why this matters for "people who just want the app"):** iOS is a leaf by OS design — it can't
+be a full peer, so it needs a hub. The realistic models, in order of how most users experience them: (1)
+**default community/public hubs** the app auto-connects to (most users do nothing — the Mesh tab's auto-connect
+is the seed of this); (2) **an Android device as the hub** (Android *can* run background + a hidden service —
+"one Android unlocks iOS for a group"); (3) **run your own / a friend's hub** (privacy-max, what `runHub` is);
+(4) a hosted "home hub" appliance. Trust trade-off to message in GTM: a public hub relays your *encrypted*
+traffic + sees metadata (it cannot read DMs — proven step 5), a hub you control sees nothing it shouldn't.
+
+**iOS gotcha:** `NSDate.timeIntervalSince1970` is an **extension property** in the Kotlin/Native Foundation
+bindings — it must be `import platform.Foundation.timeIntervalSince1970`'d explicitly (fully-qualifying the
+receiver gives "unresolved reference"). Added `NSLocalNetworkUsageDescription` to Info.plist for on-device LAN.
+
+**Next:** the **Tor layer** — HUB registers an onion hidden service; iOS dials it via SOCKS (replacing the
+plain-TCP host/port with an onion address). That's the real privacy story and the last big external dependency.
+
+---
+
 ## 2026-06-17 — Phase 1 step 7: the desktop HUB — a real always-on relay process 🟢
 
 ADR-002's missing piece now exists: **a runnable always-on HUB that iOS leaves can dial.** It's a headless
