@@ -143,3 +143,6 @@ actual object DbDriverFactory {
 }
 
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
+
+actual fun nowMillis(): Long = System.currentTimeMillis()
+actual fun randomId(): String = java.util.UUID.randomUUID().toString()

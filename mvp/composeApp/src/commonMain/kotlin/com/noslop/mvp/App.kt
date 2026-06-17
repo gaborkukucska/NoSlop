@@ -2,6 +2,7 @@ package com.noslop.mvp
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,8 +18,10 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-/** Root MVP UI: two tabs — Identity and Feed. */
+/** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
 @Composable
 fun App() {
     MaterialTheme {
@@ -41,10 +44,12 @@ fun App() {
                 TabRow(selectedTabIndex = tab) {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Identity") })
                     Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Feed") })
+                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Mesh") })
                 }
                 when (tab) {
                     0 -> IdentityScreen()
-                    else -> FeedScreen()
+                    1 -> FeedScreen()
+                    else -> MeshScreen()
                 }
             }
         }
@@ -169,6 +174,86 @@ private fun FeedScreen() {
                                 Text(s.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
+ * (ADR-002); posting broadcasts to the hub, which relays to other connected nodes, and posts from others
+ * arrive here. This is an iPhone participating in the mesh via a hub it can't be itself.
+ */
+@Composable
+private fun MeshScreen() {
+    val scope = rememberCoroutineScope()
+    val identity = remember { loadIdentity(HandleStore.load()) }
+    val store = remember { MeshStoreProvider.get() }
+    val client = remember { MeshClient(identity, store, scope) }
+    val received = remember { mutableStateListOf<PostPayload>() }
+
+    var host by remember { mutableStateOf("127.0.0.1") }
+    var port by remember { mutableStateOf("9876") }
+    var status by remember { mutableStateOf("Not connected") }
+    var connected by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("Hello from my iPhone 👋") }
+
+    DisposableEffect(Unit) {
+        // Sink runs on a background coroutine; bounce UI updates onto the (main) composition scope.
+        client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
+        onDispose { client.close() }
+    }
+
+    // Auto-connect to the default hub on open — the "just install the app" path (a real product ships a
+    // default/public hub address here; the user does nothing). Manual reconnect via the button below.
+    LaunchedEffect(Unit) {
+        if (!connected) {
+            status = "Connecting…"
+            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876) }
+                .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
+                .onFailure { status = "Error: ${it.message}" }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(host, { host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
+            OutlinedTextField(port, { port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
+        }
+        Button(
+            onClick = {
+                status = "Connecting…"
+                scope.launch {
+                    runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876) }
+                        .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
+                        .onFailure { status = "Error: ${it.message}" }
+                }
+            },
+            enabled = !connected,
+        ) { Text(if (connected) "Connected" else "Connect to hub") }
+        Text(
+            status,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (status.startsWith("Connected")) MaterialTheme.colorScheme.primary
+            else if (status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+        )
+        OutlinedTextField(draft, { draft = it }, label = { Text("Post to the mesh") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Button(
+            onClick = { scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" } },
+            enabled = connected,
+        ) { Text("Broadcast post") }
+
+        Text("Received from mesh (${received.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(received) { p ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(p.authorName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(p.content, fontSize = 14.sp)
                     }
                 }
             }

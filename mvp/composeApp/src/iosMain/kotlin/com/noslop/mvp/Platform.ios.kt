@@ -8,6 +8,9 @@ import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
 import kotlinx.cinterop.convert
 import kotlinx.cinterop.usePinned
+import platform.Foundation.NSDate
+import platform.Foundation.NSUUID
+import platform.Foundation.timeIntervalSince1970
 import platform.Security.SecRandomCopyBytes
 import platform.Security.kSecRandomDefault
 
@@ -163,3 +166,6 @@ actual object DbDriverFactory {
 }
 
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
+
+actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
+actual fun randomId(): String = NSUUID().UUIDString()

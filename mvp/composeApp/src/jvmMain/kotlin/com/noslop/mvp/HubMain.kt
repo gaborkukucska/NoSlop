@@ -46,5 +46,3 @@ fun main(args: Array<String>) = runBlocking {
         println("[hub] heartbeat — links=${transport.links.size} storedPosts=${store.postCount()}")
     }
 }
-
-private fun nowMillis(): Long = System.currentTimeMillis()

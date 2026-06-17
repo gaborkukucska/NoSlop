@@ -29,5 +29,8 @@
 	<!-- Required by Compose Multiplatform iOS: PlistSanityCheck throws (crashing at first layout) without it. -->
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- The mesh client dials a HUB over the local network (LAN/loopback); iOS prompts using this string. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>NoSlop connects to a mesh hub on your local network to send and receive posts.</string>
 </dict>
 </plist>
