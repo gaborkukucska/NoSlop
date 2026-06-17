@@ -4,6 +4,37 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 7: the desktop HUB — a real always-on relay process 🟢
+
+ADR-002's missing piece now exists: **a runnable always-on HUB that iOS leaves can dial.** It's a headless
+JVM build of the shared core — `MeshNode` + `SocketTransport.listen()` + a `MeshStore`-backed sink — no new
+logic, just the tested pieces composed and given a `main()`.
+
+- **New `jvm()` target** on `composeApp` (headless; the same module, so it shares commonMain — Compose
+  compiles for JVM but the HUB never renders UI). JVM actuals for every shared seam in `Platform.jvm.kt`:
+  Ed25519 `Signer` + `DmCrypto` via **the same BouncyCastle code as Android** (so a HUB verifies signatures
+  and relays DMs byte-identically to a phone), `DbDriverFactory` via JDBC SQLite, file-based identity/handle,
+  OkHttp. `Mappers.kt` adds `PostPayload.toMeshPost()` (shared, used by the HUB sink and later the app).
+- **`HubMain`** (`./gradlew :composeApp:runHub [--args="<port>"]`): loads/creates a real Ed25519 identity,
+  opens the DB, listens on TCP, and relays + persists what arrives. ~40 lines — everything else is reused.
+- **Proven end-to-end as a standalone process:** ran `runHub` on :9876 → "NoSlop HUB up — node 302a30…
+  listening". A **separate external client** (a Python script — not our code) connected, completed the
+  node-id handshake (received the hub's real Ed25519 id), and sent a wire-format POST; the hub ingested it
+  through the full pipeline and logged `[hub] post py-post-1 by PythonLeaf: hello from a real external
+  client`. Proves the wire protocol is genuinely interoperable with a non-Kotlin client.
+- **No regression:** full suite now also runs on the **JVM target — 50/50 green** (the new BouncyCastle/JDBC
+  actuals validated against the same golden vectors as Android + Native). Plus the JVM socket integration test.
+
+**Integration notes:** adding `jvm()` makes `commonTest` compile/run on JVM too, so it needs a `jvmTest`
+`inMemoryDriver` actual (JDBC IN_MEMORY) — added. The HUB is run via a `JavaExec` task (`runHub`) wired to the
+jvm compilation's output + runtime classpath (KMP jvm targets have no application-plugin `run` by default).
+
+**Next:** point a real **iOS leaf at this HUB** — wire `SocketTransport.connect(hubHost, port)` into the iOS
+app (loopback/LAN first) so a phone gossips through the desktop hub; then the **Tor layer** (HUB registers an
+onion hidden service; iOS dials it via SOCKS) for the real privacy story.
+
+---
+
 ## 2026-06-17 — Phase 1 step 6: real TCP transport — packets leave the process 🟢
 
 First non-in-memory [Transport]: `SocketTransport` moves packets over real TCP. The first time a NoSlop
