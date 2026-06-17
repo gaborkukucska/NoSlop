@@ -4,6 +4,27 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 10a: QR pairing — the HUB shows a code the phone scans 🟢
+
+Owner's UX idea (the right call for non-tech users): instead of typing a 56-char onion + toggling SOCKS, the
+**node displays a QR; the phone scans it and is configured**. Built the hub side (the phone scanner + iOS Tor
+are the interactive next steps).
+
+- `MeshInvite` (commonMain): the connection descriptor both sides agree on — `noslop://<host>:<port>?tor=<0|1>
+  [&id=<hubNodeId>]`. Carries where to dial, whether it's a Tor onion, and the hub's identity (so the app can
+  pin it). `parse()`/`toUri()` round-trip; `MeshInviteTest` **5/5 green on JVM + Native**.
+- `QrConsole` (jvmMain, ZXing): renders any string as a terminal QR using Unicode half-blocks (▀▄█) so two QR
+  rows pack per text line — square + compact enough to scan off the screen.
+- `HubMain` now prints the pairing QR after startup: the **onion** invite when Tor is on, else a **LAN-IP**
+  invite for same-WiFi (prefers the physical `en*` interface). Verified live — the hub renders a clean,
+  finder-pattern-correct QR for `noslop://192.168.20.4:9876?tor=0&id=…` / the onion form.
+
+**Next (interactive, needs your device):** (10b) the iOS **camera QR scanner** → parse `MeshInvite` → fill the
+Mesh tab + connect; (10c) iOS **Tor.framework** (SPM) → start Tor, hand its SOCKS port to `MeshClient.connect`
+with the scanned onion. End state: install app → scan the hub's QR → connected from anywhere.
+
+---
+
 ## 2026-06-18 — Phase 1 step 9e: `downloadTor` Gradle task — tor is bundled reproducibly 🟢
 
 Packaging for the bundled tor (owner's choice over committing per-OS binaries): a Gradle task fetches the

@@ -92,6 +92,7 @@ kotlin {
             implementation(libs.bouncycastle)
             implementation(libs.sqldelight.sqlite.driver)
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.zxing.core)
         }
         jvmTest.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
