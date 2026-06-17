@@ -62,4 +62,13 @@ actual object IdentityKeyStore {
     }
 }
 
+/** Handle persisted in NSUserDefaults (reachable directly from Kotlin/Native — no Swift bridge needed). */
+actual object HandleStore {
+    private const val KEY = "noslop_handle"
+    actual fun load(): String =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY) ?: "anon"
+    actual fun save(handle: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(handle, KEY)
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)

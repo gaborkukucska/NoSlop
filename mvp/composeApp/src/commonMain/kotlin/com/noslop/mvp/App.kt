@@ -11,6 +11,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -52,22 +53,31 @@ fun App() {
 
 @Composable
 private fun IdentityScreen() {
-    // Loads the identity persisted in secure storage (Keychain / Keystore) — same every launch.
-    var identity by remember { mutableStateOf(loadIdentity("anon")) }
+    // Handle + keypair both persist (NSUserDefaults / SharedPreferences and Keychain / Keystore).
+    var handle by remember { mutableStateOf(HandleStore.load()) }
+    var identity by remember { mutableStateOf(loadIdentity(handle)) }
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("NoSlop Identity", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "Persisted on this device",
-            fontSize = 12.sp,
-            color = MaterialTheme.colorScheme.outline,
+        Text("Persisted on this device", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+        OutlinedTextField(
+            value = handle,
+            onValueChange = { new ->
+                val clean = new.filter { it.isLetterOrDigit() || it == '_' }.take(20)
+                handle = clean
+                HandleStore.save(clean)
+                identity = identity.copy(handle = clean.ifBlank { "anon" })
+            },
+            label = { Text("Handle") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
         )
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Field("Handle", "${identity.handle}.${identity.tripcode}")
+                Field("Display name", "${identity.handle}.${identity.tripcode}")
                 Field("Tripcode", identity.tripcode)
                 Field("Onion", identity.onionAddress)
                 Field("Public key", identity.publicKeyHex)
@@ -80,7 +90,9 @@ private fun IdentityScreen() {
                 }
             }
         }
-        Button(onClick = { identity = regenerateIdentity("anon") }) { Text("Regenerate identity") }
+        Button(onClick = { identity = regenerateIdentity(handle.ifBlank { "anon" }) }) {
+            Text("Regenerate keypair")
+        }
     }
 }
 

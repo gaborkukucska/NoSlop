@@ -24,6 +24,15 @@ expect object IdentityKeyStore {
     fun reset()
 }
 
+/**
+ * Persists the user's chosen handle (the display prefix, e.g. `alice` in `alice.tripcode`). Not secret,
+ * so plain device storage (iOS NSUserDefaults / Android SharedPreferences) is fine. Defaults to "anon".
+ */
+expect object HandleStore {
+    fun load(): String
+    fun save(handle: String)
+}
+
 private fun ByteArray.toHex(): String =
     joinToString("") { (it.toInt() and 0xFF).toString(16).padStart(2, '0') }
 

@@ -64,4 +64,18 @@ actual object IdentityKeyStore {
             .apply { initialize(255, SecureRandom()) }.generateKeyPair().public.encoded
 }
 
+/** Handle persisted in app-private SharedPreferences (in-memory fallback when no context, e.g. tests). */
+actual object HandleStore {
+    private const val PREFS = "noslop_handle"
+    private const val KEY = "handle"
+    private var fallback = "anon"
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String = sp()?.getString(KEY, null) ?: fallback
+    actual fun save(handle: String) {
+        val s = sp()
+        if (s != null) s.edit().putString(KEY, handle).apply() else fallback = handle
+    }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
