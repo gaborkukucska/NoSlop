@@ -39,7 +39,21 @@ fun main(args: Array<String>) = runBlocking {
     MeshNode(nodeId, transport, sink, MeshFirewall(now = { nowMillis() }))
     val bound = transport.listen("0.0.0.0", port)
     println("NoSlop HUB up — node ${nodeId.take(16)}… listening on 0.0.0.0:$bound")
-    println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
+
+    // Optional onion: pass a tor control port (and optional password) as arg 2, e.g.
+    //   ./gradlew :composeApp:runHub --args="9876 9051:mypassword"
+    // The bundled-tor launch (ADR-009 9c) will point here; for now this expects a running tor's control port.
+    val torArg = args.getOrNull(1)
+    if (torArg != null) {
+        val controlPort = torArg.substringBefore(':').toIntOrNull() ?: 9051
+        val password = torArg.substringAfter(':', "")
+        runCatching {
+            TorControl.addOnion(controlPort = controlPort, password = password, virtualPort = bound, targetPort = bound)
+        }.onSuccess { onion -> println("Onion published: leaves dial $onion:$bound via Tor SOCKS (ADR-002).") }
+            .onFailure { println("Tor onion registration failed (${it.message}); staying plain-TCP only.") }
+    } else {
+        println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
+    }
 
     while (true) {
         delay(60_000)

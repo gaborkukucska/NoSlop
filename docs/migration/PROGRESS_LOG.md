@@ -4,6 +4,29 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 9c (protocol): Tor control-port onion registration 🟢
+
+Owner decisions are in (ADR-009): **bundle `tor` with the HUB**, **Tor.framework/iCepa for iOS**. Built the
+desktop-side protocol piece toward "bundle tor" — the part testable without a `tor` binary.
+
+- `TorControl.addOnion(...)` (commonMain): a minimal Tor **control-port** client — `AUTHENTICATE` then
+  `ADD_ONION NEW:ED25519-V3 Port=<virt>,<target>`, parse the multiline reply, return `<id>.onion`. This is
+  how the HUB publishes a v3 hidden service pointing at its listen port so leaves dial it over Tor.
+- `TorControlTest` (JVM, mock control server): asserts the exact AUTHENTICATE + ADD_ONION lines and the
+  `<ServiceID>.onion` result. Green. Compiles JVM + Native.
+- `HubMain` takes an optional arg 2 (`<controlPort>[:password]`): after `listen()`, registers an onion via the
+  control port and prints the dial address, gracefully falling back to plain-TCP if Tor isn't there.
+
+**Still needs live verification (no `tor` on this machine — flagged, not faked):**
+- **Bundle + launch `tor`:** vendor a `tor` binary per desktop OS and have the HUB spawn it with a generated
+  torrc enabling the control port, then call `TorControl.addOnion`. Binary vendoring + process launch is the
+  remaining packaging work; the control protocol it drives is done + tested.
+- **iOS Tor.framework/iCepa:** add the pod/SwiftPM dependency, start Tor on launch, read its SOCKS port, and
+  pass `SocksProxy(127.0.0.1, torSocksPort)` + the `.onion` to `MeshClient.connect` (dialing side already done,
+  9a/9b). Interactive Xcode/CocoaPods + a multi-minute Tor bootstrap — best done with you and a device.
+
+---
+
 ## 2026-06-17 — Phase 1 step 9a: SOCKS5 client dialing (the Tor seam) 🟢
 
 First piece of the Tor layer (ADR-009): a leaf can now dial through a **SOCKS5 proxy** — the exact mechanism
