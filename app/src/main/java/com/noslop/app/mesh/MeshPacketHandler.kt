@@ -49,6 +49,7 @@ class MeshPacketHandler(
             "MESSAGE" -> handleDirectMessage(packet, localKeys)
             "CONNECTION_REQUEST" -> handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handleUserHandshake(packet)
+            "CONNECTION_REJECTED" -> handleConnectionRejected(packet)
             "ANNOUNCE_PEER" -> handleAnnouncePeer(packet)
             "CHAT_REACTION" -> handleChatReaction(packet)
             "COMMENT_REACTION" -> handleCommentReaction(packet)
@@ -708,6 +709,76 @@ class MeshPacketHandler(
                 authorAvatarB64 = handPay.authorAvatarB64
             )
             peerDao.insertPeer(newPeer)
+        }
+
+        // Generate the accepted notification
+        val title = "Connection Accepted"
+        val msg = "${handPay.fromUsername.split(".")[0]} accepted your connection request."
+        val route = "chat/${handPay.fromUserId}"
+
+        notificationDao.insertNotification(
+            com.noslop.app.data.NotificationItem(
+                id = java.util.UUID.randomUUID().toString(),
+                type = "SYSTEM",
+                title = title,
+                body = msg,
+                targetRoute = route,
+                iconType = "handshake",
+                senderPub = handPay.fromUserId
+            )
+        )
+
+        com.noslop.app.util.NotificationHelper.showNotification(
+            context = repo.context,
+            title = title,
+            message = msg,
+            deepLinkRoute = route
+        )
+
+        return true
+    }
+
+    private suspend fun handleConnectionRejected(packet: NetworkPacket): Boolean {
+        val rejectPay = packet.getConnectionRejectedPayload() ?: return false
+        val signature = packet.signature
+        if (signature == null) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected CONNECTION_REJECTED: Missing signature")
+            return false
+        }
+
+        val payloadToVerify = "${rejectPay.fromUserId}|${rejectPay.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, signature, rejectPay.fromUserId)) {
+            com.noslop.app.debug.Logger.warn(TAG, "Rejected CONNECTION_REJECTED: Signature verification failed")
+            return false
+        }
+
+        val peer = peerDao.getPeerByPublicKey(rejectPay.fromUserId)
+        if (peer != null) {
+            // Remove the pending untrusted peer since they rejected us
+            peerDao.deletePeer(peer)
+
+            val title = "Connection Declined"
+            val msg = "${peer.handle} declined your connection request."
+            val route = "notifications"
+
+            notificationDao.insertNotification(
+                com.noslop.app.data.NotificationItem(
+                    id = java.util.UUID.randomUUID().toString(),
+                    type = "SYSTEM",
+                    title = title,
+                    body = msg,
+                    targetRoute = route,
+                    iconType = "handshake_declined",
+                    senderPub = peer.publicKeyB64
+                )
+            )
+
+            com.noslop.app.util.NotificationHelper.showNotification(
+                context = repo.context,
+                title = title,
+                message = msg,
+                deepLinkRoute = route
+            )
         }
         return true
     }

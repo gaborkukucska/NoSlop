@@ -173,6 +173,12 @@ data class UserExitPayload(
     val signature: String
 )
 
+data class ConnectionRejectedPayload(
+    @SerializedName("from_user_id") val fromUserId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class EditPostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -237,7 +243,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "VOTE", "COMMENT_VOTE", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
+    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "CONNECTION_REJECTED", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "VOTE", "COMMENT_VOTE", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)
@@ -333,6 +339,10 @@ data class NetworkPacket(
 
     fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
         Gson().fromJson(payload, UserExitPayload::class.java)
+    } else null
+
+    fun getConnectionRejectedPayload(): ConnectionRejectedPayload? = if (type == "CONNECTION_REJECTED" && payload != null) {
+        Gson().fromJson(payload, ConnectionRejectedPayload::class.java)
     } else null
 
     fun getEditPostPayload(): EditPostPayload? = if (type == "EDIT_POST" && payload != null) {

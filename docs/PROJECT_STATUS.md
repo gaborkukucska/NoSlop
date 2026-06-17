@@ -40,6 +40,10 @@
 *   **Fix**: Added a high-quality default fallback hero image for articles without thumbnails.
 *   **Fix**: Improved article pagination state to always show a content page with the "Read Full Article" button even when no text is extractable.
 
+### 7. Handshake Reply Notifications
+*   Added logic to notify the sender of a connection request when it is accepted (`USER_HANDSHAKE`).
+*   Introduced new packet type `CONNECTION_REJECTED` to notify the sender if their request is declined, safely removing the pending peer and displaying a local notification.
+
 ## Pending / Future Work
 *   Add more no-auth image and video sources.
 *   Enhance WebView with ad-blocking or reader mode if possible.

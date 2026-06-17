@@ -33,9 +33,9 @@ Wire format: newline-delimited JSON over the SOCKS5/Tor mesh transport
 
 ---
 
-## 2. Full Packet Type Catalog (19 types)
+## 2. Full Packet Type Catalog (20 types)
 
-`Packets.kt`'s `type` field documents 19 string values. Each is listed below
+`Packets.kt`'s `type` field documents 20 string values. Each is listed below
 with its payload class, signed-payload format (where applicable), and
 handler in `MeshPacketHandler.handlePacket`.
 
@@ -60,6 +60,7 @@ handler in `MeshPacketHandler.handlePacket`.
 | 17 | `EDIT_POST` | (edit payload: `postId`, new `content`, `timestamp`, `signature`) | author-checked against `existingPost.authorPublicKeyB64` | `handleEditPost` | updates `mesh_posts.content` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 18 | `DELETE_POST` | (delete payload: `postId`, `timestamp`, `signature`) | author-checked against `existingPost.authorPublicKeyB64` | `handleDeletePost` | marks `mesh_posts.isOrphaned = true` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 19 | `MEDIA_REQUEST` / `MEDIA_CHUNK` / `MEDIA_RELAY_REQUEST` / `MEDIA_RECOVERY_FOUND` / `MEDIA_PENDING` / `MEDIA_TRANSFER_ACK` | see §5 | none | delegated to `MediaManager`/`GossipService` | see §5 |
+| 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed) | `handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
 
 Notes:
 
@@ -234,7 +235,7 @@ unified reply envelope for both reconciliation strategies.
 ## 6. Cryptographic Signed-String Formats — Consolidated Table
 
 For quick reference, every signed pipe-delimited string format currently in
-use across the 19 packet types (per §3.4's note that "the verifier must know
+use across the 20 packet types (per §3.4's note that "the verifier must know
 the precise format per packet type"):
 
 | Packet type | Signed string |
@@ -252,6 +253,7 @@ the precise format per packet type"):
 | `DELETE_POST` | `postId\|timestamp` (author-checked against stored post's `authorPublicKeyB64`) |
 | `ANNOUNCE_PEER` | sender's identity fields + timestamp (exact field order not confirmed from `Packets.kt` alone; verify against `NoSlopRepository`'s broadcast call site if reimplementing) |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | computed and sent (`PeerHandshakePayload.signature`) but **never verified on receipt** — see §2 row 3–4 note |
+| `CONNECTION_REJECTED` | `fromUserId\|timestamp` |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64
 no-wrap encoding, over the UTF-8 bytes of the literal pipe-delimited string —

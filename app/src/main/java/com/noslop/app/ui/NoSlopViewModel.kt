@@ -994,7 +994,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rejectHandshake() {
         viewModelScope.launch {
-            repository.clearIncomingRequest()
+            val peer = incomingRequest.value
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+            } else {
+                repository.clearIncomingRequest()
+            }
         }
     }
 
@@ -1062,9 +1067,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rejectConnectionFromNotification(notifId: String, senderPub: String) {
         viewModelScope.launch {
-            repository.deletePeer(senderPub)
+            val peer = repository.peerDao.getPeerByPublicKey(senderPub)
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+            } else {
+                repository.deletePeer(senderPub)
+                repository.clearIncomingRequest()
+            }
             repository.deleteNotification(notifId)
-            repository.clearIncomingRequest()
         }
     }
 

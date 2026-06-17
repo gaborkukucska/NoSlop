@@ -966,6 +966,39 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         true
     }
 
+    suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
+        peerDao.deletePeer(peer)
+        _incomingRequestFlow.value = null
+
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+            val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            
+            val rejectPay = com.noslop.app.mesh.ConnectionRejectedPayload(
+                fromUserId = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = peer.publicKeyB64,
+                type = "CONNECTION_REJECTED",
+                payload = com.google.gson.Gson().toJsonTree(rejectPay),
+                signature = signature
+            )
+            
+            repositoryScope.launch {
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+            }
+        }
+        return@withContext true
+    }
+
     suspend fun togglePeerTrust(peer: Peer) = withContext(Dispatchers.IO) {
         val updated = peer.copy(isTrusted = !peer.isTrusted)
         peerDao.insertPeer(updated)
