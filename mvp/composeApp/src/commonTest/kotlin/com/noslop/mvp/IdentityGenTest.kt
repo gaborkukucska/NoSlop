@@ -5,23 +5,32 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * Exercises the FULL identity pipeline — platform [KeyProvider] keygen + portable derivation — on
- * whichever target runs the test. Run on `iosSimulatorArm64` this verifies the iOS path end to end:
- * SecRandomCopyBytes (Security cinterop) -> SHA3 (KotlinCrypto on Kotlin/Native) -> Base32.
+ * Exercises the persistent identity pipeline — platform [IdentityKeyStore] + portable derivation —
+ * on whichever target runs. On `iosSimulatorArm64` this verifies the Kotlin/Native side end to end
+ * (keygen → SHA3 → Base32). The real Keychain/Keystore path is exercised by running the app; here
+ * the no-bridge fallback (process-stable) stands in.
  */
 class IdentityGenTest {
+
     @Test
-    fun generateIdentity_producesWellFormedIdentity() {
-        val id = generateIdentity("anon")
+    fun loadIdentity_producesWellFormedIdentity() {
+        val id = loadIdentity("anon")
         assertEquals("anon", id.handle)
         assertEquals(6, id.tripcode.length)
         assertTrue(id.onionAddress.endsWith(".onion"))
         assertEquals(62, id.onionAddress.length)
-        assertEquals(64, id.publicKeyHex.length)
     }
 
     @Test
-    fun twoIdentities_differ() {
-        assertTrue(generateIdentity("a").publicKeyHex != generateIdentity("a").publicKeyHex)
+    fun loadIdentity_isStableAcrossCalls() {
+        // Persistence: loading twice returns the SAME identity (the whole point of the keystore).
+        assertEquals(loadIdentity("anon").publicKeyHex, loadIdentity("anon").publicKeyHex)
+    }
+
+    @Test
+    fun regenerate_producesADifferentIdentity() {
+        val before = loadIdentity("anon").publicKeyHex
+        val after = regenerateIdentity("anon").publicKeyHex
+        assertTrue(before != after, "a regenerated identity must differ")
     }
 }

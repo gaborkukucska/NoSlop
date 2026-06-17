@@ -12,44 +12,54 @@ import platform.Security.SecRandomCopyBytes
 import platform.Security.kSecRandomDefault
 
 /**
- * Swift→Kotlin bridge for real iOS Ed25519 keys.
+ * Swift→Kotlin bridge for the **persistent** iOS identity keypair.
  *
- * CryptoKit (`Curve25519.Signing`) is a Swift-only framework and is NOT reachable from Kotlin/Native
- * cinterop, so the iOS app (Swift) implements this interface with CryptoKit and injects it into
- * [IosCrypto] at startup. Kotlin then has a real keypair without depending on CryptoKit directly.
+ * CryptoKit + Keychain are Swift-only (unreachable from Kotlin/Native cinterop), so the iOS app
+ * implements this with `Curve25519.Signing` + the Keychain and injects it into [IosKeychainBridge]
+ * at startup. The private key lives in the Keychain; this returns the persisted public key.
  */
-interface Ed25519KeyProvider {
-    /** Base64 of a freshly generated, real 32-byte Ed25519 public key (with a backing private key). */
-    fun publicKeyBase64(): String
+interface IosKeychain {
+    /** Base64 of the persisted Ed25519 public key, creating + storing a keypair on first use. */
+    fun loadOrCreatePublicKeyBase64(): String
+    /** Delete the stored keypair so the next load creates a fresh one. */
+    fun reset()
 }
 
-/** Holds the Swift-supplied [Ed25519KeyProvider]; set once by the iOS app before any identity is made. */
-object IosCrypto {
-    var provider: Ed25519KeyProvider? = null
+/** Holds the Swift-supplied [IosKeychain]; set once by the iOS app before any identity is loaded. */
+object IosKeychainBridge {
+    var keychain: IosKeychain? = null
 }
 
 /**
- * iOS keypair seam.
+ * iOS persistent identity store.
  *
- * When the iOS app has injected a CryptoKit-backed [Ed25519KeyProvider] (the normal on-device path),
- * this returns a REAL 32-byte Ed25519 public key. When no provider is wired — e.g. Kotlin/Native unit
- * tests, which can't reach CryptoKit — it falls back to a secure-random demo key so derivation still
- * runs. [producesRealKeypair] reflects which path was taken.
+ * With the Keychain bridge wired (normal on-device path), the keypair is persisted in the Keychain
+ * and the same identity is returned every launch. Without it — e.g. Kotlin/Native unit tests, which
+ * can't reach CryptoKit/Keychain — it falls back to a process-stable secure-random key.
  */
-actual object KeyProvider {
-    @OptIn(ExperimentalForeignApi::class, ExperimentalEncodingApi::class)
-    actual fun generateRawEd25519PublicKey(): ByteArray {
-        IosCrypto.provider?.let { return Base64.decode(it.publicKeyBase64()) }
+actual object IdentityKeyStore {
+    private var fallbackKey: ByteArray? = null
 
-        // Fallback (no Swift bridge wired): secure-random demo bytes.
-        val bytes = ByteArray(32)
-        bytes.usePinned { pinned ->
-            SecRandomCopyBytes(kSecRandomDefault, 32.convert(), pinned.addressOf(0))
-        }
-        return bytes
+    @OptIn(ExperimentalForeignApi::class, ExperimentalEncodingApi::class)
+    actual fun loadOrCreatePublicKey(): ByteArray {
+        IosKeychainBridge.keychain?.let { return Base64.decode(it.loadOrCreatePublicKeyBase64()) }
+        // Fallback (no bridge): stable within the process so derivations are reproducible in tests.
+        return fallbackKey ?: secureRandom32().also { fallbackKey = it }
     }
 
-    actual val producesRealKeypair: Boolean get() = IosCrypto.provider != null
+    actual val isRealKeypair: Boolean get() = IosKeychainBridge.keychain != null
+
+    actual fun reset() {
+        IosKeychainBridge.keychain?.reset()
+        fallbackKey = null
+    }
+
+    @OptIn(ExperimentalForeignApi::class)
+    private fun secureRandom32(): ByteArray {
+        val bytes = ByteArray(32)
+        bytes.usePinned { SecRandomCopyBytes(kSecRandomDefault, 32.convert(), it.addressOf(0)) }
+        return bytes
+    }
 }
 
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)

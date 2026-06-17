@@ -51,33 +51,35 @@ fun App() {
 
 @Composable
 private fun IdentityScreen() {
-    var identity by remember { mutableStateOf<Identity?>(null) }
+    // Loads the identity persisted in secure storage (Keychain / Keystore) — same every launch.
+    var identity by remember { mutableStateOf(loadIdentity("anon")) }
     Column(
         Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Text("NoSlop Identity", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Button(onClick = { identity = generateIdentity("anon") }) {
-            Text(if (identity == null) "Generate identity" else "Regenerate")
-        }
-        identity?.let { id ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Field("Handle", "${id.handle}.${id.tripcode}")
-                    Field("Tripcode", id.tripcode)
-                    Field("Onion", id.onionAddress)
-                    Field("Public key", id.publicKeyHex)
-                    if (!id.isRealKeypair) {
-                        Text(
-                            "⚠︎ iOS MVP demo key — real CryptoKit Ed25519 is the next step.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
+        Text(
+            "Persisted on this device",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Field("Handle", "${identity.handle}.${identity.tripcode}")
+                Field("Tripcode", identity.tripcode)
+                Field("Onion", identity.onionAddress)
+                Field("Public key", identity.publicKeyHex)
+                if (!identity.isRealKeypair) {
+                    Text(
+                        "⚠︎ ephemeral fallback key — secure storage not wired here.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         }
+        Button(onClick = { identity = regenerateIdentity("anon") }) { Text("Regenerate identity") }
     }
 }
 
