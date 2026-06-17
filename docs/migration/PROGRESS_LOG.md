@@ -4,6 +4,31 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-17 — Phase 1 step 2: cross-platform Ed25519 sign/verify (Android ↔ iOS interop) 🟢
+
+A node can now **sign a packet on one platform that the other verifies** — the real interoperability
+threshold. Commit `d454b19`.
+
+- `Signer` expect/actual: Android = BouncyCastle JCA; iOS = CryptoKit `Curve25519.Signing` via a Swift
+  bridge. Base64 + UTF-8 live in commonMain (`kotlin.io.encoding.Base64`) so the actuals are raw-bytes only
+  — which keeps `android.util.Base64` out of the JVM unit-test path (golden vector runs on BC directly). iOS
+  strips the PKCS#8/X.509 header to the raw 32-byte key CryptoKit expects.
+- Conformance anchored on the **RFC 8032 golden vector** (test 2; independently computed + verified with
+  Python `cryptography`). Android reproduces the EXACT golden signature — `SignerTest` green on BouncyCastle.
+  iOS proven by an in-app self-test, screenshotted ✓ on the simulator.
+- **Gotcha found + handled:** Apple's CryptoKit Ed25519 is **randomized** (valid signatures, but not
+  byte-identical to the deterministic golden). Interop needs *mutual verifiability*, not byte-equality — so
+  the self-test VERIFIES the canonical RFC signature (each platform can verify the other's) + round-trips its
+  own, rather than byte-comparing. Documented for whoever ports the rest of the crypto.
+
+MVP test count: **Android 19** (incl. SignerTest ×2 with strict golden equality), **iOS** golden vectors +
+self-test ✓. The wire protocol + signing — the two pieces that make a packet trustworthy — are now shared.
+
+**Next:** DM crypto (X25519 + SHA3 + ChaCha20-Poly1305) and the gossip TTL/dedup/rate-limit logic; then
+persistence (SQLDelight); then transport + the HUB (ADR-002).
+
+---
+
 ## 2026-06-17 — Phase 1 begins: wire protocol ported to shared code (byte-identical on iOS + Android) 🟢
 
 Toward Android parity. The CMP MVP (`mvp/`) grew real capabilities and now holds the first piece of the
