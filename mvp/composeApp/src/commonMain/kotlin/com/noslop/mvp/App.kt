@@ -81,6 +81,13 @@ private fun IdentityScreen() {
                 Field("Tripcode", identity.tripcode)
                 Field("Onion", identity.onionAddress)
                 Field("Public key", identity.publicKeyHex)
+                val signOk = remember { Ed25519SelfTest.run() }
+                Text(
+                    if (signOk) "Ed25519 sign/verify ✓ (RFC 8032 conformant)" else "Ed25519 self-test failed",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (signOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                )
                 if (!identity.isRealKeypair) {
                     Text(
                         "⚠︎ ephemeral fallback key — secure storage not wired here.",

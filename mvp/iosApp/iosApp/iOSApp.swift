@@ -54,11 +54,32 @@ class KeychainIdentity: IosKeychain {
     }
 }
 
+/// CryptoKit Ed25519 signing, bridged into the shared core. Keys arrive as raw 32-byte values (the
+/// Kotlin side strips the PKCS#8/X.509 headers); CryptoKit produces standard RFC 8032 signatures.
+class CryptoKitSigner: IosSigner {
+    func signBase64(payloadBase64: String, privateKeyRawBase64: String) -> String? {
+        guard let key = Data(base64Encoded: privateKeyRawBase64),
+              let priv = try? Curve25519.Signing.PrivateKey(rawRepresentation: key),
+              let msg = Data(base64Encoded: payloadBase64),
+              let sig = try? priv.signature(for: msg) else { return nil }
+        return sig.base64EncodedString()
+    }
+
+    func verifyBase64(payloadBase64: String, signatureBase64: String, publicKeyRawBase64: String) -> Bool {
+        guard let pubData = Data(base64Encoded: publicKeyRawBase64),
+              let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: pubData),
+              let sig = Data(base64Encoded: signatureBase64),
+              let msg = Data(base64Encoded: payloadBase64) else { return false }
+        return pub.isValidSignature(sig, for: msg)
+    }
+}
+
 @main
 struct iOSApp: App {
     init() {
-        // Wire the Keychain-backed identity before any identity is loaded.
+        // Wire the CryptoKit bridges before any identity / signing happens.
         IosKeychainBridge.shared.keychain = KeychainIdentity()
+        IosSignerBridge.shared.signer = CryptoKitSigner()
     }
 
     var body: some Scene {

@@ -78,4 +78,26 @@ actual object HandleStore {
     }
 }
 
+/** Android Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 handled in commonMain). */
+actual object Signer {
+    private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()
+    actual val isAvailable: Boolean = true
+
+    actual fun signRaw(payload: ByteArray, pkcs8PrivateKey: ByteArray): ByteArray = try {
+        val priv = java.security.KeyFactory.getInstance("Ed25519", bc)
+            .generatePrivate(java.security.spec.PKCS8EncodedKeySpec(pkcs8PrivateKey))
+        java.security.Signature.getInstance("Ed25519", bc).run {
+            initSign(priv); update(payload); sign()
+        }
+    } catch (e: Exception) { ByteArray(0) }
+
+    actual fun verifyRaw(payload: ByteArray, signature: ByteArray, x509PublicKey: ByteArray): Boolean = try {
+        val pub = java.security.KeyFactory.getInstance("Ed25519", bc)
+            .generatePublic(java.security.spec.X509EncodedKeySpec(x509PublicKey))
+        java.security.Signature.getInstance("Ed25519", bc).run {
+            initVerify(pub); update(payload); verify(signature)
+        }
+    } catch (e: Exception) { false }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)

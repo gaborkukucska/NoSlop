@@ -71,4 +71,38 @@ actual object HandleStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(handle, KEY)
 }
 
+/**
+ * Swift→Kotlin bridge for CryptoKit Ed25519 signing. CryptoKit takes RAW 32-byte keys (not PKCS#8/X.509)
+ * and exchanges base64 strings across the bridge for clean byte transfer.
+ */
+interface IosSigner {
+    fun signBase64(payloadBase64: String, privateKeyRawBase64: String): String?
+    fun verifyBase64(payloadBase64: String, signatureBase64: String, publicKeyRawBase64: String): Boolean
+}
+
+object IosSignerBridge {
+    var signer: IosSigner? = null
+}
+
+/** iOS Ed25519 signer: strip the PKCS#8/X.509 header to the raw 32-byte key, then CryptoKit via the bridge. */
+@OptIn(ExperimentalEncodingApi::class)
+actual object Signer {
+    actual val isAvailable: Boolean get() = IosSignerBridge.signer != null
+
+    actual fun signRaw(payload: ByteArray, pkcs8PrivateKey: ByteArray): ByteArray {
+        val s = IosSignerBridge.signer ?: return ByteArray(0)
+        val out = s.signBase64(Base64.encode(payload), Base64.encode(raw32(pkcs8PrivateKey))) ?: return ByteArray(0)
+        return Base64.decode(out)
+    }
+
+    actual fun verifyRaw(payload: ByteArray, signature: ByteArray, x509PublicKey: ByteArray): Boolean {
+        val s = IosSignerBridge.signer ?: return false
+        return s.verifyBase64(Base64.encode(payload), Base64.encode(signature), Base64.encode(raw32(x509PublicKey)))
+    }
+
+    /** The raw 32-byte Ed25519 key is the last 32 bytes of a PKCS#8 (48-byte) / X.509 (44-byte) encoding. */
+    private fun raw32(encoded: ByteArray): ByteArray =
+        if (encoded.size >= 32) encoded.copyOfRange(encoded.size - 32, encoded.size) else encoded
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
