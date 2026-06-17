@@ -153,4 +153,13 @@ actual object DmCrypto {
     }
 }
 
+/** iOS SQLite via SQLDelight's NativeSqliteDriver — reachable directly from Kotlin/Native, no Swift bridge. */
+actual object DbDriverFactory {
+    actual val isAvailable: Boolean get() = true
+    actual fun create(): app.cash.sqldelight.db.SqlDriver =
+        app.cash.sqldelight.driver.native.NativeSqliteDriver(
+            com.noslop.mvp.db.MeshDatabase.Schema, "mesh.db",
+        )
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)

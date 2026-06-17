@@ -133,4 +133,13 @@ actual object DmCrypto {
         }
 }
 
+/** Android SQLite via SQLDelight's AndroidSqliteDriver, using the app context holder set by MainActivity. */
+actual object DbDriverFactory {
+    actual val isAvailable: Boolean get() = AndroidAppContext.isSet
+    actual fun create(): app.cash.sqldelight.db.SqlDriver =
+        app.cash.sqldelight.driver.android.AndroidSqliteDriver(
+            com.noslop.mvp.db.MeshDatabase.Schema, AndroidAppContext.context, "mesh.db",
+        )
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)

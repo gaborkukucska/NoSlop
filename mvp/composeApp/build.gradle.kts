@@ -1,12 +1,30 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+buildscript {
+    // SQLDelight's Gradle plugin drags in Gradle's embedded Kotlin, which strictly pins
+    // org.jetbrains:annotations to 13.0; AGP 9.2.1 needs 23.0.0. Force the newer one on the
+    // buildscript classpath so plugin resolution doesn't fail.
+    configurations.classpath {
+        resolutionStrategy { force("org.jetbrains:annotations:23.0.0") }
+    }
+}
+
 plugins {
     alias(libs.plugins.multiplatform)
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.serialization)
+    alias(libs.plugins.sqldelight)
+}
+
+sqldelight {
+    databases {
+        create("MeshDatabase") {
+            packageName.set("com.noslop.mvp.db")
+        }
+    }
 }
 
 kotlin {
@@ -40,6 +58,8 @@ kotlin {
             implementation(libs.ktor.serialization.json)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlincrypto.sha3)
+            implementation(libs.sqldelight.runtime)
+            implementation(libs.sqldelight.primitive.adapters)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -50,9 +70,15 @@ kotlin {
             implementation(libs.ktor.client.okhttp)
             implementation(libs.bouncycastle)
             implementation(libs.androidx.security.crypto)
+            implementation(libs.sqldelight.android.driver)
+        }
+        // Android unit tests run on the JVM — use the JDBC (in-memory) driver, no Robolectric/device needed.
+        androidUnitTest.dependencies {
+            implementation(libs.sqldelight.sqlite.driver)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
+            implementation(libs.sqldelight.native.driver)
         }
     }
 }

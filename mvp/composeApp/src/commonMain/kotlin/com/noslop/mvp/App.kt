@@ -95,6 +95,14 @@ private fun IdentityScreen() {
                     fontWeight = FontWeight.Bold,
                     color = if (dmOk) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )
+                val storage = remember { runStorageDemo(identity) }
+                Text(
+                    storage,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (storage.startsWith("SQLDelight ✓")) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.error,
+                )
                 if (!identity.isRealKeypair) {
                     Text(
                         "⚠︎ ephemeral fallback key — secure storage not wired here.",
