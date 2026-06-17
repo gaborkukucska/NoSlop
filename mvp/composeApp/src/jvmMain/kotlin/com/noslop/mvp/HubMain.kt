@@ -40,19 +40,32 @@ fun main(args: Array<String>) = runBlocking {
     val bound = transport.listen("0.0.0.0", port)
     println("NoSlop HUB up — node ${nodeId.take(16)}… listening on 0.0.0.0:$bound")
 
-    // Optional onion: pass a tor control port (and optional password) as arg 2, e.g.
-    //   ./gradlew :composeApp:runHub --args="9876 9051:mypassword"
-    // The bundled-tor launch (ADR-009 9c) will point here; for now this expects a running tor's control port.
+    // Tor (ADR-009): arg 2 controls the onion.
+    //   "tor"                 → launch the bundled tor, bootstrap, publish an onion (NOSLOP_TOR_BINARY overrides the binary)
+    //   "<controlPort>[:pwd]" → use an already-running tor's control port
+    //   (absent)              → plain TCP only
+    //   ./gradlew :composeApp:runHub --args="9876 tor"
     val torArg = args.getOrNull(1)
-    if (torArg != null) {
-        val controlPort = torArg.substringBefore(':').toIntOrNull() ?: 9051
-        val password = torArg.substringAfter(':', "")
-        runCatching {
-            TorControl.addOnion(controlPort = controlPort, password = password, virtualPort = bound, targetPort = bound)
-        }.onSuccess { onion -> println("Onion published: leaves dial $onion:$bound via Tor SOCKS (ADR-002).") }
+    var tor: TorProcess? = null
+    when {
+        torArg == "tor" -> runCatching {
+            println("[tor] launching bundled tor + bootstrapping (first run can take ~30–60s)…")
+            tor = TorProcess().start()
+            val onion = TorControl.addOnion(
+                controlPort = tor!!.controlPort, password = tor!!.controlPassword, virtualPort = bound, targetPort = bound,
+            )
+            println("Onion published — leaves dial $onion:$bound via Tor SOCKS (this hub's SOCKS: 127.0.0.1:${tor!!.socksPort}).")
+        }.onFailure { println("Bundled-tor onion failed (${it.message}); staying plain-TCP only.") }
+
+        torArg != null -> runCatching {
+            TorControl.addOnion(
+                controlPort = torArg.substringBefore(':').toIntOrNull() ?: 9051,
+                password = torArg.substringAfter(':', ""), virtualPort = bound, targetPort = bound,
+            )
+        }.onSuccess { println("Onion published: leaves dial $it:$bound via Tor SOCKS (ADR-002).") }
             .onFailure { println("Tor onion registration failed (${it.message}); staying plain-TCP only.") }
-    } else {
-        println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
+
+        else -> println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
     }
 
     while (true) {
