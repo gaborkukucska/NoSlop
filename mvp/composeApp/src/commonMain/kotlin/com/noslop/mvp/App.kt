@@ -14,6 +14,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -199,6 +200,11 @@ private fun MeshScreen() {
     var status by remember { mutableStateOf("Not connected") }
     var connected by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("Hello from my iPhone 👋") }
+    var viaTor by remember { mutableStateOf(false) }
+    var socksHost by remember { mutableStateOf("127.0.0.1") }
+    var socksPort by remember { mutableStateOf("9050") }
+
+    fun proxy(): SocksProxy? = if (viaTor) SocksProxy(socksHost.trim(), socksPort.toIntOrNull() ?: 9050) else null
 
     DisposableEffect(Unit) {
         // Sink runs on a background coroutine; bounce UI updates onto the (main) composition scope.
@@ -211,7 +217,7 @@ private fun MeshScreen() {
     LaunchedEffect(Unit) {
         if (!connected) {
             status = "Connecting…"
-            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876) }
+            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
                 .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
                 .onFailure { status = "Error: ${it.message}" }
         }
@@ -223,11 +229,21 @@ private fun MeshScreen() {
             OutlinedTextField(host, { host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
             OutlinedTextField(port, { port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
         }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = viaTor, onCheckedChange = { viaTor = it }, enabled = !connected)
+            Text("Via Tor (SOCKS5)", fontSize = 13.sp)
+        }
+        if (viaTor) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(socksHost, { socksHost = it }, label = { Text("SOCKS host") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(2f))
+                OutlinedTextField(socksPort, { socksPort = it.filter { c -> c.isDigit() } }, label = { Text("SOCKS port") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(1f))
+            }
+        }
         Button(
             onClick = {
                 status = "Connecting…"
                 scope.launch {
-                    runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876) }
+                    runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
                         .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
                         .onFailure { status = "Error: ${it.message}" }
                 }

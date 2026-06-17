@@ -19,13 +19,29 @@ resolves + tunnels). Built and tested with **no Tor daemon required**.
   and a post relays leafA→(SOCKS)→hub→leafB. Same topology as Tor (leaf → Tor SOCKS → onion HUB). Green; the
   SOCKS client also compiles for iOS/Native.
 
-**Next (gated on external deps — see ADR-009):** (9b) desktop HUB launches Tor + registers a v3 onion (needs a
-`tor` binary); (9c) iOS Tor (needs Tor.framework/Arti — an owner dependency decision). The dialing client they
-both feed is done.
+---
+
+## 2026-06-17 — Phase 1 step 9b: app is Tor-ready (SOCKS proxy wired through MeshClient + UI) 🟢
+
+The leaf can now be *told* to dial via a SOCKS proxy end-to-end: `MeshClient.connect(host, port, proxy)`
+threads through to `SocketTransport`, and the **Mesh tab** has a "Via Tor (SOCKS5)" switch + SOCKS host/port
+fields (default `127.0.0.1:9050`, Tor's port). Toggle on → the hub host is dialed through the proxy (so an
+`.onion` + a running Tor would Just Work). Compiles on JVM + Native; **iOS app builds green**. No Tor daemon
+on this machine yet, so this is verified by build + the mock-proxy test (9a), not a live onion.
+
+**Remaining Tor work is owner-gated (ADR-009), deliberately not guessed at overnight:**
+- **9c — desktop HUB onion:** needs a `tor` binary (none installed here). The HUB would launch Tor, `ADD_ONION`
+  a v3 hidden service over the control port pointing at its listen port, and print the address. ~Decision:
+  bundle `tor` vs require it installed.
+- **9d — iOS Tor:** needs a native dependency decision — **Tor.framework/iCepa** (CocoaPods/SwiftPM, proven)
+  vs a future **Arti** (Rust) embedding. This is the biggest unknown and an owner call.
+
+When you're back: pick the iOS Tor approach + how the desktop ships Tor, and I'll wire the live onion path
+(the dialing + UI are already done and tested).
 
 ---
 
-## 2026-06-17 — Phase 1 step 8: the iOS app talks to the HUB — real phone ↔ real hub 🟢
+## 2026-06-17 — Phase 1 step 9a: SOCKS5 client dialing (the Tor seam) 🟢
 
 The whole stack closes the loop: **the actual iOS app dials the actual desktop HUB and gossips through it.**
 First time the phone app touches real networking.

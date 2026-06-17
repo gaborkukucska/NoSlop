@@ -34,8 +34,11 @@ class MeshClient(
 
     val linkCount: Int get() = transport.links.size
 
-    /** Dial a HUB. Throws on failure (no hub there, refused, etc.) — caller surfaces the error. */
-    suspend fun connect(host: String, port: Int) = transport.connect(host, port)
+    /**
+     * Dial a HUB. With [proxy] set, tunnels through a SOCKS5 proxy — pass Tor's SOCKS port and an `.onion`
+     * [host] to reach the hub over Tor. Throws on failure (no hub/proxy, refused, …); caller surfaces it.
+     */
+    suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null) = transport.connect(host, port, proxy)
 
     /** Publish a text post to the mesh (and persist our own copy). */
     suspend fun publish(text: String): PostPayload {
