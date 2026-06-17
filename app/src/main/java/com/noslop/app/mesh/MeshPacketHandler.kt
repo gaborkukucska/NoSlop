@@ -642,6 +642,30 @@ class MeshPacketHandler(
         )
         peerDao.insertPeer(peer)
         repo.setIncomingRequest(peer)
+
+        val title = "New Connection Request"
+        val msg = "${peer.handle} wants to connect with you."
+        val route = "notifications"
+        
+        notificationDao.insertNotification(
+            NotificationItem(
+                id = UUID.randomUUID().toString(),
+                type = "CONNECTION_REQUEST",
+                title = title,
+                body = msg,
+                targetRoute = route,
+                iconType = "handshake",
+                senderPub = peer.publicKeyB64
+            )
+        )
+
+        com.noslop.app.util.NotificationHelper.showNotification(
+            context = repo.context,
+            title = title,
+            message = msg,
+            deepLinkRoute = route
+        )
+
         return true
     }
 

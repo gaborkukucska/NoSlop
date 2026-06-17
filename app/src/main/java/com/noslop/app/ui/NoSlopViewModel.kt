@@ -1049,6 +1049,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    // NEW CONNECTION REQUEST HANDLERS FROM NOTIFICATION
+    fun acceptConnectionFromNotification(notifId: String, senderPub: String) {
+        viewModelScope.launch {
+            val peer = repository.peerDao.getPeerByPublicKey(senderPub)
+            if (peer != null) {
+                repository.acceptConnectionRequest(peer)
+            }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun rejectConnectionFromNotification(notifId: String, senderPub: String) {
+        viewModelScope.launch {
+            repository.deletePeer(senderPub)
+            repository.deleteNotification(notifId)
+            repository.clearIncomingRequest()
+        }
+    }
+
     /**
      * Start Embedded Tor daemon
      */

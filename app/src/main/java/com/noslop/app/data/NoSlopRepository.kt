@@ -994,6 +994,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         db.notificationDao().clearAllNotifications()
     }
 
+    suspend fun deleteNotification(id: String) = withContext(Dispatchers.IO) {
+        db.notificationDao().deleteNotification(id)
+    }
+
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
