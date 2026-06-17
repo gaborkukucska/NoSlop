@@ -16,6 +16,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,25 +103,28 @@ private fun FeedScreen() {
     fun load() {
         loading = true; error = null
         scope.launch {
-            runCatching { repo.topStories() }
+            runCatching { repo.loadFeed() }
                 .onSuccess { stories = it }
                 .onFailure { error = it.message ?: "Failed to load feed" }
             loading = false
         }
     }
+    LaunchedEffect(Unit) { load() } // auto-load on first open
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Button(onClick = { load() }, enabled = !loading) { Text("Load feed") }
+        Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
         when {
-            loading -> CircularProgressIndicator()
-            error != null -> Text("Error: $error", color = MaterialTheme.colorScheme.error)
+            loading && stories.isEmpty() -> CircularProgressIndicator()
+            error != null && stories.isEmpty() -> Text("Error: $error", color = MaterialTheme.colorScheme.error)
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(stories) { s ->
                     Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp)) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(s.source.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Text(s.title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            Text("▲ ${s.score} · ${s.by}", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
-                            s.url?.let { Text(it, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary) }
+                            if (s.excerpt.isNotBlank()) {
+                                Text(s.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
+                            }
                         }
                     }
                 }
