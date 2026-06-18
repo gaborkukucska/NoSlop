@@ -12,5 +12,5 @@ object Constants {
      * its GitHub path, e.g. ".../download/v0.1.3-alpha/NoSlop.apk") as our single source of
      * truth for "is there a newer APK available".
      */
-    const val UPDATE_CHECK_URL = "https://noslop.com/content.json"
+    const val UPDATE_CHECK_URL = "https://noslop.me/content.json"
 }

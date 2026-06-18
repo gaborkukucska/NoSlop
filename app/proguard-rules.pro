@@ -45,3 +45,10 @@
 
 # 5. Backup Manager Data Model (In case you use Gson for backups too)
 -keep class com.noslop.app.data.UserProfile { *; }
+
+# 6. Update Checker Data Models (Fixes "abstract classes can't be instantiated"
+#    Gson crash on release builds — these live in com.noslop.app.util, which
+#    has no other keep rule, so R8 was free to strip their fields/constructors).
+#    Wildcard covers UpdateInfo, ContentJson, HeroBlock, and the worker/checker
+#    classes themselves so nothing in this package is touched by Gson reflection.
+-keep class com.noslop.app.util.** { *; }
