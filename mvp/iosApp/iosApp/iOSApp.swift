@@ -117,7 +117,9 @@ struct iOSApp: App {
         IosKeychainBridge.shared.keychain = KeychainIdentity()
         IosSignerBridge.shared.signer = CryptoKitSigner()
         IosDmBridge.shared.dm = CryptoKitDm()
-        IosTorBridge.shared.tor = TorManager() // Tor starts lazily on the first "Via Tor" connect (MeshScreen)
+        let tor = TorManager()
+        IosTorBridge.shared.tor = tor
+        tor.start() // warm Tor up at launch so it's (nearly) bootstrapped by the time the user connects
         IosQrScannerBridge.shared.scanner = QrScanner()
     }
 
