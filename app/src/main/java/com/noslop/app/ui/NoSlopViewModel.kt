@@ -38,6 +38,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     init {
         Logger.initialize(application)
         logFilePath = Logger.getLogFilePath()
+        viewModelScope.launch { NoSlopApp.updateChecker.checkForUpdate() }
     }
 
     // --- State Observables ---
@@ -132,6 +133,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
+
+    /** Surfaces a newer-version notice in Settings when the daily background check finds one. */
+    val updateInfo: StateFlow<com.noslop.app.util.UpdateInfo?> = NoSlopApp.updateChecker.updateInfo
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
     val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow

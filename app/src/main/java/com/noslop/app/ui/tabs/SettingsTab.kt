@@ -29,6 +29,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     val isTorChecking by viewModel.isTorChecking.collectAsState()
     val mediaSettings by viewModel.mediaSettings.collectAsState()
     val isEncryptionActive by viewModel.isEncryptionActive.collectAsState()
+    val updateInfo by viewModel.updateInfo.collectAsState()
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
@@ -50,6 +51,43 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
             )
 
             LazyColumn(modifier = Modifier.weight(1f)) {
+                if (updateInfo != null) {
+                    item {
+                        val info = updateInfo!!
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
+                            border = BorderStroke(1.dp, DestructiveRed)
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Update Available", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Version ${info.latestVersion} is out (you have ${info.currentVersion}). Tap to download the new APK.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextLight
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(info.downloadUrl)
+                                        )
+                                        context.startActivity(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                ) {
+                                    Text("Download")
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if (!isEncryptionActive) {
                     item {
                         Card(

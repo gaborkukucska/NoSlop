@@ -117,6 +117,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 viewModel.ensurePostInFeed(postId)
             } else if (initialRoute == "notifications") {
                 selectedTab = 4
+            } else if (initialRoute == "settings") {
+                selectedTab = 3
             }
         }
     }
