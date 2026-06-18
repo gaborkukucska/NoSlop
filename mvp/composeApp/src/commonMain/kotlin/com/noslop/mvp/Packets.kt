@@ -103,6 +103,9 @@ data class EncryptedPayload(
     // Sender's X25519 public key (X.509 b64) so the recipient can derive the shared secret without a
     // pre-shared contact. The key is public; the hub still only ever sees ciphertext + public keys.
     @SerialName("sender_enc_pub") val senderEncPublicKey: String? = null,
+    // Sender's node id, carried because the hub re-stamps NetworkPacket.senderId on each forward (privacy);
+    // without this the recipient can't address a reply back to the original sender.
+    @SerialName("sender_node_id") val senderNodeId: String? = null,
 )
 
 @Serializable

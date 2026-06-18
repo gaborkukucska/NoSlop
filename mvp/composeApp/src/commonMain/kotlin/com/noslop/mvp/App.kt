@@ -421,6 +421,7 @@ private fun MeshScreen(state: MeshUiState) {
  */
 @Composable
 private fun DmScreen(state: MeshUiState) {
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         Text(
@@ -445,8 +446,13 @@ private fun DmScreen(state: MeshUiState) {
         state.selectedContact?.let { to ->
             Text("To: ${to.handle}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true, modifier = Modifier.weight(1f))
-                Button(onClick = { state.sendDm() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
+                OutlinedTextField(
+                    state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
+                )
+                Button(onClick = { state.sendDm(); focus.clearFocus() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
             }
         }
         Text("Messages (${state.dmLog.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

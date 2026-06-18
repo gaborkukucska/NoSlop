@@ -30,7 +30,9 @@ class MeshClient(
                 if (packet.targetUserId != nodeId) return
                 val senderPub = dm.senderEncPublicKey ?: return
                 val text = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
-                onDm?.invoke(packet.senderId ?: "?", senderPub, text)
+                // Reply must go to the ORIGINAL sender (carried in the payload), not packet.senderId — the
+                // hub re-stamps that to its own id on forward.
+                onDm?.invoke(dm.senderNodeId ?: packet.senderId ?: "?", senderPub, text)
             }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
@@ -82,6 +84,7 @@ class MeshClient(
         val payload = EncryptedPayload(
             id = randomId(), nonce = nonce, ciphertext = ct,
             timestamp = nowMillis(), senderEncPublicKey = DmKeys.publicKeyX509B64(),
+            senderNodeId = nodeId, // so the recipient can reply (hub re-stamps packet.senderId on forward)
         )
         node.broadcast(messagePacket(nodeId, contact.nodeId, payload))
         return true
