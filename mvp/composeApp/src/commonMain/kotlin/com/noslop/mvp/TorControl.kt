@@ -21,6 +21,10 @@ object TorControl {
     /**
      * Authenticate to the control port and register an ephemeral v3 onion forwarding [virtualPort] → the
      * local [targetHost]:[targetPort]. Returns the `<id>.onion` address. Throws on any protocol failure.
+     *
+     * NOTE: `Flags=Detach` is essential — without it tor destroys the ephemeral service the instant this
+     * control connection closes (which the `finally` below does), so the onion resolves to a valid address
+     * but is permanently unreachable (SOCKS REP=4 "host unreachable"). Detach lets it outlive this client.
      */
     suspend fun addOnion(
         controlHost: String = "127.0.0.1",
@@ -39,7 +43,7 @@ object TorControl {
             val auth = input.readUTF8Line() ?: error("Tor control: no AUTHENTICATE reply")
             require(auth.startsWith("250")) { "Tor control: AUTHENTICATE failed ($auth)" }
 
-            output.writeStringUtf8("ADD_ONION NEW:ED25519-V3 Port=$virtualPort,$targetHost:$targetPort\r\n")
+            output.writeStringUtf8("ADD_ONION NEW:ED25519-V3 Flags=Detach Port=$virtualPort,$targetHost:$targetPort\r\n")
             var serviceId: String? = null
             while (true) {
                 val line = input.readUTF8Line() ?: break
