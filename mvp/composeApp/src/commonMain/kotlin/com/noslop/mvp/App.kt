@@ -158,7 +158,7 @@ private fun FeedScreen() {
     var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
+    var videoUrl by remember { mutableStateOf("https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4") }
 
     fun load() {
         loading = true; error = null
