@@ -4,6 +4,39 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 11: device LAN test — fixed 3 transport bugs + 1 build gotcha 🟡
+
+On-device LAN test (phone → desktop HUB, Tor off). Found and fixed the real reasons the leaf could never
+link to the hub. **Net: hub now accepts many concurrent + LAN connections; iOS app builds + installs.**
+
+- **Accept loop died after the FIRST connection.** ktor's `SelectorManager` ran on `Dispatchers.Default`
+  (CPU pool), starved by the accept loop + per-link read loops; the 2nd `accept()` threw `SocketException`
+  and the old `catch { break }` killed the listener — so only one peer ever linked. Fix: selector dispatcher
+  is injectable, hub uses `Dispatchers.IO`; accept loop tolerates transient errors (log + continue) and only
+  exits on a closed server socket. Verified: 5 sequential loopback handshakes now all succeed (was 1).
+- **`0.0.0.0` bound an IPv6 wildcard socket** (`*:9876`); inbound IPv4 LAN arrived IPv4-mapped and was
+  rejected. Fix: `runHub` passes `-Djava.net.preferIPv4Stack=true` → clean IPv4 listener.
+- **macOS hairpin EINVAL (test artifact, not a real bug).** Setting `TCP_NODELAY` on a socket accepted from a
+  *hairpin* connection (a host dialing its OWN LAN IP) throws `SocketException: Invalid argument` — reproduced
+  with plain `java.net.ServerSocket` too, so it's a macOS/JDK quirk, not ktor. Genuine remote clients (the
+  phone) don't trigger it. So Mac→own-LAN-IP is NOT a valid local test; loopback or a real second device is.
+- **BUILD GOTCHA — repo is under iCloud-synced `~/Documents`.** iCloud Drive keeps re-stamping
+  `com.apple.FinderInfo` on the Tor xcframework dirs (and anything else), which makes codesign fail with
+  *"resource fork, Finder information, or similar detritus not allowed."* Stripping never sticks (iCloud
+  re-adds it within seconds). **Fix: build with `-derivedDataPath /tmp/noslop-dd` (outside iCloud).**
+  `rsync -av` in CocoaPods' embed phase doesn't copy xattrs, so a non-iCloud DerivedData yields a clean
+  framework. Podfile `post_install` also strips the xcframework as a best-effort safety net.
+- **App UX:** `connectNow()` now parses a `noslop://…` invite pasted into the host field (was → "posix error
+  0"). Scanning remains the intended path.
+
+**Status: BLOCKED on user.** App installed + launched on the iPhone; hub up on `192.168.20.4:9876`. The phone's
+connection wasn't reaching the hub at all (hub log shows zero inbound) — classic iOS **Local Network permission
+off** signature ("No link" = TCP EOF, nothing on the wire). User confirmed Local Network is now enabled in
+Settings; on-device scan retest pending (user stepped away). Next: user scans QR → expect link-up from a
+`192.168.20.x` address in the hub log.
+
+---
+
 ## 2026-06-18 — Phase 1 step 10b: iOS camera QR scanner — "scan to connect" 🟢
 
 The non-tech-user flow is now wired end to end: **point the phone at the hub's QR and it connects.** No

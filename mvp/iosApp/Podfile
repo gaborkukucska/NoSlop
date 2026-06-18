@@ -17,4 +17,11 @@ post_install do |installer|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
     end
   end
+
+  # The Tor xcframework slices ship with a com.apple.FinderInfo xattr on each tor.framework dir.
+  # It propagates into the embedded Tor.framework and makes codesign fail at build time with
+  # "resource fork, Finder information, or similar detritus not allowed". Strip it after every
+  # `pod install` so a fresh checkout/install can't silently reintroduce the build break.
+  tor = File.join(installer.sandbox.root, 'Tor', 'tor.xcframework')
+  system('/usr/bin/xattr', '-rc', tor) if File.exist?(tor)
 end

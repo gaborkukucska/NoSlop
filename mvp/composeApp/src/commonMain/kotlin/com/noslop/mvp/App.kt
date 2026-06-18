@@ -223,6 +223,11 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     fun connectNow() {
         scope.launch {
+            // Tolerate a full invite URI pasted into the host field (instead of scanning): parse it and apply
+            // host/port/Tor. Without this, "noslop://…" was treated as a hostname → "posix error 0" on connect.
+            MeshInvite.parse(host.trim())?.let { invite ->
+                host = invite.host; port = invite.port.toString(); viaTor = invite.tor
+            }
             val p = port.toIntOrNull() ?: 9876
             if (viaTor) {
                 if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
