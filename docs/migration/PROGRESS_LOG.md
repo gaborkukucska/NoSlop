@@ -4,6 +4,32 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 10c: iOS embedded Tor — the app can dial .onion hubs 🟢
+
+The iOS app now embeds Tor, so a phone can reach a HUB's onion from anywhere (cellular, any network) — the
+ADR-002 endgame. Owner decision was CocoaPods (no usable SPM for iOS Tor).
+
+- **CocoaPods adopted:** `pod 'Tor', '~> 409'` (iCepa Tor.framework 409.9.1). Needed newer CocoaPods (brew
+  1.16.2 — system 1.11.3 couldn't read XcodeGen's objectVersion-77 project). `Pods/` (~335 MB) is gitignored,
+  reproduced from `Podfile.lock`. Workflow is now `xcodegen generate && pod install`, build the **.xcworkspace**.
+  First made `project.yml` authoritative (folded in `-lsqlite3`, signing team, and all Info.plist keys — incl.
+  the new `NSCameraUsageDescription` — into `info.properties`, since XcodeGen regenerates Info.plist).
+- **`TorService`** (commonMain expect; iOS bridges to Swift, Android/JVM no-op): `start()` + `socksPort()`.
+  Swift **`TorManager`** runs `TorThread` + a cookie-authed `TorController`, watches for "Bootstrapped 100%",
+  and exposes a local SOCKS port; injected via `IosTorBridge` at launch (like the CryptoKit bridges).
+- **`MeshScreen` "Via Tor"** now uses the embedded Tor: on connect it starts Tor, waits for bootstrap (live
+  status), and dials the hub through `SocksProxy(127.0.0.1, socksPort)` — so an `.onion` host connects from
+  anywhere. Replaced the manual SOCKS fields.
+- **Verified:** the workspace **builds + links Tor**, and the app **launches cleanly on the simulator** (Tor
+  framework loads, all self-tests green, no crash). Tor's C lib doesn't surface bootstrap to iOS unified
+  logging, and the sim can't drive the UI/scan, so the **live onion round-trip is for on-device testing** (the
+  part to do with a real phone + unthrottled network + the QR scanner).
+
+**Remaining:** (10b) iOS **camera QR scanner** → parse `MeshInvite` → auto-fill + connect; then the full
+"install → scan the hub's QR → connected from anywhere over Tor" flow is complete (and worth a device test).
+
+---
+
 ## 2026-06-18 — Phase 1 step 10a: QR pairing — the HUB shows a code the phone scans 🟢
 
 Owner's UX idea (the right call for non-tech users): instead of typing a 56-char onion + toggling SOCKS, the
