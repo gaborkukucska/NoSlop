@@ -121,6 +121,7 @@ struct iOSApp: App {
         IosTorBridge.shared.tor = tor
         tor.start() // warm Tor up at launch so it's (nearly) bootstrapped by the time the user connects
         IosQrScannerBridge.shared.scanner = QrScanner()
+        IosVideoPlayerBridge.shared.player = VideoPlayerBridge()
     }
 
     var body: some Scene {

@@ -237,6 +237,20 @@ actual object QrScanner {
     }
 }
 
+/** Swift→Kotlin bridge for full-screen video playback (AVKit's AVPlayerViewController). */
+interface IosVideoPlayer {
+    fun play(url: String)
+}
+
+object IosVideoPlayerBridge {
+    var player: IosVideoPlayer? = null
+}
+
+actual object VideoPlayer {
+    actual val isAvailable: Boolean get() = IosVideoPlayerBridge.player != null
+    actual fun play(url: String) { IosVideoPlayerBridge.player?.play(url) }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()

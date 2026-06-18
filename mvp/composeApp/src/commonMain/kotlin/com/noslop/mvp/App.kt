@@ -158,6 +158,7 @@ private fun FeedScreen() {
     var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var videoUrl by remember { mutableStateOf("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4") }
 
     fun load() {
         loading = true; error = null
@@ -171,6 +172,13 @@ private fun FeedScreen() {
     LaunchedEffect(Unit) { load() } // auto-load on first open
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // Media playback (roadmap step 1): play a clearnet video URL full-screen via the native player.
+        if (VideoPlayer.isAvailable) {
+            OutlinedTextField(videoUrl, { videoUrl = it }, label = { Text("Video URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button(onClick = { VideoPlayer.play(videoUrl.trim()) }, enabled = videoUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+                Text("▶  Play video")
+            }
+        }
         Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
         when {
             loading && stories.isEmpty() -> CircularProgressIndicator()

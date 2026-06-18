@@ -146,3 +146,9 @@ actual object QrScanner {
     actual val isAvailable: Boolean = false
     actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
 }
+
+/** No video playback on the desktop HUB (headless). */
+actual object VideoPlayer {
+    actual val isAvailable: Boolean = false
+    actual fun play(url: String) {}
+}

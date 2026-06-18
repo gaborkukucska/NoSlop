@@ -197,3 +197,15 @@ actual object QrScanner {
     actual val isAvailable: Boolean = false
     actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
 }
+
+/** Android video playback: hand the URL to a system video viewer (inline ExoPlayer is a later option). */
+actual object VideoPlayer {
+    actual val isAvailable: Boolean get() = AndroidAppContext.isSet
+    actual fun play(url: String) {
+        if (!AndroidAppContext.isSet) return
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+            .setDataAndType(android.net.Uri.parse(url), "video/*")
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { AndroidAppContext.context.startActivity(intent) }
+    }
+}
