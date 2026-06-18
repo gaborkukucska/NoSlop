@@ -1,0 +1,13 @@
+-- Small key/value store for app-level state (e.g. the launch counter used to demonstrate that the
+-- database genuinely persists across restarts). Mirrors the Android AppSetting key/value pattern.
+
+CREATE TABLE appMeta (
+    key   TEXT NOT NULL PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+get:
+SELECT value FROM appMeta WHERE key = ?;
+
+put:
+INSERT OR REPLACE INTO appMeta VALUES ?;

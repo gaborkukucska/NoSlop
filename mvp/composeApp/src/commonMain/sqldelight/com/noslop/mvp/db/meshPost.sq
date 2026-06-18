@@ -1,0 +1,45 @@
+-- Mesh feed posts. Mirrors the Android Room `mesh_posts` table (com.noslop.app.data.MeshPost).
+-- Posts are content-addressed by `id`; a duplicate arriving via gossip must NOT overwrite (first
+-- writer wins) — instead the gossip count is bumped. That mirrors GossipService dedup semantics.
+
+CREATE TABLE meshPost (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    authorPublicKeyB64   TEXT NOT NULL,
+    authorHandle         TEXT NOT NULL,
+    authorTripcode       TEXT NOT NULL,
+    authorAvatarB64      TEXT,
+    content              TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL,
+    mediaUrl             TEXT,
+    mediaType            TEXT,
+    gossipCount          INTEGER AS kotlin.Int NOT NULL DEFAULT 1,
+    privacy              TEXT NOT NULL DEFAULT 'public',
+    thumbnailB64         TEXT,
+    clearnetUrl          TEXT,
+    clearnetTitle        TEXT,
+    clearnetThumbnailUrl TEXT,
+    isOrphaned           INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0
+);
+
+CREATE INDEX meshPost_timestamp ON meshPost(timestamp);
+
+-- INSERT OR IGNORE: dedup by id — a re-gossiped post is dropped, not overwritten.
+insertIgnore:
+INSERT OR IGNORE INTO meshPost VALUES ?;
+
+-- Called when a duplicate is seen, so popular posts surface a higher gossip count.
+bumpGossip:
+UPDATE meshPost SET gossipCount = gossipCount + 1 WHERE id = ?;
+
+selectRecent:
+SELECT * FROM meshPost ORDER BY timestamp DESC LIMIT ?;
+
+getById:
+SELECT * FROM meshPost WHERE id = ?;
+
+count:
+SELECT count(*) FROM meshPost;
+
+deleteAll:
+DELETE FROM meshPost;

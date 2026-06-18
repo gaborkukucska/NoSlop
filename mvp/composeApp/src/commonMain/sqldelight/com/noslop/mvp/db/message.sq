@@ -1,0 +1,32 @@
+-- Encrypted direct messages. Mirrors the Android Room ChatMessage (MessageDao). The body is stored as
+-- ciphertext + nonce exactly as produced by DmCrypto/encryptDM — plaintext is never persisted. A message
+-- is keyed by `id`; `chatWithPeerPub` groups a conversation, `senderPub` distinguishes self- from peer-sent.
+
+CREATE TABLE message (
+    id               TEXT NOT NULL PRIMARY KEY,
+    chatWithPeerPub  TEXT NOT NULL,
+    senderPub        TEXT NOT NULL,
+    ciphertext       TEXT NOT NULL,   -- base64, from encryptDM
+    nonce            TEXT NOT NULL,   -- base64, from encryptDM
+    timestamp        INTEGER NOT NULL,
+    isRead           INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    mediaId          TEXT,
+    mediaType        TEXT
+);
+
+CREATE INDEX message_chat ON message(chatWithPeerPub, timestamp);
+
+insertIgnore:
+INSERT OR IGNORE INTO message VALUES ?;
+
+selectThread:
+SELECT * FROM message WHERE chatWithPeerPub = ? ORDER BY timestamp ASC;
+
+markRead:
+UPDATE message SET isRead = 1 WHERE id = ?;
+
+count:
+SELECT count(*) FROM message;
+
+deleteAll:
+DELETE FROM message;

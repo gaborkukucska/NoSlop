@@ -74,6 +74,11 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            // WHY: pure-JVM unit tests exercise core logic (crypto, mnemonic, wire protocol) that
+            // transitively touches lightweight Android APIs — notably Logger -> android.util.Log.
+            // Without this, those stubbed methods throw "not mocked" RuntimeExceptions. Returning
+            // default values makes them no-ops so the core can be tested without Robolectric.
+            isReturnDefaultValues = true
         }
     }
 }

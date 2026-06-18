@@ -1,0 +1,30 @@
+-- Known mesh peers. Mirrors the Android Room `peers` table (com.noslop.app.data.Peer) column-for-column
+-- so a future data bridge between the two apps is a straight copy. Keyed by the Ed25519 signing key.
+
+CREATE TABLE peer (
+    publicKeyB64     TEXT NOT NULL PRIMARY KEY,   -- Ed25519 signing public key (identity)
+    handle           TEXT NOT NULL,
+    tripcode         TEXT NOT NULL,
+    onionAddress     TEXT NOT NULL,
+    encPublicKeyB64  TEXT NOT NULL DEFAULT '',     -- X25519 key for DM encryption (see DmCrypto)
+    isTrusted        INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    isOnline         INTEGER AS kotlin.Boolean NOT NULL DEFAULT 0,
+    lastSeenAt       INTEGER NOT NULL,
+    authorAvatarB64  TEXT
+);
+
+-- Peers are mutable (handle/online state change), so last write wins.
+upsert:
+INSERT OR REPLACE INTO peer VALUES ?;
+
+selectAll:
+SELECT * FROM peer ORDER BY lastSeenAt DESC;
+
+getByKey:
+SELECT * FROM peer WHERE publicKeyB64 = ?;
+
+count:
+SELECT count(*) FROM peer;
+
+deleteAll:
+DELETE FROM peer;

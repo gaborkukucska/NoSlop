@@ -1,0 +1,12 @@
+# Gradle / build outputs
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+.kotlin/
+
+# Xcode
+**/xcuserdata/
+**/DerivedData/
+.DS_Store
