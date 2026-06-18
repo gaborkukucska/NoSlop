@@ -26,6 +26,10 @@ interface IosKeychain {
     fun loadOrCreatePublicKeyBase64(): String
     /** Delete the stored keypair so the next load creates a fresh one. */
     fun reset()
+    /** Load the stored X25519 DM private key (raw 32-byte, base64), or null if none. */
+    fun loadDmPrivB64(): String?
+    /** Persist the X25519 DM private key (raw 32-byte, base64). */
+    fun saveDmPrivB64(value: String)
 }
 
 /** Holds the Swift-supplied [IosKeychain]; set once by the iOS app before any identity is loaded. */
@@ -85,13 +89,32 @@ actual object HubStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
 }
 
-/** X25519 DM private key in NSUserDefaults (hardening TODO: move to Keychain like the Ed25519 key). */
+/**
+ * X25519 DM private key in the **Keychain** (via the [IosKeychain] bridge), alongside the Ed25519 key.
+ * One-time migration: an existing key in the old NSUserDefaults slot is moved into the Keychain and the
+ * plaintext copy cleared — so hardening doesn't change the user's DM identity. Falls back to NSUserDefaults
+ * only when no Keychain bridge is present (e.g. Kotlin/Native unit tests).
+ */
 actual object DmKeyStore {
-    private const val KEY = "noslop_dm_priv"
-    actual fun load(): String? =
-        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
-    actual fun save(privRawB64: String) =
-        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(privRawB64, KEY)
+    private const val LEGACY_KEY = "noslop_dm_priv"
+    private val defaults get() = platform.Foundation.NSUserDefaults.standardUserDefaults
+
+    actual fun load(): String? {
+        val kc = IosKeychainBridge.keychain ?: return defaults.stringForKey(LEGACY_KEY)
+        kc.loadDmPrivB64()?.let { return it }
+        // Migrate a legacy plaintext key into the Keychain, then wipe the plaintext copy.
+        defaults.stringForKey(LEGACY_KEY)?.let { legacy ->
+            kc.saveDmPrivB64(legacy)
+            defaults.removeObjectForKey(LEGACY_KEY)
+            return legacy
+        }
+        return null
+    }
+
+    actual fun save(privRawB64: String) {
+        val kc = IosKeychainBridge.keychain
+        if (kc != null) kc.saveDmPrivB64(privRawB64) else defaults.setObject(privRawB64, LEGACY_KEY)
+    }
 }
 
 /** Saved-DM-contacts blob in NSUserDefaults (same approach as [HubStore]). */

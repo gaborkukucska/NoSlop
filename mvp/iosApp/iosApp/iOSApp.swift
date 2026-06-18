@@ -21,15 +21,38 @@ class KeychainIdentity: IosKeychain {
 
     func reset() {
         SecItemDelete(baseQuery() as CFDictionary)
+        SecItemDelete(baseQuery(account: dmAccount) as CFDictionary)
+    }
+
+    // X25519 DM private key (raw 32 bytes), base64, stored under its own Keychain account.
+    private let dmAccount = "x25519-dm-private-key"
+
+    func loadDmPrivB64() -> String? {
+        var query = baseQuery(account: dmAccount)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return data.base64EncodedString()
+    }
+
+    func saveDmPrivB64(value: String) {
+        guard let data = Data(base64Encoded: value) else { return }
+        SecItemDelete(baseQuery(account: dmAccount) as CFDictionary) // overwrite any prior
+        var query = baseQuery(account: dmAccount)
+        query[kSecValueData as String] = data
+        query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(query as CFDictionary, nil)
     }
 
     // MARK: - Keychain
 
-    private func baseQuery() -> [String: Any] {
+    private func baseQuery(account: String? = nil) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: account ?? self.account,
         ]
     }
 
