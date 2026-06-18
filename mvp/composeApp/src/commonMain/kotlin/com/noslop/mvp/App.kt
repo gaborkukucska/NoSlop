@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
@@ -201,10 +202,29 @@ private fun MeshScreen() {
     var connected by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("Hello from my iPhone 👋") }
     var viaTor by remember { mutableStateOf(false) }
-    var socksHost by remember { mutableStateOf("127.0.0.1") }
-    var socksPort by remember { mutableStateOf("9050") }
 
-    fun proxy(): SocksProxy? = if (viaTor) SocksProxy(socksHost.trim(), socksPort.toIntOrNull() ?: 9050) else null
+    fun connectNow() {
+        scope.launch {
+            val proxy: SocksProxy? = if (viaTor) {
+                if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
+                status = "Starting Tor…"
+                TorService.start()
+                var p = TorService.socksPort()
+                var waited = 0
+                while (p == 0 && waited < 120_000) {
+                    delay(1500); waited += 1500
+                    status = "Bootstrapping Tor… ${waited / 1000}s (first run is slow)"
+                    p = TorService.socksPort()
+                }
+                if (p == 0) { status = "Tor bootstrap timed out"; return@launch }
+                SocksProxy("127.0.0.1", p)
+            } else null
+            status = if (proxy != null) "Connecting via Tor…" else "Connecting…"
+            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy) }
+                .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
+                .onFailure { status = "Error: ${it.message}" }
+        }
+    }
 
     DisposableEffect(Unit) {
         // Sink runs on a background coroutine; bounce UI updates onto the (main) composition scope.
@@ -214,14 +234,7 @@ private fun MeshScreen() {
 
     // Auto-connect to the default hub on open — the "just install the app" path (a real product ships a
     // default/public hub address here; the user does nothing). Manual reconnect via the button below.
-    LaunchedEffect(Unit) {
-        if (!connected) {
-            status = "Connecting…"
-            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
-                .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
-                .onFailure { status = "Error: ${it.message}" }
-        }
-    }
+    LaunchedEffect(Unit) { if (!connected) connectNow() }
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -231,23 +244,10 @@ private fun MeshScreen() {
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Switch(checked = viaTor, onCheckedChange = { viaTor = it }, enabled = !connected)
-            Text("Via Tor (SOCKS5)", fontSize = 13.sp)
-        }
-        if (viaTor) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(socksHost, { socksHost = it }, label = { Text("SOCKS host") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(2f))
-                OutlinedTextField(socksPort, { socksPort = it.filter { c -> c.isDigit() } }, label = { Text("SOCKS port") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(1f))
-            }
+            Text("Via Tor (for .onion hubs, from anywhere)", fontSize = 13.sp)
         }
         Button(
-            onClick = {
-                status = "Connecting…"
-                scope.launch {
-                    runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
-                        .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
-                        .onFailure { status = "Error: ${it.message}" }
-                }
-            },
+            onClick = { connectNow() },
             enabled = !connected,
         ) { Text(if (connected) "Connected" else "Connect to hub") }
         Text(

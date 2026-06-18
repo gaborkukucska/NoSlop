@@ -106,3 +106,10 @@ actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
+
+/** The desktop HUB hosts the onion (via TorProcess) rather than dialing one — no client Tor needed here. */
+actual object TorService {
+    actual val isAvailable: Boolean = false
+    actual fun start() {}
+    actual fun socksPort(): Int = 0
+}

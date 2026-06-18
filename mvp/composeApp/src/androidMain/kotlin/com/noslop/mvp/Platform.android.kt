@@ -146,3 +146,10 @@ actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
+
+/** No embedded Tor on Android in the MVP (Orbot/system Tor is a later option). */
+actual object TorService {
+    actual val isAvailable: Boolean = false
+    actual fun start() {}
+    actual fun socksPort(): Int = 0
+}

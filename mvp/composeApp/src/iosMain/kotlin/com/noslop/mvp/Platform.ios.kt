@@ -165,6 +165,26 @@ actual object DbDriverFactory {
         )
 }
 
+/**
+ * Swift→Kotlin bridge for embedded Tor (Tor.framework). The iOS app implements this by launching a
+ * `TORThread` + `TORController`, and reports the local SOCKS port once Tor reports "Bootstrapped 100%".
+ */
+interface IosTor {
+    fun start()
+    fun socksPort(): Int // 0 until bootstrapped
+}
+
+object IosTorBridge {
+    var tor: IosTor? = null
+}
+
+/** iOS embedded Tor, via the Swift bridge. */
+actual object TorService {
+    actual val isAvailable: Boolean get() = IosTorBridge.tor != null
+    actual fun start() { IosTorBridge.tor?.start() }
+    actual fun socksPort(): Int = IosTorBridge.tor?.socksPort() ?: 0
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()

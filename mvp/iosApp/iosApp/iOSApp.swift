@@ -117,6 +117,7 @@ struct iOSApp: App {
         IosKeychainBridge.shared.keychain = KeychainIdentity()
         IosSignerBridge.shared.signer = CryptoKitSigner()
         IosDmBridge.shared.dm = CryptoKitDm()
+        IosTorBridge.shared.tor = TorManager()
     }
 
     var body: some Scene {
