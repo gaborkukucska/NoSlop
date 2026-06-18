@@ -52,11 +52,13 @@ fun App() {
                     Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Identity") })
                     Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Feed") })
                     Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Mesh") })
+                    Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("DMs") })
                 }
                 when (tab) {
                     0 -> IdentityScreen()
                     1 -> FeedScreen()
-                    else -> MeshScreen(mesh)
+                    2 -> MeshScreen(mesh)
+                    else -> DmScreen(mesh)
                 }
             }
         }
@@ -203,18 +205,33 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private val client = MeshClient(identity, MeshStoreProvider.get(), scope)
     val received = mutableStateListOf<PostPayload>()
     val savedNodes = mutableStateListOf<MeshInvite>()      // persisted hubs, newest first (see SavedNodes)
+    val contacts = mutableStateListOf<MeshContact>()       // DM contacts (in-memory for now)
+    val dmLog = mutableStateListOf<DmEntry>()              // DM history this session, newest first
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
     var status by mutableStateOf("Not connected")
     var connected by mutableStateOf(false)
     var draft by mutableStateOf("Hello from my iPhone 👋")
+    var dmDraft by mutableStateOf("")
+    var selectedContact by mutableStateOf<MeshContact?>(null)
     private var autoTried = false
 
     val linkCount: Int get() = client.linkCount
 
     init {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
+        client.onDm = { fromNodeId, fromEncPub, text ->
+            scope.launch {
+                // Learn the sender as a contact (so the user can reply) if we don't have them yet.
+                if (contacts.none { it.nodeId == fromNodeId }) {
+                    val c = MeshContact("${fromNodeId.take(8)}…", fromNodeId, fromEncPub)
+                    contacts.add(c); if (selectedContact == null) selectedContact = c
+                }
+                val name = contacts.firstOrNull { it.nodeId == fromNodeId }?.handle ?: fromNodeId.take(8)
+                dmLog.add(0, DmEntry(from = name, text = text, mine = false))
+            }
+        }
         reloadSaved()
         // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
         savedNodes.firstOrNull()?.let { host = it.host; port = it.port.toString(); viaTor = it.tor }
@@ -283,16 +300,41 @@ private class MeshUiState(private val scope: CoroutineScope) {
     fun removeNode(invite: MeshInvite) { SavedNodes.remove(invite); reloadSaved() }
 
     fun onScan(scanned: String?) {
-        val invite = scanned?.let { MeshInvite.parse(it) }
-        if (invite == null) { status = if (scanned == null) "Scan cancelled" else "Not a NoSlop code"; return }
-        status = "Scanned ${if (invite.tor) "onion" else invite.host} — connecting…"
-        connect(invite, save = true)
+        if (scanned == null) { status = "Scan cancelled"; return }
+        // A hub invite (noslop://…) connects; a contact card ({…}) is added for DMs.
+        MeshInvite.parse(scanned)?.let { invite ->
+            status = "Scanned ${if (invite.tor) "onion" else invite.host} — connecting…"
+            connect(invite, save = true); return
+        }
+        MeshContact.parse(scanned)?.let { contact -> addContact(contact); return }
+        status = "Not a NoSlop code"
+    }
+
+    fun addContact(contact: MeshContact) {
+        contacts.removeAll { it.nodeId == contact.nodeId }
+        contacts.add(0, contact)
+        selectedContact = contact
+        status = "Added contact ${contact.handle}"
+    }
+
+    fun sendDm() {
+        val to = selectedContact ?: return
+        val text = dmDraft.trim()
+        if (text.isEmpty()) return
+        scope.launch {
+            val ok = client.sendDm(to, text)
+            if (ok) { dmLog.add(0, DmEntry(from = to.handle, text = text, mine = true)); dmDraft = "" }
+            else status = "DM failed (no link or bad key)"
+        }
     }
 
     fun publish() {
         scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" }
     }
 }
+
+/** One line of DM history for the UI. [mine] = we sent it. */
+data class DmEntry(val from: String, val text: String, val mine: Boolean)
 
 /**
  * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
@@ -365,6 +407,59 @@ private fun MeshScreen(state: MeshUiState) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(p.authorName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text(p.content, fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Direct messages: end-to-end encrypted leaf-to-leaf DMs relayed by the (blind) hub. Scan a peer's contact QR
+ * to add them, pick a contact, and send. Incoming DMs are decrypted locally and auto-add the sender as a
+ * contact so you can reply. Shares [MeshUiState] (hence the live link) with the Mesh tab.
+ */
+@Composable
+private fun DmScreen(state: MeshUiState) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text(
+            if (state.connected) "Linked — DMs route through the hub, end-to-end encrypted (the hub can't read them)."
+            else "Connect to a hub on the Mesh tab first.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
+        )
+        if (QrScanner.isAvailable) {
+            Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }, modifier = Modifier.fillMaxWidth()) {
+                Text("📷  Scan a contact QR")
+            }
+        }
+        if (state.contacts.isNotEmpty()) {
+            Text("Contacts (${state.contacts.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            state.contacts.forEach { c ->
+                val selected = state.selectedContact?.nodeId == c.nodeId
+                Button(onClick = { state.selectedContact = c }, modifier = Modifier.fillMaxWidth()) {
+                    Text((if (selected) "● " else "○ ") + c.handle + "  ·  " + c.nodeId.take(8) + "…", fontSize = 13.sp)
+                }
+            }
+        }
+        state.selectedContact?.let { to ->
+            Text("To: ${to.handle}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true, modifier = Modifier.weight(1f))
+                Button(onClick = { state.sendDm() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
+            }
+        }
+        Text("Messages (${state.dmLog.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(state.dmLog) { e ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text(
+                            if (e.mine) "me → ${e.from}" else "${e.from} → me",
+                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            color = if (e.mine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                        )
+                        Text(e.text, fontSize = 14.sp)
                     }
                 }
             }

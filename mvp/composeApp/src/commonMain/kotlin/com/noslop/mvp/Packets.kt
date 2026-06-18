@@ -100,6 +100,9 @@ data class EncryptedPayload(
     val ciphertext: String,
     @SerialName("group_id") val groupId: String? = null,
     val timestamp: Long? = null,
+    // Sender's X25519 public key (X.509 b64) so the recipient can derive the shared secret without a
+    // pre-shared contact. The key is public; the hub still only ever sees ciphertext + public keys.
+    @SerialName("sender_enc_pub") val senderEncPublicKey: String? = null,
 )
 
 @Serializable

@@ -89,6 +89,20 @@ actual object HubStore {
     actual fun clear() { sp()?.edit()?.remove(KEY)?.apply() }
 }
 
+/** X25519 DM private key in SharedPreferences (hardening TODO: move to Keystore like the Ed25519 key). */
+actual object DmKeyStore {
+    private const val PREFS = "noslop_dm"
+    private const val KEY = "dm_priv"
+    private var fallback: String? = null
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null) ?: fallback
+    actual fun save(privRawB64: String) {
+        val s = sp()
+        if (s != null) s.edit().putString(KEY, privRawB64).apply() else fallback = privRawB64
+    }
+}
+
 /** Android Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 handled in commonMain). */
 actual object Signer {
     private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()

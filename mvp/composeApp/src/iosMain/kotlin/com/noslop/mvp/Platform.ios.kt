@@ -85,6 +85,15 @@ actual object HubStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
 }
 
+/** X25519 DM private key in NSUserDefaults (hardening TODO: move to Keychain like the Ed25519 key). */
+actual object DmKeyStore {
+    private const val KEY = "noslop_dm_priv"
+    actual fun load(): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(privRawB64: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(privRawB64, KEY)
+}
+
 /**
  * Swift→Kotlin bridge for CryptoKit Ed25519 signing. CryptoKit takes RAW 32-byte keys (not PKCS#8/X.509)
  * and exchanges base64 strings across the bridge for clean byte transfer.

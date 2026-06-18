@@ -26,7 +26,9 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider
  * identity/handle and a JDBC SQLite database. This is what makes the always-on HUB (ADR-002) a real process.
  */
 private val bc = BouncyCastleProvider()
-private val hubDir = File(System.getProperty("user.home"), ".noslop-hub").apply { mkdirs() }
+// Per-node storage dir. Override with NOSLOP_HOME so a second JVM node (e.g. the test "creator" leaf) gets a
+// distinct identity + DM key instead of colliding with the hub's (same nodeId would break DM routing).
+private val hubDir = File(System.getenv("NOSLOP_HOME") ?: File(System.getProperty("user.home"), ".noslop-hub").path).apply { mkdirs() }
 
 @OptIn(ExperimentalEncodingApi::class)
 actual object IdentityKeyStore {
@@ -54,6 +56,13 @@ actual object HubStore {
     actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
     actual fun save(blob: String) { file.writeText(blob) }
     actual fun clear() { file.delete() }
+}
+
+/** X25519 DM private key in a file under the hub dir (per-leaf; the creator-leaf reuses this). */
+actual object DmKeyStore {
+    private val file = File(hubDir, "dm_priv")
+    actual fun load(): String? = if (file.exists()) file.readText().trim().ifBlank { null } else null
+    actual fun save(privRawB64: String) { file.writeText(privRawB64) }
 }
 
 /** JVM Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 stay in commonMain). Mirrors androidMain. */

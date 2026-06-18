@@ -169,6 +169,19 @@ tasks.register<JavaExec>("runHub") {
     environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
 }
 
+// Run a desktop test LEAF (stands in for a second phone for leaf-to-leaf DMs). Its own NOSLOP_HOME gives it
+// a distinct identity from the hub.  ./gradlew :composeApp:runLeaf --args="9876"   (hub must be running)
+tasks.register<JavaExec>("runLeaf") {
+    group = "application"
+    description = "Run a NoSlop test leaf (a second node, for DM testing) that connects to a local hub."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.LeafMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_HOME", layout.buildDirectory.dir("noslop-leaf").get().asFile.absolutePath)
+}
+
 android {
     namespace = "com.noslop.mvp"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()

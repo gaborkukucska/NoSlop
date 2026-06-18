@@ -55,3 +55,25 @@ class DmCryptoTest {
         assertTrue(DmSelfTest.run(), "the in-app DM self-test must pass on a platform with DM crypto")
     }
 }
+
+/**
+ * Validates [DmKeys] X25519 keypair derivation (pub = priv·basepoint via the shared-secret primitive).
+ * Two independently-derived keypairs must agree on a shared secret — which only holds if both public keys
+ * are the correct priv·G. A consistency-only bug (wrong-but-stable pub) would fail this cross round-trip.
+ */
+class DmKeysTest {
+    @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+    @Test
+    fun derivedKeypairs_crossRoundTrip() {
+        if (!DmCrypto.isAvailable) return // native unit-test guard (CryptoKit unreachable)
+        val privA = kotlin.io.encoding.Base64.encode(DmCrypto.randomBytes(32))
+        val privB = kotlin.io.encoding.Base64.encode(DmCrypto.randomBytes(32))
+        val pubA = DmKeys.derivePublicX509B64(privA); assertNotNull(pubA)
+        val pubB = DmKeys.derivePublicX509B64(privB); assertNotNull(pubB)
+        // A encrypts to B; B decrypts with A's pub + B's priv. Works iff pubA=privA·G and pubB=privB·G.
+        val sealed = encryptDM("leaf-to-leaf 🔐", pubB, DmKeys.privPkcs8B64(privA))
+        assertNotNull(sealed)
+        val opened = decryptDM(sealed.first, sealed.second, pubA, DmKeys.privPkcs8B64(privB))
+        assertEquals("leaf-to-leaf 🔐", opened)
+    }
+}
