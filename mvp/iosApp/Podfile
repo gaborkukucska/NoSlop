@@ -1,0 +1,9 @@
+# CocoaPods integration for the iOS app — currently just Tor (iCepa Tor.framework), the only practical way
+# to embed Tor on iOS (no clean SPM option; see ADR-009). Workflow with XcodeGen:
+#   cd iosApp && xcodegen generate && pod install   # then build the .xcworkspace, not the .xcodeproj
+platform :ios, '15.0'
+
+target 'iosApp' do
+  use_frameworks!
+  pod 'Tor', '~> 409'
+end
