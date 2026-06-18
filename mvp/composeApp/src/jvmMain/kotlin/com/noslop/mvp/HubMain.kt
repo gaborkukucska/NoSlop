@@ -23,7 +23,9 @@ fun main(args: Array<String>) = runBlocking {
     val identity = loadIdentity(HandleStore.load())
     val nodeId = identity.publicKeyHex
     val store = MeshStore(DbDriverFactory.create())
-    val transport = SocketTransport(nodeId, scope)
+    // Selector on Dispatchers.IO: the hub's accept loop + per-link read loops are blocking-ish and would
+    // starve the CPU-bound Dispatchers.Default pool (the cause of the accept loop dying after the 1st link).
+    val transport = SocketTransport(nodeId, scope, Dispatchers.IO)
 
     val sink = object : MeshSink {
         override suspend fun onPost(packet: NetworkPacket, post: PostPayload) {

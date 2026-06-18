@@ -39,8 +39,9 @@ data class SocksProxy(val host: String, val port: Int)
 class SocketTransport(
     val nodeId: String,
     private val scope: CoroutineScope,
+    selectorDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
 ) : Transport {
-    private val selector = SelectorManager(Dispatchers.Default)
+    private val selector = SelectorManager(selectorDispatcher)
     private val conns = mutableMapOf<String, Conn>()
     private val lock = Mutex()
     private var handler: (suspend (String, NetworkPacket) -> Unit)? = null
@@ -62,8 +63,21 @@ class SocketTransport(
         server = s
         val bound = (s.localAddress as InetSocketAddress).port
         scope.launch {
+            var consecutiveErrors = 0
             while (true) {
-                val socket = try { s.accept() } catch (_: Throwable) { break }
+                val socket = try {
+                    s.accept().also { consecutiveErrors = 0 }
+                } catch (e: Throwable) {
+                    // A closed server socket means we're shutting down — exit. Otherwise the JVM selector can
+                    // throw transient EINVAL ("Invalid argument") between accepts; tolerate a few in a row so a
+                    // single hiccup doesn't permanently kill the listener (which would drop every later peer).
+                    if (server == null) { println("[transport] accept loop ended (server closed)"); break }
+                    if (++consecutiveErrors > 50) { println("[transport] accept loop giving up after $consecutiveErrors errors: $e"); break }
+                    // Note: macOS throws EINVAL here for *hairpin* self-connections (a host dialing its own LAN
+                    // IP) — a test-only artifact; genuine remote clients (the iOS leaf) accept cleanly.
+                    println("[transport] accept error #$consecutiveErrors (continuing): $e")
+                    continue
+                }
                 scope.launch { handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true)) }
             }
         }
@@ -135,8 +149,19 @@ class SocketTransport(
     }
 
     private suspend fun handle(socket: Socket, input: ByteReadChannel, output: ByteWriteChannel) {
-        output.writeStringUtf8("$nodeId\n")                          // handshake: announce our id first…
-        val peerId = input.readUTF8Line() ?: run { runCatching { socket.close() }; return } // …then learn theirs
+        val peer = socket.remoteAddress
+        val peerId: String
+        try {
+            output.writeStringUtf8("$nodeId\n")                      // handshake: announce our id first…
+            peerId = input.readUTF8Line() ?: run {                   // …then learn theirs
+                println("[transport] EOF reading peer id from $peer")
+                runCatching { socket.close() }; return
+            }
+        } catch (e: Throwable) {
+            println("[transport] handshake error with $peer: $e")
+            runCatching { socket.close() }; return
+        }
+        println("[transport] link up: ${peerId.take(16)} from $peer")
         val conn = Conn(socket, output)
         lock.withLock { conns[peerId] = conn }
         scope.launch {
@@ -160,7 +185,9 @@ class SocketTransport(
     }
 
     fun close() {
-        runCatching { server?.close() }
+        val s = server
+        server = null // signals the accept loop to exit instead of treating the close() as a transient error
+        runCatching { s?.close() }
         conns.values.forEach { runCatching { it.socket.close() } }
         runCatching { selector.close() }
     }

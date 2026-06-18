@@ -161,6 +161,10 @@ tasks.register<JavaExec>("runHub") {
     dependsOn(jvmMain.compileTaskProvider, downloadTor)
     classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
     mainClass.set("com.noslop.mvp.HubMainKt")
+    // Force an IPv4 socket stack. Binding "0.0.0.0" otherwise yields an IPv6 wildcard socket (`*:9876`);
+    // inbound IPv4 LAN connections then arrive as IPv4-mapped-IPv6 and the JVM/ktor accept() throws
+    // SocketException "Invalid argument" — so loopback worked but no LAN/phone connection was ever accepted.
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
     // Point TorProcess at the bundled binary, robust to working directory.
     environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
 }
