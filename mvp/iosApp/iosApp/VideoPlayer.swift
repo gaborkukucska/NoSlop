@@ -1,5 +1,6 @@
 import UIKit
 import AVKit
+import AVFoundation
 import ComposeApp
 
 /// Full-screen clearnet video playback bridged into the Kotlin core (`IosVideoPlayer`). Presents a native
@@ -9,7 +10,12 @@ final class VideoPlayerBridge: NSObject, IosVideoPlayer {
     func play(url: String) {
         DispatchQueue.main.async {
             guard let u = URL(string: url), let root = Self.topViewController() else { return }
+            // Without an active .playback audio session, iOS keeps the player paused (first frame renders but
+            // it won't start) and honours the mute switch. moviePlayback mode is the AVKit-recommended setup.
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try? AVAudioSession.sharedInstance().setActive(true)
             let player = AVPlayer(url: u)
+            player.automaticallyWaitsToMinimizeStalling = false
             let vc = AVPlayerViewController()
             vc.player = player
             vc.modalPresentationStyle = .fullScreen
