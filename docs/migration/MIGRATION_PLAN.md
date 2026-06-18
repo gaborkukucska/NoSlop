@@ -1,6 +1,6 @@
 # NoSlop Cross-Platform Migration — Master Plan
 
-**Status:** 🟡 Phase 0 in progress · **Branch:** `feat/cross-platform-migration` · **Last updated:** 2026-06-16
+**Status:** 🟢 Phases 0–1 done · Phase 2 (iOS leaf) ~80% · Phase 3 (HUB) functionally working · **Branch:** `feat/cross-platform-migration` · **Last updated:** 2026-06-19
 
 ---
 
@@ -18,21 +18,56 @@ Adopt **Kotlin Multiplatform + Compose Multiplatform** (one language for logic *
 
 | Phase | Goal | Status | Detail doc |
 |---|---|---|---|
-| **0 — Decompose & test the core** | Split monolith files; extract `:core-*` modules; golden-vector tests for crypto/protocol. *No behavior change.* | 🟡 **In progress** (both god-objects done; UI monoliths remain) | [`PHASE_0.md`](PHASE_0.md) |
-| **0.5 — iOS MVP (identity + feed)** | **Owner goal (2026-06-16): a runnable iOS MVP.** Scoped slice of Phase 1/2 — CMP app: generate identity + clearnet feed reader. No mesh/Tor. Free-provisioning sideload. | 🟡 **In progress** | [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) · ADR-008 |
-| **1 — KMP-ify the core** | Move core modules to `commonMain`; Room→SQLDelight; define platform seams. Android still runs on shared core. | 🟡 **Begun** — wire protocol ported to shared code, golden-tested on iOS + Android (commit `4ddc3bd`). Next: sign/verify, DM crypto, gossip logic. | [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) |
-| **2 — iOS leaf client** | Compose MP UI on iOS; `actual` Tor, Keychain, AVPlayer, QR. Pairs to a HUB. App Store compliance. | ⚪ Not started | _TBD_ |
-| **3 — Desktop / Home HUB** | JVM desktop = always-on HUB that keeps iOS reachable. Win/macOS/Linux. | ⚪ Not started | _TBD_ |
-| **4 — Web (optional)** | Wasm bridge client only — no in-browser Tor; talks to a HUB. | ⚪ Deferred | _TBD_ |
-| **5 — Rust/Arti core (optional)** | Port only crypto+mesh+Tor to Rust via Arti, gated on Phase 0 tests as conformance suite. | ⚪ Deferred | _TBD_ |
+| **0 — Decompose & test the core** | Split monolith files; golden-vector tests for crypto/protocol. *No behavior change.* | 🟢 **Done** — portable core extracted + golden-tested cross-platform (identity, wire protocol, sign/verify, DM crypto). | [`PHASE_0.md`](PHASE_0.md) |
+| **0.5 — iOS MVP (identity + feed)** | A runnable iOS MVP: identity + clearnet feed. | 🟢 **Done** — runs on device; real CryptoKit Ed25519 identity + live JSON feed. | [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) · ADR-008 |
+| **1 — KMP-ify the core** | Core in `commonMain`; Room→SQLDelight; platform seams. | 🟢 **Done** — wire protocol, Ed25519 sign/verify, **DM crypto (X25519)**, gossip/firewall/routing, SQLDelight persistence, TCP transport, SOCKS5 — all shared + tested on iOS/Android/JVM. | [`IOS_MVP_PLAN.md`](IOS_MVP_PLAN.md) |
+| **2 — iOS leaf client** | Compose MP UI on iOS; `actual` Tor, Keychain, AVPlayer, QR. Pairs to a HUB. App Store compliance. | 🟢 **~80%** — ✅ Tor (embedded, onion dial), QR scan **+ share**, hub pairing + persistence, identity in Keychain, **e2e DMs**, contacts. ❌ remaining: **media/AVPlayer**, DM-key→Keychain, App Store/TestFlight. See roadmap ↓. | this doc ↓ |
+| **3 — Desktop / Home HUB** | JVM desktop = always-on HUB; publishes onion, relays blind. | 🟢 **Functionally working** — `runHub` bootstraps Tor, publishes an onion (`Flags=Detach`), relays posts + ciphertext DMs. ❌ not packaged as a desktop app/service. | this doc ↓ |
+| **4 — Web (optional)** | Wasm bridge client; talks to a HUB. | ⚪ Deferred | _TBD_ |
+| **5 — Rust/Arti core (optional)** | Port crypto+mesh+Tor to Rust via Arti, gated on Phase 0 tests. | ⚪ Deferred | _TBD_ |
 
-Legend: ⚪ not started · 🟡 in progress · 🟢 complete · 🔴 blocked
+Legend: ⚪ not started · 🟡 in progress · 🟢 complete/working · 🔴 blocked
+
+> **Note (2026-06-19):** progress ran well ahead of the original plan — the iOS MVP was scoped as identity+feed
+> only, but mesh, Tor onion, and end-to-end DMs are all working on-device now. The remaining work is feature
+> parity with the Android app + hardening + distribution, tracked in the roadmap below.
 
 ## Scope guardrails
 
-- **In scope now:** Phase 0 (decompose + test). Nothing platform-specific is written until the core is clean and tested.
-- **Out of scope until Phase 0 done:** any iOS code, any KMP module conversion, any new features.
-- **Never in scope:** changing the wire protocol or crypto scheme without an ADR + conformance tests — it's the interop contract with the existing Android network.
+- **In scope now:** Phase 2 completion — feature parity with the Android app on iOS, hardening, distribution (roadmap below).
+- **Never in scope:** changing the wire protocol or crypto scheme without an ADR + conformance tests — it's the interop contract with the existing Android network. (The DM payload gained optional `sender_enc_pub` / `sender_node_id` fields — additive, backward-compatible.)
+- **Privacy invariant:** the HUB relays ciphertext only and must never decrypt DMs.
+
+## Feature parity vs. the Android app (the working yardstick)
+
+Goal (owner): *"mimic the Android features on a functioning iOS app."*
+
+| Feature | Android | iOS now |
+|---|---|---|
+| Identity (Ed25519, tripcode, onion) | ✅ | ✅ (CryptoKit, Keychain) |
+| Clearnet feed reader | ✅ | ✅ JSON (RSS pending) |
+| Mesh posts (gossip broadcast/receive) | ✅ | ✅ |
+| Tor onion connectivity | ✅ | ✅ (embedded Tor, dials hub onion) |
+| QR pair / scan | ✅ | ✅ + **share-my-QR** |
+| Encrypted DMs (X25519 · SHA3 · ChaCha20-Poly1305) | ✅ | ✅ end-to-end, blind hub |
+| Contacts | ✅ | ✅ persisted + nameable |
+| Saved hubs / auto-connect | ~ | ✅ persisted + default (★) |
+| **Media / video playback** | ✅ | ❌ **not ported (biggest gap)** |
+| Reactions / votes | ✅ proto+UI | ⚠️ wire proto only, no UI |
+| Settings / Notifications / Logs / API keys / Content prefs / Onboarding | ✅ | ❌ not ported |
+| Secure DM key storage | ✅ | ⚠️ device prefs (hardening TODO) |
+| App icon · distribution | ✅ | ❌ icon missing; needs TestFlight for others |
+
+## Remaining roadmap (ordered) — Phase 2 completion → parity
+
+1. **Media / video playback** — `expect`/`actual` player (AVPlayer on iOS, ExoPlayer on Android), wired into the feed/posts. The one large missing core feature.
+2. **Harden DM key storage** — move the X25519 DM private key into Keychain / Android Keystore (where the Ed25519 key already lives). Security-critical for a privacy app.
+3. **Reactions / votes UI** — the wire protocol already carries them; add the UI (cheap, visible win).
+4. **Onboarding + Settings** — the connective UX tissue (handle setup, hub management, Tor status, content prefs).
+5. **App icon + distribution** — asset catalog icon; Apple Developer Program + **TestFlight** so others (e.g. a real remote DM peer) can install. *External dependency: paid Apple account.*
+6. **RSS feed sources** — multiplatform XML, beyond the JSON feed.
+
+Then: Phase 3 packaging (desktop HUB as an installable app/service), Phases 4–5 (optional).
 
 ## The portable core vs. the platform shell (what moves where)
 
