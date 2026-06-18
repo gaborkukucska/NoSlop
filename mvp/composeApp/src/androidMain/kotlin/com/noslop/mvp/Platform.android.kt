@@ -78,6 +78,17 @@ actual object HandleStore {
     }
 }
 
+/** Saved-hubs blob in SharedPreferences (same approach as [HandleStore]). */
+actual object HubStore {
+    private const val PREFS = "noslop_hubs"
+    private const val KEY = "hubs"
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null)
+    actual fun save(blob: String) { sp()?.edit()?.putString(KEY, blob)?.apply() }
+    actual fun clear() { sp()?.edit()?.remove(KEY)?.apply() }
+}
+
 /** Android Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 handled in commonMain). */
 actual object Signer {
     private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()

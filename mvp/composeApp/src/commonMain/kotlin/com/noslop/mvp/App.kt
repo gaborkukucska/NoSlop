@@ -202,6 +202,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private val identity = loadIdentity(HandleStore.load())
     private val client = MeshClient(identity, MeshStoreProvider.get(), scope)
     val received = mutableStateListOf<PostPayload>()
+    val savedNodes = mutableStateListOf<MeshInvite>()      // persisted hubs, newest first (see SavedNodes)
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -210,26 +211,42 @@ private class MeshUiState(private val scope: CoroutineScope) {
     var draft by mutableStateOf("Hello from my iPhone 👋")
     private var autoTried = false
 
+    val linkCount: Int get() = client.linkCount
+
     init {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
+        reloadSaved()
+        // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
+        savedNodes.firstOrNull()?.let { host = it.host; port = it.port.toString(); viaTor = it.tor }
     }
 
-    /** Auto-connect once on first open (the "just install the app" path); no-op afterwards. */
+    private fun reloadSaved() { savedNodes.clear(); savedNodes.addAll(SavedNodes.list()) }
+
+    /**
+     * On first open, auto-reconnect to the most recent saved hub — so a paired phone never has to re-scan.
+     * No-op if nothing's saved yet. Additional saved hubs are reachable by tapping them in the list.
+     */
     fun autoConnectOnce() {
         if (autoTried) return
         autoTried = true
-        if (!connected) connectNow()
+        val recent = savedNodes.firstOrNull()
+        if (recent == null) { status = "No saved hub yet — scan a node QR to connect"; return }
+        connect(recent, save = false)
     }
 
+    /** Connect using whatever's in the host/port/Tor fields (the manual "Connect" button). */
     fun connectNow() {
+        // Tolerate a full invite URI pasted into the host field instead of scanning.
+        val pasted = MeshInvite.parse(host.trim())
+        val invite = pasted ?: MeshInvite(host.trim(), port.toIntOrNull() ?: 9876, viaTor)
+        connect(invite, save = true)
+    }
+
+    /** Connect to a specific saved/scanned hub. Persists it on success when [save]. */
+    fun connect(invite: MeshInvite, save: Boolean) {
+        host = invite.host; port = invite.port.toString(); viaTor = invite.tor
         scope.launch {
-            // Tolerate a full invite URI pasted into the host field (instead of scanning): parse it and apply
-            // host/port/Tor. Without this, "noslop://…" was treated as a hostname → "posix error 0" on connect.
-            MeshInvite.parse(host.trim())?.let { invite ->
-                host = invite.host; port = invite.port.toString(); viaTor = invite.tor
-            }
-            val p = port.toIntOrNull() ?: 9876
-            if (viaTor) {
+            if (invite.tor) {
                 if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
                 status = "Starting Tor…"
                 TorService.start()
@@ -241,9 +258,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
                     val prog = TorService.bootstrapProgress()
                     status = "Connecting via Tor… ${if (prog in 1..99) "$prog% " else ""}(${waited / 1000}s)"
                     if (sp > 0) {
-                        val ok = runCatching { client.connect(host.trim(), p, SocksProxy("127.0.0.1", sp)) }
+                        val ok = runCatching { client.connect(invite.host, invite.port, SocksProxy("127.0.0.1", sp)) }
                             .map { client.linkCount > 0 }.getOrDefault(false)
-                        if (ok) { connected = true; status = "Connected ✓ over Tor — ${client.linkCount} link(s)"; return@launch }
+                        if (ok) { onLinked(invite, save, "over Tor"); return@launch }
                     }
                     delay(4000); waited += 4000
                 }
@@ -251,18 +268,25 @@ private class MeshUiState(private val scope: CoroutineScope) {
                 return@launch
             }
             status = "Connecting…"
-            runCatching { client.connect(host.trim(), p, null) }
-                .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
+            runCatching { client.connect(invite.host, invite.port, null) }
+                .onSuccess { if (client.linkCount > 0) onLinked(invite, save, "") else { connected = false; status = "No link" } }
                 .onFailure { status = "Error: ${it.message}" }
         }
     }
 
+    private fun onLinked(invite: MeshInvite, save: Boolean, how: String) {
+        connected = true
+        status = "Connected ✓ ${how.ifBlank { "" }}— ${client.linkCount} link(s)".replace("  ", " ")
+        if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
+    }
+
+    fun removeNode(invite: MeshInvite) { SavedNodes.remove(invite); reloadSaved() }
+
     fun onScan(scanned: String?) {
         val invite = scanned?.let { MeshInvite.parse(it) }
         if (invite == null) { status = if (scanned == null) "Scan cancelled" else "Not a NoSlop code"; return }
-        host = invite.host; port = invite.port.toString(); viaTor = invite.tor
         status = "Scanned ${if (invite.tor) "onion" else invite.host} — connecting…"
-        connectNow()
+        connect(invite, save = true)
     }
 
     fun publish() {
@@ -306,6 +330,31 @@ private fun MeshScreen(state: MeshUiState) {
             color = if (state.status.startsWith("Connected")) MaterialTheme.colorScheme.primary
             else if (state.status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
         )
+
+        // Saved hubs — persisted across launches; auto-reconnects to the most recent on open, and any of these
+        // can be tapped to (re)connect (adding a link). So a paired phone never has to re-scan.
+        if (state.savedNodes.isNotEmpty()) {
+            Text("Saved hubs (${state.savedNodes.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            state.savedNodes.forEach { node ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                (if (node.tor) "🧅 " else "🌐 ") + node.host.let { if (it.length > 22) it.take(10) + "…" + it.takeLast(8) else it },
+                                fontSize = 13.sp, fontFamily = FontFamily.Monospace,
+                            )
+                            Text(":${node.port}${if (node.tor) " · Tor" else " · LAN"}", fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
+                        }
+                        Button(onClick = { state.connect(node, save = true) }) { Text("Connect") }
+                        Button(onClick = { state.removeNode(node) }) { Text("✕") }
+                    }
+                }
+            }
+        }
         OutlinedTextField(state.draft, { state.draft = it }, label = { Text("Post to the mesh") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = { state.publish() }, enabled = state.connected) { Text("Broadcast post") }
 

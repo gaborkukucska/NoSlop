@@ -74,6 +74,17 @@ actual object HandleStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(handle, KEY)
 }
 
+/** Saved-hubs blob persisted in NSUserDefaults (same approach as [HandleStore]). */
+actual object HubStore {
+    private const val KEY = "noslop_hubs"
+    actual fun load(): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+    actual fun clear() =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
+}
+
 /**
  * Swift→Kotlin bridge for CryptoKit Ed25519 signing. CryptoKit takes RAW 32-byte keys (not PKCS#8/X.509)
  * and exchanges base64 strings across the bridge for clean byte transfer.
