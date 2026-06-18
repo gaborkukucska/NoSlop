@@ -4,6 +4,36 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-19 — Phase 1 step 13: end-to-end encrypted DMs on-device (hub stays blind) 🟢
+
+**Two-way encrypted DM proven on the phone, relayed by a hub that can't read it.** Owner steered two key
+design points: (1) the hub must NOT decrypt DMs (privacy) → leaf-to-leaf, hub relays ciphertext only;
+(2) DMs reach a peer who is *also* a leaf on the same hub (hub-and-spoke), reachable via the onion.
+
+- **X25519 DM keypair** (`DmKeys`) per node, separate from the Ed25519 identity. No new platform crypto:
+  the public key is derived as `priv·basepoint` through the existing `x25519SharedSecret` primitive (proven
+  by a two-keypair cross round-trip test on JVM). Persisted via `DmKeyStore`. **Hardening TODO:** move the
+  DM private key into Keychain/Keystore (currently device prefs/file like the saved hubs).
+- **MeshContact** (handle + node id + X25519 pub) shared as a JSON QR, out of band from the hub.
+  `EncryptedPayload` gained `sender_enc_pub` (so the recipient derives the shared secret without a pre-shared
+  contact) and `sender_node_id` (so replies route to the originator — the hub re-stamps `senderId` on every
+  forward for privacy, which had silently misrouted the first replies to the hub itself).
+- **MeshClient.sendDm/onDm**: seal to a contact, broadcast a MESSAGE; on receipt decrypt only packets whose
+  `targetUserId` is us (the hub floods MESSAGE to all links). Verified live: phone → hub (onion, blind relay)
+  → desktop "creator" leaf (loopback) → decrypt + auto-reply → back to phone, decrypted. Hub logs only
+  "relayed DM … (ciphertext only)".
+- **LeafMain + `runLeaf`**: a desktop test leaf with its own identity (via `NOSLOP_HOME`) standing in for a
+  second phone (e.g. Gabour). For a real remote peer: they need a client (TestFlight build / desktop leaf),
+  scan the hub onion QR to join, and swap contact QRs.
+- **App UX:** new **DMs tab** (scan contact, pick, send; incoming DMs auto-add the sender). **Show-my-QR**
+  (first in-app QR *generation*, via qrose). **Persisted + renameable contacts** (`ContactStore`/`SavedContacts`).
+  **Default hub** — first saved hub (★) is the launch auto-connect target; pin another with ★.
+
+**Next:** harden DM key storage (Keychain/Keystore); get a peer (Gabour) a client for a real remote DM;
+hub→phone post receive-path on-device; app icon.
+
+---
+
 ## 2026-06-18 — Phase 1 step 12: Tor onion reachable on-device + saved-hub persistence 🟢
 
 **The ADR-002 endgame works on a real device: install → scan onion QR → connected from anywhere over Tor → post.**
