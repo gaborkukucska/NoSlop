@@ -153,3 +153,9 @@ actual object TorService {
     actual fun start() {}
     actual fun socksPort(): Int = 0
 }
+
+/** No in-app QR scanner on Android yet (CameraX/ML Kit is a later option); manual host/port still works. */
+actual object QrScanner {
+    actual val isAvailable: Boolean = false
+    actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
+}

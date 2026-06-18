@@ -113,3 +113,9 @@ actual object TorService {
     actual fun start() {}
     actual fun socksPort(): Int = 0
 }
+
+/** The desktop HUB *shows* the QR; it doesn't scan one. */
+actual object QrScanner {
+    actual val isAvailable: Boolean = false
+    actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
+}

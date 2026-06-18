@@ -238,6 +238,24 @@ private fun MeshScreen() {
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        if (QrScanner.isAvailable) {
+            Button(
+                onClick = {
+                    QrScanner.scan { scanned ->
+                        val invite = scanned?.let { MeshInvite.parse(it) }
+                        if (invite == null) {
+                            status = if (scanned == null) "Scan cancelled" else "Not a NoSlop code"
+                        } else {
+                            host = invite.host; port = invite.port.toString(); viaTor = invite.tor
+                            status = "Scanned ${if (invite.tor) "onion" else invite.host} — connecting…"
+                            connectNow()
+                        }
+                    }
+                },
+                enabled = !connected,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("📷  Scan node QR to connect") }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(host, { host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
             OutlinedTextField(port, { port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))

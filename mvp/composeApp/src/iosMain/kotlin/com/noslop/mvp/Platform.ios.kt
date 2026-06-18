@@ -185,6 +185,23 @@ actual object TorService {
     actual fun socksPort(): Int = IosTorBridge.tor?.socksPort() ?: 0
 }
 
+/** Swift→Kotlin bridge for the camera QR scanner (AVFoundation). */
+interface IosQrScanner {
+    fun scan(onResult: (String?) -> Unit)
+}
+
+object IosQrScannerBridge {
+    var scanner: IosQrScanner? = null
+}
+
+actual object QrScanner {
+    actual val isAvailable: Boolean get() = IosQrScannerBridge.scanner != null
+    actual fun scan(onResult: (String?) -> Unit) {
+        val s = IosQrScannerBridge.scanner
+        if (s == null) onResult(null) else s.scan(onResult)
+    }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
