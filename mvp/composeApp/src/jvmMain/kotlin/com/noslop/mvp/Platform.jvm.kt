@@ -112,6 +112,8 @@ actual object TorService {
     actual val isAvailable: Boolean = false
     actual fun start() {}
     actual fun socksPort(): Int = 0
+    actual fun bootstrapProgress(): Int = 0
+    actual fun status(): String = "unavailable"
 }
 
 /** The desktop HUB *shows* the QR; it doesn't scan one. */

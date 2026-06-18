@@ -172,6 +172,8 @@ actual object DbDriverFactory {
 interface IosTor {
     fun start()
     fun socksPort(): Int // 0 until bootstrapped
+    fun bootstrapProgress(): Int // 0..100
+    fun status(): String // human-readable stage, for diagnostics
 }
 
 object IosTorBridge {
@@ -183,6 +185,8 @@ actual object TorService {
     actual val isAvailable: Boolean get() = IosTorBridge.tor != null
     actual fun start() { IosTorBridge.tor?.start() }
     actual fun socksPort(): Int = IosTorBridge.tor?.socksPort() ?: 0
+    actual fun bootstrapProgress(): Int = IosTorBridge.tor?.bootstrapProgress() ?: 0
+    actual fun status(): String = IosTorBridge.tor?.status() ?: "unavailable"
 }
 
 /** Swift→Kotlin bridge for the camera QR scanner (AVFoundation). */

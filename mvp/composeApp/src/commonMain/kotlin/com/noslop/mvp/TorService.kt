@@ -13,4 +13,8 @@ expect object TorService {
     fun start()
     /** The local SOCKS proxy port once Tor has bootstrapped, else 0 (still connecting). */
     fun socksPort(): Int
+    /** Tor bootstrap percentage 0–100 (for progress UI). */
+    fun bootstrapProgress(): Int
+    /** Human-readable stage (for diagnostics when bootstrap stalls). */
+    fun status(): String
 }
