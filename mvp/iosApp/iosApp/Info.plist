@@ -2,8 +2,12 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>NoSlop MVP</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -18,19 +22,15 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>CFBundleDisplayName</key>
-	<string>NoSlop MVP</string>
+	<key>NSCameraUsageDescription</key>
+	<string>NoSlop uses the camera to scan a hub's QR code and connect.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>NoSlop connects to a mesh hub on your local network to send and receive posts.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
-	<!-- Required by Compose Multiplatform iOS: PlistSanityCheck throws (crashing at first layout) without it. -->
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<!-- The mesh client dials a HUB over the local network (LAN/loopback); iOS prompts using this string. -->
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>NoSlop connects to a mesh hub on your local network to send and receive posts.</string>
 </dict>
 </plist>
