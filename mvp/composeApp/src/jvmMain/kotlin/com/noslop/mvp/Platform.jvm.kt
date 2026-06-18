@@ -65,6 +65,14 @@ actual object DmKeyStore {
     actual fun save(privRawB64: String) { file.writeText(privRawB64) }
 }
 
+/** Saved-DM-contacts blob in a file under the hub dir (same approach as [HubStore]). */
+actual object ContactStore {
+    private val file = File(hubDir, "contacts")
+    actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
+    actual fun save(blob: String) { file.writeText(blob) }
+    actual fun clear() { file.delete() }
+}
+
 /** JVM Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 stay in commonMain). Mirrors androidMain. */
 actual object Signer {
     actual val isAvailable: Boolean = true

@@ -103,6 +103,17 @@ actual object DmKeyStore {
     }
 }
 
+/** Saved-DM-contacts blob in SharedPreferences (same approach as [HubStore]). */
+actual object ContactStore {
+    private const val PREFS = "noslop_contacts"
+    private const val KEY = "contacts"
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null)
+    actual fun save(blob: String) { sp()?.edit()?.putString(KEY, blob)?.apply() }
+    actual fun clear() { sp()?.edit()?.remove(KEY)?.apply() }
+}
+
 /** Android Ed25519 signer via BouncyCastle JCA (raw bytes; base64/UTF-8 handled in commonMain). */
 actual object Signer {
     private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()

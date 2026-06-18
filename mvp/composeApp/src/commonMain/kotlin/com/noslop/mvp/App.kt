@@ -1,7 +1,9 @@
 package com.noslop.mvp
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -223,16 +225,18 @@ private class MeshUiState(private val scope: CoroutineScope) {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
         client.onDm = { fromNodeId, fromEncPub, text ->
             scope.launch {
-                // Learn the sender as a contact (so the user can reply) if we don't have them yet.
+                // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.
                 if (contacts.none { it.nodeId == fromNodeId }) {
                     val c = MeshContact("${fromNodeId.take(8)}…", fromNodeId, fromEncPub)
-                    contacts.add(c); if (selectedContact == null) selectedContact = c
+                    SavedContacts.add(c); reloadContacts()
+                    if (selectedContact == null) selectedContact = c
                 }
                 val name = contacts.firstOrNull { it.nodeId == fromNodeId }?.handle ?: fromNodeId.take(8)
                 dmLog.add(0, DmEntry(from = name, text = text, mine = false))
             }
         }
         reloadSaved()
+        reloadContacts()
         // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
         savedNodes.firstOrNull()?.let { host = it.host; port = it.port.toString(); viaTor = it.tor }
     }
@@ -299,6 +303,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     fun removeNode(invite: MeshInvite) { SavedNodes.remove(invite); reloadSaved() }
 
+    /** Pin a saved hub as the launch default by moving it to the front (what autoConnectOnce dials). */
+    fun setDefaultHub(invite: MeshInvite) { SavedNodes.add(invite.toUri()); reloadSaved() }
+
     fun onScan(scanned: String?) {
         if (scanned == null) { status = "Scan cancelled"; return }
         // A hub invite (noslop://…) connects; a contact card ({…}) is added for DMs.
@@ -310,11 +317,28 @@ private class MeshUiState(private val scope: CoroutineScope) {
         status = "Not a NoSlop code"
     }
 
+    private fun reloadContacts() { contacts.clear(); contacts.addAll(SavedContacts.list()) }
+
+    /** My shareable contact card as a QR string — others scan this to add me. */
+    fun myContactQr(): String = client.contactCard().toQrJson()
+    fun myHandle(): String = client.contactCard().handle
+
     fun addContact(contact: MeshContact) {
-        contacts.removeAll { it.nodeId == contact.nodeId }
-        contacts.add(0, contact)
-        selectedContact = contact
+        SavedContacts.add(contact); reloadContacts()
+        selectedContact = contacts.firstOrNull { it.nodeId == contact.nodeId }
         status = "Added contact ${contact.handle}"
+    }
+
+    /** Give a contact a meaningful name (keyed by node id; survives relaunches). */
+    fun renameContact(contact: MeshContact, newName: String) {
+        val renamed = contact.copy(handle = newName.trim().ifBlank { contact.handle })
+        SavedContacts.add(renamed); reloadContacts()
+        if (selectedContact?.nodeId == contact.nodeId) selectedContact = renamed
+    }
+
+    fun removeContact(contact: MeshContact) {
+        SavedContacts.remove(contact); reloadContacts()
+        if (selectedContact?.nodeId == contact.nodeId) selectedContact = contacts.firstOrNull()
     }
 
     fun sendDm() {
@@ -373,11 +397,12 @@ private fun MeshScreen(state: MeshUiState) {
             else if (state.status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
         )
 
-        // Saved hubs — persisted across launches; auto-reconnects to the most recent on open, and any of these
-        // can be tapped to (re)connect (adding a link). So a paired phone never has to re-scan.
+        // Saved hubs — persisted across launches. The first (★) is the launch default that autoConnectOnce
+        // dials; "Default" pins another there. Any can be tapped to (re)connect. So a paired phone never re-scans.
         if (state.savedNodes.isNotEmpty()) {
-            Text("Saved hubs (${state.savedNodes.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            state.savedNodes.forEach { node ->
+            Text("Saved hubs (${state.savedNodes.size}) — ★ is the launch default", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+            state.savedNodes.forEachIndexed { index, node ->
+                val isDefault = index == 0
                 Card(Modifier.fillMaxWidth()) {
                     Row(
                         Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
@@ -386,11 +411,12 @@ private fun MeshScreen(state: MeshUiState) {
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                (if (node.tor) "🧅 " else "🌐 ") + node.host.let { if (it.length > 22) it.take(10) + "…" + it.takeLast(8) else it },
+                                (if (isDefault) "★ " else "") + (if (node.tor) "🧅 " else "🌐 ") + node.host.let { if (it.length > 20) it.take(9) + "…" + it.takeLast(7) else it },
                                 fontSize = 13.sp, fontFamily = FontFamily.Monospace,
                             )
                             Text(":${node.port}${if (node.tor) " · Tor" else " · LAN"}", fontSize = 10.sp, color = MaterialTheme.colorScheme.outline)
                         }
+                        if (!isDefault) Button(onClick = { state.setDefaultHub(node) }) { Text("★") }
                         Button(onClick = { state.connect(node, save = true) }) { Text("Connect") }
                         Button(onClick = { state.removeNode(node) }) { Text("✕") }
                     }
@@ -422,51 +448,88 @@ private fun MeshScreen(state: MeshUiState) {
 @Composable
 private fun DmScreen(state: MeshUiState) {
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Text(
-            if (state.connected) "Linked — DMs route through the hub, end-to-end encrypted (the hub can't read them)."
-            else "Connect to a hub on the Mesh tab first.",
-            fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
-        )
-        if (QrScanner.isAvailable) {
-            Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }, modifier = Modifier.fillMaxWidth()) {
-                Text("📷  Scan a contact QR")
-            }
+    var showMyQr by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf("") }
+
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (state.connected) "Linked — DMs route through the hub, end-to-end encrypted (the hub can't read them)."
+                else "Connect to a hub on the Mesh tab first.",
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
+            )
         }
-        if (state.contacts.isNotEmpty()) {
-            Text("Contacts (${state.contacts.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            state.contacts.forEach { c ->
-                val selected = state.selectedContact?.nodeId == c.nodeId
-                Button(onClick = { state.selectedContact = c }, modifier = Modifier.fillMaxWidth()) {
-                    Text((if (selected) "● " else "○ ") + c.handle + "  ·  " + c.nodeId.take(8) + "…", fontSize = 13.sp)
+        // My contact QR — others scan this to add me (carries my handle, node id, DM public key).
+        item {
+            Button(onClick = { showMyQr = !showMyQr }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (showMyQr) "Hide my contact QR" else "📇  Show my contact QR")
+            }
+            if (showMyQr) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("I am: ${state.myHandle()}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Image(
+                            painter = io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()),
+                            contentDescription = "My contact QR",
+                            modifier = Modifier.size(220.dp),
+                        )
+                        Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    }
                 }
             }
         }
-        state.selectedContact?.let { to ->
-            Text("To: ${to.handle}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true,
-                    modifier = Modifier.weight(1f),
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
-                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
-                )
-                Button(onClick = { state.sendDm(); focus.clearFocus() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
+        item {
+            if (QrScanner.isAvailable) {
+                Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }, modifier = Modifier.fillMaxWidth()) {
+                    Text("📷  Scan a contact QR")
+                }
             }
         }
-        Text("Messages (${state.dmLog.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(state.dmLog) { e ->
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(10.dp)) {
-                        Text(
-                            if (e.mine) "me → ${e.from}" else "${e.from} → me",
-                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = if (e.mine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
-                        )
-                        Text(e.text, fontSize = 14.sp)
+        if (state.contacts.isNotEmpty()) {
+            item { Text("Contacts (${state.contacts.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+            items(state.contacts) { c ->
+                val selected = state.selectedContact?.nodeId == c.nodeId
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(onClick = { state.selectedContact = c; renaming = "" }, modifier = Modifier.weight(1f)) {
+                        Text((if (selected) "● " else "○ ") + c.handle + "  ·  " + c.nodeId.take(8) + "…", fontSize = 13.sp)
                     }
+                    Button(onClick = { state.removeContact(c) }) { Text("✕") }
+                }
+            }
+        }
+        // Compose to + rename the selected contact.
+        state.selectedContact?.let { to ->
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        renaming, { renaming = it }, label = { Text("Name for ${to.handle}") }, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = { state.renameContact(to, renaming); renaming = ""; focus.clearFocus() }, enabled = renaming.isNotBlank()) { Text("Rename") }
+                }
+                Text("To: ${to.handle}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true,
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
+                    )
+                    Button(onClick = { state.sendDm(); focus.clearFocus() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
+                }
+            }
+        }
+        item { Text("Messages (${state.dmLog.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
+        items(state.dmLog) { e ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp)) {
+                    Text(
+                        if (e.mine) "me → ${e.from}" else "${e.from} → me",
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                        color = if (e.mine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                    )
+                    Text(e.text, fontSize = 14.sp)
                 }
             }
         }

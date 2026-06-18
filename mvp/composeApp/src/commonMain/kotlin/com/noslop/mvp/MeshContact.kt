@@ -27,3 +27,33 @@ data class MeshContact(
         }.getOrNull()?.takeIf { it.nodeId.isNotBlank() && it.encPublicKeyX509B64.isNotBlank() }
     }
 }
+
+/** Raw per-device persistence for saved DM contacts — a newline-joined blob. Mirrors [HubStore]. */
+expect object ContactStore {
+    fun load(): String?
+    fun save(blob: String)
+    fun clear()
+}
+
+/**
+ * The user's saved DM contacts, newest-first, deduped by node id. Persisted via [ContactStore] as
+ * newline-joined contact JSON, so a paired contact never has to be re-scanned. Mirrors [SavedNodes].
+ */
+object SavedContacts {
+    fun list(): List<MeshContact> =
+        ContactStore.load()?.lineSequence()
+            ?.mapNotNull { it.trim().takeIf(String::isNotEmpty)?.let(MeshContact::parse) }
+            ?.toList()
+            ?: emptyList()
+
+    fun add(contact: MeshContact) {
+        val deduped = listOf(contact) + list().filter { it.nodeId != contact.nodeId }
+        persist(deduped)
+    }
+
+    fun remove(contact: MeshContact) = persist(list().filter { it.nodeId != contact.nodeId })
+
+    private fun persist(contacts: List<MeshContact>) {
+        if (contacts.isEmpty()) ContactStore.clear() else ContactStore.save(contacts.joinToString("\n") { it.toQrJson() })
+    }
+}

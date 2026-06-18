@@ -94,6 +94,17 @@ actual object DmKeyStore {
         platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(privRawB64, KEY)
 }
 
+/** Saved-DM-contacts blob in NSUserDefaults (same approach as [HubStore]). */
+actual object ContactStore {
+    private const val KEY = "noslop_contacts"
+    actual fun load(): String? =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+    actual fun clear() =
+        platform.Foundation.NSUserDefaults.standardUserDefaults.removeObjectForKey(KEY)
+}
+
 /**
  * Swift→Kotlin bridge for CryptoKit Ed25519 signing. CryptoKit takes RAW 32-byte keys (not PKCS#8/X.509)
  * and exchanges base64 strings across the bridge for clean byte transfer.

@@ -70,6 +70,7 @@ kotlin {
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.primitive.adapters)
             implementation(libs.ktor.network)
+            implementation("io.github.alexzhirkevich:qrose:1.0.1") // Compose-MP QR rendering (share-my-contact)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
