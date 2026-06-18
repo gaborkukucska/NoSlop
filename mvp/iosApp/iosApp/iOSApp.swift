@@ -117,7 +117,7 @@ struct iOSApp: App {
         IosKeychainBridge.shared.keychain = KeychainIdentity()
         IosSignerBridge.shared.signer = CryptoKitSigner()
         IosDmBridge.shared.dm = CryptoKitDm()
-        IosTorBridge.shared.tor = TorManager()
+        IosTorBridge.shared.tor = TorManager() // Tor starts lazily on the first "Via Tor" connect (MeshScreen)
     }
 
     var body: some Scene {
