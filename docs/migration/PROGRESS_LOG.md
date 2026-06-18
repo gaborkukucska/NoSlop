@@ -4,6 +4,34 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 12: Tor onion reachable on-device + saved-hub persistence 🟢
+
+**The ADR-002 endgame works on a real device: install → scan onion QR → connected from anywhere over Tor → post.**
+
+- **Onion bug fixed (the big one).** `TorControl.addOnion` published a v3 onion via `ADD_ONION`, then closed
+  the control connection in its `finally`. Ephemeral onions are torn down when their creating control
+  connection closes **unless `Flags=Detach`** — so the onion was a valid-but-unreachable address (SOCKS
+  `REP=4`). Added `Flags=Detach`. Verified desktop-side first (a SOCKS probe through the hub's own Tor reached
+  the onion on attempt 1 and got the hub node id back through the full circuit), then on the iPhone: the
+  phone's embedded Tor built a circuit, fetched the descriptor, and linked to `…onion:9876`
+  (`[transport] link up: 97559379… ; links=1`).
+- **Also proved earlier in the session over ngrok** (TCP tunnel → hub `localhost:9876`, bypassing the mesh
+  router's client isolation): phone linked + posted, hub received & persisted it (`storedPosts` ++). ngrok
+  validated the socket/handshake layer; Tor is the real "from anywhere" transport.
+- **Network gotcha learned:** the home Wi-Fi is a `cloudmesh` mesh router with **client isolation** — phone
+  and Mac on the same `/24` (.20.3 ↔ .20.4) but device-to-device TCP is blocked (Mac→phone ping works, so not
+  a firewall; macOS firewall confirmed off). That's *why* LAN testing kept failing and *why* Tor/ngrok matter.
+- **Saved-hub persistence + auto-reconnect** (`HubStore` + `SavedNodes`, mirrors `HandleStore`): the app now
+  remembers paired hubs (newest-first, `host:port`-deduped list of invite URIs), auto-reconnects to the most
+  recent on launch, and shows a "Saved hubs" list (tap to (re)connect, ✕ to remove). Groundwork for multi-hub
+  resilience — the model is a list from the start. No more re-scanning every launch.
+
+**Next:** two-way DM needs DM compose/inbox UI (crypto is proven via the self-test; the send path is
+`messagePacket`/`EncryptedPayload` + `DmCrypto.sealDm`/`openDm` — needs recipient X25519 key handling).
+Then hub→phone post delivery (receive-path on-device), and the app icon.
+
+---
+
 ## 2026-06-18 — Phase 1 step 11: device LAN test — fixed 3 transport bugs + 1 build gotcha 🟡
 
 On-device LAN test (phone → desktop HUB, Tor off). Found and fixed the real reasons the leaf could never
