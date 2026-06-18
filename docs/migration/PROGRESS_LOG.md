@@ -4,6 +4,26 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 10b: iOS camera QR scanner — "scan to connect" 🟢
+
+The non-tech-user flow is now wired end to end: **point the phone at the hub's QR and it connects.** No
+typing a 56-char onion, no toggles.
+
+- **`QrScanner`** (commonMain expect; iOS bridges to Swift, Android/JVM no-op). Swift `QrScanner.swift`
+  presents a full-screen AVFoundation capture view, reads a `.qr`, and returns the decoded `MeshInvite` URI
+  (with a Cancel + "no camera" fallback). Injected via `IosQrScannerBridge` at launch.
+- **Mesh tab "📷 Scan node QR to connect"**: parses the invite → fills host/port, flips the Tor toggle to
+  match `tor=1`, and connects. So scanning the hub's onion QR → starts embedded Tor → dials the onion. One tap.
+- `NSCameraUsageDescription` was already in `project.yml` (added with the Pods reconcile). Workspace builds;
+  the app launches with the scan button on the Mesh tab (screenshotted). The simulator has no camera, so the
+  **live scan → Tor → onion round-trip is the on-device test** — and it's the satisfying one to run on a phone.
+
+**The full vision is now built:** install → scan the hub's QR → connected from anywhere over Tor. Everything
+compiles + links + launches; the remaining work is on-device verification (camera + real Tor bootstrap +
+onion reachability) and product hardening (reconnect/retry, multiple hubs, Android scanner + Tor via Orbot).
+
+---
+
 ## 2026-06-18 — Phase 1 step 10c: iOS embedded Tor — the app can dial .onion hubs 🟢
 
 The iOS app now embeds Tor, so a phone can reach a HUB's onion from anywhere (cellular, any network) — the
