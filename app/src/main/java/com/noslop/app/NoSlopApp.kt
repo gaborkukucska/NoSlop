@@ -94,7 +94,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
             Logger.error("APP", "Failed to register WorkManager feed sync: ${e.message}")
         }
 
-        // Daily check of noslop.com/content.json for a newer APK version
+        // Daily check of noslop.com/content.json for a newer APK version.
+        // Uses UPDATE (not KEEP, unlike the feed sync above) because this feature is new/evolving —
+        // KEEP would silently freeze whatever schedule/constraints existed from the first install
+        // that ever registered "update_check_daily", ignoring any future tuning here.
         try {
             val updateCheckRequest = PeriodicWorkRequestBuilder<com.noslop.app.util.UpdateCheckWorker>(1, TimeUnit.DAYS)
                 .setConstraints(
@@ -105,7 +108,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                 .build()
             WorkManager.getInstance(this).enqueueUniquePeriodicWork(
                 "update_check_daily",
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 updateCheckRequest
             )
             Logger.info("APP", "WorkManager Periodic update check registered successfully")

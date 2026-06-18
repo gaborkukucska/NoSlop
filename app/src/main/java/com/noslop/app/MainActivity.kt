@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         if (this::viewModel.isInitialized) {
             viewModel.refreshTorStatus()
+            viewModel.checkForUpdateNow()
         }
     }
 
