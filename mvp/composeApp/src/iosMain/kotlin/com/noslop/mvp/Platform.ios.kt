@@ -165,6 +165,47 @@ actual object DbDriverFactory {
         )
 }
 
+/**
+ * Swift→Kotlin bridge for embedded Tor (Tor.framework). The iOS app implements this by launching a
+ * `TORThread` + `TORController`, and reports the local SOCKS port once Tor reports "Bootstrapped 100%".
+ */
+interface IosTor {
+    fun start()
+    fun socksPort(): Int // 0 until bootstrapped
+    fun bootstrapProgress(): Int // 0..100
+    fun status(): String // human-readable stage, for diagnostics
+}
+
+object IosTorBridge {
+    var tor: IosTor? = null
+}
+
+/** iOS embedded Tor, via the Swift bridge. */
+actual object TorService {
+    actual val isAvailable: Boolean get() = IosTorBridge.tor != null
+    actual fun start() { IosTorBridge.tor?.start() }
+    actual fun socksPort(): Int = IosTorBridge.tor?.socksPort() ?: 0
+    actual fun bootstrapProgress(): Int = IosTorBridge.tor?.bootstrapProgress() ?: 0
+    actual fun status(): String = IosTorBridge.tor?.status() ?: "unavailable"
+}
+
+/** Swift→Kotlin bridge for the camera QR scanner (AVFoundation). */
+interface IosQrScanner {
+    fun scan(onResult: (String?) -> Unit)
+}
+
+object IosQrScannerBridge {
+    var scanner: IosQrScanner? = null
+}
+
+actual object QrScanner {
+    actual val isAvailable: Boolean get() = IosQrScannerBridge.scanner != null
+    actual fun scan(onResult: (String?) -> Unit) {
+        val s = IosQrScannerBridge.scanner
+        if (s == null) onResult(null) else s.scan(onResult)
+    }
+}
+
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()

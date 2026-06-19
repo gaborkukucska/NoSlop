@@ -94,6 +94,17 @@ class SocketTransport(
         proxy: SocksProxy, destHost: String, destPort: Int,
     ): Triple<Socket, ByteReadChannel, ByteWriteChannel> {
         val socket = aSocket(selector).tcp().connect(proxy.host, proxy.port)
+        return try {
+            socks5Handshake(socket, destHost, destPort)
+        } catch (e: Throwable) {
+            runCatching { socket.close() } // don't leak the socket when Tor's SOCKS rejects (pre-bootstrap)
+            throw e
+        }
+    }
+
+    private suspend fun socks5Handshake(
+        socket: Socket, destHost: String, destPort: Int,
+    ): Triple<Socket, ByteReadChannel, ByteWriteChannel> {
         val input = socket.openReadChannel()
         val output = socket.openWriteChannel(autoFlush = true)
 

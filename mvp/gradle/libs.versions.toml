@@ -12,6 +12,7 @@ bouncycastle = "1.78.1"
 androidxActivityCompose = "1.9.3"
 securityCrypto = "1.1.0-alpha06"
 sqldelight = "2.3.2"
+zxing = "3.5.3"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -32,6 +33,7 @@ sqldelight-primitive-adapters = { module = "app.cash.sqldelight:primitive-adapte
 sqldelight-android-driver = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

@@ -4,6 +4,124 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-18 — Phase 1 step 10b: iOS camera QR scanner — "scan to connect" 🟢
+
+The non-tech-user flow is now wired end to end: **point the phone at the hub's QR and it connects.** No
+typing a 56-char onion, no toggles.
+
+- **`QrScanner`** (commonMain expect; iOS bridges to Swift, Android/JVM no-op). Swift `QrScanner.swift`
+  presents a full-screen AVFoundation capture view, reads a `.qr`, and returns the decoded `MeshInvite` URI
+  (with a Cancel + "no camera" fallback). Injected via `IosQrScannerBridge` at launch.
+- **Mesh tab "📷 Scan node QR to connect"**: parses the invite → fills host/port, flips the Tor toggle to
+  match `tor=1`, and connects. So scanning the hub's onion QR → starts embedded Tor → dials the onion. One tap.
+- `NSCameraUsageDescription` was already in `project.yml` (added with the Pods reconcile). Workspace builds;
+  the app launches with the scan button on the Mesh tab (screenshotted). The simulator has no camera, so the
+  **live scan → Tor → onion round-trip is the on-device test** — and it's the satisfying one to run on a phone.
+
+**The full vision is now built:** install → scan the hub's QR → connected from anywhere over Tor. Everything
+compiles + links + launches; the remaining work is on-device verification (camera + real Tor bootstrap +
+onion reachability) and product hardening (reconnect/retry, multiple hubs, Android scanner + Tor via Orbot).
+
+---
+
+## 2026-06-18 — Phase 1 step 10c: iOS embedded Tor — the app can dial .onion hubs 🟢
+
+The iOS app now embeds Tor, so a phone can reach a HUB's onion from anywhere (cellular, any network) — the
+ADR-002 endgame. Owner decision was CocoaPods (no usable SPM for iOS Tor).
+
+- **CocoaPods adopted:** `pod 'Tor', '~> 409'` (iCepa Tor.framework 409.9.1). Needed newer CocoaPods (brew
+  1.16.2 — system 1.11.3 couldn't read XcodeGen's objectVersion-77 project). `Pods/` (~335 MB) is gitignored,
+  reproduced from `Podfile.lock`. Workflow is now `xcodegen generate && pod install`, build the **.xcworkspace**.
+  First made `project.yml` authoritative (folded in `-lsqlite3`, signing team, and all Info.plist keys — incl.
+  the new `NSCameraUsageDescription` — into `info.properties`, since XcodeGen regenerates Info.plist).
+- **`TorService`** (commonMain expect; iOS bridges to Swift, Android/JVM no-op): `start()` + `socksPort()`.
+  Swift **`TorManager`** runs `TorThread` + a cookie-authed `TorController`, watches for "Bootstrapped 100%",
+  and exposes a local SOCKS port; injected via `IosTorBridge` at launch (like the CryptoKit bridges).
+- **`MeshScreen` "Via Tor"** now uses the embedded Tor: on connect it starts Tor, waits for bootstrap (live
+  status), and dials the hub through `SocksProxy(127.0.0.1, socksPort)` — so an `.onion` host connects from
+  anywhere. Replaced the manual SOCKS fields.
+- **Verified:** the workspace **builds + links Tor**, and the app **launches cleanly on the simulator** (Tor
+  framework loads, all self-tests green, no crash). Tor's C lib doesn't surface bootstrap to iOS unified
+  logging, and the sim can't drive the UI/scan, so the **live onion round-trip is for on-device testing** (the
+  part to do with a real phone + unthrottled network + the QR scanner).
+
+**Remaining:** (10b) iOS **camera QR scanner** → parse `MeshInvite` → auto-fill + connect; then the full
+"install → scan the hub's QR → connected from anywhere over Tor" flow is complete (and worth a device test).
+
+---
+
+## 2026-06-18 — Phase 1 step 10a: QR pairing — the HUB shows a code the phone scans 🟢
+
+Owner's UX idea (the right call for non-tech users): instead of typing a 56-char onion + toggling SOCKS, the
+**node displays a QR; the phone scans it and is configured**. Built the hub side (the phone scanner + iOS Tor
+are the interactive next steps).
+
+- `MeshInvite` (commonMain): the connection descriptor both sides agree on — `noslop://<host>:<port>?tor=<0|1>
+  [&id=<hubNodeId>]`. Carries where to dial, whether it's a Tor onion, and the hub's identity (so the app can
+  pin it). `parse()`/`toUri()` round-trip; `MeshInviteTest` **5/5 green on JVM + Native**.
+- `QrConsole` (jvmMain, ZXing): renders any string as a terminal QR using Unicode half-blocks (▀▄█) so two QR
+  rows pack per text line — square + compact enough to scan off the screen.
+- `HubMain` now prints the pairing QR after startup: the **onion** invite when Tor is on, else a **LAN-IP**
+  invite for same-WiFi (prefers the physical `en*` interface). Verified live — the hub renders a clean,
+  finder-pattern-correct QR for `noslop://192.168.20.4:9876?tor=0&id=…` / the onion form.
+
+**Next (interactive, needs your device):** (10b) the iOS **camera QR scanner** → parse `MeshInvite` → fill the
+Mesh tab + connect; (10c) iOS **Tor.framework** (SPM) → start Tor, hand its SOCKS port to `MeshClient.connect`
+with the scanned onion. End state: install app → scan the hub's QR → connected from anywhere.
+
+---
+
+## 2026-06-18 — Phase 1 step 9e: `downloadTor` Gradle task — tor is bundled reproducibly 🟢
+
+Packaging for the bundled tor (owner's choice over committing per-OS binaries): a Gradle task fetches the
+**pinned Tor Expert Bundle** for the host platform, so each machine downloads only the binary it needs and
+nothing heavyweight is committed.
+
+- `downloadTor` task (`composeApp/build.gradle.kts`): resolves host platform (`macos/linux/windows` ×
+  `aarch64/x86_64`), downloads `tor-expert-bundle-<platform>-14.5.1.tar.gz`, extracts the `tor/` subtree
+  (binary + `libevent` dylib + pluggable transports) into `build/tor/`, marks executable, and on macOS
+  **ad-hoc codesigns** the binary + dylib + PTs (Gatekeeper SIGKILLs unsigned downloads — `exit=137` until
+  signed). Written with plain `java.io` + `ProcessBuilder` (no Project execution-time APIs → Gradle-9 safe).
+- `runHub` now `dependsOn(downloadTor)` and sets `NOSLOP_TOR_BINARY` to the bundled path, so
+  `./gradlew :composeApp:runHub --args="9876 tor"` works out-of-the-box. `build/` is gitignored — the 16 MB
+  binary is never committed. Version pinned for reproducibility (bump deliberately; sha256/signature
+  verification is a noted hardening TODO).
+- **Verified end-to-end:** `downloadTor` → bundled `build/tor/tor/tor` runs (`Tor version 0.4.8.16`); then
+  `runHub … tor` with **no override** launched that bundled binary, bootstrapped 0→100% on the real network,
+  and published a fresh onion `xxoeamuelpwgq…qdxdvqd.onion:9876`.
+
+Desktop Tor (ADR-009 piece 2) is now complete: bundled, reproducible, and producing live onions. **Remaining
+for full phone-over-Tor: iOS Tor.framework/iCepa** (start Tor on launch → feed its SOCKS port + the hub onion
+to `MeshClient.connect`; the dialing side is done).
+
+---
+
+## 2026-06-18 — Phase 1 step 9d: HUB launches bundled `tor` + publishes a LIVE onion 🟢
+
+The desktop HUB now stands up Tor itself and publishes a **real v3 hidden service on the live Tor network** —
+ADR-009 piece 2 (bundle `tor`), verified end-to-end on this machine.
+
+- `TorProcess` (jvmMain): resolves a `tor` binary (explicit arg → `NOSLOP_TOR_BINARY` → bundled `build/tor/tor`
+  → PATH), hashes a control password via `tor --hash-password`, writes a torrc (SOCKS + control port), spawns
+  tor, and blocks until "Bootstrapped 100%", echoing progress. Bundle-ready: ship the per-OS Tor Expert Bundle
+  binary at `build/tor/tor` (a `downloadTor` Gradle task can fetch it — the launcher is binary-source-agnostic).
+- `HubMain` arg `"tor"` → launch `TorProcess`, then `TorControl.addOnion` forwarding the onion's virtual port
+  to the hub's listen port; prints the dial address. Falls back to plain-TCP on any failure.
+- **Live run (verified):** `runHub --args="9876 tor"` with brew's tor (0.4.9.9) via `NOSLOP_TOR_BINARY` →
+  tor bootstrapped 0→100% against the real network → **`Onion published — 36iypbzy…qqd.onion:9876`**. A real,
+  reachable hidden-service address generated by our HUB.
+- **Round-trip caveat (environment, not code):** dialing the onion back through Tor SOCKS returned SOCKS
+  REP=4 (host-unreachable) for ~3 min — this sandbox throttles Tor directory/HSDir traffic (bootstrap itself
+  stalled at 50% for minutes before clearing), so descriptor propagation + rendezvous didn't complete here.
+  The round-trip's parts are each already proven: SOCKS5 dialing (`SocksProxyTest`) and the socket node-handshake
+  /relay (`SocketTransportTest`); only Tor's own rendezvous (not our code) is unproven on this network.
+
+**Remaining for full mesh-over-Tor:** (1) ship the bundled binary (commit per-OS or a `downloadTor` task);
+(2) **iOS Tor.framework/iCepa** — start Tor on launch, feed its SOCKS port + the hub onion to
+`MeshClient.connect` (dialing side done). Then a phone reaches the hub purely over Tor.
+
+---
+
 ## 2026-06-17 — Phase 1 step 9c (protocol): Tor control-port onion registration 🟢
 
 Owner decisions are in (ADR-009): **bundle `tor` with the HUB**, **Tor.framework/iCepa for iOS**. Built the

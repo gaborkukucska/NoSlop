@@ -10,3 +10,6 @@ local.properties
 **/xcuserdata/
 **/DerivedData/
 .DS_Store
+
+# CocoaPods — the Tor xcframework (~335MB) is reproduced from Podfile.lock via `pod install`
+iosApp/Pods/

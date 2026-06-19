@@ -146,3 +146,18 @@ actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
+
+/** No embedded Tor on Android in the MVP (Orbot/system Tor is a later option). */
+actual object TorService {
+    actual val isAvailable: Boolean = false
+    actual fun start() {}
+    actual fun socksPort(): Int = 0
+    actual fun bootstrapProgress(): Int = 0
+    actual fun status(): String = "unavailable"
+}
+
+/** No in-app QR scanner on Android yet (CameraX/ML Kit is a later option); manual host/port still works. */
+actual object QrScanner {
+    actual val isAvailable: Boolean = false
+    actual fun scan(onResult: (String?) -> Unit) { onResult(null) }
+}

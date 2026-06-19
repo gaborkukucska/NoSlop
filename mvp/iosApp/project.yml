@@ -11,6 +11,17 @@ targets:
       - path: iosApp
     info:
       path: iosApp/Info.plist
+      properties:
+        CFBundleDisplayName: NoSlop MVP
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Required by Compose Multiplatform iOS: PlistSanityCheck crashes at first layout without it.
+        CADisableMinimumFrameDurationOnPhone: true
+        # The mesh client dials a HUB over the local network (LAN/loopback); iOS prompts with this.
+        NSLocalNetworkUsageDescription: "NoSlop connects to a mesh hub on your local network to send and receive posts."
+        # The QR scanner uses the camera to read a hub's pairing code.
+        NSCameraUsageDescription: "NoSlop uses the camera to scan a hub's QR code and connect."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.noslop.mvp.ios
@@ -20,6 +31,8 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: ""
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+        DEVELOPMENT_TEAM: HAT6Q5RYC6
+        CODE_SIGN_IDENTITY: "iPhone Developer"
         FRAMEWORK_SEARCH_PATHS:
           - "$(inherited)"
           - "$(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
@@ -27,6 +40,7 @@ targets:
           - "$(inherited)"
           - "-framework"
           - "ComposeApp"
+          - "-lsqlite3"
     preBuildScripts:
       - name: "Compile Kotlin Framework"
         basedOnDependencyAnalysis: false

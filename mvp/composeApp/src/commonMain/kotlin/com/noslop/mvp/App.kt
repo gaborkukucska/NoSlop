@@ -33,6 +33,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
@@ -40,6 +42,10 @@ import kotlinx.coroutines.launch
 fun App() {
     MaterialTheme {
         var tab by remember { mutableStateOf(0) }
+        // Mesh state + the live connection live here (above the tab switch) so they survive tab changes —
+        // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
+        val meshScope = rememberCoroutineScope()
+        val mesh = remember { MeshUiState(meshScope) }
         Scaffold { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 TabRow(selectedTabIndex = tab) {
@@ -50,7 +56,7 @@ fun App() {
                 when (tab) {
                     0 -> IdentityScreen()
                     1 -> FeedScreen()
-                    else -> MeshScreen()
+                    else -> MeshScreen(mesh)
                 }
             }
         }
@@ -187,85 +193,120 @@ private fun FeedScreen() {
  * (ADR-002); posting broadcasts to the hub, which relays to other connected nodes, and posts from others
  * arrive here. This is an iPhone participating in the mesh via a hub it can't be itself.
  */
-@Composable
-private fun MeshScreen() {
-    val scope = rememberCoroutineScope()
-    val identity = remember { loadIdentity(HandleStore.load()) }
-    val store = remember { MeshStoreProvider.get() }
-    val client = remember { MeshClient(identity, store, scope) }
-    val received = remember { mutableStateListOf<PostPayload>() }
+/**
+ * Mesh UI state + the live [MeshClient], held above the tab switch (see [App]) so the scanned hub and the
+ * open link survive switching tabs. One client for the app's lifetime; the transport read-loops run on the
+ * app-scoped [scope], so the connection isn't torn down when the Mesh tab is hidden.
+ */
+private class MeshUiState(private val scope: CoroutineScope) {
+    private val identity = loadIdentity(HandleStore.load())
+    private val client = MeshClient(identity, MeshStoreProvider.get(), scope)
+    val received = mutableStateListOf<PostPayload>()
+    var host by mutableStateOf("127.0.0.1")
+    var port by mutableStateOf("9876")
+    var viaTor by mutableStateOf(false)
+    var status by mutableStateOf("Not connected")
+    var connected by mutableStateOf(false)
+    var draft by mutableStateOf("Hello from my iPhone 👋")
+    private var autoTried = false
 
-    var host by remember { mutableStateOf("127.0.0.1") }
-    var port by remember { mutableStateOf("9876") }
-    var status by remember { mutableStateOf("Not connected") }
-    var connected by remember { mutableStateOf(false) }
-    var draft by remember { mutableStateOf("Hello from my iPhone 👋") }
-    var viaTor by remember { mutableStateOf(false) }
-    var socksHost by remember { mutableStateOf("127.0.0.1") }
-    var socksPort by remember { mutableStateOf("9050") }
-
-    fun proxy(): SocksProxy? = if (viaTor) SocksProxy(socksHost.trim(), socksPort.toIntOrNull() ?: 9050) else null
-
-    DisposableEffect(Unit) {
-        // Sink runs on a background coroutine; bounce UI updates onto the (main) composition scope.
+    init {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
-        onDispose { client.close() }
     }
 
-    // Auto-connect to the default hub on open — the "just install the app" path (a real product ships a
-    // default/public hub address here; the user does nothing). Manual reconnect via the button below.
-    LaunchedEffect(Unit) {
-        if (!connected) {
+    /** Auto-connect once on first open (the "just install the app" path); no-op afterwards. */
+    fun autoConnectOnce() {
+        if (autoTried) return
+        autoTried = true
+        if (!connected) connectNow()
+    }
+
+    fun connectNow() {
+        scope.launch {
+            val p = port.toIntOrNull() ?: 9876
+            if (viaTor) {
+                if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
+                status = "Starting Tor…"
+                TorService.start()
+                // Tor's SOCKS rejects until it's bootstrapped + the onion circuit is built, so retry the
+                // connection through SOCKS until it succeeds — no fragile control-port readiness gate.
+                var waited = 0
+                while (waited < 300_000) {
+                    val sp = TorService.socksPort()
+                    val prog = TorService.bootstrapProgress()
+                    status = "Connecting via Tor… ${if (prog in 1..99) "$prog% " else ""}(${waited / 1000}s)"
+                    if (sp > 0) {
+                        val ok = runCatching { client.connect(host.trim(), p, SocksProxy("127.0.0.1", sp)) }
+                            .map { client.linkCount > 0 }.getOrDefault(false)
+                        if (ok) { connected = true; status = "Connected ✓ over Tor — ${client.linkCount} link(s)"; return@launch }
+                    }
+                    delay(4000); waited += 4000
+                }
+                status = "Couldn't reach the hub over Tor (5 min) — tor: ${TorService.status()}"
+                return@launch
+            }
             status = "Connecting…"
-            runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
+            runCatching { client.connect(host.trim(), p, null) }
                 .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
                 .onFailure { status = "Error: ${it.message}" }
         }
     }
 
+    fun onScan(scanned: String?) {
+        val invite = scanned?.let { MeshInvite.parse(it) }
+        if (invite == null) { status = if (scanned == null) "Scan cancelled" else "Not a NoSlop code"; return }
+        host = invite.host; port = invite.port.toString(); viaTor = invite.tor
+        status = "Scanned ${if (invite.tor) "onion" else invite.host} — connecting…"
+        connectNow()
+    }
+
+    fun publish() {
+        scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" }
+    }
+}
+
+/**
+ * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
+ * (ADR-002); posting broadcasts to the hub, which relays to other connected nodes, and posts from others
+ * arrive here. Stateless view over [MeshUiState] so the connection persists across tab switches.
+ */
+@Composable
+private fun MeshScreen(state: MeshUiState) {
+    LaunchedEffect(Unit) { state.autoConnectOnce() }
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        if (QrScanner.isAvailable) {
+            Button(
+                onClick = { QrScanner.scan { scanned -> state.onScan(scanned) } },
+                enabled = !state.connected,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("📷  Scan node QR to connect") }
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(host, { host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
-            OutlinedTextField(port, { port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(state.host, { state.host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
+            OutlinedTextField(state.port, { state.port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = viaTor, onCheckedChange = { viaTor = it }, enabled = !connected)
-            Text("Via Tor (SOCKS5)", fontSize = 13.sp)
+            Switch(checked = state.viaTor, onCheckedChange = { state.viaTor = it }, enabled = !state.connected)
+            Text("Via Tor (for .onion hubs, from anywhere)", fontSize = 13.sp)
         }
-        if (viaTor) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(socksHost, { socksHost = it }, label = { Text("SOCKS host") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(2f))
-                OutlinedTextField(socksPort, { socksPort = it.filter { c -> c.isDigit() } }, label = { Text("SOCKS port") }, singleLine = true, enabled = !connected, modifier = Modifier.weight(1f))
-            }
+        Button(onClick = { state.connectNow() }, enabled = !state.connected) {
+            Text(if (state.connected) "Connected" else "Connect to hub")
         }
-        Button(
-            onClick = {
-                status = "Connecting…"
-                scope.launch {
-                    runCatching { client.connect(host.trim(), port.toIntOrNull() ?: 9876, proxy()) }
-                        .onSuccess { connected = client.linkCount > 0; status = if (connected) "Connected ✓ — ${client.linkCount} link(s)" else "No link" }
-                        .onFailure { status = "Error: ${it.message}" }
-                }
-            },
-            enabled = !connected,
-        ) { Text(if (connected) "Connected" else "Connect to hub") }
         Text(
-            status,
+            state.status,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
-            color = if (status.startsWith("Connected")) MaterialTheme.colorScheme.primary
-            else if (status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
+            color = if (state.status.startsWith("Connected")) MaterialTheme.colorScheme.primary
+            else if (state.status.startsWith("Error")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
         )
-        OutlinedTextField(draft, { draft = it }, label = { Text("Post to the mesh") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(
-            onClick = { scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" } },
-            enabled = connected,
-        ) { Text("Broadcast post") }
+        OutlinedTextField(state.draft, { state.draft = it }, label = { Text("Post to the mesh") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { state.publish() }, enabled = state.connected) { Text("Broadcast post") }
 
-        Text("Received from mesh (${received.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text("Received from mesh (${state.received.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(received) { p ->
+            items(state.received) { p ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(p.authorName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

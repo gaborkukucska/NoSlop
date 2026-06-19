@@ -1,5 +1,6 @@
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.net.URI
 
 buildscript {
     // SQLDelight's Gradle plugin drags in Gradle's embedded Kotlin, which strictly pins
@@ -91,6 +92,7 @@ kotlin {
             implementation(libs.bouncycastle)
             implementation(libs.sqldelight.sqlite.driver)
             implementation(libs.ktor.client.okhttp)
+            implementation(libs.zxing.core)
         }
         jvmTest.dependencies {
             implementation(libs.sqldelight.sqlite.driver)
@@ -102,14 +104,65 @@ kotlin {
     }
 }
 
-// Run the HUB:  ./gradlew :composeApp:runHub  (optional port arg: --args="9999")
+// --- Bundled Tor (ADR-009) ------------------------------------------------------------------------
+// Fetch the pinned Tor Expert Bundle for the host platform into build/tor (not committed; cached after
+// first run). The HUB launches build/tor/tor/tor to publish its onion. Pinned version = reproducible +
+// supply-chain hygiene; bump deliberately. (Hardening TODO: verify the bundle's published sha256/signature.)
+val torExpertBundleVersion = "14.5.1"
+val torPlatform: String = run {
+    val os = System.getProperty("os.name").lowercase()
+    val arch = if (System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm") }) "aarch64" else "x86_64"
+    when {
+        os.contains("mac") -> "macos-$arch"
+        os.contains("win") -> "windows-x86_64"
+        else -> "linux-$arch"
+    }
+}
+
+val downloadTor = tasks.register("downloadTor") {
+    group = "application"
+    description = "Download + prepare the bundled Tor binary for the HUB (build/tor/tor/tor)."
+    val outDir = layout.buildDirectory.dir("tor").get().asFile
+    val binary = File(outDir, "tor/tor")
+    val version = torExpertBundleVersion
+    val platform = torPlatform
+    val isMac = System.getProperty("os.name").lowercase().contains("mac")
+    outputs.file(binary)
+    // Plain java.io + ProcessBuilder only — no Project execution-time APIs (Gradle 9 / config-cache safe).
+    doLast {
+        outDir.mkdirs()
+        val tarball = File(outDir, "tor-expert-bundle.tar.gz")
+        val url = "https://archive.torproject.org/tor-package-archive/torbrowser/" +
+            "$version/tor-expert-bundle-$platform-$version.tar.gz"
+        logger.lifecycle("Downloading Tor Expert Bundle $version ($platform)…")
+        URI(url).toURL().openStream().use { input -> tarball.outputStream().use { input.copyTo(it) } }
+        // Extract just the tor/ subtree (binary + libevent + pluggable transports).
+        check(ProcessBuilder("tar", "xzf", tarball.absolutePath, "-C", outDir.absolutePath, "tor")
+            .inheritIO().start().waitFor() == 0) { "tar extract failed" }
+        tarball.delete()
+        val torDir = File(outDir, "tor")
+        torDir.walkTopDown().filter { it.isFile }.forEach { it.setExecutable(true) }
+        // macOS Gatekeeper SIGKILLs unsigned downloaded binaries — ad-hoc sign tor + its dylib(s)/PTs.
+        if (isMac) {
+            torDir.walkTopDown()
+                .filter { it.isFile && (it.name == "tor" || it.extension == "dylib" || it.parentFile.name == "pluggable_transports") }
+                .forEach { f -> ProcessBuilder("codesign", "--force", "--sign", "-", f.absolutePath).start().waitFor() }
+        }
+        logger.lifecycle("Tor ready at ${binary.absolutePath}")
+    }
+}
+
+// Run the HUB:  ./gradlew :composeApp:runHub --args="9876"      (plain TCP)
+//               ./gradlew :composeApp:runHub --args="9876 tor"  (publishes an onion via the bundled tor)
 tasks.register<JavaExec>("runHub") {
     group = "application"
     description = "Run the NoSlop desktop HUB (always-on relay node)."
     val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
-    dependsOn(jvmMain.compileTaskProvider)
+    dependsOn(jvmMain.compileTaskProvider, downloadTor)
     classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
     mainClass.set("com.noslop.mvp.HubMainKt")
+    // Point TorProcess at the bundled binary, robust to working directory.
+    environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
 }
 
 android {

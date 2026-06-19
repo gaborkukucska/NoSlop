@@ -40,23 +40,54 @@ fun main(args: Array<String>) = runBlocking {
     val bound = transport.listen("0.0.0.0", port)
     println("NoSlop HUB up — node ${nodeId.take(16)}… listening on 0.0.0.0:$bound")
 
-    // Optional onion: pass a tor control port (and optional password) as arg 2, e.g.
-    //   ./gradlew :composeApp:runHub --args="9876 9051:mypassword"
-    // The bundled-tor launch (ADR-009 9c) will point here; for now this expects a running tor's control port.
+    // Tor (ADR-009): arg 2 controls the onion.
+    //   "tor"                 → launch the bundled tor, bootstrap, publish an onion (NOSLOP_TOR_BINARY overrides the binary)
+    //   "<controlPort>[:pwd]" → use an already-running tor's control port
+    //   (absent)              → plain TCP only
+    //   ./gradlew :composeApp:runHub --args="9876 tor"
     val torArg = args.getOrNull(1)
-    if (torArg != null) {
-        val controlPort = torArg.substringBefore(':').toIntOrNull() ?: 9051
-        val password = torArg.substringAfter(':', "")
-        runCatching {
-            TorControl.addOnion(controlPort = controlPort, password = password, virtualPort = bound, targetPort = bound)
-        }.onSuccess { onion -> println("Onion published: leaves dial $onion:$bound via Tor SOCKS (ADR-002).") }
-            .onFailure { println("Tor onion registration failed (${it.message}); staying plain-TCP only.") }
-    } else {
-        println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
+    var tor: TorProcess? = null
+    var invite = MeshInvite(host = lanIp(), port = bound, tor = false, nodeId = nodeId) // default: plain-TCP / LAN
+    when {
+        torArg == "tor" -> runCatching {
+            println("[tor] launching bundled tor + bootstrapping (first run can take ~30–60s)…")
+            tor = TorProcess().start()
+            val onion = TorControl.addOnion(
+                controlPort = tor!!.controlPort, password = tor!!.controlPassword, virtualPort = bound, targetPort = bound,
+            )
+            invite = MeshInvite(host = onion, port = bound, tor = true, nodeId = nodeId)
+            println("Onion published — leaves dial $onion:$bound via Tor SOCKS (this hub's SOCKS: 127.0.0.1:${tor!!.socksPort}).")
+        }.onFailure { println("Bundled-tor onion failed (${it.message}); staying plain-TCP only.") }
+
+        torArg != null -> runCatching {
+            val onion = TorControl.addOnion(
+                controlPort = torArg.substringBefore(':').toIntOrNull() ?: 9051,
+                password = torArg.substringAfter(':', ""), virtualPort = bound, targetPort = bound,
+            )
+            invite = MeshInvite(host = onion, port = bound, tor = true, nodeId = nodeId)
+            println("Onion published: leaves dial $onion:$bound via Tor SOCKS (ADR-002).")
+        }.onFailure { println("Tor onion registration failed (${it.message}); staying plain-TCP only.") }
+
+        else -> println("Leaves dial in with SocketTransport.connect(<this-host>, $bound). Ctrl+C to stop.")
     }
+
+    // Show the pairing QR — scan it with the NoSlop app to auto-configure + connect (no typing).
+    println("\nScan this with the NoSlop app to connect:\n")
+    println(QrConsole.render(invite.toUri()))
+    println(invite.toUri() + "\n")
 
     while (true) {
         delay(60_000)
         println("[hub] heartbeat — links=${transport.links.size} storedPosts=${store.postCount()}")
     }
 }
+
+/** Best-guess LAN IPv4 for the same-WiFi (plain-TCP) pairing QR; falls back to localhost. */
+private fun lanIp(): String = runCatching {
+    java.net.NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+        .sortedBy { if (it.name.startsWith("en")) 0 else 1 } // prefer physical Wi-Fi/Ethernet over VM/bridge ifaces
+        .flatMap { it.inetAddresses.toList() }
+        .firstOrNull { it is java.net.Inet4Address && it.isSiteLocalAddress }
+        ?.hostAddress
+}.getOrNull() ?: "127.0.0.1"
