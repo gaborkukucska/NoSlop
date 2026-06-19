@@ -170,6 +170,19 @@ tasks.register<JavaExec>("runHub") {
     environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
 }
 
+// Run the Android-interop BRIDGE: serves iOS leaves AND dials an existing Android node's onion, relaying
+// between them.  ./gradlew :composeApp:runBridge --args="9876 <peerOnion>.onion <peerBase64Id>"
+tasks.register<JavaExec>("runBridge") {
+    group = "application"
+    description = "Run the NoSlop Android-interop bridge (iOS leaves <-> an Android mesh node)."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider, downloadTor)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.BridgeMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
+}
+
 // Run a desktop test LEAF (stands in for a second phone for leaf-to-leaf DMs). Its own NOSLOP_HOME gives it
 // a distinct identity from the hub.  ./gradlew :composeApp:runLeaf --args="9876"   (hub must be running)
 tasks.register<JavaExec>("runLeaf") {

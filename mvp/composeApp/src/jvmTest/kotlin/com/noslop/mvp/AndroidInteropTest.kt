@@ -54,4 +54,19 @@ class AndroidInteropTest {
         assertTrue(got.contains("\"type\":\"POST\""), "android-style peer should receive raw packet JSON: $got")
         server.close()
     }
+
+    @Test
+    fun bridge_translates_dm_routing_ids_at_the_boundary() {
+        val gaborHex = NodeId.androidToHex(gaborB64)     // Gabor as iOS would store him (hex)
+        val myHex = "302a300506032b6570032100" + "11".repeat(32)
+        // iOS leaf DMs Gabor: hex sender + hex target. Bridging to Android re-encodes both to base64.
+        val dm = EncryptedPayload(id = "m1", nonce = "n", ciphertext = "c", senderEncPublicKey = "pub")
+        val pkt = messagePacket(senderId = myHex, targetUserId = gaborHex, dm = dm)
+        val toAndroid = pkt.idsToAndroid()
+        assertEquals(gaborB64, toAndroid.targetUserId, "Gabor's id must land in his Android base64 form")
+        assertEquals(NodeId.hexToAndroid(myHex), toAndroid.senderId, "sender re-encoded, NOT re-stamped")
+        // …and the reverse restores the hex ids exactly (idempotent round-trip).
+        assertEquals(pkt.targetUserId, toAndroid.idsToHex().targetUserId)
+        assertEquals(pkt.senderId, toAndroid.idsToHex().senderId)
+    }
 }

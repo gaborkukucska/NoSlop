@@ -25,4 +25,22 @@ object NodeId {
     /** True if [s] looks like an Android-style base64 X.509 Ed25519 key (vs. our hex). */
     fun isAndroidId(s: String): Boolean =
         s.any { it == '+' || it == '/' || it == '=' } || s.any { it in 'g'..'z' || it in 'G'..'Z' }
+
+    /** Idempotent: ensure [id] is in Android (base64) form. */
+    fun toAndroid(id: String): String = if (isAndroidId(id)) id else hexToAndroid(id)
+
+    /** Idempotent: ensure [id] is in this app's (hex) form. */
+    fun toHex(id: String): String = if (isAndroidId(id)) androidToHex(id) else id
 }
+
+/** Re-encode a packet's routing ids (senderId/targetUserId) for the Android side of a bridge. */
+fun NetworkPacket.idsToAndroid(): NetworkPacket = copy(
+    senderId = NodeId.toAndroid(senderId),
+    targetUserId = targetUserId?.let { NodeId.toAndroid(it) },
+)
+
+/** Re-encode a packet's routing ids (senderId/targetUserId) for this app's (hex) side of a bridge. */
+fun NetworkPacket.idsToHex(): NetworkPacket = copy(
+    senderId = NodeId.toHex(senderId),
+    targetUserId = targetUserId?.let { NodeId.toHex(it) },
+)
