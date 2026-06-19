@@ -19,6 +19,21 @@ expect object Signer {
     fun verifyRaw(payload: ByteArray, signature: ByteArray, x509PublicKey: ByteArray): Boolean
 }
 
+/**
+ * Sign with **this device's own identity** Ed25519 key — without exposing the private key. iOS keeps it in
+ * the Keychain (signs via the Swift bridge); JVM reads it from the identity file; Android via Keystore (todo).
+ * Needed to sign the Android-interop CONNECTION_REQUEST/USER_HANDSHAKE, which the peer verifies.
+ */
+expect object IdentitySigner {
+    val isAvailable: Boolean
+    fun sign(message: ByteArray): ByteArray?
+}
+
+/** Sign [message] with our identity key, base64 result; null if unavailable. */
+@OptIn(ExperimentalEncodingApi::class)
+fun signWithIdentity(message: String): String? =
+    IdentitySigner.sign(message.encodeToByteArray())?.takeIf { it.isNotEmpty() }?.let { Base64.encode(it) }
+
 @OptIn(ExperimentalEncodingApi::class)
 fun sign(payload: String, privateKeyB64: String): String {
     val sig = Signer.signRaw(payload.encodeToByteArray(), Base64.decode(privateKeyB64))

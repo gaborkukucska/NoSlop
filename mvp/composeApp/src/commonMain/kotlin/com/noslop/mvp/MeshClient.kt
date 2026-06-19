@@ -107,5 +107,24 @@ class MeshClient(
         node.broadcast(dialPacket(nodeId, DialPayload(onion = onion, peerId = NodeId.toAndroid(contact.nodeId))))
     }
 
+    /**
+     * Send a signed CONNECTION_REQUEST to an Android [contact] — the handshake Android requires before it
+     * accepts our DMs. [myHomeNode] is the onion the peer should reply to (the bridge's onion), and it's part
+     * of the signed payload. Returns false if we can't sign with our identity key.
+     */
+    suspend fun sendConnectionRequest(contact: MeshContact, myHomeNode: String): Boolean {
+        val myUserId = NodeId.toAndroid(nodeId)               // base64 X.509 Ed25519 (Android id form)
+        val username = identity.handle.substringBefore(".")
+        val ts = nowMillis()
+        val signature = signWithIdentity("$myUserId|$username|$myHomeNode|$ts") ?: return false
+        val hs = PeerHandshakePayload(
+            id = randomId(), fromUserId = myUserId, fromUsername = username,
+            fromDisplayName = "${identity.handle}.${identity.tripcode}", fromHomeNode = myHomeNode,
+            fromEncryptionPublicKey = DmKeys.publicKeyX509B64(), timestamp = ts, signature = signature,
+        )
+        node.broadcast(connectionRequestPacket(myUserId, NodeId.toAndroid(contact.nodeId), hs))
+        return true
+    }
+
     fun close() = transport.close()
 }

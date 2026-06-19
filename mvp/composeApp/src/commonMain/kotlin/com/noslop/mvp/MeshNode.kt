@@ -87,3 +87,10 @@ fun dialPacket(senderId: String, dial: DialPayload, hops: Int = 2): NetworkPacke
         id = "dial-${dial.peerId.take(12)}", hops = hops, senderId = senderId, type = "DIAL_PEER",
         payload = NetworkPacket.payloadOf(dial, DialPayload.serializer()),
     )
+
+/** Build a signed CONNECTION_REQUEST (the Android handshake). [senderId]/[targetUserId] are base64 (Android). */
+fun connectionRequestPacket(senderId: String, targetUserId: String, hs: PeerHandshakePayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = hs.id, hops = hops, senderId = senderId, targetUserId = targetUserId, type = "CONNECTION_REQUEST",
+        payload = NetworkPacket.payloadOf(hs, PeerHandshakePayload.serializer()), signature = hs.signature,
+    )

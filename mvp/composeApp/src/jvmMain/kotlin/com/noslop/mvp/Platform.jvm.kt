@@ -30,6 +30,17 @@ private val bc = BouncyCastleProvider()
 // distinct identity + DM key instead of colliding with the hub's (same nodeId would break DM routing).
 private val hubDir = File(System.getenv("NOSLOP_HOME") ?: File(System.getProperty("user.home"), ".noslop-hub").path).apply { mkdirs() }
 
+/** Signs with the JVM identity key read from the identity file (2nd line = PKCS#8 priv, base64). */
+@OptIn(ExperimentalEncodingApi::class)
+actual object IdentitySigner {
+    private val file = File(hubDir, "identity")
+    actual val isAvailable: Boolean get() = file.exists()
+    actual fun sign(message: ByteArray): ByteArray? {
+        val priv = if (file.exists()) file.readLines().getOrNull(1)?.let { Base64.decode(it) } else null
+        return priv?.let { Signer.signRaw(message, it) }?.takeIf { it.isNotEmpty() }
+    }
+}
+
 @OptIn(ExperimentalEncodingApi::class)
 actual object IdentityKeyStore {
     private val file = File(hubDir, "identity")

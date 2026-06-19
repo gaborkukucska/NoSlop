@@ -64,6 +64,25 @@ actual object IdentityKeyStore {
             .apply { initialize(255, SecureRandom()) }.generateKeyPair().public.encoded
 }
 
+/** Signs with the Android identity key (PKCS#8 in EncryptedSharedPreferences). */
+actual object IdentitySigner {
+    private fun prefs(): SharedPreferences? {
+        if (!AndroidAppContext.isSet) return null
+        val ctx = AndroidAppContext.context
+        val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+        return EncryptedSharedPreferences.create(
+            ctx, "noslop_identity", masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+    actual val isAvailable: Boolean get() = AndroidAppContext.isSet
+    actual fun sign(message: ByteArray): ByteArray? {
+        val privB64 = prefs()?.getString("ed25519_priv_pkcs8_b64", null) ?: return null
+        return Signer.signRaw(message, Base64.decode(privB64, Base64.NO_WRAP)).takeIf { it.isNotEmpty() }
+    }
+}
+
 /** Handle persisted in app-private SharedPreferences (in-memory fallback when no context, e.g. tests). */
 actual object HandleStore {
     private const val PREFS = "noslop_handle"

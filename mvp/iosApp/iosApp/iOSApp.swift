@@ -46,6 +46,12 @@ class KeychainIdentity: IosKeychain {
         SecItemAdd(query as CFDictionary, nil)
     }
 
+    func signIdentityBase64(messageBase64: String) -> String? {
+        guard let priv = loadPrivateKey(), let msg = Data(base64Encoded: messageBase64),
+              let sig = try? priv.signature(for: msg) else { return nil }
+        return sig.base64EncodedString()
+    }
+
     // MARK: - Keychain
 
     private func baseQuery(account: String? = nil) -> [String: Any] {

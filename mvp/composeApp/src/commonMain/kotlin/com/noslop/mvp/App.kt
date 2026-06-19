@@ -345,8 +345,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
         connected = true
         status = "Connected ✓ ${how.ifBlank { "" }}— ${client.linkCount} link(s)".replace("  ", " ")
         if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
-        // Tell the bridge to (re)dial every Android contact we have, so DMs to them can relay.
-        scope.launch { contacts.filter { it.onionAddress != null }.forEach { client.requestDial(it) } }
+        // Re-handshake every Android contact through the (now-connected) bridge: dial + signed CONNECTION_REQUEST.
+        contacts.filter { it.onionAddress != null }.forEach { handshakeAndroidContact(it) }
     }
 
     /** User-initiated disconnect: stop auto-reconnect and drop the link, keeping the client reusable. */
@@ -387,8 +387,26 @@ private class MeshUiState(private val scope: CoroutineScope) {
         SavedContacts.add(contact); reloadContacts()
         selectedContact = contacts.firstOrNull { it.nodeId == contact.nodeId }
         status = "Added contact ${contact.handle}"
-        // If they host an onion and we're linked to a bridge, have it dial them now.
-        if (contact.onionAddress != null && connected) scope.launch { client.requestDial(contact) }
+        if (connected) handshakeAndroidContact(contact)
+    }
+
+    /**
+     * Bring an Android contact online through the bridge: tell the bridge to dial them, then send a signed
+     * CONNECTION_REQUEST (the handshake Android needs before accepting DMs). Retried a few times because the
+     * bridge's dial to their onion takes a little while — the request must arrive after their link is up.
+     * `fromHomeNode` is the bridge's onion (what we're connected through), so their replies route back to us.
+     */
+    private fun handshakeAndroidContact(contact: MeshContact) {
+        val onion = contact.onionAddress ?: return
+        val homeNode = activeInvite?.host ?: return       // the bridge onion we're connected through
+        scope.launch {
+            client.requestDial(contact)
+            repeat(5) {
+                val ok = client.sendConnectionRequest(contact, homeNode)
+                if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
+                delay(12_000)                              // give the bridge time to link their onion
+            }
+        }
     }
 
     /** Give a contact a meaningful name (keyed by node id; survives relaunches). */

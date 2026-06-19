@@ -4,21 +4,44 @@ import AVFoundation
 import ComposeApp
 
 /// Full-screen clearnet video playback bridged into the Kotlin core (`IosVideoPlayer`). Presents a native
-/// `AVPlayerViewController` over the app and starts playback — the same full-screen-modal pattern the QR
-/// scanner uses. First slice of media playback; inline-in-feed embedding can come later.
+/// `AVPlayerViewController`. Starts playback when the item reports `.readyToPlay` (KVO) rather than racing on
+/// the present-completion, and surfaces a load failure as an alert so issues are diagnosable on-device.
 final class VideoPlayerBridge: NSObject, IosVideoPlayer {
+    private var player: AVPlayer?
+    private var statusObs: NSKeyValueObservation?
+    private weak var presented: AVPlayerViewController?
+
     func play(url: String) {
         DispatchQueue.main.async {
             guard let u = URL(string: url), let root = Self.topViewController() else { return }
-            // Without an active .playback audio session, iOS keeps the player paused (first frame renders but
-            // it won't start) and honours the mute switch. moviePlayback mode is the AVKit-recommended setup.
+            // .playback keeps the player from being paused by the default session / mute switch.
             try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
             try? AVAudioSession.sharedInstance().setActive(true)
-            let player = AVPlayer(url: u)
-            player.automaticallyWaitsToMinimizeStalling = false
+
+            let item = AVPlayerItem(url: u)
+            let player = AVPlayer(playerItem: item)
+            self.player = player
+
             let vc = AVPlayerViewController()
             vc.player = player
             vc.modalPresentationStyle = .fullScreen
+            self.presented = vc
+
+            // Drive playback off the item's readiness (robust) and report failures on screen.
+            self.statusObs = item.observe(\.status, options: [.new, .initial]) { [weak vc] it, _ in
+                switch it.status {
+                case .readyToPlay:
+                    player.play()
+                case .failed:
+                    let msg = (it.error as NSError?).map { "\($0.localizedDescription) [\($0.domain) \($0.code)]" } ?? "unknown error"
+                    let alert = UIAlertController(title: "Video failed to load", message: msg, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "OK", style: .default))
+                    vc?.present(alert, animated: true)
+                default:
+                    break
+                }
+            }
+
             root.present(vc, animated: true) { player.play() }
         }
     }

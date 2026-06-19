@@ -30,6 +30,8 @@ interface IosKeychain {
     fun loadDmPrivB64(): String?
     /** Persist the X25519 DM private key (raw 32-byte, base64). */
     fun saveDmPrivB64(value: String)
+    /** Sign [messageBase64] with the stored identity Ed25519 key (Keychain); base64 signature, null on failure. */
+    fun signIdentityBase64(messageBase64: String): String?
 }
 
 /** Holds the Swift-supplied [IosKeychain]; set once by the iOS app before any identity is loaded. */
@@ -114,6 +116,17 @@ actual object DmKeyStore {
     actual fun save(privRawB64: String) {
         val kc = IosKeychainBridge.keychain
         if (kc != null) kc.saveDmPrivB64(privRawB64) else defaults.setObject(privRawB64, LEGACY_KEY)
+    }
+}
+
+/** Signs with the identity Ed25519 key in the Keychain via the Swift bridge (key never leaves the device). */
+@OptIn(ExperimentalEncodingApi::class)
+actual object IdentitySigner {
+    actual val isAvailable: Boolean get() = IosKeychainBridge.keychain != null
+    actual fun sign(message: ByteArray): ByteArray? {
+        val kc = IosKeychainBridge.keychain ?: return null
+        val sigB64 = kc.signIdentityBase64(Base64.encode(message)) ?: return null
+        return runCatching { Base64.decode(sigB64) }.getOrNull()
     }
 }
 
