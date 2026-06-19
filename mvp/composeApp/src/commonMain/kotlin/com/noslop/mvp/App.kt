@@ -230,6 +230,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private var autoTried = false
     var connecting by mutableStateOf(false)        // observable: a connect attempt is in flight
     private var activeInvite: MeshInvite? = null   // what the reconnect monitor re-dials
+    private var connectJob: kotlinx.coroutines.Job? = null  // in-flight dial, cancelled when retargeting
     private var monitorStarted = false
 
     val linkCount: Int get() = client.linkCount
@@ -280,12 +281,12 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     /** Connect to a specific saved/scanned hub. Persists it on success when [save]. */
     fun connect(invite: MeshInvite, save: Boolean) {
-        if (connecting) return                 // don't stack attempts (the monitor + UI can both call this)
-        connecting = true
         activeInvite = invite
         host = invite.host; port = invite.port.toString(); viaTor = invite.tor
         startReconnectMonitor()
-        scope.launch {
+        connectJob?.cancel()                   // cancel any in-flight dial (e.g. to a now-stale hub) and retarget
+        connecting = true
+        connectJob = scope.launch {
             try {
                 if (invite.tor) {
                     if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
@@ -313,9 +314,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
                 status = "Connecting…"
                 runCatching { client.connect(invite.host, invite.port, null) }
                     .onSuccess { if (client.linkCount > 0) onLinked(invite, save, "") else { connected = false; status = "No link" } }
-                    .onFailure { status = "Error: ${it.message}" }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; status = "Error: ${it.message}" }
             } finally {
-                connecting = false
+                if (activeInvite == invite) connecting = false   // only the latest dial owns the flag
             }
         }
     }
@@ -349,6 +350,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
     /** User-initiated disconnect: stop auto-reconnect and drop the link, keeping the client reusable. */
     fun disconnect() {
         activeInvite = null            // stop the reconnect monitor from re-dialing
+        connectJob?.cancel()           // cancel any in-flight dial
+        connecting = false
         scope.launch {
             client.disconnectLinks()
             connected = false
