@@ -44,6 +44,12 @@ android {
         debug {
             isDebuggable = true
             // No signingConfig needed — Android uses the default debug keystore automatically
+
+            // Gives the debug build its own package name (com.noslop.app.debug)
+            // and a distinct app label, so it installs side-by-side with the
+            // Release build instead of overwriting it.
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "NoSlop Debug")
         }
     }
 
