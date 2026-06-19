@@ -518,11 +518,7 @@ private fun ExoVideoPlayer(
                 },
                 update = { view ->
                     view.player = exoPlayer
-                    view.resizeMode = if (isLandscape) {
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                    } else {
-                        androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    }
+                    view.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                 },
                 onRelease = { view ->
                     view.player = null
