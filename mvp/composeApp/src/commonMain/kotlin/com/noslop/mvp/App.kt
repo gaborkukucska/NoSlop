@@ -48,6 +48,8 @@ fun App() {
         // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
         val meshScope = rememberCoroutineScope()
         val mesh = remember { MeshUiState(meshScope) }
+        // Start dialing the saved hub at launch (any tab) so the Tor circuit pre-builds in the background.
+        LaunchedEffect(Unit) { mesh.autoConnectOnce() }
         Scaffold { padding ->
             Column(Modifier.fillMaxSize().padding(padding)) {
                 TabRow(selectedTabIndex = tab) {
@@ -226,6 +228,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
     var dmDraft by mutableStateOf("")
     var selectedContact by mutableStateOf<MeshContact?>(null)
     private var autoTried = false
+    private var connecting = false                 // guard against overlapping connect attempts
+    private var activeInvite: MeshInvite? = null   // what the reconnect monitor re-dials
+    private var monitorStarted = false
 
     val linkCount: Int get() = client.linkCount
 
@@ -273,33 +278,62 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     /** Connect to a specific saved/scanned hub. Persists it on success when [save]. */
     fun connect(invite: MeshInvite, save: Boolean) {
+        if (connecting) return                 // don't stack attempts (the monitor + UI can both call this)
+        connecting = true
+        activeInvite = invite
         host = invite.host; port = invite.port.toString(); viaTor = invite.tor
+        startReconnectMonitor()
         scope.launch {
-            if (invite.tor) {
-                if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
-                status = "Starting Tor…"
-                TorService.start()
-                // Tor's SOCKS rejects until it's bootstrapped + the onion circuit is built, so retry the
-                // connection through SOCKS until it succeeds — no fragile control-port readiness gate.
-                var waited = 0
-                while (waited < 300_000) {
-                    val sp = TorService.socksPort()
-                    val prog = TorService.bootstrapProgress()
-                    status = "Connecting via Tor… ${if (prog in 1..99) "$prog% " else ""}(${waited / 1000}s)"
-                    if (sp > 0) {
-                        val ok = runCatching { client.connect(invite.host, invite.port, SocksProxy("127.0.0.1", sp)) }
-                            .map { client.linkCount > 0 }.getOrDefault(false)
-                        if (ok) { onLinked(invite, save, "over Tor"); return@launch }
+            try {
+                if (invite.tor) {
+                    if (!TorService.isAvailable) { status = "Tor not available on this device"; return@launch }
+                    status = "Starting Tor…"
+                    TorService.start()
+                    // Tor's SOCKS rejects until it's bootstrapped + the onion circuit is built, so retry the
+                    // connection through SOCKS until it succeeds — no fragile control-port readiness gate.
+                    var waited = 0
+                    while (waited < 300_000) {
+                        val sp = TorService.socksPort()
+                        val prog = TorService.bootstrapProgress()
+                        val phase = when { prog in 1..99 -> "bootstrapping $prog%"; prog >= 100 -> "building circuit"; else -> "starting Tor" }
+                        status = "Connecting via Tor… $phase (${waited / 1000}s)"
+                        if (sp > 0) {
+                            val ok = runCatching { client.connect(invite.host, invite.port, SocksProxy("127.0.0.1", sp)) }
+                                .map { client.linkCount > 0 }.getOrDefault(false)
+                            if (ok) { onLinked(invite, save, "over Tor"); return@launch }
+                        }
+                        delay(4000); waited += 4000
                     }
-                    delay(4000); waited += 4000
+                    status = "Couldn't reach the hub over Tor (5 min) — will keep retrying. tor: ${TorService.status()}"
+                    return@launch
                 }
-                status = "Couldn't reach the hub over Tor (5 min) — tor: ${TorService.status()}"
-                return@launch
+                status = "Connecting…"
+                runCatching { client.connect(invite.host, invite.port, null) }
+                    .onSuccess { if (client.linkCount > 0) onLinked(invite, save, "") else { connected = false; status = "No link" } }
+                    .onFailure { status = "Error: ${it.message}" }
+            } finally {
+                connecting = false
             }
-            status = "Connecting…"
-            runCatching { client.connect(invite.host, invite.port, null) }
-                .onSuccess { if (client.linkCount > 0) onLinked(invite, save, "") else { connected = false; status = "No link" } }
-                .onFailure { status = "Error: ${it.message}" }
+        }
+    }
+
+    /**
+     * Keep the link alive: poll for drops and auto-redial the active hub, so a paired phone stays connected
+     * across Tor circuit churn / app resumes without the user touching anything. Eager — the first connect
+     * starts it, then it runs for the app's lifetime.
+     */
+    private fun startReconnectMonitor() {
+        if (monitorStarted) return
+        monitorStarted = true
+        scope.launch {
+            while (true) {
+                delay(6000)
+                if (client.linkCount == 0) {
+                    if (connected) connected = false      // reflect a dropped link in the UI
+                    val inv = activeInvite
+                    if (inv != null && !connecting) { status = "Link dropped — reconnecting…"; connect(inv, save = false) }
+                }
+            }
         }
     }
 
