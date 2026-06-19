@@ -183,6 +183,19 @@ tasks.register<JavaExec>("runBridge") {
     environment("NOSLOP_TOR_BINARY", layout.buildDirectory.file("tor/tor/tor").get().asFile.absolutePath)
 }
 
+// Run a desktop INTEROP test node (stands in for the iPhone) that signs + sends a CONNECTION_REQUEST and DM
+// to an Android peer through a local bridge.  ./gradlew :composeApp:runInteropNode   (bridge must be running)
+tasks.register<JavaExec>("runInteropNode") {
+    group = "application"
+    description = "Run a desktop node that handshakes + DMs an Android peer through the bridge (iOS stand-in)."
+    val jvmMain = kotlin.targets.getByName("jvm").compilations.getByName("main")
+    dependsOn(jvmMain.compileTaskProvider)
+    classpath = files(jvmMain.output.allOutputs, jvmMain.runtimeDependencyFiles)
+    mainClass.set("com.noslop.mvp.InteropNodeMainKt")
+    jvmArgs("-Djava.net.preferIPv4Stack=true")
+    environment("NOSLOP_HOME", layout.buildDirectory.dir("noslop-desktop").get().asFile.absolutePath)
+}
+
 // Run a desktop test LEAF (stands in for a second phone for leaf-to-leaf DMs). Its own NOSLOP_HOME gives it
 // a distinct identity from the hub.  ./gradlew :composeApp:runLeaf --args="9876"   (hub must be running)
 tasks.register<JavaExec>("runLeaf") {

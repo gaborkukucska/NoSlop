@@ -73,6 +73,28 @@ class AndroidInteropTest {
         assertEquals(pkt.senderId, toAndroid.idsToHex().senderId)
     }
 
+    @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class, kotlin.ExperimentalStdlibApi::class)
+    @Test
+    fun signed_connection_request_verifies_the_way_android_does() {
+        // A node whose key we hold (the Ed25519 self-test vector). iOS stores it as the raw 32 bytes (hex).
+        val pubX509 = Ed25519SelfTest.PUB_X509_B64
+        val priv = Ed25519SelfTest.PRIV_PKCS8_B64
+        val nodeIdHex = NodeId.androidToHex(pubX509)                 // our raw-32 hex form
+        val fromUserId = NodeId.hexToAndroid(nodeIdHex)              // → X.509 base64 (THE FIX)
+        assertEquals(pubX509, fromUserId, "wrap raw→X.509 must reproduce the real Android key")
+
+        // Build + sign the exact handshake string MeshClient.sendConnectionRequest signs.
+        val msg = "$fromUserId|alice|somebridge.onion|1718900000000"
+        val sig = sign(msg, priv)
+
+        // Verify exactly as Android's HandshakePacketHandler does: verify(payload, sig, connPay.fromUserId).
+        assertTrue(verify(msg, sig, fromUserId), "Android verify() must accept the signed request (post-fix)")
+
+        // …and the OLD pre-fix form (raw-32 base64, no X.509 header) would FAIL — i.e. why Gabor saw nothing.
+        val brokenId = kotlin.io.encoding.Base64.encode(nodeIdHex.hexToByteArray())
+        assertFalse(verify(msg, sig, brokenId), "a raw-32 key can't be verified → the bug we just fixed")
+    }
+
     @Test
     fun parses_gabor_android_contact_qr_and_exports_android_shape() {
         val gaborEnc = "MCowBQYDK2VuAyEAJvSMafyFL+btlHuwUWRl50wYwKRcq0mFX4ueT24hU0w="
