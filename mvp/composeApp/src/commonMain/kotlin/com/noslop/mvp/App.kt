@@ -248,6 +248,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
                 dmLog.add(0, DmEntry(from = name, text = text, mine = false))
             }
         }
+        // For Android DMs (which omit the sender's enc-key in the payload), resolve it from a stored contact.
+        client.resolveEncPub = { id -> SavedContacts.list().firstOrNull { it.nodeId == id }?.encPublicKeyX509B64 }
         reloadSaved()
         reloadContacts()
         // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
@@ -372,8 +374,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     private fun reloadContacts() { contacts.clear(); contacts.addAll(SavedContacts.list()) }
 
-    /** My shareable contact card as a QR string — others scan this to add me. */
-    fun myContactQr(): String = client.contactCard().toQrJson()
+    /** My shareable contact card as a QR string — Android-compatible shape so both iOS *and* Android can scan it. */
+    fun myContactQr(): String = client.contactCard().toAndroidQrJson()
     fun myHandle(): String = client.contactCard().handle
 
     fun addContact(contact: MeshContact) {

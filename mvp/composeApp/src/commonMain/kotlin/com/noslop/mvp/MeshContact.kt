@@ -2,6 +2,8 @@ package com.noslop.mvp
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * A DM contact — everything one leaf needs to send another an end-to-end-encrypted DM through a blind hub:
@@ -20,11 +22,35 @@ data class MeshContact(
 ) {
     fun toQrJson(): String = WireJson.encodeToString(serializer(), this)
 
+    /**
+     * This contact card in the **Android app's** QR shape — so an Android user can scan us. Their fields:
+     * `publicKey` (our node id as base64 X.509 Ed25519), `encPublicKey` (our DM key, already X.509 b64), and
+     * `onionAddress` (empty: an iOS leaf hosts no onion — they reach us via the bridge, not directly).
+     */
+    fun toAndroidQrJson(): String =
+        """{"handle":"$handle","publicKey":"${NodeId.hexToAndroid(nodeId)}","encPublicKey":"$encPublicKeyX509B64","onionAddress":""}"""
+
     companion object {
-        /** Parse a scanned/pasted contact card; null if it isn't a well-formed contact. */
-        fun parse(s: String): MeshContact? = runCatching {
-            WireJson.decodeFromString(serializer(), s.trim())
-        }.getOrNull()?.takeIf { it.nodeId.isNotBlank() && it.encPublicKeyX509B64.isNotBlank() }
+        /**
+         * Parse a scanned/pasted contact card — ours (`{node_id, enc_pub}`) OR the Android app's
+         * (`{publicKey, encPublicKey, onionAddress}`). Android's base64 node id is normalized to our hex form
+         * so routing/contact-matching lines up. Null if it isn't a well-formed contact.
+         */
+        fun parse(s: String): MeshContact? {
+            val t = s.trim()
+            // Ours first.
+            runCatching { WireJson.decodeFromString(serializer(), t) }.getOrNull()
+                ?.takeIf { it.nodeId.isNotBlank() && it.encPublicKeyX509B64.isNotBlank() }
+                ?.let { return it }
+            // Android format: {handle, publicKey, encPublicKey, onionAddress}.
+            return runCatching {
+                val o = WireJson.parseToJsonElement(t).jsonObject
+                fun f(k: String) = o[k]?.jsonPrimitive?.content
+                val pub = f("publicKey"); val enc = f("encPublicKey")
+                if (pub.isNullOrBlank() || enc.isNullOrBlank()) null
+                else MeshContact(handle = f("handle") ?: "android", nodeId = NodeId.androidToHex(pub), encPublicKeyX509B64 = enc)
+            }.getOrNull()
+        }
     }
 }
 

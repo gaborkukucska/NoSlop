@@ -28,11 +28,13 @@ class MeshClient(
                 // Only DMs addressed to us (the hub forwards every MESSAGE to all links). Decrypt with the
                 // sender's enc-pubkey (carried in the payload) + our DM private key. The hub never does this.
                 if (packet.targetUserId != nodeId) return
-                val senderPub = dm.senderEncPublicKey ?: return
+                // Our DMs carry the sender's enc-key in the payload; Android's don't, so fall back to the
+                // sender's stored contact (resolved by the UI). packet.senderId is already hex on our side.
+                val senderPub = dm.senderEncPublicKey ?: resolveEncPub?.invoke(packet.senderId) ?: return
                 val text = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
-                // Reply must go to the ORIGINAL sender (carried in the payload), not packet.senderId — the
-                // hub re-stamps that to its own id on forward.
-                onDm?.invoke(dm.senderNodeId ?: packet.senderId ?: "?", senderPub, text)
+                // Reply must go to the ORIGINAL sender (our DMs carry senderNodeId; Android's use senderId,
+                // which the bridge does NOT re-stamp — only re-encodes — so it's the true sender).
+                onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, text)
             }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
@@ -43,6 +45,9 @@ class MeshClient(
 
     /** Called for every decrypted DM addressed to us: (fromNodeId, theirEncPubX509B64, plaintext). */
     var onDm: ((fromNodeId: String, fromEncPub: String, text: String) -> Unit)? = null
+
+    /** Resolve a sender's X25519 enc-pubkey from a stored contact (for Android DMs lacking it in-payload). */
+    var resolveEncPub: ((nodeId: String) -> String?)? = null
 
     /** Our X25519 DM public key (X.509 b64) — share via a [MeshContact] so peers can encrypt to us. */
     fun dmPublicKeyB64(): String = DmKeys.publicKeyX509B64()

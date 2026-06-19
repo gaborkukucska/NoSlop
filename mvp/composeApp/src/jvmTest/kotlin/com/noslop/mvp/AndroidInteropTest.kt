@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -68,5 +69,18 @@ class AndroidInteropTest {
         // …and the reverse restores the hex ids exactly (idempotent round-trip).
         assertEquals(pkt.targetUserId, toAndroid.idsToHex().targetUserId)
         assertEquals(pkt.senderId, toAndroid.idsToHex().senderId)
+    }
+
+    @Test
+    fun parses_gabor_android_contact_qr_and_exports_android_shape() {
+        val gaborEnc = "MCowBQYDK2VuAyEAJvSMafyFL+btlHuwUWRl50wYwKRcq0mFX4ueT24hU0w="
+        val json = """{"handle":"Gabby.r2qv2x","publicKey":"$gaborB64","encPublicKey":"$gaborEnc","onionAddress":"s4zk7w5uolv3zdb4ubsamtw5eajpf5j2tsktrbc7fwz3uhcf2wqb5yqd.onion"}"""
+        val c = MeshContact.parse(json); assertNotNull(c)
+        assertEquals("Gabby.r2qv2x", c.handle)
+        assertEquals(NodeId.androidToHex(gaborB64), c.nodeId, "Android id normalized to our hex form")
+        assertEquals(gaborEnc, c.encPublicKeyX509B64, "X25519 enc-key used as-is")
+        // Our own card exported in Android shape re-parses to the same hex id (so a peer scanning us matches).
+        val mine = MeshContact("me", NodeId.androidToHex(gaborB64), gaborEnc)
+        assertEquals(mine.nodeId, MeshContact.parse(mine.toAndroidQrJson())?.nodeId)
     }
 }
