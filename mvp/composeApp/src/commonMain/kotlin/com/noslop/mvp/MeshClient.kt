@@ -90,5 +90,8 @@ class MeshClient(
         return true
     }
 
+    /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */
+    suspend fun disconnectLinks() = transport.disconnectLinks()
+
     fun close() = transport.close()
 }

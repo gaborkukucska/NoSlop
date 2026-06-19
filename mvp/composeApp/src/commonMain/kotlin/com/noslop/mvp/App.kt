@@ -343,6 +343,16 @@ private class MeshUiState(private val scope: CoroutineScope) {
         if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
     }
 
+    /** User-initiated disconnect: stop auto-reconnect and drop the link, keeping the client reusable. */
+    fun disconnect() {
+        activeInvite = null            // stop the reconnect monitor from re-dialing
+        scope.launch {
+            client.disconnectLinks()
+            connected = false
+            status = "Disconnected"
+        }
+    }
+
     fun removeNode(invite: MeshInvite) { SavedNodes.remove(invite); reloadSaved() }
 
     /** Pin a saved hub as the launch default by moving it to the front (what autoConnectOnce dials). */
@@ -414,9 +424,9 @@ private fun MeshScreen(state: MeshUiState) {
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (QrScanner.isAvailable) {
+            // Always enabled — you can add/switch hubs while already connected (no need to disconnect first).
             Button(
                 onClick = { QrScanner.scan { scanned -> state.onScan(scanned) } },
-                enabled = !state.connected,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("📷  Scan node QR to connect") }
         }
@@ -425,11 +435,16 @@ private fun MeshScreen(state: MeshUiState) {
             OutlinedTextField(state.port, { state.port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = state.viaTor, onCheckedChange = { state.viaTor = it }, enabled = !state.connected)
+            Switch(checked = state.viaTor, onCheckedChange = { state.viaTor = it })
             Text("Via Tor (for .onion hubs, from anywhere)", fontSize = 13.sp)
         }
-        Button(onClick = { state.connectNow() }, enabled = !state.connected) {
-            Text(if (state.connected) "Connected" else "Connect to hub")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { state.connectNow() }, enabled = !state.connected, modifier = Modifier.weight(1f)) {
+                Text(if (state.connected) "Connected" else "Connect to hub")
+            }
+            if (state.connected) {
+                Button(onClick = { state.disconnect() }) { Text("Disconnect") }
+            }
         }
         Text(
             state.status,

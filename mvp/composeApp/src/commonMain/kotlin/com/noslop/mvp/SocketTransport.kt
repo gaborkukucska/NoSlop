@@ -184,6 +184,13 @@ class SocketTransport(
         conn.writeLock.withLock { conn.out.writeStringUtf8(packet.toJson() + "\n") }
     }
 
+    /** Drop all open links (the read loops then clean up `conns`) but keep the transport reusable for a
+     *  fresh [connect] — unlike [close], which tears down the selector. For a user-initiated disconnect. */
+    suspend fun disconnectLinks() {
+        val sockets = lock.withLock { conns.values.map { it.socket } }
+        sockets.forEach { runCatching { it.close() } }
+    }
+
     fun close() {
         val s = server
         server = null // signals the accept loop to exit instead of treating the close() as a transient error
