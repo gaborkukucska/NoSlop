@@ -52,12 +52,25 @@ data class NetworkPacket(
 
     fun getPostPayload(): PostPayload? = decode("POST", PostPayload.serializer())
     fun getMessagePayload(): EncryptedPayload? = decode("MESSAGE", EncryptedPayload.serializer())
+    fun getDialPayload(): DialPayload? = decode("DIAL_PEER", DialPayload.serializer())
     fun getReactionPayload(): ReactionPayload? = decode("REACTION", ReactionPayload.serializer())
     fun getVotePayload(): VotePayload? = decode("VOTE", VotePayload.serializer())
     fun getCommentPayload(): CommentPayload? = decode("COMMENT", CommentPayload.serializer())
     fun getConnectionRequestPayload(): PeerHandshakePayload? = decode("CONNECTION_REQUEST", PeerHandshakePayload.serializer())
     fun getUserHandshakePayload(): PeerHandshakePayload? = decode("USER_HANDSHAKE", PeerHandshakePayload.serializer())
 }
+
+/**
+ * Control message from an iOS leaf to its bridge: "dial this Android peer." Carries the peer's [onion] and
+ * its [peerId] (base64 Android node id). Bridge-internal — never forwarded onward to Android. Lets the bridge
+ * learn peers dynamically from the phone's contacts instead of a hardcoded command line.
+ */
+@Serializable
+data class DialPayload(
+    val onion: String,
+    @SerialName("peer_id") val peerId: String,
+    val port: Int = 9999,
+)
 
 @Serializable
 data class PostPayload(

@@ -19,6 +19,8 @@ data class MeshContact(
     val handle: String,
     @SerialName("node_id") val nodeId: String,
     @SerialName("enc_pub") val encPublicKeyX509B64: String,
+    // The peer's own onion (Android peers host one). The bridge dials this to reach them; null for an iOS leaf.
+    @SerialName("onion") val onionAddress: String? = null,
 ) {
     fun toQrJson(): String = WireJson.encodeToString(serializer(), this)
 
@@ -48,7 +50,10 @@ data class MeshContact(
                 fun f(k: String) = o[k]?.jsonPrimitive?.content
                 val pub = f("publicKey"); val enc = f("encPublicKey")
                 if (pub.isNullOrBlank() || enc.isNullOrBlank()) null
-                else MeshContact(handle = f("handle") ?: "android", nodeId = NodeId.androidToHex(pub), encPublicKeyX509B64 = enc)
+                else MeshContact(
+                    handle = f("handle") ?: "android", nodeId = NodeId.androidToHex(pub),
+                    encPublicKeyX509B64 = enc, onionAddress = f("onionAddress")?.takeIf { it.isNotBlank() },
+                )
             }.getOrNull()
         }
     }

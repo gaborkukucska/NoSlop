@@ -80,3 +80,10 @@ fun messagePacket(senderId: String, targetUserId: String, dm: EncryptedPayload, 
         id = dm.id, hops = hops, senderId = senderId, targetUserId = targetUserId, type = "MESSAGE",
         payload = NetworkPacket.payloadOf(dm, EncryptedPayload.serializer()),
     )
+
+/** Build a DIAL_PEER control packet (leaf → bridge): "dial this Android peer at [dial]". */
+fun dialPacket(senderId: String, dial: DialPayload, hops: Int = 2): NetworkPacket =
+    NetworkPacket(
+        id = "dial-${dial.peerId.take(12)}", hops = hops, senderId = senderId, type = "DIAL_PEER",
+        payload = NetworkPacket.payloadOf(dial, DialPayload.serializer()),
+    )

@@ -345,6 +345,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
         connected = true
         status = "Connected ✓ ${how.ifBlank { "" }}— ${client.linkCount} link(s)".replace("  ", " ")
         if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
+        // Tell the bridge to (re)dial every Android contact we have, so DMs to them can relay.
+        scope.launch { contacts.filter { it.onionAddress != null }.forEach { client.requestDial(it) } }
     }
 
     /** User-initiated disconnect: stop auto-reconnect and drop the link, keeping the client reusable. */
@@ -385,6 +387,8 @@ private class MeshUiState(private val scope: CoroutineScope) {
         SavedContacts.add(contact); reloadContacts()
         selectedContact = contacts.firstOrNull { it.nodeId == contact.nodeId }
         status = "Added contact ${contact.handle}"
+        // If they host an onion and we're linked to a bridge, have it dial them now.
+        if (contact.onionAddress != null && connected) scope.launch { client.requestDial(contact) }
     }
 
     /** Give a contact a meaningful name (keyed by node id; survives relaunches). */

@@ -98,5 +98,14 @@ class MeshClient(
     /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */
     suspend fun disconnectLinks() = transport.disconnectLinks()
 
+    /**
+     * Ask the bridge to dial an Android peer (so it can relay our DMs to them). Sent for each contact that
+     * has its own onion. The peer id is the Android base64 form so the bridge keys the link as an Android side.
+     */
+    suspend fun requestDial(contact: MeshContact) {
+        val onion = contact.onionAddress ?: return
+        node.broadcast(dialPacket(nodeId, DialPayload(onion = onion, peerId = NodeId.toAndroid(contact.nodeId))))
+    }
+
     fun close() = transport.close()
 }
