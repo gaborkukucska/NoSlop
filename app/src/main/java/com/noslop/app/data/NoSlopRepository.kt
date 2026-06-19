@@ -48,6 +48,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
+    val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -173,6 +174,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun setForegroundServiceEnabled(enabled: Boolean) =
         settingsRepository.setForegroundServiceEnabled(enabled)
+
+    suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
+
+    suspend fun setSendOnEnterEnabled(enabled: Boolean) =
+        settingsRepository.setSendOnEnterEnabled(enabled)
 
     // --- Feed Methods (delegated to FeedRepository) ---
     suspend fun insertSource(source: FeedSource) = feedRepository.insertSource(source)

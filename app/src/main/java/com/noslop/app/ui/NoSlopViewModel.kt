@@ -153,6 +153,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val isForegroundServiceEnabled: StateFlow<Boolean> = repository.isForegroundServiceEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    val isSendOnEnterEnabled: StateFlow<Boolean> = repository.isSendOnEnterEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         repository.getCommentsForPost(postId)
 
@@ -240,6 +243,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.getMediaSettings()
             repository.getNotificationSettings()
             repository.initForegroundServiceSetting()
+            repository.initSendOnEnterSetting()
         }
 
         // Load profile and preferences
@@ -924,6 +928,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 com.noslop.app.mesh.NoSlopForegroundService.stop(context)
             }
+        }
+    }
+
+    fun setSendOnEnterEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setSendOnEnterEnabled(enabled)
         }
     }
 

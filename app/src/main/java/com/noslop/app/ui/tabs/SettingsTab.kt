@@ -190,6 +190,34 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Send Chat on Enter", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Pressing enter on the on-screen keyboard sends the message immediately.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isSendOnEnterEnabled,
+                                    onCheckedChange = { viewModel.setSendOnEnterEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
                         }
                     }
                 }

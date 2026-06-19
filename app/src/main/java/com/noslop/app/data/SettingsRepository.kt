@@ -34,6 +34,10 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     /** Whether the user enabled the always-on foreground service. */
     val isForegroundServiceEnabled: StateFlow<Boolean> = _isForegroundServiceEnabled.asStateFlow()
 
+    private val _isSendOnEnterEnabled = MutableStateFlow(false)
+    /** Whether to send chat messages on keyboard enter. */
+    val isSendOnEnterEnabled: StateFlow<Boolean> = _isSendOnEnterEnabled.asStateFlow()
+
     /** Load media settings from storage, hydrating [mediaSettingsFlow]. */
     suspend fun getMediaSettings(): MediaSettings = withContext(Dispatchers.IO) {
         val json = appSettingDao.getSetting("media_settings")
@@ -72,5 +76,17 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     suspend fun setForegroundServiceEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting("foreground_service_enabled", enabled.toString()))
         _isForegroundServiceEnabled.value = enabled
+    }
+
+    /** Hydrate [isSendOnEnterEnabled] from storage (defaults to false). */
+    suspend fun initSendOnEnterSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("send_on_enter_enabled")
+        _isSendOnEnterEnabled.value = setting == "true"
+    }
+
+    /** Persist and publish the send-on-enter flag. */
+    suspend fun setSendOnEnterEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("send_on_enter_enabled", enabled.toString()))
+        _isSendOnEnterEnabled.value = enabled
     }
 }

@@ -16,6 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +42,7 @@ fun ChatThreadScreen(
     onBack: () -> Unit
 ) {
     var rawText by remember { mutableStateOf("") }
+    val sendOnEnter by viewModel.isSendOnEnterEnabled.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // Thread header
@@ -241,31 +245,8 @@ fun ChatThreadScreen(
         ) {
             var attachedMediaId by remember { mutableStateOf<String?>(null) }
             
-            IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
-                Icon(
-                    if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.Add, 
-                    contentDescription = "Attach", 
-                    tint = if (attachedMediaId != null) AccentGreen else TextMuted
-                )
-            }
-            
-            OutlinedTextField(
-                value = rawText,
-                onValueChange = { rawText = it },
-                placeholder = { Text("Message...") },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentGreen,
-                    unfocusedBorderColor = BorderSubtle,
-                    focusedTextColor = TextLight,
-                    unfocusedTextColor = TextLight
-                ),
-                modifier = Modifier.weight(1f)
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            IconButton(
-                onClick = {
+            val handleSend = {
+                if (rawText.isNotBlank() || attachedMediaId != null) {
                     val mediaMetadata = attachedMediaId?.let { id ->
                         MediaMetadata(
                             id = id,
@@ -280,7 +261,40 @@ fun ChatThreadScreen(
                     onSendMessage(rawText, mediaMetadata)
                     rawText = ""
                     attachedMediaId = null
-                },
+                }
+            }
+
+            IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
+                Icon(
+                    if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.Add, 
+                    contentDescription = "Attach", 
+                    tint = if (attachedMediaId != null) AccentGreen else TextMuted
+                )
+            }
+            
+            OutlinedTextField(
+                value = rawText,
+                onValueChange = { rawText = it },
+                placeholder = { Text("Message...") },
+                keyboardOptions = KeyboardOptions(
+                    imeAction = if (sendOnEnter) ImeAction.Send else ImeAction.Default
+                ),
+                keyboardActions = KeyboardActions(
+                    onSend = { handleSend() }
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = AccentGreen,
+                    unfocusedBorderColor = BorderSubtle,
+                    focusedTextColor = TextLight,
+                    unfocusedTextColor = TextLight
+                ),
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            IconButton(
+                onClick = { handleSend() },
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .background(AccentGreen)
