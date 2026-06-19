@@ -38,6 +38,7 @@ object TorControl {
         targetHost: String = "127.0.0.1",
         targetPort: Int = 9876,
         privateKey: String? = null,        // reuse a saved key for a persistent address; null = generate new
+        extraVirtualPort: Int? = null,     // a 2nd Port mapping → targetHost:extraVirtualPort (e.g. Android 9999)
     ): Onion {
         val selector = SelectorManager(Dispatchers.Default)
         val socket = aSocket(selector).tcp().connect(controlHost, controlPort)
@@ -49,7 +50,8 @@ object TorControl {
             require(auth.startsWith("250")) { "Tor control: AUTHENTICATE failed ($auth)" }
 
             val keyParam = if (privateKey != null) "ED25519-V3:$privateKey" else "NEW:ED25519-V3"
-            output.writeStringUtf8("ADD_ONION $keyParam Flags=Detach Port=$virtualPort,$targetHost:$targetPort\r\n")
+            val extra = extraVirtualPort?.let { " Port=$it,$targetHost:$it" } ?: ""
+            output.writeStringUtf8("ADD_ONION $keyParam Flags=Detach Port=$virtualPort,$targetHost:$targetPort$extra\r\n")
             var serviceId: String? = null
             var key: String? = privateKey
             while (true) {

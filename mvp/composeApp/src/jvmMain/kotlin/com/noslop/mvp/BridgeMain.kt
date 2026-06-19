@@ -73,7 +73,7 @@ fun main(args: Array<String>) = runBlocking {
     val savedKey = if (keyFile.exists()) keyFile.readText().trim().ifBlank { null } else null
     val result = TorControl.addOnion(
         controlPort = tor.controlPort, password = tor.controlPassword, virtualPort = bound, targetPort = bound,
-        privateKey = savedKey,
+        privateKey = savedKey, extraVirtualPort = androidPort,   // also serve Android's port (9999) for inbound replies
     )
     val onion = result.address
     if (savedKey == null) result.privateKey?.let { keyFile.parentFile?.mkdirs(); keyFile.writeText(it); println("[bridge] saved onion key — address is now stable across restarts") }
@@ -81,6 +81,35 @@ fun main(args: Array<String>) = runBlocking {
     println("\nScan this on the iPhone to join the bridge:\n")
     println(QrConsole.render(invite.toUri()))
     println(invite.toUri() + "\n")
+
+    // Inbound from Android peers: they dial our onion on MESH_PORT (9999) to deliver USER_HANDSHAKE / DM
+    // replies (Android's connectionless per-send model — write a packet, close). Accept handshake-less, read
+    // packets, translate ids to our hex form, and forward to the iOS leaves. We don't reply on these sockets
+    // (Android sends to us by dialing back), so they aren't registered as sendable links.
+    scope.launch {
+        val server = java.net.ServerSocket()
+        server.bind(java.net.InetSocketAddress("127.0.0.1", androidPort))
+        println("[bridge] inbound Android listener on 127.0.0.1:$androidPort (onion :$androidPort)")
+        while (true) {
+            val sock = runCatching { server.accept() }.getOrNull() ?: break
+            scope.launch {
+                runCatching {
+                    val reader = sock.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = reader.readLine() ?: break
+                        if (line.isBlank()) continue
+                        val pkt = runCatching { NetworkPacket.fromJson(line) }.getOrNull() ?: continue
+                        if (!firewall.admit(pkt)) continue
+                        val out = pkt.idsToHex()
+                        val leaves = transport.links.filter { !NodeId.isAndroidId(it) }
+                        leaves.forEach { leaf -> launch { transport.send(leaf, out) } }
+                        println("[bridge] inbound android→ios ${pkt.type} ${(pkt.id ?: "?").take(8)}… → ${leaves.size} leaf(s)")
+                    }
+                }
+                runCatching { sock.close() }
+            }
+        }
+    }
 
     // Keep a link to every known Android peer up: (re)dial handshake-less through our Tor SOCKS whenever a
     // peer isn't currently linked — so peers learned from the phone connect automatically (and reconnect).
