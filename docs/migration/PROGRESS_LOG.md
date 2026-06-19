@@ -4,6 +4,36 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-19 (later) — Android interop: signed handshake DELIVERED to a live Android node 🟢🟡
+
+The bridge is now a complete bidirectional gateway, and a **signed CONNECTION_REQUEST from the iPhone was
+relayed to Gabor's real Android node** (`ios→android CONNECTION_REQUEST → 1 peer`, ×3 via retries). Awaiting
+only his **Accept** for the full human DM round-trip.
+
+What landed (all driven by Gabor's feedback "I need a handshake request, I haven't gotten one"):
+- **Signed CONNECTION_REQUEST** (`IdentitySigner` expect/actual — iOS signs with the Keychain identity key
+  via a new bridge method; JVM/Android from their stored key). `MeshClient.sendConnectionRequest` builds the
+  Android `PeerHandshakePayload`, signs `from_user_id|from_username|from_home_node|timestamp`, with
+  `from_home_node` = the BRIDGE's onion (so replies route back). `App.handshakeAndroidContact` sends it on
+  connect/add-contact, retried to cover the bridge's dial latency.
+- **Dynamic peers:** the phone sends the bridge a `DIAL_PEER` for each Android contact (which now carries its
+  `onionAddress`); the bridge learns + dials peers automatically — no hardcoded args. Scales to many contacts.
+- **Persistent bridge onion:** `TorControl.addOnion` reuses a saved ED25519-V3 key; the bridge keeps the SAME
+  `.onion` across restarts (no more re-scanning). `latzrm6z…onion`.
+- **Bidirectional:** bridge onion also maps :9999; a handshake-less inbound listener accepts Android peers
+  dialing in (their connectionless per-send reply model) and relays to the iOS leaves. So Gabor's
+  USER_HANDSHAKE/DM replies route: Gabor → bridge:9999 → iPhone (decrypts via stored contact).
+- Node-id translation (hex↔base64, same X.509 DER) at the boundary; DM crypto + key encodings already matched.
+
+**Verified live:** bridge dials Gabor's onion ✓, relays the signed request to him ✓. **Pending:** Gabor taps
+Accept (his node was intermittently offline — driving). Then verify the DM both ways on-device.
+
+Earlier today: clearnet video (AVPlayer, audio ✓), DM key→Keychain, saved-hub persistence + default,
+share-my-QR + persisted/nameable contacts, connection UX (auto-reconnect/eager-dial/Disconnect/keyboard),
+app icon.
+
+---
+
 ## 2026-06-19 — Phase 2: Android-network interop bridge (the migration payoff) 🟢 built, ⏳ awaiting live peer
 
 The KMP app can now interoperate with the **existing Android NoSlop network** — the whole point of the
