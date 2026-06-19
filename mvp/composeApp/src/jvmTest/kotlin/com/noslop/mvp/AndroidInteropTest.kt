@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -24,10 +25,11 @@ class AndroidInteropTest {
     private val gaborB64 = "MCowBQYDK2VwAyEAlzKv27Ry67yMPKBkBk7dIBLy9TqclTiEXy2zuhxF1aA="
 
     @Test
-    fun nodeId_hex_base64_roundtrip_matches_gabor() {
+    fun nodeId_roundtrip_and_raw_form_matches_gabor() {
         val hex = NodeId.androidToHex(gaborB64)
-        assertTrue(hex.startsWith("302a300506032b6570032100"), "expected X.509 Ed25519 DER hex, got $hex")
-        assertEquals(gaborB64, NodeId.hexToAndroid(hex), "hex↔base64 must round-trip")
+        assertEquals(64, hex.length, "our hex form is the RAW 32-byte key (X.509 header stripped): $hex")
+        assertFalse(hex.startsWith("302a300506032b6570"), "raw form has no X.509 header")
+        assertEquals(gaborB64, NodeId.hexToAndroid(hex), "raw hex → X.509 base64 must round-trip back to Gabor's key")
         assertTrue(NodeId.isAndroidId(gaborB64) && !NodeId.isAndroidId(hex))
     }
 
@@ -58,8 +60,8 @@ class AndroidInteropTest {
 
     @Test
     fun bridge_translates_dm_routing_ids_at_the_boundary() {
-        val gaborHex = NodeId.androidToHex(gaborB64)     // Gabor as iOS would store him (hex)
-        val myHex = "302a300506032b6570032100" + "11".repeat(32)
+        val gaborHex = NodeId.androidToHex(gaborB64)     // Gabor as iOS would store him (raw-32 hex)
+        val myHex = "11".repeat(32)                       // our raw 32-byte node id (hex)
         // iOS leaf DMs Gabor: hex sender + hex target. Bridging to Android re-encodes both to base64.
         val dm = EncryptedPayload(id = "m1", nonce = "n", ciphertext = "c", senderEncPublicKey = "pub")
         val pkt = messagePacket(senderId = myHex, targetUserId = gaborHex, dm = dm)

@@ -15,12 +15,23 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 @OptIn(ExperimentalStdlibApi::class, ExperimentalEncodingApi::class)
 object NodeId {
     /** hex (this app) → base64 (Android). Returns the input unchanged if it isn't valid hex. */
-    fun hexToAndroid(hex: String): String =
-        runCatching { Base64.encode(hex.hexToByteArray()) }.getOrDefault(hex)
+    // X.509 SubjectPublicKeyInfo header for Ed25519 (OID 1.3.101.112) — Android/JVM keys are 44-byte DER
+    // (this 12-byte prefix + 32 raw bytes); iOS uses the raw 32 bytes. We normalize to RAW on our side.
+    private val ED25519_X509_PREFIX =
+        byteArrayOf(0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00)
 
-    /** base64 (Android) → hex (this app). Returns the input unchanged if it isn't valid base64. */
-    fun androidToHex(b64: String): String =
-        runCatching { Base64.decode(b64).toHexString() }.getOrDefault(b64)
+    /** hex (this app, RAW 32 bytes) → base64 X.509 DER (the Android wire form). Wraps the raw key in the header. */
+    fun hexToAndroid(hex: String): String = runCatching {
+        val raw = hex.hexToByteArray()
+        Base64.encode(if (raw.size == 32) ED25519_X509_PREFIX + raw else raw)
+    }.getOrDefault(hex)
+
+    /** base64 X.509 DER (Android) → hex (this app, RAW 32 bytes). Strips the X.509 header. */
+    fun androidToHex(b64: String): String = runCatching {
+        val der = Base64.decode(b64)
+        val raw = if (der.size == 44 && der.copyOfRange(0, 12).contentEquals(ED25519_X509_PREFIX)) der.copyOfRange(12, 44) else der
+        raw.toHexString()
+    }.getOrDefault(b64)
 
     /** True if [s] looks like an Android-style base64 X.509 Ed25519 key (vs. our hex). */
     fun isAndroidId(s: String): Boolean =
