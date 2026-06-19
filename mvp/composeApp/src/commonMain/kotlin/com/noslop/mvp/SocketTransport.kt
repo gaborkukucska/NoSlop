@@ -89,14 +89,17 @@ class SocketTransport(
      * If [proxy] is set, the connection is tunnelled through a SOCKS5 proxy — this is how a leaf reaches a
      * HUB's `.onion` via Tor (point [proxy] at Tor's SOCKS port and pass the onion address as [host]).
      */
-    suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null) {
+    suspend fun connect(
+        host: String, port: Int, proxy: SocksProxy? = null,
+        handshake: Boolean = true, peerId: String? = null,
+    ) {
         if (proxy == null) {
             val socket = aSocket(selector).tcp().connect(host, port)
-            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true))
+            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true), handshake, peerId)
         } else {
             // socks5Connect opens the channels for the handshake; reuse them (a socket's channels open once).
             val (socket, input, output) = socks5Connect(proxy, host, port)
-            handle(socket, input, output)
+            handle(socket, input, output, handshake, peerId)
         }
     }
 
@@ -148,18 +151,27 @@ class SocketTransport(
         return Triple(socket, input, output)                            // tunnel to destHost:destPort is open
     }
 
-    private suspend fun handle(socket: Socket, input: ByteReadChannel, output: ByteWriteChannel) {
+    private suspend fun handle(
+        socket: Socket, input: ByteReadChannel, output: ByteWriteChannel,
+        handshake: Boolean = true, knownPeerId: String? = null,
+    ) {
         val peer = socket.remoteAddress
         val peerId: String
-        try {
-            output.writeStringUtf8("$nodeId\n")                      // handshake: announce our id first…
-            peerId = input.readUTF8Line() ?: run {                   // …then learn theirs
-                println("[transport] EOF reading peer id from $peer")
+        if (handshake) {
+            try {
+                output.writeStringUtf8("$nodeId\n")                  // handshake: announce our id first…
+                peerId = input.readUTF8Line() ?: run {               // …then learn theirs
+                    println("[transport] EOF reading peer id from $peer")
+                    runCatching { socket.close() }; return
+                }
+            } catch (e: Throwable) {
+                println("[transport] handshake error with $peer: $e")
                 runCatching { socket.close() }; return
             }
-        } catch (e: Throwable) {
-            println("[transport] handshake error with $peer: $e")
-            runCatching { socket.close() }; return
+        } else {
+            // Handshake-less (Android-protocol peer): no preamble, just NetworkPacket JSON lines. We already
+            // know the peer's id (from its contact card), so use that as the link id.
+            peerId = knownPeerId ?: "peer-$peer"
         }
         println("[transport] link up: ${peerId.take(16)} from $peer")
         val conn = Conn(socket, output)
