@@ -158,7 +158,7 @@ private fun FeedScreen() {
     var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var videoUrl by remember { mutableStateOf("https://download.samplelib.com/mp4/sample-5s.mp4") }
+    var videoUrl by remember { mutableStateOf("https://www.w3schools.com/html/mov_bbb.mp4") }
 
     fun load() {
         loading = true; error = null
