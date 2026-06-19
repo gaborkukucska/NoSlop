@@ -52,20 +52,21 @@ Goal (owner): *"mimic the Android features on a functioning iOS app."*
 | Encrypted DMs (X25519 · SHA3 · ChaCha20-Poly1305) | ✅ | ✅ end-to-end, blind hub |
 | Contacts | ✅ | ✅ persisted + nameable |
 | Saved hubs / auto-connect | ~ | ✅ persisted + default (★) |
-| **Media / video playback** | ✅ | ❌ **not ported (biggest gap)** |
-| Reactions / votes | ✅ proto+UI | ⚠️ wire proto only, no UI |
+| **Media / video playback** | ✅ | ✅ clearnet video (full-screen AVPlayer); inline/mesh-media pending |
+| Reactions / votes | ✅ proto+UI | ⚠️ wire proto only, no UI/routing |
 | Settings / Notifications / Logs / API keys / Content prefs / Onboarding | ✅ | ❌ not ported |
-| Secure DM key storage | ✅ | ⚠️ device prefs (hardening TODO) |
-| App icon · distribution | ✅ | ❌ icon missing; needs TestFlight for others |
+| Secure DM key storage | ✅ | ✅ iOS Keychain (Android Keystore pending) |
+| App icon · distribution | ✅ | ✅ icon (NoSlop floppy); ❌ TestFlight for others |
 
 ## Remaining roadmap (ordered) — Phase 2 completion → parity
 
-1. **Media / video playback** — `expect`/`actual` player (AVPlayer on iOS, ExoPlayer on Android), wired into the feed/posts. The one large missing core feature.
-2. **Harden DM key storage** — move the X25519 DM private key into Keychain / Android Keystore (where the Ed25519 key already lives). Security-critical for a privacy app.
-3. **Reactions / votes UI** — the wire protocol already carries them; add the UI (cheap, visible win).
-4. **Onboarding + Settings** — the connective UX tissue (handle setup, hub management, Tor status, content prefs).
-5. **App icon + distribution** — asset catalog icon; Apple Developer Program + **TestFlight** so others (e.g. a real remote DM peer) can install. *External dependency: paid Apple account.*
-6. **RSS feed sources** — multiplatform XML, beyond the JSON feed.
+1. ✅ **Media / video playback** — `VideoPlayer` expect/actual; iOS full-screen AVPlayer (Swift bridge), Android system viewer. Verified on-device (plays w/ audio). *Pending: inline-in-feed embedding, peer-to-peer mesh media.*
+2. ✅ **Harden DM key storage** — iOS DM private key migrated into the Keychain (identity preserved). *Pending: Android Keystore.*
+3. **Reactions / votes** — wire types exist but the mesh doesn't route/aggregate them yet, so it's a real feature: react/vote on a post → packet → blind relay → aggregate counts → UI.
+4. **Connection UX pass** — keep the onion link alive / auto-reconnect, optimistically pre-build the circuit after Tor bootstrap, clearer "building circuit…" progress. (Tor latency is inherent; this is about not re-dialing + perceived speed.)
+5. **Onboarding + Settings** — handle setup, hub management, Tor status, content prefs.
+6. **Distribution / TestFlight** — Apple Developer Program so others (e.g. Gabor, the original repo creator) can install + do a real remote DM. *External dependency: paid Apple account.* (App icon ✅ done.)
+7. **RSS feed sources** — multiplatform XML, beyond the JSON feed.
 
 Then: Phase 3 packaging (desktop HUB as an installable app/service), Phases 4–5 (optional).
 
