@@ -228,7 +228,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     var dmDraft by mutableStateOf("")
     var selectedContact by mutableStateOf<MeshContact?>(null)
     private var autoTried = false
-    private var connecting = false                 // guard against overlapping connect attempts
+    var connecting by mutableStateOf(false)        // observable: a connect attempt is in flight
     private var activeInvite: MeshInvite? = null   // what the reconnect monitor re-dials
     private var monitorStarted = false
 
@@ -293,6 +293,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
                     // connection through SOCKS until it succeeds — no fragile control-port readiness gate.
                     var waited = 0
                     while (waited < 300_000) {
+                        if (activeInvite != invite) { status = "Disconnected"; return@launch } // cancelled by disconnect / new dial
                         val sp = TorService.socksPort()
                         val prog = TorService.bootstrapProgress()
                         val phase = when { prog in 1..99 -> "bootstrapping $prog%"; prog >= 100 -> "building circuit"; else -> "starting Tor" }
@@ -420,30 +421,39 @@ data class DmEntry(val from: String, val text: String, val mine: Boolean)
 @Composable
 private fun MeshScreen(state: MeshUiState) {
     LaunchedEffect(Unit) { state.autoConnectOnce() }
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Mesh — connect to a HUB", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         if (QrScanner.isAvailable) {
             // Always enabled — you can add/switch hubs while already connected (no need to disconnect first).
             Button(
-                onClick = { QrScanner.scan { scanned -> state.onScan(scanned) } },
+                onClick = { focus.clearFocus(); QrScanner.scan { scanned -> state.onScan(scanned) } },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("📷  Scan node QR to connect") }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(state.host, { state.host = it }, label = { Text("Hub host") }, singleLine = true, modifier = Modifier.weight(2f))
-            OutlinedTextField(state.port, { state.port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(
+                state.host, { state.host = it }, label = { Text("Hub host / onion URI") }, singleLine = true, modifier = Modifier.weight(2f),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+            )
+            OutlinedTextField(
+                state.port, { state.port = it.filter { c -> c.isDigit() } }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+            )
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Switch(checked = state.viaTor, onCheckedChange = { state.viaTor = it })
             Text("Via Tor (for .onion hubs, from anywhere)", fontSize = 13.sp)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { state.connectNow() }, enabled = !state.connected, modifier = Modifier.weight(1f)) {
-                Text(if (state.connected) "Connected" else "Connect to hub")
+            Button(onClick = { focus.clearFocus(); state.connectNow() }, enabled = !state.connected && !state.connecting, modifier = Modifier.weight(1f)) {
+                Text(if (state.connected) "Connected" else if (state.connecting) "Connecting…" else "Connect to hub")
             }
-            if (state.connected) {
-                Button(onClick = { state.disconnect() }) { Text("Disconnect") }
+            if (state.connected || state.connecting) {
+                Button(onClick = { focus.clearFocus(); state.disconnect() }) { Text("Disconnect") }
             }
         }
         Text(
