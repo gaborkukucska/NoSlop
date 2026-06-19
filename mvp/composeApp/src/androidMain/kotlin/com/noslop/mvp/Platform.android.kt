@@ -122,6 +122,17 @@ actual object DmKeyStore {
     }
 }
 
+/** Feed-filter text blob in SharedPreferences. */
+actual object FilterStore {
+    private const val PREFS = "noslop_filters"
+    private const val KEY = "filters"
+    private var fallback: String? = null
+    private fun sp() =
+        if (AndroidAppContext.isSet) AndroidAppContext.context.getSharedPreferences(PREFS, Context.MODE_PRIVATE) else null
+    actual fun load(): String? = sp()?.getString(KEY, null) ?: fallback
+    actual fun save(blob: String) { val s = sp(); if (s != null) s.edit().putString(KEY, blob).apply() else fallback = blob }
+}
+
 /** Saved-DM-contacts blob in SharedPreferences (same approach as [HubStore]). */
 actual object ContactStore {
     private const val PREFS = "noslop_contacts"

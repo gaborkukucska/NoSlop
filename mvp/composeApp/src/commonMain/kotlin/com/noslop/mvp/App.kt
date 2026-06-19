@@ -156,11 +156,17 @@ private fun Field(label: String, value: String) {
 @Composable
 private fun FeedScreen() {
     val scope = rememberCoroutineScope()
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val repo = remember { FeedRepository() }
     var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var videoUrl by remember { mutableStateOf("https://www.w3schools.com/html/mov_bbb.mp4") }
+    // Feed curation (the "NoSlop" core). Persisted raw text; applied live.
+    val saved = remember { SavedFilters.loadTexts() }
+    var mutedText by remember { mutableStateOf(saved.first) }
+    var requiredText by remember { mutableStateOf(saved.second) }
+    var showFilters by remember { mutableStateOf(false) }
 
     fun load() {
         loading = true; error = null
@@ -173,20 +179,50 @@ private fun FeedScreen() {
     }
     LaunchedEffect(Unit) { load() } // auto-load on first open
 
+    val filters = FeedFilters.from(mutedText, requiredText)
+    val shown = filters.apply(stories)
+
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Media playback (roadmap step 1): play a clearnet video URL full-screen via the native player.
+        // Media playback: play a clearnet video URL full-screen via the native player.
         if (VideoPlayer.isAvailable) {
             OutlinedTextField(videoUrl, { videoUrl = it }, label = { Text("Video URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { VideoPlayer.play(videoUrl.trim()) }, enabled = videoUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { focus.clearFocus(); VideoPlayer.play(videoUrl.trim()) }, enabled = videoUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
                 Text("▶  Play video")
             }
         }
-        Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { load() }, enabled = !loading, modifier = Modifier.weight(1f)) { Text(if (loading) "Loading…" else "Refresh feed") }
+            Button(onClick = { showFilters = !showFilters }) { Text(if (showFilters) "Hide filters" else "🧹 Filters") }
+        }
+        // Curation panel: mute words (hide) + must-have words (only show matching). Persisted as you type.
+        if (showFilters) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        mutedText, { mutedText = it; SavedFilters.saveTexts(it, requiredText) },
+                        label = { Text("Mute words (comma-separated)") }, modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+                    )
+                    OutlinedTextField(
+                        requiredText, { requiredText = it; SavedFilters.saveTexts(mutedText, it) },
+                        label = { Text("Must-have words (optional)") }, modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+                    )
+                    Text("Hide anything containing a mute word; with must-have words set, show only matches.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+        if (stories.isNotEmpty()) {
+            val muted = stories.size - shown.size
+            Text("Showing ${shown.size} of ${stories.size}${if (muted > 0) " · $muted filtered" else ""}", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+        }
         when {
             loading && stories.isEmpty() -> CircularProgressIndicator()
             error != null && stories.isEmpty() -> Text("Error: $error", color = MaterialTheme.colorScheme.error)
             else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(stories) { s ->
+                items(shown) { s ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(s.source.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)

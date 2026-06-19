@@ -130,6 +130,13 @@ actual object IdentitySigner {
     }
 }
 
+/** Feed-filter text blob in NSUserDefaults. */
+actual object FilterStore {
+    private const val KEY = "noslop_filters"
+    actual fun load(): String? = platform.Foundation.NSUserDefaults.standardUserDefaults.stringForKey(KEY)
+    actual fun save(blob: String) = platform.Foundation.NSUserDefaults.standardUserDefaults.setObject(blob, KEY)
+}
+
 /** Saved-DM-contacts blob in NSUserDefaults (same approach as [HubStore]). */
 actual object ContactStore {
     private const val KEY = "noslop_contacts"

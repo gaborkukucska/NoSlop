@@ -76,6 +76,13 @@ actual object DmKeyStore {
     actual fun save(privRawB64: String) { file.writeText(privRawB64) }
 }
 
+/** Feed-filter text blob in a file under the hub dir. */
+actual object FilterStore {
+    private val file = File(hubDir, "filters")
+    actual fun load(): String? = if (file.exists()) file.readText().ifBlank { null } else null
+    actual fun save(blob: String) { file.writeText(blob) }
+}
+
 /** Saved-DM-contacts blob in a file under the hub dir (same approach as [HubStore]). */
 actual object ContactStore {
     private val file = File(hubDir, "contacts")
