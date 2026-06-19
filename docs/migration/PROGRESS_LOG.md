@@ -4,6 +4,38 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-06-19 — Phase 2: Android-network interop bridge (the migration payoff) 🟢 built, ⏳ awaiting live peer
+
+The KMP app can now interoperate with the **existing Android NoSlop network** — the whole point of the
+migration. Built + unit-tested; the live cross-platform DM just needs the Android peer (Gabor) online.
+
+- **Discovery (from reading the Android source + Gabor's real QR):** Android is **peer-to-peer** (each device
+  hosts its own onion, dials peers' onions directly on `Constants.MESH_PORT` = 9999), uses **no link handshake**
+  (reads raw `NetworkPacket` JSON lines), and identifies nodes by **base64** X.509 Ed25519 keys (we use hex —
+  *same DER bytes*). DM crypto + key encodings already match ours; contact QR is `{handle, publicKey,
+  encPublicKey, onionAddress}`. We conform to Android (can't change the deployed app).
+- **iOS leaf can't host an onion**, so two-way with a P2P Android node needs a bridge. **Solution: the desktop
+  hub becomes bilingual** (`BridgeMain` / `runBridge`): iOS leaves dial its onion the normal way; it dials the
+  Android peer's onion handshake-less; it relays between the two on one transport (sides distinguished by
+  link-id format), re-encoding `senderId`/`targetUserId` hex↔base64 at the boundary **without re-stamping**
+  (Android decrypts DMs by original-sender contact lookup). Retries the peer dial every 20s.
+- **Transport:** `SocketTransport.connect(handshake=false, peerId=…)` — handshake-less mode. `NodeId` codec
+  (hex↔base64, idempotent) + packet id-translation. All in `AndroidInteropTest` (jvmTest), green, incl. against
+  Gabor's real key.
+- **iOS:** `MeshContact.parse` also reads Android's QR (normalizes id to hex); "Show my QR" emits Android shape
+  (universal); `MeshClient.resolveEncPub` decrypts Android DMs (which omit the in-payload sender key) via the
+  stored contact.
+- **Live test status:** bridge runs, bootstraps Tor, publishes its onion, dials Gabor's
+  `s4zk7w5u…onion:9999` correctly — currently `SOCKS REP=4` (his node offline). Auto-connects when he's up.
+
+**Also this session:** clearnet video playback (AVPlayer, on-device w/ audio), DM key → iOS Keychain,
+saved-hub persistence + default, share-my-QR + persisted/nameable contacts, connection UX (auto-reconnect +
+eager dial + Disconnect + keyboard dismiss), app icon (NoSlop floppy).
+
+**Next:** the live Gabor DM once his device is online; then Android-side Keystore for the DM key, RSS, etc.
+
+---
+
 ## 2026-06-19 — Phase 1 step 13: end-to-end encrypted DMs on-device (hub stays blind) 🟢
 
 **Two-way encrypted DM proven on the phone, relayed by a hub that can't read it.** Owner steered two key
