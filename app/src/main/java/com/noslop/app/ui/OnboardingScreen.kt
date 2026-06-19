@@ -211,11 +211,7 @@ fun OnboardingScreen(
                 if (currentStep < 8) {
                     Button(
                         onClick = {
-                            if (currentStep == 3 && !selectedInterests.contains("Music") && !selectedInterests.contains("Video Platforms")) {
-                                currentStep += 2 // Skip genres if they don't want music/video
-                            } else {
-                                currentStep++
-                            }
+                            currentStep++
                             if (currentStep == 7) {
                                 viewModel.preloadFeedsDuringOnboarding(
                                     selectedSources,
@@ -449,7 +445,7 @@ fun Step3Interests(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
         ) {
-            gridItems(SourceLibrary.categories) { category ->
+            gridItems(SourceLibrary.selectableCategories) { category ->
                 val isSelected = selectedInterests.contains(category)
                 Card(
                     modifier = Modifier
@@ -486,10 +482,17 @@ fun Step4Genres(
     onToggleVideoGenre: (String) -> Unit
 ) {
     val showMusic = interests.contains("Music")
-    val showVideo = interests.contains("Video Platforms")
+    // Video is always included (not a selectable category) so always show video genres
+    val showVideo = true
     
-    val musicGenres = listOf("Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop")
-    val videoGenres = listOf("Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary")
+    val musicGenres = listOf(
+        "Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop",
+        "Metal", "R&B", "Country", "Reggae", "Blues", "Indie", "Soul", "Punk"
+    )
+    val videoGenres = listOf(
+        "Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary",
+        "Comedy", "Music Videos", "Sports", "Travel", "DIY & How-To", "Animation", "Film & Cinema"
+    )
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -603,20 +606,19 @@ fun Step5Feeds(
     val apiKeyRepository = remember { com.noslop.app.data.ApiKeyRepository(context) }
     var showApiWarningFor by remember { mutableStateOf<String?>(null) }
     
-    var searchQuery by remember { mutableStateOf("") }
+    // Include always-included categories (Video Platforms, Social Clearnet) alongside user interests
+    val effectiveInterests = remember(interests) {
+        (interests + SourceLibrary.alwaysIncludedCategories).distinct()
+    }
     
-    val suggestedSources = remember(interests, searchQuery) {
-        SourceLibrary.sources.filter { 
-            (interests.contains(it.category) || searchQuery.isNotBlank()) &&
-            (it.title.contains(searchQuery, ignoreCase = true) || 
-             it.category.contains(searchQuery, ignoreCase = true))
-        }
+    val suggestedSources = remember(effectiveInterests) {
+        SourceLibrary.sources.filter { effectiveInterests.contains(it.category) }
     }
 
     var hasPreselected by remember { mutableStateOf(false) }
 
     LaunchedEffect(suggestedSources) {
-        if (!hasPreselected && suggestedSources.isNotEmpty() && searchQuery.isBlank()) {
+        if (!hasPreselected && suggestedSources.isNotEmpty()) {
             suggestedSources.forEach { src ->
                 val isApiSource = src.feedType == "api"
                 val serviceId = if (isApiSource) src.url.split(":").first() else null
@@ -643,26 +645,8 @@ fun Step5Feeds(
             modifier = Modifier.padding(bottom = 8.dp)
         )
 
-        OutlinedTextField(
-            value = searchQuery,
-            onValueChange = { searchQuery = it },
-            placeholder = { Text("Search creators, channels, names...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-            singleLine = true,
-            shape = RoundedCornerShape(24.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AccentGreen,
-                unfocusedBorderColor = BorderSubtle,
-                focusedTextColor = TextLight,
-                unfocusedTextColor = TextLight
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        )
-
         Text(
-            text = if (searchQuery.isBlank()) "Based on your interests, we recommend these sources." else "Search results:",
+            text = "Based on your interests, we recommend these sources.",
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted,
             textAlign = TextAlign.Center,
@@ -763,7 +747,7 @@ fun Step5Feeds(
  * The collected names are later passed as extra search keywords into the API
  * aggregation pipeline so content from those creators surfaces in the feed.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun Step6Creators(
     selectedInterests: List<String>,
@@ -799,6 +783,67 @@ fun Step6Creators(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
+        // Word-cloud: show suggestions above the text field so users pick from the cloud first
+        if (suggestions.isNotEmpty()) {
+            Text(
+                text = "SUGGESTED FOR YOUR INTERESTS",
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 8.dp, bottom = 6.dp)
+            )
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 12.dp)
+            ) {
+                item {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        suggestions.forEach { creator ->
+                            val isSelected = currentKeywords.contains(creator)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    val updated = if (isSelected) {
+                                        currentKeywords - creator
+                                    } else {
+                                        currentKeywords + creator
+                                    }
+                                    onCreatorKeywordsChange(updated.joinToString(", "))
+                                },
+                                label = {
+                                    Text(
+                                        text = creator,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = PrimaryBlack,
+                                    labelColor = TextLight,
+                                    selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
+                                    selectedLabelColor = AccentGreen
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = if (isSelected) AccentGreen else BorderSubtle,
+                                    selectedBorderColor = AccentGreen
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         OutlinedTextField(
             value = creatorKeywords,
             onValueChange = onCreatorKeywordsChange,
@@ -818,73 +863,6 @@ fun Step6Creators(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         )
-
-        if (suggestions.isNotEmpty()) {
-            Text(
-                text = "SUGGESTED FOR YOUR INTERESTS",
-                style = MaterialTheme.typography.labelSmall,
-                color = AccentGreen,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, top = 8.dp, bottom = 6.dp)
-            )
-
-            // Word-cloud: wrapping flow of suggestion chips
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-            ) {
-                // Group chips into rows of ~3 so they wrap naturally within a LazyColumn
-                val chunked = suggestions.chunked(3)
-                items(chunked) { row ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        row.forEach { creator ->
-                            val isSelected = currentKeywords.contains(creator)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = {
-                                    val updated = if (isSelected) {
-                                        currentKeywords - creator
-                                    } else {
-                                        currentKeywords + creator
-                                    }
-                                    onCreatorKeywordsChange(updated.joinToString(", "))
-                                },
-                                label = {
-                                    Text(
-                                        text = creator,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        maxLines = 1
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    containerColor = PrimaryBlack,
-                                    labelColor = TextLight,
-                                    selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
-                                    selectedLabelColor = AccentGreen
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = isSelected,
-                                    borderColor = if (isSelected) AccentGreen else BorderSubtle,
-                                    selectedBorderColor = AccentGreen
-                                ),
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                        }
-                        // Fill remainder so the row aligns left
-                        repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
-                    }
-                }
-            }
-        }
     }
 }
 

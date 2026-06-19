@@ -26,7 +26,7 @@ import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.ui.theme.*
 import androidx.compose.ui.graphics.asImageBitmap
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     // Profile state
@@ -65,8 +65,14 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     val localMusicGenres = remember { mutableStateListOf<String>().apply { addAll(musicGenres) } }
     val localVideoGenres = remember { mutableStateListOf<String>().apply { addAll(videoGenres) } }
 
-    val allMusicGenres = listOf("Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop")
-    val allVideoGenres = listOf("Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary")
+    val allMusicGenres = listOf(
+        "Electronic", "Ambient", "Rock", "Lo-Fi", "Classical", "Hip-Hop", "Jazz", "Pop",
+        "Metal", "R&B", "Country", "Reggae", "Blues", "Indie", "Soul", "Punk"
+    )
+    val allVideoGenres = listOf(
+        "Education", "Tech", "Gaming", "Science", "Entertainment", "News", "Documentary",
+        "Comedy", "Music Videos", "Sports", "Travel", "DIY & How-To", "Animation", "Film & Cinema"
+    )
 
     // Sources state
     val sources by viewModel.allSources.collectAsState(initial = emptyList())
@@ -216,7 +222,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 Text("CATEGORIES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             }
 
-            items(SourceLibrary.categories) { category ->
+            items(SourceLibrary.selectableCategories) { category ->
                 val isSelected = localInterests.contains(category)
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
@@ -276,7 +282,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             }
 
             // ────────────────── VIDEO GENRES ──────────────────
-            if (localInterests.contains("Video Platforms")) {
+            // Video Platforms is always included — always show video genre options
+            run {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text("VIDEO GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
@@ -305,7 +312,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             )
                         }
                     }
-                }
+            }
             }
 
             // ────────────────── NEGATIVE KEYWORDS ──────────────────
@@ -327,40 +334,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // ────────────────── CREATOR FILTERS ──────────────────
-            item {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    "CREATOR & CHANNEL FILTERS",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = AccentGreen,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Creators, channels, or outlets whose content you want surfaced in your feed. Used as search keywords across all active API sources.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = creatorKeywords,
-                    onValueChange = { creatorKeywords = it },
-                    label = { Text("Creators / channels (comma separated)") },
-                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
-                    minLines = 2,
-                    maxLines = 4,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
             // Creator word-cloud suggestion chips (derived from current selected interests)
+            // Shown ABOVE the text field so users pick from suggestions first
             run {
                 val suggestions = SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
                 if (suggestions.isNotEmpty()) {
@@ -373,15 +348,13 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
                     }
-                    val chunked = suggestions.chunked(3)
-                    items(chunked) { row ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    item {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            row.forEach { creator ->
+                            suggestions.forEach { creator ->
                                 val currentSet = creatorKeywords.split(",")
                                     .map { it.trim() }
                                     .filter { it.isNotEmpty() }
@@ -396,8 +369,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                     label = {
                                         Text(
                                             text = creator,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            maxLines = 1
+                                            style = MaterialTheme.typography.labelSmall
                                         )
                                     },
                                     colors = FilterChipDefaults.filterChipColors(
@@ -411,15 +383,31 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                         selected = isSelected,
                                         borderColor = if (isSelected) AccentGreen else BorderSubtle,
                                         selectedBorderColor = AccentGreen
-                                    ),
-                                    modifier = Modifier.weight(1f, fill = false)
+                                    )
                                 )
                             }
-                            repeat(3 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                         }
                     }
-                    item { Spacer(modifier = Modifier.height(16.dp)) }
+                    item { Spacer(modifier = Modifier.height(12.dp)) }
                 }
+            }
+
+            // ────────────────── CREATOR TEXT FIELD ──────────────────
+            item {
+                OutlinedTextField(
+                    value = creatorKeywords,
+                    onValueChange = { creatorKeywords = it },
+                    label = { Text("Creators / channels (comma separated)") },
+                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
+                    minLines = 2,
+                    maxLines = 4,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // ────────────────── LANGUAGE ──────────────────

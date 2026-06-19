@@ -147,71 +147,78 @@ fun QRScanScreen(
                 // Main body based on permission
                 if (cameraPermissionState.status.isGranted) {
                     if (!showConfirmDialog) {
-                        CameraScanPreview(
-                            onBarcodeDetected = { barcode ->
-                                if (scannedRawData == null) {
-                                    scannedRawData = barcode
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Camera area with HUD overlay
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                            ) {
+                                CameraScanPreview(
+                                    onBarcodeDetected = { barcode ->
+                                        if (scannedRawData == null) {
+                                            scannedRawData = barcode
+                                        }
+                                    }
+                                )
+
+                                // Scanner target box HUD overlay (centered over camera)
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(260.dp)
+                                                .border(2.dp, AccentGreen, RoundedCornerShape(16.dp))
+                                        )
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Text(
+                                            text = "Center the peer's QR code in the grid",
+                                            color = AccentGreen,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier
+                                                .background(PrimaryBlack.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        )
+                                    }
                                 }
                             }
-                        )
 
-                        // Scanner target box HUD mockup overlay
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .zIndex(1f),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(260.dp)
-                                        .border(2.dp, AccentGreen, RoundedCornerShape(16.dp))
-                                )
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    text = "Center the peer's QR code in the grid",
-                                    color = AccentGreen,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier
-                                        .background(PrimaryBlack.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 12.dp, vertical = 6.dp)
-                                )
-                            }
-                        }
-
-                        // Gallery picker button at the bottom
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .zIndex(2f)
-                                .padding(bottom = 48.dp)
-                                .navigationBarsPadding(),
-                            contentAlignment = Alignment.BottomCenter
-                        ) {
-                            Button(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = SurfaceDark.copy(alpha = 0.9f),
-                                    contentColor = AccentGreen
-                                ),
-                                border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                            // Gallery picker button — sits BELOW the camera preview
+                            // so the native AndroidView cannot obscure it.
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(PrimaryBlack)
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    Icons.Default.PhotoLibrary,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "Select from Gallery",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
+                                Button(
+                                    onClick = { imagePickerLauncher.launch("image/*") },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = SurfaceDark.copy(alpha = 0.9f),
+                                        contentColor = AccentGreen
+                                    ),
+                                    border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.PhotoLibrary,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "Select from Gallery",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                }
                             }
                         }
                     } else {

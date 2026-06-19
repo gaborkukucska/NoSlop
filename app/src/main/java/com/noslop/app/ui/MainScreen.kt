@@ -28,6 +28,7 @@ import java.util.Locale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 
 private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
@@ -36,7 +37,9 @@ fun FullScreenMeshCard(
     post: MeshPost, 
     isVisible: Boolean = true, 
     onShareToMesh: () -> Unit = {},
-    viewModel: NoSlopViewModel? = null
+    viewModel: NoSlopViewModel? = null,
+    bottomSlideOffset: Float = 0f,
+    rightSlideOffset: Float = 0f
 ) {
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
@@ -106,6 +109,7 @@ fun FullScreenMeshCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomStart)
+                    .graphicsLayer { translationY = bottomSlideOffset }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
@@ -224,7 +228,9 @@ fun FullScreenMeshCard(
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .graphicsLayer { translationX = rightSlideOffset }
             )
 
             ContentHealthOverlay(

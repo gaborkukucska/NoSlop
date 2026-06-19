@@ -64,6 +64,13 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import android.content.res.Configuration
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
@@ -106,6 +113,50 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
 
+    // ─── Landscape auto-hide UI ───
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    var uiVisible by remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
+    var hideJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    // Auto-hide timer: when in landscape on the Feed tab, hide UI after 1 second
+    LaunchedEffect(isLandscape, selectedTab, uiVisible) {
+        if (isLandscape && selectedTab == 0 && uiVisible) {
+            hideJob?.cancel()
+            hideJob = coroutineScope.launch {
+                kotlinx.coroutines.delay(1000L)
+                uiVisible = false
+            }
+        }
+    }
+
+    // Reset UI visibility when leaving landscape or switching tabs
+    LaunchedEffect(isLandscape, selectedTab) {
+        if (!isLandscape || selectedTab != 0) {
+            uiVisible = true
+            hideJob?.cancel()
+        }
+    }
+
+    // Animation values for slide transitions
+    val landscapeHidden = isLandscape && selectedTab == 0 && !uiVisible
+    val bottomSlide by animateFloatAsState(
+        targetValue = if (landscapeHidden) 300f else 0f,
+        animationSpec = tween(durationMillis = 350),
+        label = "bottomSlide"
+    )
+    val topSlide by animateFloatAsState(
+        targetValue = if (landscapeHidden) -200f else 0f,
+        animationSpec = tween(durationMillis = 350),
+        label = "topSlide"
+    )
+    val rightSlide by animateFloatAsState(
+        targetValue = if (landscapeHidden) 300f else 0f,
+        animationSpec = tween(durationMillis = 350),
+        label = "rightSlide"
+    )
+
     LaunchedEffect(initialRoute) {
         if (initialRoute != null) {
             if (initialRoute.startsWith("chat/")) {
@@ -133,7 +184,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     containerColor = AccentGreen,
                     contentColor = PrimaryBlack,
                     shape = RoundedCornerShape(50),
-                    modifier = Modifier.size(56.dp).offset(y = 58.dp)
+                    modifier = Modifier
+                        .size(56.dp)
+                        .offset(y = 58.dp)
+                        .graphicsLayer { translationY = bottomSlide }
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
                 }
@@ -143,7 +197,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         bottomBar = {
             NavigationBar(
                 containerColor = SurfaceDark,
-                tonalElevation = 8.dp
+                tonalElevation = 8.dp,
+                modifier = Modifier.graphicsLayer { translationY = bottomSlide }
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
@@ -243,10 +298,19 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
+            val animatedBottomPadding by animateFloatAsState(
+                targetValue = if (landscapeHidden) 0f else innerPadding.calculateBottomPadding().value,
+                animationSpec = tween(durationMillis = 350),
+                label = "bottomPadding"
+            )
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
+                    .padding(
+                        top = innerPadding.calculateTopPadding(),
+                        bottom = if (selectedTab == 0) animatedBottomPadding.dp else innerPadding.calculateBottomPadding()
+                    )
             ) {
                 // The Feed tab is always composed to preserve VerticalPager scroll position.
                 // It is hidden via alpha=0 when not selected.
@@ -256,12 +320,36 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         if (selectedTab == 0) Modifier
                         else Modifier.alpha(0f)
                     )
+                    // Landscape tap interceptor: tap to show/hide UI
+                    .then(
+                        if (isLandscape && selectedTab == 0) {
+                            Modifier.pointerInput(Unit) {
+                                detectTapGestures {
+                                    if (!uiVisible) {
+                                        uiVisible = true
+                                        // Re-arm the auto-hide timer
+                                        hideJob?.cancel()
+                                        hideJob = coroutineScope.launch {
+                                            kotlinx.coroutines.delay(1000L)
+                                            uiVisible = false
+                                        }
+                                    } else {
+                                        uiVisible = false
+                                        hideJob?.cancel()
+                                    }
+                                }
+                            }
+                        } else Modifier
+                    )
                 ) {
                     UnifiedFeedTab(
                         viewModel,
                         showComposeDialog,
                         { showComposeDialog = false },
-                        { selectedTab = it }
+                        { selectedTab = it },
+                        topSlideOffset = topSlide,
+                        bottomSlideOffset = bottomSlide,
+                        rightSlideOffset = rightSlide
                     )
                 }
                 if (selectedTab == 1) {
@@ -350,7 +438,10 @@ fun UnifiedFeedTab(
     viewModel: NoSlopViewModel, 
     showComposeDialog: Boolean, 
     onComposeDismiss: () -> Unit,
-    onTabChange: (Int) -> Unit
+    onTabChange: (Int) -> Unit,
+    topSlideOffset: Float = 0f,
+    bottomSlideOffset: Float = 0f,
+    rightSlideOffset: Float = 0f
 ) {
     val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
@@ -545,12 +636,17 @@ fun UnifiedFeedTab(
                             item = item.item,
                             isVisible = isVisible,
                             onShareToMesh = { showShareDialog = item },
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            bottomSlideOffset = bottomSlideOffset,
+                            rightSlideOffset = rightSlideOffset
                         )
                         is UnifiedItem.Mesh -> FullScreenMeshCard(
                             post = item.post,
                             isVisible = isVisible,
-                            viewModel = viewModel
+                            onShareToMesh = { showShareDialog = item },
+                            viewModel = viewModel,
+                            bottomSlideOffset = bottomSlideOffset,
+                            rightSlideOffset = rightSlideOffset
                         )
                     }
                 }
@@ -563,6 +659,7 @@ fun UnifiedFeedTab(
                 .align(Alignment.TopEnd)
                 .padding(top = 12.dp, end = 12.dp)
                 .zIndex(10f)
+                .graphicsLayer { translationY = topSlideOffset }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Show active filter indicator chip if any filter is active
@@ -627,6 +724,7 @@ fun UnifiedFeedTab(
                 .align(Alignment.TopStart)
                 .padding(top = 12.dp, start = 12.dp)
                 .zIndex(10f)
+                .graphicsLayer { translationY = topSlideOffset }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // Notifications button
