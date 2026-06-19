@@ -283,6 +283,13 @@ fun VideoPlayer(
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
+    // Auto-fullscreen: hides status/nav bars whenever the device is rotated to
+    // landscape while this video is the visible card, and restores them the
+    // moment the device goes back to portrait OR this player leaves
+    // composition (card swiped away, tab changed, etc.) — see
+    // PlaybackPositionStore.kt for the implementation + safety rationale.
+    rememberAutoFullscreenOnLandscape(enabled = isVisible)
+
     var retryTrigger by remember { mutableStateOf(0) }
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
 
@@ -403,6 +410,11 @@ private fun ExoVideoPlayer(
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = true
+                val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                if (resumeMs > 0L) {
+                    Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $url")
+                    seekTo(resumeMs)
+                }
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
@@ -432,6 +444,11 @@ private fun ExoVideoPlayer(
                         .setMimeType(mimeType)
                         .build()
                     setMediaItem(mediaItem)
+                    val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                    if (resumeMs > 0L) {
+                        Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $url")
+                        seekTo(resumeMs)
+                    }
                     prepare()
                     playWhenReady = true
                     repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
@@ -451,8 +468,33 @@ private fun ExoVideoPlayer(
         exoPlayer = player
 
         onDispose {
+            // Remember where playback left off so re-visiting this video
+            // (swiping back to it, or re-opening the app) resumes instead of
+            // restarting from zero. Skipped automatically by the store itself
+            // if the video had barely started or had basically finished.
+            try {
+                PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+            } catch (e: Exception) {
+                Logger.warn("VIDEO", "Failed to save playback position for $url: ${e.message}")
+            }
             player.release()
             exoPlayer = null
+        }
+    }
+
+    // Periodically persist playback position while this player exists, so
+    // progress survives an app kill/crash, not just a clean navigate-away.
+    // onDispose above still does the final, most up-to-date save.
+    LaunchedEffect(exoPlayer) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        while (true) {
+            kotlinx.coroutines.delay(5000L)
+            try {
+                PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+            } catch (e: Exception) {
+                // Player may have been released concurrently; ignore and let the loop end.
+                break
+            }
         }
     }
 

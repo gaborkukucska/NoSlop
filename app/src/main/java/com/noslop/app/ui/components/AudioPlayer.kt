@@ -39,6 +39,11 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             val player = if (preloaded != null) {
                 preloaded.apply {
                     playWhenReady = true
+                    val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                    if (resumeMs > 0L) {
+                        Logger.info("AUDIO", "Resuming preloaded audio at ${resumeMs}ms: $url")
+                        seekTo(resumeMs)
+                    }
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             hasError = true
@@ -82,6 +87,11 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                         val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
                         setMediaItem(mediaItem)
                         volume = 1f
+                        val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                        if (resumeMs > 0L) {
+                            Logger.info("AUDIO", "Resuming audio at ${resumeMs}ms: $url")
+                            seekTo(resumeMs)
+                        }
                         prepare()
                         playWhenReady = true
                         repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
@@ -117,8 +127,17 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
                 duration = player.duration
             }
+            currentPos = player.currentPosition
+            if (duration > 0) {
+                progress = currentPos.toFloat() / duration
+            }
             
             onDispose {
+                try {
+                    PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+                } catch (e: Exception) {
+                    Logger.warn("AUDIO", "Failed to save playback position for $url: ${e.message}")
+                }
                 player.release()
                 exoPlayer = null
                 isPlaying = false
@@ -141,12 +160,22 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
 
     LaunchedEffect(isPlaying, exoPlayer) {
         exoPlayer?.let { player ->
+            var ticksSinceSave = 0
             while (isPlaying) {
                 currentPos = player.currentPosition
                 val d = player.duration
                 if (d > 0) {
                     progress = currentPos.toFloat() / d
                     duration = d
+                }
+                // Piggyback a position save on this existing 200ms poll loop,
+                // throttled to roughly every 5s so we're not writing on every tick.
+                ticksSinceSave++
+                if (ticksSinceSave >= 25) {
+                    ticksSinceSave = 0
+                    try {
+                        PlaybackPositionStore.save(url, currentPos, duration)
+                    } catch (e: Exception) { /* player may be mid-release; ignore */ }
                 }
                 kotlinx.coroutines.delay(200)
             }
