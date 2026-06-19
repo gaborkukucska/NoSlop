@@ -62,6 +62,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         getUserProfile = { getUserProfile() },
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
+    val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
     // --- State Observables ---
     // Feed observables re-exposed from FeedRepository (Stage 0.3) so UI subscribers are unchanged.
@@ -315,6 +316,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         meshPacketHandler.handleIncomingPacket(packet)
 
     suspend fun setIncomingRequest(peer: Peer) = meshSocialRepository.setIncomingRequest(peer)
+    fun setHandshakeAccepted(peer: Peer) = meshSocialRepository.setHandshakeAccepted(peer)
+    fun clearHandshakeAccepted() = meshSocialRepository.clearHandshakeAccepted()
 
     suspend fun clearIncomingRequest() = meshSocialRepository.clearIncomingRequest()
 

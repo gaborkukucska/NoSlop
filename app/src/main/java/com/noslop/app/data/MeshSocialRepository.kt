@@ -53,6 +53,18 @@ class MeshSocialRepository(
     /** Pending inbound connection request awaiting the user's accept/decline (null when none). */
     val incomingRequestFlow: StateFlow<Peer?> = _incomingRequestFlow.asStateFlow()
 
+    private val _acceptedHandshakeFlow = MutableStateFlow<Peer?>(null)
+    /** Fires once when a peer accepts our outgoing connection request; cleared after consumption. */
+    val acceptedHandshakeFlow: StateFlow<Peer?> = _acceptedHandshakeFlow.asStateFlow()
+
+    fun setHandshakeAccepted(peer: Peer) {
+        _acceptedHandshakeFlow.value = peer
+    }
+
+    fun clearHandshakeAccepted() {
+        _acceptedHandshakeFlow.value = null
+    }
+
     fun startPresenceHeartbeat() {
         if (presenceJob?.isActive == true) return
         presenceJob = repositoryScope.launch {

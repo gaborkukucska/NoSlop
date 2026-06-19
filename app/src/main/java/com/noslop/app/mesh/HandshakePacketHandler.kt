@@ -104,6 +104,8 @@ class HandshakePacketHandler(
             peerDao.insertPeer(peer.copy(
                 isTrusted = true,
                 lastSeenAt = System.currentTimeMillis(),
+                onionAddress = handPay.fromHomeNode,
+                encPublicKeyB64 = handPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: peer.encPublicKeyB64,
                 authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64
             ))
         } else {
@@ -145,6 +147,12 @@ class HandshakePacketHandler(
             message = msg,
             deepLinkRoute = route
         )
+
+        // Signal the UI that our outgoing request was accepted
+        val acceptedPeer = peerDao.getPeerByPublicKey(handPay.fromUserId)
+        if (acceptedPeer != null) {
+            repo.setHandshakeAccepted(acceptedPeer)
+        }
 
         return true
     }
