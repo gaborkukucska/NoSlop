@@ -62,12 +62,19 @@ fun main(args: Array<String>) = runBlocking {
     println(QrConsole.render(invite.toUri()))
     println(invite.toUri() + "\n")
 
-    // Dial the Android peer (e.g. Gabor) handshake-less, through our own Tor SOCKS.
-    println("[bridge] dialing Android peer ${peerId.take(12)}… via $peerOnion:$androidPort …")
-    runCatching {
-        transport.connect(peerOnion, androidPort, SocksProxy("127.0.0.1", tor.socksPort), handshake = false, peerId = peerId)
-        println("[bridge] linked to Android peer ✓ — posts + DMs now relay both ways")
-    }.onFailure { println("[bridge] could NOT reach Android peer (${it.message}) — will still serve the iPhone") }
+    // Keep a link to the Android peer (e.g. Gabor) up: (re)dial handshake-less through our Tor SOCKS whenever
+    // it's not currently linked — so when his node comes online (onion reachable) we connect automatically.
+    scope.launch {
+        while (true) {
+            if (transport.links.none { NodeId.isAndroidId(it) }) {
+                runCatching {
+                    transport.connect(peerOnion, androidPort, SocksProxy("127.0.0.1", tor.socksPort), handshake = false, peerId = peerId)
+                    println("[bridge] linked to Android peer ✓ — posts + DMs now relay both ways")
+                }.onFailure { println("[bridge] Android peer unreachable (${it.message}); retrying in 20s") }
+            }
+            delay(20_000)
+        }
+    }
 
     while (true) {
         delay(60_000)
