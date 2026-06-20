@@ -357,8 +357,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
-        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
-    ): Boolean = meshSocialRepository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata)
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        replyToMessageId: String? = null
+    ): Boolean = meshSocialRepository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId)
 
     suspend fun markMessagesAsRead(peerPub: String) = meshSocialRepository.markMessagesAsRead(peerPub)
 

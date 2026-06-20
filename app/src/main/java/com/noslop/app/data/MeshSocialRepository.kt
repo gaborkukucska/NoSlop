@@ -373,22 +373,22 @@ class MeshSocialRepository(
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
-        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        replyToMessageId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
-        // Wrap content with media metadata if present
-        val contentToSend = if (mediaMetadata != null) {
-            val map = mapOf(
-                "content" to messageText,
-                "media" to mediaMetadata
-            )
-            com.google.gson.Gson().toJson(map)
-        } else {
-            messageText
+        // Always wrap content with JSON to securely pass metadata over X25519 channel
+        val map = mutableMapOf<String, Any>("content" to messageText)
+        if (mediaMetadata != null) {
+            map["media"] = mediaMetadata
         }
+        if (replyToMessageId != null) {
+            map["replyTo"] = replyToMessageId
+        }
+        val contentToSend = com.google.gson.Gson().toJson(map)
 
         val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, recipientEncPub, myKeys.encPrivateKeyB64)
 
@@ -406,7 +406,8 @@ class MeshSocialRepository(
             nonce = nonce,
             timestamp = System.currentTimeMillis(),
             mediaId = mediaMetadata?.id,
-            mediaType = mediaMetadata?.type
+            mediaType = mediaMetadata?.type,
+            replyToMessageId = replyToMessageId
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")

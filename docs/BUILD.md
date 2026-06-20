@@ -154,9 +154,11 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 *   **Fix**: Wait an additional 30 seconds for the internal daemon to achieve 100% bootstrap. If it continues to fail, fully force-close the app and reopen it to restart the native Tor process.
 
 ### 3. SQLite Database Migration Crash
-*   **Symptom**: App crashes upon launching after a package update.
-*   **Cause**: The database entity schema was modified, but Room database version was not incremented, or a migration configuration was omitted.
-*   **Fix**: During early R&D phases, you can clear the app's cache and local storage data via **App Info** -> **Storage** -> **Clear Data** on the device to drop local files and allow Room to re-create the tables cleanly.
+*   **Symptom**: App crashes upon launching after a package update with an `IllegalStateException` stating `A migration from X to Y was required but not found`.
+*   **Cause**: The database entity schema was modified, and the Room database version was incremented, but no explicit `Migration` object was provided to `NoSlopDatabase.addMigrations()`.
+*   **Fix**: Write a proper SQL migration path from the old version to the new version in `NoSlopDatabase.kt`. 
+    *   > [!CAUTION]
+    *   > **NEVER use `.fallbackToDestructiveMigration()` in production.** Doing so will silently drop all tables and completely wipe the user's local peer connections, feed history, and stored mesh posts. While a cryptographic identity survives a destructive migration, the social graph will be irrevocably lost. Always prefer a crash over silent data destruction during beta testing.
 
 ### 4. MediaCodec Exhaustion (Video Black Screens)
 *   **Symptom**: Videos in the feed fail to play, showing a black screen and logging `Media Quality Service not found`.

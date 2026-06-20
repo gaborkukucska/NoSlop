@@ -92,7 +92,8 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val isRead: Boolean = false,
     val mediaId: String? = null,
-    val mediaType: String? = null
+    val mediaType: String? = null,
+    val replyToMessageId: String? = null
 )
 
 @Entity(

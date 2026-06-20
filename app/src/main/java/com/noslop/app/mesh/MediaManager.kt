@@ -409,8 +409,8 @@ object MediaManager {
             }
         } else {
             // 2. We don't have it, are we relaying it?
-            // Relay logic would go here (GossipService will also handle relay requests)
-            Logger.warn(TAG, "Received MEDIA_REQUEST for unknown media ${payload.mediaId} from $senderId")
+            Logger.warn(TAG, "Received MEDIA_REQUEST for unknown media ${payload.mediaId} from $senderId. Delegating to GossipService.")
+            GossipService.delegateUnknownMediaRequest(senderId, payload.mediaId)
         }
     }
 

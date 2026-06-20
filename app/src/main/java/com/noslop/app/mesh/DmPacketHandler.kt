@@ -36,6 +36,7 @@ class DmPacketHandler(
             var mediaId: String? = null
             var mediaType: String? = null
             var mediaMetadata: MediaMetadata? = null
+            var replyToMessageId: String? = null
 
             try {
                 val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
@@ -45,6 +46,9 @@ class DmPacketHandler(
                         mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
                         mediaId = mediaMetadata.id
                         mediaType = mediaMetadata.type
+                    }
+                    if (obj.has("replyTo")) {
+                        replyToMessageId = obj.get("replyTo").asString
                     }
                 }
             } catch (e: Exception) {
@@ -59,7 +63,8 @@ class DmPacketHandler(
                 nonce = msgPay.nonce,
                 timestamp = msgPay.timestamp ?: System.currentTimeMillis(),
                 mediaId = mediaId,
-                mediaType = mediaType
+                mediaType = mediaType,
+                replyToMessageId = replyToMessageId
             )
             messageDao.insertMessage(msg)
             

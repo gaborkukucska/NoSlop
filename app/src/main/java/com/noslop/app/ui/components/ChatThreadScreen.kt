@@ -38,10 +38,11 @@ fun ChatThreadScreen(
     messages: List<ChatMessage>,
     localKeys: CryptoService.IdentityKeys?,
     viewModel: NoSlopViewModel,
-    onSendMessage: (String, MediaMetadata?) -> Unit,
+    onSendMessage: (String, MediaMetadata?, String?) -> Unit,
     onBack: () -> Unit
 ) {
     var rawText by remember { mutableStateOf("") }
+    var replyingToMessageId by remember { mutableStateOf<String?>(null) }
     val sendOnEnter by viewModel.isSendOnEnterEnabled.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
@@ -131,6 +132,30 @@ fun ChatThreadScreen(
                                         .widthIn(max = 260.dp)
                                 ) {
                                     Column {
+                                        if (msg.replyToMessageId != null) {
+                                            val replyMsg = messages.find { it.id == msg.replyToMessageId }
+                                            if (replyMsg != null) {
+                                                val replyText = if (localKeys != null) {
+                                                    val oppPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
+                                                    CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, localKeys.encPrivateKeyB64)
+                                                } else { "" }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(4.dp))
+                                                        .background(PrimaryBlack.copy(alpha = 0.2f))
+                                                        .padding(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = replyText ?: "Media/Encrypted",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = if (isSelf) PrimaryBlack.copy(alpha = 0.7f) else TextMuted
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                            }
+                                        }
+
                                         if (decryptedText.isNotEmpty()) {
                                             Text(
                                                 text = decryptedText, 
@@ -141,7 +166,18 @@ fun ChatThreadScreen(
 
                                         msg.mediaId?.let { mid ->
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            val progress = downloadProgress[mid] ?: 0
+                                            if (msg.mediaType == "gif") {
+                                                val url = mid.removePrefix("noslop-gif://")
+                                                coil.compose.AsyncImage(
+                                                    model = url,
+                                                    contentDescription = "GIF",
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .heightIn(max = 200.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                )
+                                            } else {
+                                                val progress = downloadProgress[mid] ?: 0
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
@@ -169,6 +205,7 @@ fun ChatThreadScreen(
                                                         color = if (isSelf) PrimaryBlack else TextMuted
                                                     )
                                                 }
+                                            }
                                             }
                                         }
 
@@ -228,12 +265,36 @@ fun ChatThreadScreen(
                                             tint = TextMuted,
                                             modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
                                         )
+                                        Icon(
+                                            Icons.Default.Reply,
+                                            contentDescription = "Reply",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(20.dp).clickable {
+                                                replyingToMessageId = msg.id
+                                                showReactionPicker = false
+                                            }
+                                        )
                                     }
                                 }
                             }
                         }
                     }
                 }
+
+        if (replyingToMessageId != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(SurfaceDark)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Replying to message...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyingToMessageId = null })
+            }
+        }
 
         // Chat Input box
         Row(
@@ -244,6 +305,7 @@ fun ChatThreadScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             var attachedMediaId by remember { mutableStateOf<String?>(null) }
+            var showGifPrompt by remember { mutableStateOf(false) }
             
             val handleSend = {
                 if (rawText.isNotBlank() || attachedMediaId != null) {
@@ -258,17 +320,65 @@ fun ChatThreadScreen(
                             ownerId = localKeys?.publicKeyB64
                         )
                     }
-                    onSendMessage(rawText, mediaMetadata)
+                    onSendMessage(rawText, mediaMetadata, replyingToMessageId)
                     rawText = ""
                     attachedMediaId = null
+                    replyingToMessageId = null
                 }
             }
 
-            IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
-                Icon(
-                    if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.Add, 
-                    contentDescription = "Attach", 
-                    tint = if (attachedMediaId != null) AccentGreen else TextMuted
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { attachedMediaId = if (attachedMediaId == null) "dm-media-${UUID.randomUUID().toString().take(8)}" else null }) {
+                    Icon(
+                        if (attachedMediaId != null) Icons.Default.CheckCircle else Icons.Default.AttachFile, 
+                        contentDescription = "Attach", 
+                        tint = if (attachedMediaId != null) AccentGreen else TextMuted
+                    )
+                }
+                IconButton(onClick = { /* Wire to MediaCaptureManager */ }) {
+                    Icon(Icons.Default.CameraAlt, contentDescription = "Camera", tint = TextMuted)
+                }
+                IconButton(onClick = { showGifPrompt = true }) {
+                    Icon(Icons.Default.Gif, contentDescription = "GIF", tint = TextMuted)
+                }
+            }
+            
+            if (showGifPrompt) {
+                var gifUrl by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { showGifPrompt = false },
+                    title = { Text("Insert GIF URL", color = TextLight) },
+                    containerColor = SurfaceDark,
+                    text = {
+                        OutlinedTextField(
+                            value = gifUrl,
+                            onValueChange = { gifUrl = it },
+                            placeholder = { Text("https://example.com/anim.gif") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight,
+                                unfocusedTextColor = TextLight
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            if (gifUrl.isNotBlank()) {
+                                val meta = MediaMetadata(
+                                    id = "noslop-gif://$gifUrl",
+                                    type = "gif",
+                                    mimeType = "image/gif",
+                                    size = 0,
+                                    chunkCount = 0
+                                )
+                                onSendMessage("", meta, replyingToMessageId)
+                                replyingToMessageId = null
+                            }
+                            showGifPrompt = false
+                        }) { Text("Send", color = AccentGreen) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showGifPrompt = false }) { Text("Cancel", color = TextMuted) }
+                    }
                 )
             }
             

@@ -952,10 +952,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null) {
+    fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
         viewModelScope.launch {
-            repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata)
+            repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId)
         }
     }
 

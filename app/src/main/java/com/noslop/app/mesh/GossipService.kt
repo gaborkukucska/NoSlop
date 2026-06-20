@@ -206,6 +206,32 @@ object GossipService {
         Logger.info(TAG, "Relay: Registered $senderId as listener for $mediaId")
     }
 
+    fun delegateUnknownMediaRequest(senderId: String, mediaId: String) {
+        val state = relayStates.getOrPut(mediaId) { RelayState(mediaId) }
+        if (!state.listeners.contains(senderId)) {
+            state.listeners.add(senderId)
+            Logger.info(TAG, "Relay: Registered $senderId as listener for unknown media $mediaId (delegated)")
+        }
+
+        scope.launch {
+            val payload = MediaRelayRequestPayload(
+                mediaId = mediaId,
+                originNode = null,
+                ownerId = null,
+                accessKey = null,
+                metadata = state.metadata
+            )
+            val packet = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = localPublicKeyB64,
+                type = "MEDIA_RELAY_REQUEST",
+                payload = com.google.gson.Gson().toJsonTree(payload)
+            )
+            broadcast(packet)
+        }
+    }
+
     private fun handleRecoveryFound(senderId: String, packet: NetworkPacket) {
         val payload = packet.getMediaRecoveryFoundPayload() ?: return
         val mediaId = payload.mediaId

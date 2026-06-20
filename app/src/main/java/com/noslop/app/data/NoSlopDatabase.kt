@@ -44,7 +44,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 23,
+    version = 24,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -68,6 +68,12 @@ abstract class NoSlopDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: NoSlopDatabase? = null
 
+        val MIGRATION_23_24 = object : androidx.room.migration.Migration(23, 24) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE chat_messages ADD COLUMN replyToMessageId TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -76,7 +82,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "noslop_app_database"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .fallbackToDestructiveMigration() // Facilitate updates during prototyping
+                .addMigrations(MIGRATION_23_24)
                 .build()
                 INSTANCE = instance
                 instance

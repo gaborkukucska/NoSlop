@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Gif
+import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +38,8 @@ fun CommentsBottomSheet(
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
     val localKeys by viewModel.localKeys.collectAsState()
     var commentText by remember { mutableStateOf("") }
+    var replyToCommentId by remember { mutableStateOf<String?>(null) }
+    var showGifPrompt by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -72,16 +76,32 @@ fun CommentsBottomSheet(
                     }
                 }
                 items(comments) { comment ->
-                    CommentItem(comment, viewModel, localKeys)
+                    CommentItem(comment, viewModel, localKeys, onReply = { replyToCommentId = it })
                 }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            if (replyToCommentId != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Replying to comment...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                IconButton(onClick = { showGifPrompt = true }) {
+                    Icon(Icons.Default.Gif, contentDescription = "Insert GIF", tint = TextMuted)
+                }
+
                 OutlinedTextField(
                     value = commentText,
                     onValueChange = { commentText = it },
@@ -99,8 +119,9 @@ fun CommentsBottomSheet(
                 
                 IconButton(
                     onClick = {
-                        viewModel.composeAndBroadcastComment(postId, commentText)
+                        viewModel.composeAndBroadcastComment(postId, commentText, replyToCommentId)
                         commentText = ""
+                        replyToCommentId = null
                     },
                     enabled = commentText.isNotBlank(),
                     modifier = Modifier.background(AccentGreen, CircleShape)
@@ -108,12 +129,45 @@ fun CommentsBottomSheet(
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
                 }
             }
+            if (showGifPrompt) {
+                var gifUrl by remember { mutableStateOf("") }
+                AlertDialog(
+                    onDismissRequest = { showGifPrompt = false },
+                    title = { Text("Insert GIF URL", color = TextLight) },
+                    containerColor = SurfaceDark,
+                    text = {
+                        OutlinedTextField(
+                            value = gifUrl,
+                            onValueChange = { gifUrl = it },
+                            placeholder = { Text("https://example.com/anim.gif") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            if (gifUrl.isNotBlank()) {
+                                viewModel.composeAndBroadcastComment(postId, "noslop-gif://$gifUrl", replyToCommentId)
+                                replyToCommentId = null
+                            }
+                            showGifPrompt = false
+                        }) { Text("Send", color = AccentGreen) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showGifPrompt = false }) { Text("Cancel", color = TextMuted) }
+                    }
+                )
+            }
         }
     }
 }
 
 @Composable
-fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?) {
+fun CommentItem(
+    comment: MeshComment, 
+    viewModel: NoSlopViewModel, 
+    localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?,
+    onReply: (String) -> Unit
+) {
     val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
     val votes by viewModel.getVotesForComment(comment.id).collectAsState(initial = emptyList())
     var showReactionPicker by remember { mutableStateOf(false) }
@@ -158,11 +212,37 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            comment.content,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextLight
-        )
+        if (comment.parentCommentId != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(PrimaryBlack.copy(alpha = 0.2f))
+                    .padding(4.dp)
+            ) {
+                Text(
+                    text = "Replying to previous comment...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+        }
+        
+        if (comment.content.startsWith("noslop-gif://")) {
+            val url = comment.content.removePrefix("noslop-gif://")
+            coil.compose.AsyncImage(
+                model = url,
+                contentDescription = "GIF",
+                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(8.dp))
+            )
+        } else {
+            Text(
+                comment.content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextLight
+            )
+        }
 
         if (reactions.isNotEmpty() || votes.isNotEmpty()) {
             val allReactions = reactions.map { it.reactionType to it.authorPublicKeyB64 } + 
@@ -227,6 +307,15 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
                     contentDescription = "Close", 
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
+                )
+                Icon(
+                    Icons.Default.Reply,
+                    contentDescription = "Reply",
+                    tint = TextMuted,
+                    modifier = Modifier.size(20.dp).clickable { 
+                        onReply(comment.id)
+                        showReactionPicker = false 
+                    }
                 )
             }
         }
