@@ -24,6 +24,9 @@ data class MeshContact(
     // True once this Android peer has completed the handshake (we've received their USER_HANDSHAKE/request).
     // Persisted locally so we stop re-sending CONNECTION_REQUEST on every reconnect (no handshake spam).
     @SerialName("accepted") val accepted: Boolean = false,
+    // Epoch-ms of the last CONNECTION_REQUEST we sent this peer. Gates re-sends to ~once per retry window so a
+    // peer who's simply offline isn't spammed on every reconnect/relaunch (a handshake can stay pending for days).
+    @SerialName("last_handshake_at") val lastHandshakeAt: Long? = null,
 ) {
     fun toQrJson(): String = WireJson.encodeToString(serializer(), this)
 
@@ -92,6 +95,13 @@ object SavedContacts {
         val cur = list()
         if (cur.none { it.nodeId == nodeId && !it.accepted }) return   // unknown or already accepted — no-op
         persist(cur.map { if (it.nodeId == nodeId) it.copy(accepted = true) else it })
+    }
+
+    /** Record (persisted) the time we last sent this peer a CONNECTION_REQUEST — gates the retry window. */
+    fun recordHandshake(nodeId: String, at: Long) {
+        val cur = list()
+        if (cur.none { it.nodeId == nodeId }) return
+        persist(cur.map { if (it.nodeId == nodeId) it.copy(lastHandshakeAt = at) else it })
     }
 
     private fun persist(contacts: List<MeshContact>) {

@@ -530,21 +530,30 @@ private class MeshUiState(private val scope: CoroutineScope) {
         val homeNode = activeInvite?.host ?: return       // the bridge onion we're connected through
         // Already handshake-complete (persisted), or a loop is already running for them — don't re-spam.
         if (contact.accepted || !handshaking.add(contact.nodeId)) return
+        // Be patient instead of bursting: a peer can be offline for days. If we sent a request within the retry
+        // window, stay quiet (across reconnects/relaunches) — we'll try again only after it lapses or they accept.
+        val last = contact.lastHandshakeAt
+        if (last != null && nowMillis() - last < HANDSHAKE_RETRY_MS) { handshaking.remove(contact.nodeId); return }
         scope.launch {
             try {
                 client.requestDial(contact)
-                repeat(5) {
-                    // Stop as soon as they've accepted (their USER_HANDSHAKE flipped the persisted flag).
+                // The bridge needs a few seconds to dial the peer's onion; send before it's linked and the request
+                // is dropped (0 peers). So wait, send once, then a single backup to cover a slow Tor dial — and stop.
+                delay(20_000)
+                repeat(2) { attempt ->
                     if (contacts.firstOrNull { it.nodeId == contact.nodeId }?.accepted == true) return@launch
                     val ok = client.sendConnectionRequest(contact, homeNode)
                     if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
-                    delay(12_000)                          // give the bridge time to link their onion
+                    if (attempt == 0) { SavedContacts.recordHandshake(contact.nodeId, nowMillis()); reloadContacts() }
+                    if (attempt == 0) delay(30_000)        // backup send only if still unaccepted after a slow dial
                 }
             } finally {
                 handshaking.remove(contact.nodeId)
             }
         }
     }
+
+    private companion object { const val HANDSHAKE_RETRY_MS = 3L * 24 * 60 * 60 * 1000 }  // ~3 days between retries
 
     /** Give a contact a meaningful name (keyed by node id; survives relaunches). */
     fun renameContact(contact: MeshContact, newName: String) {
