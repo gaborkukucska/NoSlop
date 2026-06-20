@@ -40,26 +40,44 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import com.noslop.mvp.ui.onboarding.OnboardingScreen
+import com.noslop.mvp.ui.settings.SettingsScreen
+import com.noslop.mvp.ui.settings.ContentPreferencesScreen
+import com.noslop.mvp.data.SettingsRepository
+import com.noslop.mvp.data.PreferencesRepository
+
 /** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
 @Composable
 fun App() {
     MaterialTheme {
-        var tab by remember { mutableStateOf(0) }
-        // Mesh state + the live connection live here (above the tab switch) so they survive tab changes —
-        // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
-        val meshScope = rememberCoroutineScope()
-        val mesh = remember { MeshUiState(meshScope) }
-        Scaffold { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                TabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Identity") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Feed") })
-                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Mesh") })
-                }
-                when (tab) {
-                    0 -> IdentityScreen()
-                    1 -> FeedScreen()
-                    else -> MeshScreen(mesh)
+        var handle by remember { mutableStateOf(HandleStore.load()) }
+        var showOnboarding by remember { mutableStateOf(handle == "anon") }
+
+        if (showOnboarding) {
+            OnboardingScreen(onComplete = {
+                handle = HandleStore.load()
+                showOnboarding = false
+            })
+        } else {
+            var tab by remember { mutableStateOf(0) }
+            // Mesh state + the live connection live here (above the tab switch) so they survive tab changes —
+            // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
+            val meshScope = rememberCoroutineScope()
+            val mesh = remember { MeshUiState(meshScope) }
+            Scaffold { padding ->
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    TabRow(selectedTabIndex = tab) {
+                        Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Identity") })
+                        Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Feed") })
+                        Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Mesh") })
+                        Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Settings") })
+                    }
+                    when (tab) {
+                        0 -> IdentityScreen()
+                        1 -> FeedScreen()
+                        2 -> MeshScreen(mesh)
+                        else -> SettingsTabWrapper()
+                    }
                 }
             }
         }
@@ -330,5 +348,24 @@ private fun MeshScreen(state: MeshUiState) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SettingsTabWrapper() {
+    var showPreferences by remember { mutableStateOf(false) }
+    val settingsRepo = remember { SettingsRepository() }
+    val prefsRepo = remember { PreferencesRepository() }
+
+    if (showPreferences) {
+        ContentPreferencesScreen(
+            repository = prefsRepo,
+            onBack = { showPreferences = false }
+        )
+    } else {
+        SettingsScreen(
+            repository = settingsRepo,
+            onNavigateToPreferences = { showPreferences = true }
+        )
     }
 }
