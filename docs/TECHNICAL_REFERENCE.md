@@ -3,21 +3,20 @@
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
 versionName `0.1.0`, Room schema version 23 — see §10, compileSdk/targetSdk
-35, minSdk 24). It is intended to complement — not replace — `README.md`,
-`docs/PROJECT_STATUS.md`, and `docs/PACKET_SCHEMA.md`. Where this document
-and those files overlap, this document goes deeper into implementation
-detail (file paths, function names, data flow, constants).
+35, minSdk 24). It is intended to complement — not replace — `README.md` and
+`docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
+document goes deeper into implementation detail (file paths, function names,
+data flow, constants).
 
-**A note on staleness**: this is the oldest and most detailed reference doc
-in the project, and parts of it describe earlier states of the wire protocol
-that have since moved on. Sections below are marked "Superseded" inline
-wherever a newer doc — almost always
-[WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) — is now the
-authoritative source for that specific topic. Unmarked sections are still
-believed accurate as of this revision; the architecture/identity/Tor/
-clearnet-aggregator material (§1–3, §6.2–6.5, §7–9, §11) is generally
-longer-lived than the wire-protocol tables (§4, §5), which change every time
-a new packet type ships.
+**Wire protocol detail lives elsewhere**: §4 and §5 below cover mesh
+networking and the packet envelope at a *mechanism* level (the gossip
+pipeline, dispatch architecture, transport). For the full packet-type
+catalog, every payload's JSON field shape, and all signed-string formats,
+see [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) — that document
+is the single source of truth for "what packet types exist and what's in
+them," kept in sync with `Packets.kt` every time a new type ships. This
+document's job is everything around that protocol: identity/crypto
+derivation, Tor, the clearnet aggregator, media storage, build config.
 
 ---
 
@@ -55,8 +54,8 @@ mnemonic, onion address).
 │  ├─ IdentityRepository (keys, mnemonic, onion, lock state)          │
 │  ├─ MeshPacketHandler  (incoming packet dispatch)                   │
 │  ├─ FeedDao / PostDao / PeerDao / MessageDao / CommentDao /         │
-│  │   MeshVoteDao / CommentVoteDao (Room, v20)                       │
-│  │   ReactionDao / AppSettingDao (Room, v20)                        │
+│  │   MeshVoteDao / CommentVoteDao (Room, v23)                       │
+│  │   ReactionDao / AppSettingDao (Room, v23)                        │
 │  └─ ApiKeyRepository (user-supplied API keys, EncryptedSharedPrefs) │
 └──────┬─────────────────────────────┬───────────────────────────────┘
        │                              │
@@ -90,7 +89,7 @@ com.noslop.app
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
 │   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
-│   ├── NoSlopDatabase.kt          Room database, version 16
+│   ├── NoSlopDatabase.kt          Room database, version 23
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
 ├── debug/
@@ -372,9 +371,9 @@ data class RelayState(
 ```
 Stored in `relayStates: ConcurrentHashMap<String, RelayState>`. **Has TTL
 cleanup**: a periodic 60-second sweeper evicts any entry whose
-`lastActivity` is more than 5 minutes stale, and `MeshPacketHandler` calls
-`GossipService.touchRelayState(mediaId)` on every `MEDIA_CHUNK` to refresh
-`lastActivity`. This closes the unbounded-memory-growth gap noted in
+`lastActivity` is more than 5 minutes stale, and `MediaPacketHandler` (the
+extracted media-domain handler, see §4.4) refreshes `lastActivity` on every
+`MEDIA_CHUNK`. This closes the unbounded-memory-growth gap noted in
 [GAP_ANALYSIS.md §6](GAP_ANALYSIS.md#6-trusted-media-relay--conceptually-present-streaming-semantics-differ).
 
 - **`handleRelayRequest(senderId, packet)`**: checks
@@ -387,16 +386,15 @@ cleanup**: a periodic 60-second sweeper evicts any entry whose
   = senderId`, then for each listener (excluding self), sends a
   `MEDIA_RECOVERY_FOUND` packet (hops=1) to that listener's onion address
   (looked up via `peerDao.getPeerByPublicKey`).
+- **Zero-copy chunk forwarding**: once a relay route is established, incoming
+  `MEDIA_CHUNK` packets for that `mediaId` are live-forwarded to every
+  registered listener via `GossipService.forwardRelayChunk`, in addition to
+  the relay node downloading its own copy — see
+  [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented)
+  for the exact mechanism. This was previously an open gap; it is now
+  implemented.
 
 ### 4.4 Incoming Packet Dispatch (`MeshPacketHandler.kt`)
-
-> **Superseded**: the table below documents the original 11-handler version of
-> `MeshPacketHandler`. The current code dispatches **21 packet-type cases**
-> (19 catalog entries per `WIRE_PROTOCOL_REFERENCE.md`, counting the 6
-> `MEDIA_*` types individually). For the authoritative, current dispatch
-> table see [WIRE_PROTOCOL_REFERENCE.md §2](WIRE_PROTOCOL_REFERENCE.md#2-full-packet-type-catalog-19-types).
-> The general dispatch *mechanism* described below (steps 1–2) is still
-> accurate.
 
 `handleIncomingPacket(packet)`:
 1. Fetches local identity (`repo.getLocalIdentity()`) — bails (`false`) if no
@@ -404,137 +402,51 @@ cleanup**: a periodic 60-second sweeper evicts any entry whose
 2. Delegates to `GossipService.processIncoming(packet)` — if it returns
    `false`, stop here (packet was forwarded-only, deduped, rate-limited, or
    firewalled).
-3. `when (packet.type)` dispatches to the relevant handler. The original 11
-   handlers (now superseded by the 19-type table linked above) were:
-
-| Type | Handler | Signature verification | Persistence |
-|---|---|---|---|
-| `SYNC_REQUEST` | `handleSyncRequest` | n/a (no verification on the request itself) | none — replies with `SYNC_RESPONSE` |
-| `SYNC_RESPONSE` | `handleSyncResponse` | per-post: `id\|authorId\|content\|timestamp` | `postDao.insertPost` for each valid post |
-| `POST` | `handlePost` | `id\|authorId\|content\|timestamp` | `postDao.insertPost`; triggers `MediaManager.checkAndAutoDownload` if `mediaMetadata != null` |
-| `COMMENT` | `handleComment` | `postId\|commentId\|content\|timestamp` | `commentDao.insertComment` |
-| `REACTION` | `handleReaction` | `postId\|reactionType\|authorId\|timestamp` | `reactionDao.insertReaction` or `deleteReactionById` depending on `action` |
-| `COMMENT_REACTION` | `handleCommentReaction` | `commentId\|reactionType\|authorId\|timestamp` | `commentReactionDao.insertReaction` or `deleteReactionById` |
-| `VOTE` | `handleVote` | `postId\|voteType\|authorId\|timestamp` | `voteDao.insertVote` or `deleteVoteById` depending on `action` |
-| `COMMENT_VOTE` | `handleCommentVote` | `commentId\|voteType\|authorId\|timestamp` | `commentVoteDao.insertVote` or `deleteVoteById` |
-| `MEDIA_REQUEST` | `handleMediaRequest` | none | delegates to `MediaManager.handleMediaRequest` |
-| `MEDIA_CHUNK` | `handleMediaChunk` | none | delegates to `MediaManager.handleMediaChunk` |
-| `MEDIA_RECOVERY_FOUND` | `handleMediaRecoveryFound` | none | delegates to `MediaManager.handleRecoveryFound` |
-| `MESSAGE` | `handleDirectMessage` | n/a (encryption itself is the auth) | `messageDao.insertMessage`; triggers auto-download if media attached |
-| `CONNECTION_REQUEST` | `handleConnectionRequest` | none | inserts untrusted `Peer`, sets `_incomingRequestFlow` (UI prompt) |
-| `USER_HANDSHAKE` | `handleUserHandshake` | none | upserts `Peer` with `isTrusted = true` |
-
-**Since this table was written**, 10 more types were added:
-`INVENTORY_SYNC_REQUEST`, `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT`,
-`EDIT_POST`, `DELETE_POST`, `CHAT_REACTION`, `COMMENT_REACTION` (already
-listed above), `COMMENT_VOTE` (already listed above), `VOTE` (already listed
-above) — see WIRE_PROTOCOL_REFERENCE.md for all of them in one place.
+3. `when (packet.type)` dispatches to one of seven single-responsibility
+   handler classes (`SyncPacketHandler`, `PostPacketHandler`,
+   `CommentPacketHandler`, `ReactionPacketHandler`, `DmPacketHandler`,
+   `HandshakePacketHandler`, `MediaPacketHandler`) — `MeshPacketHandler`
+   itself only owns steps 1–2 plus the dispatch `when`; the per-type logic
+   was extracted into those classes in a "Phase 0, Stage 0.3" refactor (ADR-004,
+   method bodies moved verbatim). For the full, current 21-case dispatch
+   table (type → payload class → handler class.method → signature format →
+   persistence), see
+   [WIRE_PROTOCOL_REFERENCE.md §2](WIRE_PROTOCOL_REFERENCE.md#2-full-packet-type-catalog-24-distinct-type-strings).
 
 Notably: **`CONNECTION_REQUEST` and `USER_HANDSHAKE` packets are not
-signature-checked** in `MeshPacketHandler` even though both
+signature-checked** in `HandshakePacketHandler` even though both
 `PeerHandshakePayload`s carry a `signature` field populated by the sender
 (`NoSlopRepository.sendConnectionRequest`/`acceptConnectionRequest` both call
 `CryptoService.sign(...)` before sending). This is a latent verification gap —
 the signature is computed and transmitted but never checked on receipt. This
-is still an open issue as of `WIRE_PROTOCOL_REFERENCE.md §2`'s notes.
+is still an open issue.
 
 ### 4.5 Sync Protocol
 
-> **Superseded**: this section describes the original timestamp-only sync
-> flow. `INVENTORY_SYNC_REQUEST` (hash-based diffing) was added later as the
-> *primary* reconciliation mechanism, with the timestamp-based flow below
-> still present and still used as the reply vehicle for both. See
-> [WIRE_PROTOCOL_REFERENCE.md §3](WIRE_PROTOCOL_REFERENCE.md#3-inventory-based-sync-inventory_sync_request)
-> for the current, complete picture, including the extended
-> `SyncResponsePayload` (`comments`/`reactions` fields, not shown below).
-
-- **`SYNC_REQUEST`** (`{ since: Long }`) is sent automatically by
-  `acceptConnectionRequest` immediately after a `USER_HANDSHAKE`, with
-  `since = now - 7 days` (`7 * 24 * 60 * 60 * 1000L`).
-- **`handleSyncRequest`** queries `postDao.getPostsSince(syncPay.since)`,
-  maps each `MeshPost` back into a `PostPayload` (re-deriving `MediaMetadata`
-  with placeholder `mimeType="application/octet-stream"`, `chunkCount=0` if
-  `mediaUrl != null`), wraps them in `SyncResponsePayload(posts = ...)`, and
-  sends directly (not gossiped, hops=1) to the requester's onion address.
-- **`handleSyncResponse`** verifies each post's signature independently
-  before inserting — posts with invalid signatures are dropped with a
-  per-post warning log, valid ones are upserted via `postDao.insertPost`
-  (Room `OnConflictStrategy` determines overwrite-vs-ignore behavior, defined
-  in `Daos.kt`).
-
-This timestamp-based flow is still present in the code, but
-`INVENTORY_SYNC_REQUEST` (hash/inventory-based — `{id, hash}` pairs, only the
-diff is returned) now exists alongside it and is preferred for reducing
-redundant transfer; see WIRE_PROTOCOL_REFERENCE.md §3 for the diffing
-algorithm.
+`INVENTORY_SYNC_REQUEST` (hash-based diffing — `{id, hash}` pairs, only the
+diff is returned) is the primary reconciliation mechanism; the older
+timestamp-based `SYNC_REQUEST`/`SYNC_RESPONSE` flow is still present and is
+used as the *reply vehicle* for both strategies. Full detail — diffing
+algorithm, the extended `SyncResponsePayload` with `comments`/`reactions`,
+and verification rules — is in
+[WIRE_PROTOCOL_REFERENCE.md §4](WIRE_PROTOCOL_REFERENCE.md#4-inventory-based-sync-inventory_sync_request).
 
 ---
 
 ## 5. Wire Protocol — `NetworkPacket` and Payloads
 
-### 5.1 Envelope
+The envelope shape, the full 24-type packet catalog, every payload's
+JSON field table, and all signed-string formats now live in one place:
+[WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md). That document is
+kept in sync with `Packets.kt` directly; this section intentionally doesn't
+duplicate it.
 
-```kotlin
-data class NetworkPacket(
-    val id: String? = null,
-    val hops: Int? = null,
-    @SerializedName("sender_id") val senderId: String,
-    @SerializedName("target_user_id") val targetUserId: String? = null,
-    var signature: String? = null,
-    val type: String,
-    val payload: JsonElement? = null
-)
-```
+Two conventions worth calling out here since they apply project-wide, not
+just to the wire protocol:
 - `toJson()`/`fromJson()` use a fresh `Gson()` instance each call (no shared
   configured instance — default Gson settings apply).
-- 13 typed payload accessor methods (`getPostPayload()`,
-  `getMessagePayload()`, etc.) each guard on `type == "<TYPE>"` before
-  attempting `Gson().fromJson(payload, X::class.java)`, returning `null` on
-  type mismatch or `payload == null`.
-
-### 5.2 Payload Types (all in `Packets.kt`)
-
-> **Superseded**: this table predates several payload types/fields. See
-> [WIRE_PROTOCOL_REFERENCE.md §6](WIRE_PROTOCOL_REFERENCE.md#6-cryptographic-signed-string-formats--consolidated-table)
-> for the current signed-string formats and
-> [PACKET_SCHEMA.md](PACKET_SCHEMA.md) for the current field-by-field JSON
-> shape of each payload (both are kept in sync with `Packets.kt`; this table
-> is not). Known gaps in the table below: `PostPayload` is missing
-> `authorAvatarB64`; `SyncResponsePayload` is missing the `comments`/
-> `reactions` fields added later (see WIRE_PROTOCOL_REFERENCE.md §3.3); and
-> the table omits `INVENTORY_SYNC_REQUEST`'s `InventorySyncRequestPayload`,
-> `ANNOUNCE_PEER`'s presence payload, `UserExitPayload`, and the `EDIT_POST`/
-> `DELETE_POST` payloads entirely.
-
-| Data class | Used by packet type(s) | Key fields |
-|---|---|---|
-| `PostPayload` | `POST`, embedded in `SyncResponsePayload.posts` | `id, authorId, authorName, authorPublicKey, authorAvatarB64?, originNode?, content, timestamp, privacy, hashtags?, signature?, mediaId?, mediaMetadata?, clearnetUrl?, clearnetTitle?, clearnetThumbnailUrl?` |
-| `CommentPayload` | `COMMENT` | `postId, comment: CommentData, parentCommentId?` |
-| `CommentData` | nested in `CommentPayload` | `id, authorId, authorName, content, timestamp, signature` |
-| `ReactionPayload` | `REACTION` | `postId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
-| `ChatReactionPayload` | `CHAT_REACTION` | `messageId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
-| `CommentReactionPayload`| `COMMENT_REACTION`| `commentId, reactionType, authorId, timestamp, signature, action ("add"\|"remove", default "add")` |
-| `VotePayload` | `VOTE` | `postId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
-| `CommentVotePayload`| `COMMENT_VOTE`| `commentId, voteType ("upvote"\|"downvote"), authorId, timestamp, signature, action ("add"\|"remove")` |
-| `EncryptedPayload` | `MESSAGE` | `id, nonce, ciphertext, groupId?` (groupId reserved, unused — group chats are not implemented, see [GAP_ANALYSIS.md §3](GAP_ANALYSIS.md#3-group-chats--full-spec-exists-in-gchat-absent-in-noslop)) |
-| `PeerHandshakePayload` | `CONNECTION_REQUEST`, `USER_HANDSHAKE` | `id, fromUserId, fromUsername, fromDisplayName, fromHomeNode, fromEncryptionPublicKey?, timestamp, signature?` (unified type per milestone 56 — previously two near-duplicate classes) |
-| `SyncRequestPayload` | `SYNC_REQUEST` | `since: Long` |
-| `SyncResponsePayload` | `SYNC_RESPONSE` | `posts: List<PostPayload>` — **extended** with `comments: List<CommentSyncEntry>?` and `reactions: List<ReactionSyncEntry>?`, used by the `INVENTORY_SYNC_REQUEST` reply path; see WIRE_PROTOCOL_REFERENCE.md §3.3 |
-| `MediaMetadata` | embedded in `PostPayload`, `MediaRelayRequestPayload` | `id, type ("audio"\|"video"\|"file"\|"image"), mimeType, size, chunkCount, accessKey?, filename?, originNode?, ownerId?, thumbnailB64?` |
-| `MediaRequestPayload` | `MEDIA_REQUEST` | `mediaId, chunkIndex, chunkSize, accessKey?, hlsFile?` |
-| `MediaChunkPayload` | `MEDIA_CHUNK` | `mediaId, chunkIndex, totalChunks, data` (Base64) |
-| `MediaRelayRequestPayload` | `MEDIA_RELAY_REQUEST` | `mediaId, originNode?, ownerId?, accessKey?, metadata?` |
-| `MediaRecoveryFoundPayload` | `MEDIA_RECOVERY_FOUND` | `mediaId` |
-| `MediaPendingPayload` | `MEDIA_PENDING` | `mediaId, chunkIndex` |
-| `MediaTransferAckPayload` | `MEDIA_TRANSFER_ACK` | `mediaId` |
-| `IdentityUpdatePayload` | `IDENTITY_UPDATE` | `userId, displayName, timestamp, signature` |
-| `UserExitPayload` | `USER_EXIT` | `userId, timestamp, signature` |
-
-### 5.3 Field Naming Convention
-
-All JSON wire fields use `snake_case` via `@SerializedName`, while Kotlin
-properties use `camelCase`. This matches the convention documented in
-`PACKET_SCHEMA.md` and is consistent across all payload classes.
+- All JSON wire fields use `snake_case` via `@SerializedName`, while Kotlin
+  properties use `camelCase` — consistent across every payload class.
 
 ---
 
@@ -978,12 +890,39 @@ is traceable rather than silently disappearing:
 8. The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version mismatch
    noted in §12 is **still real** — not a doc error, an actual dependency
    skew worth aligning at some point.
+9. ~~This document's §2 package-layout table and architecture diagram listed
+   `NoSlopDatabase.kt` as Room "version 16" / "version 20" in two places,
+   while §10 and the header correctly said v23.~~ **Fixed** — both now read
+   v23, matching `@Database(version = 23, ...)`.
+10. ~~§4.4's dispatch table and §5.2's payload-type table described an
+    earlier ~11-handler, single-file version of `MeshPacketHandler` and were
+    marked "Superseded" pointing elsewhere for current info, while
+    `docs/PACKET_SCHEMA.md` separately duplicated a partial (8-type) field
+    catalog.~~ **Fixed** — `docs/PACKET_SCHEMA.md` has been merged into
+    `WIRE_PROTOCOL_REFERENCE.md` (now the single complete catalog, 24 types),
+    and §4.4/§5.2 here were rewritten as short pointers to it instead of
+    maintaining a second, drifting copy. The merge also corrected several
+    factual errors carried by both old docs: the `IDENTITY_UPDATE` signed
+    string uses the payload's actual `handle` field, not `displayName`;
+    `EDIT_POST`/`DELETE_POST` signed strings include `authorId`, which both
+    docs previously omitted; `ANNOUNCE_PEER`'s signed string
+    (`authorId|timestamp`) is directly resolvable from `MeshSocialRepository`
+    and isn't actually "unconfirmed" as previously written; and the presence
+    heartbeat *does* actively flip `Peer.isOnline = false` on a 3-minute
+    timeout sweep, contrary to a prior claim that Room was never written back
+    to on timeout.
+11. ~~GAP_ANALYSIS.md §6 stated relay nodes have no zero-copy chunk
+    forwarding and would "download the whole file rather than acting as a
+    pass-through."~~ **Fixed** — `MediaPacketHandler.handleMediaChunk` calls
+    `GossipService.forwardRelayChunk`, which live-forwards each chunk to all
+    registered relay listeners. See
+    [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented).
 
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
-the current, authoritative wire-protocol detail that supersedes §4/§5 here ·
-[PACKET_SCHEMA.md](PACKET_SCHEMA.md) for plain JSON field tables ·
+the complete, authoritative wire-protocol detail (packet catalog, payload
+JSON shapes, signed-string formats) that supersedes §4/§5 here ·
 [GAP_ANALYSIS.md](GAP_ANALYSIS.md) for the feature backlog vs. gChat/HAI-Net ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
 log · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for §13's planned

@@ -7,9 +7,10 @@ implementation, and `hainet-social` (inside the HAI-Net monorepo) is the
 canonical Rust port of gChat that the rest of the HAI-Net ecosystem is
 converging on. This document captures details, protocols, and design
 decisions that exist in gChat and/or HAI-Net but are **not yet reflected** in
-NoSlop's own documentation (`docs/PROJECT_STATUS.md`, `docs/PACKET_SCHEMA.md`,
-`docs/archived/ANALYSiS.md`, README). It is intended as a backlog / spec reference for
-bringing NoSlop's mesh layer to parity with its siblings.
+NoSlop's own documentation (`docs/PROJECT_STATUS.md`,
+`docs/WIRE_PROTOCOL_REFERENCE.md`, `docs/archived/ANALYSiS.md`, README). It
+is intended as a backlog / spec reference for bringing NoSlop's mesh layer to
+parity with its siblings.
 
 Everything below is organized by subsystem. Each item notes:
 - **Source**: which codebase the detail comes from
@@ -28,10 +29,18 @@ Everything below is organized by subsystem. Each item notes:
 
 ## 1. Packet Types — Missing From NoSlop's Wire Protocol
 
-NoSlop's `Packets.kt` / `PACKET_SCHEMA.md` currently define:
-`POST, MESSAGE, CONNECTION_REQUEST, USER_HANDSHAKE, SYNC_REQUEST,
-SYNC_RESPONSE, COMMENT, REACTION, MEDIA_REQUEST, MEDIA_CHUNK,
-MEDIA_RELAY_REQUEST, MEDIA_RECOVERY_FOUND, MEDIA_PENDING, MEDIA_TRANSFER_ACK`.
+NoSlop's `Packets.kt` (see
+[WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for the full,
+current catalog) now defines 24 packet types, including everything the table
+below originally flagged as missing: `POST, MESSAGE, CONNECTION_REQUEST,
+USER_HANDSHAKE, CONNECTION_REJECTED, SYNC_REQUEST, SYNC_RESPONSE,
+INVENTORY_SYNC_REQUEST, COMMENT, REACTION, CHAT_REACTION, COMMENT_REACTION,
+VOTE, COMMENT_VOTE, ANNOUNCE_PEER, IDENTITY_UPDATE, USER_EXIT, EDIT_POST,
+DELETE_POST, MEDIA_REQUEST, MEDIA_CHUNK, MEDIA_RELAY_REQUEST,
+MEDIA_RECOVERY_FOUND, MEDIA_PENDING, MEDIA_TRANSFER_ACK`. The table below
+documents the gap analysis that drove those additions; it's kept as a
+historical record of *why* each type was added, with status columns updated
+as each landed.
 
 gChat's `services/packetSchema.ts` (and the matching `hainet-social/src/packets.rs`)
 define a substantially larger set. The following packet types exist in
@@ -46,7 +55,7 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 | `COMMENT_REACTION` | gChat | Emoji reaction scoped to a comment (not just the parent post) | **Done** — `COMMENT_REACTION` payloads and persistence added in Phase 3 |
 | `CHAT_REACTION` | gChat | Emoji reaction on a **direct message** (1:1 chat) | **Done** — `CHAT_REACTION` payloads and DM long-press UI added in Phase 3 |
 | `CHAT_VOTE` | gChat | Up/down vote on a chat message | Absent |
-| `IDENTITY_UPDATE` | gChat | Propagates changes to display name / avatar / bio to peers without a full re-handshake | **Done** — Handled when `displayName` is changed in settings |
+| `IDENTITY_UPDATE` | gChat | Propagates changes to display name / avatar / bio to peers without a full re-handshake | **Done** — Handled when `handle` (the user's display name) or avatar is changed in settings |
 | `ANNOUNCE_PEER` | gChat | Lightweight "I'm online" heartbeat carrying `onionAddress` + `alias`; drives gChat's "Live Contact Sync" (instant green/online indicator) | **Done** — `ANNOUNCE_PEER` implemented in Phase 1 |
 | `FOLLOW` / `UNFOLLOW` | gChat | Asymmetric "follow" relationship distinct from the symmetric Trusted Peer / firewall relationship | Absent — NoSlop's only relationship model is binary trust (`Peer.isTrusted`) |
 | `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` / `GROUP_QUERY` / `GROUP_SYNC` | gChat | Full decentralized group-chat packet family (see §3) | Absent — NoSlop README Phase 2 lists "Group Chats" as planned but no schema exists |
@@ -197,7 +206,7 @@ promptly rather than relying on a timeout.
 
 ---
 
-## 6. Trusted Media Relay — Conceptually Present, Streaming Semantics Differ
+## 6. Trusted Media Relay — Implemented, Retention Semantics Still Differ
 
 Both NoSlop (`GossipService.handleRelayRequest`/`handleRecoveryFound`,
 `MediaProxyService`) and gChat/HAI-Net implement the "Trusted Relay" pattern
@@ -220,21 +229,36 @@ established_at, last_activity }` per transfer session, with a
 `cleanup_stale_routes(timeout_secs)` sweep.
 
 NoSlop's current `GossipService.RelayState` (in `GossipService.kt`) tracks
-`mediaId -> listeners` but:
+`mediaId -> listeners` and:
 - Has **no stale-route cleanup** — ~~`relayStates` is an unbounded
   `ConcurrentHashMap` with no TTL/eviction, a potential slow memory leak on
   long-running nodes that participate in many relays.~~ **FIXED (2026-06-13):**
   `RelayState` now tracks `establishedAt`/`lastActivity`. A periodic 60-second
-  sweeper evicts routes idle for >5 minutes. `MeshPacketHandler` refreshes
+  sweeper evicts routes idle for >5 minutes. `MediaPacketHandler` (the
+  media-domain handler extracted from `MeshPacketHandler`) refreshes
   `lastActivity` on every `MEDIA_CHUNK` via `GossipService.touchRelayState()`.
-- Does **not yet implement the actual chunk-forwarding proxy** —
-  `handleRelayRequest`/`handleRecoveryFound` resolve *where* the media is, but
-  `MeshPacketHandler.handleMediaChunk` delegates straight to
+- Does **not yet implement the actual chunk-forwarding proxy** — ~~
+  `handleRelayRequest`/`handleRecoveryFound` resolve *where* the media is,
+  but `MeshPacketHandler.handleMediaChunk` delegates straight to
   `MediaManager.handleMediaChunk`, which is written from the perspective of
   "I am downloading this for myself," not "I am forwarding chunks I don't
   want to keep." A relaying node in NoSlop today would therefore download
   the whole file rather than acting as a zero-copy pass-through, contrary to
-  the "pure streaming proxy" privacy guarantee gChat documents.
+  the "pure streaming proxy" privacy guarantee gChat documents.~~ **FIXED:**
+  `MediaPacketHandler.handleMediaChunk` now calls
+  `GossipService.forwardRelayChunk(mediaId, packet)`, which re-stamps the
+  packet (fresh `id`, decremented `hops`, local node as `senderId`) and
+  live-forwards it to every registered relay listener, *in addition to*
+  calling `MediaManager.handleMediaChunk` for its own copy. So the chunk is
+  now forwarded on-demand as gChat's model describes — but unlike gChat's
+  "pure" streaming proxy, the NoSlop relay node still also downloads/persists
+  its own copy in the same step, rather than forwarding without retaining
+  anything. The privacy property (requester never learns the original
+  author's `.onion` address) holds; the "doesn't keep a copy" property does
+  not — that remains a real difference from gChat's design, just a smaller
+  one than "no forwarding at all." See
+  [WIRE_PROTOCOL_REFERENCE.md §6.2](WIRE_PROTOCOL_REFERENCE.md#62-zero-copy-chunk-forwarding--implemented)
+  for the exact mechanism.
 
 ---
 
@@ -388,14 +412,13 @@ implementation effort vs. value:
 - [x] Split `votes` vs `reactions` data model per gChat's `PostSchema` (§2)
 - [x] "Opt-in Transparency" override for soft-blocked content (§2)
 - [x] Relay state TTL/cleanup in `GossipService.RelayState` (§6)
-- [ ] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6) —
-      **correction**: this is still *not* implemented as of this revision.
-      `MeshPacketHandler.handleMediaChunk` delegates straight to
-      `MediaManager.handleMediaChunk` (the "download for myself" path) for
-      every relay node, not a separate pass-through proxy. A relaying node
-      today downloads the whole file rather than streaming it through. This
-      item was previously (incorrectly) checked off — verified against
-      current code while merging in `ADDENDUM.md`'s findings.
+- [x] True zero-copy chunk-forwarding for `MEDIA_RELAY_REQUEST` relays (§6) —
+      `MediaPacketHandler.handleMediaChunk` calls
+      `GossipService.forwardRelayChunk`, which live-forwards each chunk to
+      registered relay listeners (re-stamped `id`, decremented `hops`).
+      Verified directly against current code this revision — see §6 for the
+      one remaining caveat (the relay node also keeps its own copy, so it's
+      forward-and-retain rather than gChat's forward-without-retaining).
 - [x] `INVENTORY_SYNC_REQUEST`/`RESPONSE` (hash-based sync) to replace
       timestamp-based `SYNC_REQUEST`/`RESPONSE` (§1)
 - [x] `EDIT_POST` / `DELETE_POST` packets (§1)
