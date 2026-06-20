@@ -293,32 +293,38 @@ class MeshSocialRepository(
             }
 
             // Also send INVENTORY_SYNC_REQUEST
-            val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-            val recentPosts = postDao.getPostsSince(sevenDaysAgo)
-            val inventory = recentPosts.map { post ->
-                val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
-                val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-                val hashBytes = ByteArray(digest.digestSize)
-                digest.update(hashInput, 0, hashInput.size)
-                digest.doFinal(hashBytes, 0)
-                val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
-                com.noslop.app.mesh.InventoryItem(post.id, hashHex)
-            }
-            
-            val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
-            val syncPacket = com.noslop.app.mesh.NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 1,
-                senderId = myKeys.publicKeyB64,
-                targetUserId = peer.publicKeyB64,
-                type = "INVENTORY_SYNC_REQUEST",
-                payload = gson.toJsonTree(syncReqPay)
-            )
-            repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
-            }
+            requestInventorySync(peer)
         }
         true
+    }
+
+    suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+        val recentPosts = postDao.getPostsSince(sevenDaysAgo)
+        val inventory = recentPosts.map { post ->
+            val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            val hashBytes = ByteArray(digest.digestSize)
+            digest.update(hashInput, 0, hashInput.size)
+            digest.doFinal(hashBytes, 0)
+            val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
+            com.noslop.app.mesh.InventoryItem(post.id, hashHex)
+        }
+        
+        val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
+        val gson = com.google.gson.Gson()
+        val syncPacket = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = peer.publicKeyB64,
+            type = "INVENTORY_SYNC_REQUEST",
+            payload = gson.toJsonTree(syncReqPay)
+        )
+        repositoryScope.launch {
+            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
+        }
     }
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {

@@ -198,6 +198,7 @@ class SyncPacketHandler(
             }
             val pubBytes = Base64.decode(postPay.authorPublicKey, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
+            val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
             val post = MeshPost(
                 id = postPay.id,
                 authorPublicKeyB64 = postPay.authorPublicKey,
@@ -207,7 +208,7 @@ class SyncPacketHandler(
                 content = postPay.content,
                 timestamp = postPay.timestamp,
                 signature = postPay.signature ?: "",
-                mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
+                mediaUrl = postPay.mediaId?.let { "noslop://${peerOnion}/$it" },
                 mediaType = postPay.mediaMetadata?.type,
                 thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
                 clearnetUrl = postPay.clearnetUrl,

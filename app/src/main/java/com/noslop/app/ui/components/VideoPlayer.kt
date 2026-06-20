@@ -157,6 +157,7 @@ private fun isImageUrl(url: String): Boolean {
 }
 
 private fun isDirectFileUrl(url: String): Boolean {
+    if (url.startsWith("file://")) return true
     if (url.contains("127.0.0.1") || url.contains("localhost")) return true
     val lower = url.lowercase().substringBefore("?")
     return lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm") ||

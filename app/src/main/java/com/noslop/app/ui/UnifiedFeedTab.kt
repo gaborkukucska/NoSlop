@@ -1142,15 +1142,18 @@ fun UnifiedFeedTab(
                     Button(
                         onClick = {
                             val mediaMetadata = attachedFile?.let { file ->
+                                val type = if (file.name.endsWith(".jpg")) "image" else "video"
+                                val id = file.name
+                                com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
                                 com.noslop.app.mesh.MediaMetadata(
-                                    id = file.name,
-                                    type = if (file.name.endsWith(".jpg")) "image" else "video",
+                                    id = id,
+                                    type = type,
                                     mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
                                     size = file.length(),
                                     chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
                                     originNode = viewModel.localKeys.value?.onionAddress,
                                     ownerId = viewModel.localKeys.value?.publicKeyB64,
-                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, if (file.name.endsWith(".jpg")) "image" else "video")
+                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
                                 )
                             }
                             viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)

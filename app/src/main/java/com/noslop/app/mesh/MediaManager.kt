@@ -68,6 +68,18 @@ object MediaManager {
         return noSlopDir
     }
 
+    fun copyFileToMediaDirectory(source: File, type: String?, id: String): File? {
+        return try {
+            val destDir = getMediaDirectory(type)
+            val destFile = File(destDir, id)
+            source.copyTo(destFile, overwrite = true)
+            destFile
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to copy local file to media directory", e.message)
+            null
+        }
+    }
+
     fun isMediaDownloaded(id: String, type: String?): Boolean {
         return try {
             val file = File(getMediaDirectory(type), id)

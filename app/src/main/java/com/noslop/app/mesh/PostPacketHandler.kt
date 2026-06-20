@@ -59,11 +59,12 @@ class PostPacketHandler(
         postDao.insertPost(meshPost)
         
         if (postPay.mediaMetadata != null) {
+            val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress
             MediaManager.checkAndAutoDownload(
                 postPay.mediaMetadata,
                 "friends",
                 postPay.authorId,
-                packet.senderId
+                peerOnion
             )
         }
 

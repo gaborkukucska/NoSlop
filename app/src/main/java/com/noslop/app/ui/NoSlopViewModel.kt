@@ -180,6 +180,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val downloadProgress: StateFlow<Map<String, Int>> = repository.getDownloadProgress()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
+    fun startMediaDownload(metadata: com.noslop.app.mesh.MediaMetadata, peerOnion: String?) {
+        viewModelScope.launch {
+            com.noslop.app.mesh.MediaManager.startDownload(metadata, peerOnion)
+        }
+    }
+
     // Direct Messages Chat
     private val _userProfile = MutableStateFlow(com.noslop.app.data.UserProfile())
     val userProfile: StateFlow<com.noslop.app.data.UserProfile> = _userProfile.asStateFlow()
