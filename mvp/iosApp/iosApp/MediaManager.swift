@@ -76,7 +76,7 @@ class SwiftMediaPlayer: NSObject, IosMediaPlayer {
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
-    func release() {
+    func disposePlayer() {
         pause()
         statusObservation?.invalidate()
         playingObservation?.invalidate()

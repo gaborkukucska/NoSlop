@@ -328,8 +328,8 @@ interface IosMediaPlayer {
     fun play()
     fun pause()
     fun seekTo(positionMs: Long)
-    fun release()
-    
+    fun disposePlayer()   // not 'release()' — that collides with NSObject.release in the Swift impl
+
     fun setListener(
         onStateChanged: (isPlaying: Boolean, isBuffering: Boolean) -> Unit,
         onError: (message: String) -> Unit

@@ -52,6 +52,19 @@ class KeychainIdentity: IosKeychain {
         return sig.base64EncodedString()
     }
 
+    // Raw key accessors required by the IosKeychain protocol (used by upstream's identity paths).
+    func getPrivateKeyBase64() -> String? {
+        loadPrivateKey()?.rawRepresentation.base64EncodedString()
+    }
+
+    func getEncPrivateKeyBase64() -> String? { loadDmPrivB64() }
+
+    func getEncPublicKeyBase64() -> String? {
+        guard let b64 = loadDmPrivB64(), let data = Data(base64Encoded: b64),
+              let priv = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: data) else { return nil }
+        return priv.publicKey.rawRepresentation.base64EncodedString()
+    }
+
     // MARK: - Keychain
 
     private func baseQuery(account: String? = nil) -> [String: Any] {
