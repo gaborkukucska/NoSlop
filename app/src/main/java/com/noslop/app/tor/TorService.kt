@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/tor/TorService.kt
 package com.noslop.app.tor
 
 import android.content.Context
@@ -114,8 +115,8 @@ object TorService {
 
             // Unified self-healing bootstrap loop
             bootstrapJob = scope.launch {
-                // 1. Wait for SOCKS5 proxy to be reachable
-                val proxyReady = waitForProxy(timeoutSeconds = 45)
+                // FIX: Wait for SOCKS5 proxy to be reachable with increased 60s timeout
+                val proxyReady = waitForProxy(timeoutSeconds = 60)
                 if (proxyReady) {
                     _torState.value = TorState.PROXY_READY
                     
@@ -211,7 +212,7 @@ object TorService {
      * or until timeoutSeconds elapses. Each attempt logs at DEBUG level so
      * the in-app log viewer shows bootstrap progress without spamming INFO.
      */
-    suspend fun waitForProxy(timeoutSeconds: Int = 30): Boolean =
+    suspend fun waitForProxy(timeoutSeconds: Int = 60): Boolean = // FIX: Change signature default to 60
         withContext(Dispatchers.IO) {
             Logger.info(TAG, "Polling $PROXY_HOST:$SOCKS_PORT for Tor proxy readiness...")
             for (attempt in 1..timeoutSeconds) {
@@ -241,8 +242,8 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(45, TimeUnit.SECONDS)
-                    .readTimeout(45, TimeUnit.SECONDS)
+                    .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s
+                    .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s
                     .build()
                 val request = Request.Builder()
                     .url("https://check.torproject.org/")

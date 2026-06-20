@@ -15,7 +15,7 @@
 
 ## What is NoSlop?
 
-**NoSlop** is a privacy-first Android app for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
+**NoSlop** is a privacy-first Kotlin Multiplatform app (Android & iOS) for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
 
 It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. All mesh network traffic is routed through **Tor by default**. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
 
@@ -38,7 +38,7 @@ Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No cen
 
 - **Home HUBs (Coming Soon)** — Your dedicated local home hub serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline.
 - **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
-- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key. Only you and your contact can read them.
+- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key (see [TECHNICAL_REFERENCE.md §3.5](docs/TECHNICAL_REFERENCE.md#35-direct-message-encryption) for the exact derivation). Only you and your contact can read them.
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
 - **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
 
@@ -85,22 +85,22 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 | Layer | Technology |
 |---|---|
-| UI | Jetpack Compose + Material Design 3 |
-| Media | ExoPlayer (HLS/DASH/MP4), WebView (YouTube), Coil (images) |
-| Content | RSS/Atom parser, Jamendo API, Archive.org, YouTube RSS |
-| Networking | Embedded Tor SOCKS5 daemon (onion-routed), OkHttp + DNS-over-HTTPS |
-| Signing | Ed25519 (Android Keystore / Bouncy Castle) |
+| UI | Compose Multiplatform (Material Design 3) |
+| Media | ExoPlayer (Android), AVPlayer (iOS), WKWebView/WebView, Coil |
+| Content | Ktor, Kotlinx-serialization, xmlutil, RSS/Atom parser |
+| Networking | Embedded Tor SOCKS5 daemon (onion-routed), Ktor + OkHttp/Darwin |
+| Signing | Ed25519 (Android Keystore / Bouncy Castle / Apple CryptoKit) |
 | Key exchange | X25519 |
 | Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
-| Storage | Room SQLite (WAL mode) + EncryptedSharedPreferences |
-| Background sync | WorkManager |
-| Camera | CameraX + ML Kit (QR scanning) |
+| Storage | SQLDelight SQLite + native key-value stores |
+| Background sync | WorkManager (Android) |
+| Camera | CameraX (Android) + AVFoundation (iOS) |
 
 ---
 
 ## Getting Started
 
-1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md).
+1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is now the `mvp/` (Kotlin Multiplatform) directory.
 2. **Run the onboarding flow** — 6 steps: generate your Word Cloud, pick your interests, optionally scan a friend's QR to add your first contact.
 3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
 

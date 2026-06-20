@@ -62,6 +62,7 @@ import com.noslop.app.net.HttpClientProvider
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.graphics.graphicsLayer
 
 private fun getSourceLabel(item: FeedItem): String {
     return when (item.apiSource) {
@@ -100,7 +101,14 @@ fun FullScreenImage(url: String) {
 }
 
 @Composable
-fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh: () -> Unit, viewModel: NoSlopViewModel? = null) {
+fun FullScreenFeedCard(
+    item: FeedItem, 
+    isVisible: Boolean = true, 
+    onShareToMesh: () -> Unit, 
+    viewModel: NoSlopViewModel? = null,
+    bottomSlideOffset: Float = 0f,
+    rightSlideOffset: Float = 0f
+) {
     val rawText = if (!item.fullContent.isNullOrBlank()) item.fullContent 
                   else if (!item.excerpt.isNullOrBlank()) item.excerpt
                   else ""
@@ -185,6 +193,7 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomStart)
+                    .graphicsLayer { translationY = bottomSlideOffset }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
@@ -275,7 +284,9 @@ fun FullScreenFeedCard(item: FeedItem, isVisible: Boolean = true, onShareToMesh:
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
-                modifier = Modifier.align(Alignment.CenterEnd)
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .graphicsLayer { translationX = rightSlideOffset }
             )
 
             ContentHealthOverlay(

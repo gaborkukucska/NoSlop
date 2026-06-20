@@ -48,6 +48,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
+    val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -61,6 +62,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         getUserProfile = { getUserProfile() },
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
+    val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
     // --- State Observables ---
     // Feed observables re-exposed from FeedRepository (Stage 0.3) so UI subscribers are unchanged.
@@ -173,6 +175,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun setForegroundServiceEnabled(enabled: Boolean) =
         settingsRepository.setForegroundServiceEnabled(enabled)
+
+    suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
+
+    suspend fun setSendOnEnterEnabled(enabled: Boolean) =
+        settingsRepository.setSendOnEnterEnabled(enabled)
 
     // --- Feed Methods (delegated to FeedRepository) ---
     suspend fun insertSource(source: FeedSource) = feedRepository.insertSource(source)
@@ -309,6 +316,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         meshPacketHandler.handleIncomingPacket(packet)
 
     suspend fun setIncomingRequest(peer: Peer) = meshSocialRepository.setIncomingRequest(peer)
+    fun setHandshakeAccepted(peer: Peer) = meshSocialRepository.setHandshakeAccepted(peer)
+    fun clearHandshakeAccepted() = meshSocialRepository.clearHandshakeAccepted()
 
     suspend fun clearIncomingRequest() = meshSocialRepository.clearIncomingRequest()
 
@@ -321,6 +330,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.acceptConnectionRequest(peer)
+
+    suspend fun rejectConnectionRequest(peer: Peer): Boolean =
+        meshSocialRepository.rejectConnectionRequest(peer)
 
     suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
 
@@ -336,6 +348,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun clearAllNotifications() = withContext(Dispatchers.IO) {
         db.notificationDao().clearAllNotifications()
+    }
+
+    suspend fun deleteNotification(id: String) = withContext(Dispatchers.IO) {
+        db.notificationDao().deleteNotification(id)
     }
 
     suspend fun sendDirectMessage(

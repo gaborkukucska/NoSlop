@@ -40,6 +40,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         logFilePath = Logger.getLogFilePath()
     }
 
+    /**
+     * Checks for an update. Called from [com.noslop.app.MainActivity.onResume] so every time the
+     * app is brought to the foreground (cold start, or returning from background) we get a fresh
+     * check — not just once per process lifetime via init{}. Cheap (one small JSON fetch), so no
+     * extra throttling beyond what's already a fast, idempotent network call.
+     */
+    fun checkForUpdateNow() {
+        viewModelScope.launch { NoSlopApp.updateChecker.checkForUpdate() }
+    }
+
     // --- State Observables ---
     // Reactive identity: Observes database for any changes to local identity/onion address
     val localKeys: StateFlow<CryptoService.IdentityKeys?> = repository.identityUpdateFlow
@@ -134,10 +144,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
+    /** Surfaces a newer-version notice in Settings when the daily background check finds one. */
+    val updateInfo: StateFlow<com.noslop.app.util.UpdateInfo?> = NoSlopApp.updateChecker.updateInfo
+
     val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), com.noslop.app.data.NotificationSettings())
 
     val isForegroundServiceEnabled: StateFlow<Boolean> = repository.isForegroundServiceEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val isSendOnEnterEnabled: StateFlow<Boolean> = repository.isSendOnEnterEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
@@ -227,6 +243,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.getMediaSettings()
             repository.getNotificationSettings()
             repository.initForegroundServiceSetting()
+            repository.initSendOnEnterSetting()
         }
 
         // Load profile and preferences
@@ -914,6 +931,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun setSendOnEnterEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setSendOnEnterEnabled(enabled)
+        }
+    }
+
     fun sendTestPost() {
         viewModelScope.launch {
             repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}")
@@ -994,7 +1017,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun rejectHandshake() {
         viewModelScope.launch {
-            repository.clearIncomingRequest()
+            val peer = incomingRequest.value
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+            } else {
+                repository.clearIncomingRequest()
+            }
         }
     }
 
@@ -1046,6 +1074,30 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch { repository.voteToComment(commentId, reactionType) }
         } else {
             viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
+        }
+    }
+
+    // NEW CONNECTION REQUEST HANDLERS FROM NOTIFICATION
+    fun acceptConnectionFromNotification(notifId: String, senderPub: String) {
+        viewModelScope.launch {
+            val peer = repository.peerDao.getPeerByPublicKey(senderPub)
+            if (peer != null) {
+                repository.acceptConnectionRequest(peer)
+            }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun rejectConnectionFromNotification(notifId: String, senderPub: String) {
+        viewModelScope.launch {
+            val peer = repository.peerDao.getPeerByPublicKey(senderPub)
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+            } else {
+                repository.deletePeer(senderPub)
+                repository.clearIncomingRequest()
+            }
+            repository.deleteNotification(notifId)
         }
     }
 

@@ -1,5 +1,7 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.feeds.FeedItem
+
 /**
  * Feed curation — the core "NoSlop" idea: cut the slop. A story is shown unless a **mute** word matches, and
  * (if any **must-have** words are set) only when at least one of them matches. Matching is case-insensitive
@@ -10,15 +12,15 @@ data class FeedFilters(
     val muted: List<String> = emptyList(),
     val required: List<String> = emptyList(),
 ) {
-    fun allows(story: FeedStory): Boolean {
-        val hay = "${story.title} ${story.excerpt} ${story.source}".lowercase()
+    fun allows(story: FeedItem): Boolean {
+        val hay = "${story.title} ${story.excerpt ?: ""} ${story.sourceId}".lowercase()
         if (muted.any { hay.contains(it) }) return false
         if (required.isNotEmpty() && required.none { hay.contains(it) }) return false
         return true
     }
 
     /** Apply to a list, keeping order. */
-    fun apply(stories: List<FeedStory>): List<FeedStory> = stories.filter { allows(it) }
+    fun apply(stories: List<FeedItem>): List<FeedItem> = stories.filter { allows(it) }
 
     companion object {
         fun from(mutedText: String, requiredText: String) =

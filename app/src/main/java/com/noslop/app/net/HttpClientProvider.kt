@@ -86,10 +86,12 @@ object HttpClientProvider {
                 // hammering DoH servers with NXDOMAIN queries is wasteful.
                 val msg = e.message ?: ""
                 if (msg.endsWith(hostname) && !msg.contains(":")) {
-                    Logger.error(TAG, "All DNS resolvers failed for $hostname: $msg")
-                    throw e   // propagate immediately; DoH won't help
+                    // FIX: Local networks blocks (Pi-hole, ISP) return NXDOMAIN to block.
+                    // By NOT throwing the exception here, we force the fallback to DoH!
+                    Logger.warn(TAG, "System DNS returned NXDOMAIN for $hostname, falling back to DoH to bypass potential local block…")
+                } else {
+                    Logger.warn(TAG, "System DNS failed for $hostname (${e.message}), trying Cloudflare DoH…")
                 }
-                Logger.warn(TAG, "System DNS failed for $hostname (${e.message}), trying Cloudflare DoH…")
             }
 
             // 2. Cloudflare DoH
@@ -146,9 +148,9 @@ object HttpClientProvider {
     val torClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", 9050)))
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
+            .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s
+            .writeTimeout(60, TimeUnit.SECONDS)   // FIX: Bumped to 60s
             .build()
     }
 }

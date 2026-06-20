@@ -12,7 +12,7 @@ To build and run NoSlop locally, ensure your development environment has the fol
 *   **Android Studio (Koala or newer)**: Standard IDE for Android developers. It supplies the required compilation Android SDK, tools, and virtual emulators.
 *   **Android SDK (API Level 35)**:
     *   `compileSdk = 35`
-    *   `minSdk = 26` (Android 8.0 Oreo — required for cryptographic APIs, EncryptedSharedPreferences, and background networking routines)
+    *   `minSdk = 24` (Android 7.0 Nougat — see [`app/build.gradle.kts`](../app/build.gradle.kts) for the authoritative value; cryptographic APIs and `EncryptedSharedPreferences` are available from API 23+, with the Ed25519 KeyPairGenerator path using Bouncy Castle on API 24–32 and the platform Conscrypt provider on API 33+, see [TECHNICAL_REFERENCE.md §3.2](TECHNICAL_REFERENCE.md#32-key-generation-cryptoservicegenerateidentity))
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
@@ -94,26 +94,47 @@ When you boot NoSlop for the first time, verify the following checklist of scree
 
 ---
 
-## 6. Build a Debug APK
+## 6. Building from the Command Line (APK)
 
-If you need to distribute a standalone debug binary without loading Android Studio:
+If you need to distribute or test a standalone binary without loading Android Studio, you can build directly via the terminal.
+
+Since the project currently contains two parallel codebases (the legacy Android app and the new Kotlin Multiplatform app), make sure you use the correct commands for the version you want to test.
+
+### Option A: Build the Original (Legacy) Android App
+This is the fully featured, production-ready original application located in the `app/` directory.
 
 1.  **Compile with Gradle**:
-    Open the terminal inside the root package directory and trigger the assemble task:
     ```bash
-    # Standard local terminal command
-    ./gradlew assembleDebug
+    ./gradlew :app:assembleDebug
     ```
-    *(If building in the AI Studio cloud environment, run the dedicated system tool or `gradle assembleDebug` directly)*
 
 2.  **Locate output binary**:
-    The compiled debug APK will be stored at:
     `app/build/outputs/apk/debug/app-debug.apk`
 
 3.  **Install via ADB**:
-    Install the binary directly onto your connected testing device:
     ```bash
-    adb install app/build/outputs/apk/debug/app-debug.apk
+    adb install -r app/build/outputs/apk/debug/app-debug.apk
+    ```
+
+### Option B: Build the New KMP App
+This is the new Kotlin Multiplatform application currently under development in the `mvp/` directory. Note that this requires the `NOSLOP_STORE_FILE` property to be configured in your `~/.gradle/gradle.properties` for release builds.
+
+1.  **Compile with Gradle**:
+    ```bash
+    # Build debug version
+    ./gradlew -p mvp :composeApp:assembleDebug
+    
+    # Or build release version
+    ./gradlew -p mvp :composeApp:assembleRelease
+    ```
+
+2.  **Locate output binary**:
+    *   Debug: `mvp/composeApp/build/outputs/apk/debug/composeApp-debug.apk`
+    *   Release: `mvp/composeApp/build/outputs/apk/release/composeApp-release.apk`
+
+3.  **Install via ADB**:
+    ```bash
+    adb install -r mvp/composeApp/build/outputs/apk/debug/composeApp-debug.apk
     ```
 
 ---
@@ -146,3 +167,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 *   **Symptom**: Custom RSS clearnet feeds fail to fetch with `IOException: Cleartext HTTP traffic not permitted`.
 *   **Cause**: Android blocks standard non-HTTPS traffic (`http://`) by default to prevent injection attacks.
 *   **Fix**: Update your feed source URLs to use secure `https://` schemas, or use a network security configuration file.
+
+---
+
+**Related docs**: [TECHNICAL_REFERENCE.md §12](TECHNICAL_REFERENCE.md#12-build-configuration) for the full build-config/dependency reference · [DEBUG.md](DEBUG.md) if a build succeeds but the app misbehaves at runtime · [SUPPORT.md](SUPPORT.md) for user-facing troubleshooting once the app is running.

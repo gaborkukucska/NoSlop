@@ -7,7 +7,7 @@ import ComposeApp
 /// in the iOS Keychain, so the same identity is returned on every launch. Bridged into the shared
 /// Kotlin core via `IosKeychain`.
 class KeychainIdentity: IosKeychain {
-    private let service = "com.noslop.mvp.identity"
+    private let service = "com.noslop.app.identity"
     private let account = "ed25519-private-key"
 
     func loadOrCreatePublicKeyBase64() -> String {
@@ -150,7 +150,8 @@ struct iOSApp: App {
         IosTorBridge.shared.tor = tor
         tor.start() // warm Tor up at launch so it's (nearly) bootstrapped by the time the user connects
         IosQrScannerBridge.shared.scanner = QrScanner()
-        IosVideoPlayerBridge.shared.player = VideoPlayerBridge()
+        IosVideoPlayerBridge.shared.factory = SwiftVideoPlayerFactory()   // inline component player (upstream)
+        IosFullscreenVideoBridge.shared.player = VideoPlayerBridge()       // full-screen quick-play (Feed button)
     }
 
     var body: some Scene {

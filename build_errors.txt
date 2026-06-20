@@ -1,0 +1,1513 @@
+openjdk version "25.0.3" 2026-04-21
+OpenJDK Runtime Environment (build 25.0.3+9-2-26.04.2-Ubuntu)
+OpenJDK 64-Bit Server VM (build 25.0.3+9-2-26.04.2-Ubuntu, mixed mode, sharing)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/tom/.gradle/wrapper/dists/gradle-9.4.1-bin/arn2x92ynaizyzdaamcbpbhtj/gradle-9.4.1/lib/native-platform-0.22-milestone-29.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Type-safe project accessors is an incubating feature.
+
+> Configure project :composeApp
+WARNING: The option setting 'android.builtInKotlin=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: The option setting 'android.newDsl=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: API 'applicationVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling applicationVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'testVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling testVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'unitTestVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling unitTestVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+w: ⚠️ The 'org.jetbrains.kotlin.multiplatform' plugin deprecated compatibility with Android Gradle plugin: 'com.android.application'
+The 'org.jetbrains.kotlin.multiplatform' plugin is not compatible with 'com.android.application' starting with Android Gradle Plugin 9.0.0.
+
+Please change the structure of the your project and move the usage of 'com.android.application' into a separate subproject. The new subproject should add a dependency on this KMP subproject.
+
+Read more: https://kotl.in/kmp-project-structure-migration
+Solution: Please change the structure of your project and move the usage of 'com.android.application' into a separate subproject.
+See https://kotl.in/gradle/agp-new-kmp for more details.
+
+
+> Task :composeApp:kmpPartiallyResolvedDependenciesChecker
+> Task :composeApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :composeApp:convertXmlValueResourcesForAndroidMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForAndroidMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForAndroidMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForAndroidMain NO-SOURCE
+> Task :composeApp:convertXmlValueResourcesForCommonMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForCommonMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForCommonMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForCommonMain NO-SOURCE
+> Task :composeApp:generateActualResourceCollectorsForAndroidMain UP-TO-DATE
+> Task :composeApp:generateCommonMainMeshDatabaseInterface UP-TO-DATE
+> Task :composeApp:generateComposeResClass UP-TO-DATE
+> Task :composeApp:preBuild UP-TO-DATE
+> Task :composeApp:preDebugBuild UP-TO-DATE
+> Task :composeApp:generateDebugResources UP-TO-DATE
+> Task :composeApp:packageDebugResources UP-TO-DATE
+> Task :composeApp:processDebugNavigationResources UP-TO-DATE
+> Task :composeApp:parseDebugLocalResources UP-TO-DATE
+> Task :composeApp:generateDebugRFile UP-TO-DATE
+> Task :composeApp:generateExpectResourceCollectorsForCommonMain UP-TO-DATE
+> Task :composeApp:convertXmlValueResourcesForAndroidDebug NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForAndroidDebug NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForAndroidDebug NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForAndroidDebug NO-SOURCE
+
+> Task :composeApp:compileDebugKotlinAndroid FAILED
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:9:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:13:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:19:84 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:20:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:23:165 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:26:60 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:27:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:29:121 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:33:16 Return type mismatch: expected 'List<FeedItem>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:34:35 Suspend function 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:34:44 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:34:60 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:34:60 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:36:33 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:36:33 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:38:27 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:38:32 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:38:32 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:40:24 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:43:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:43:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:43:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:44:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:44:35 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:44:35 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:45:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:45:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:45:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:46:41 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:46:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:46:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:47:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:47:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:47:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:48:46 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:49:49 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:50:49 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:51:40 Unresolved reference 'trailText'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:51:67 Unresolved reference 'stripHtml'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:51:77 Unresolved reference 'trailText'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:52:67 None of the following candidates is applicable:
+
+fun String.replace(oldChar: Char, newChar: Char, ignoreCase: Boolean = ...): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.replace(oldChar: Char, newChar: Char, ignoreCase: Boolean = ...): String
+
+fun String.replace(oldValue: String, newValue: String, ignoreCase: Boolean = ...): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.replace(oldValue: String, newValue: String, ignoreCase: Boolean = ...): String
+
+fun CharSequence.replace(regex: Regex, replacement: String): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.replace(regex: Regex, replacement: String): String
+
+fun CharSequence.replace(regex: Regex, noinline transform: (MatchResult) -> CharSequence): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.replace(regex: Regex, noinline transform: (MatchResult) -> CharSequence): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:53:33 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:53:46 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:53:63 Unresolved reference 'byline'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:54:40 Unresolved reference 'thumbnail'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:54:65 Unresolved reference 'FeedParser'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:54:86 Unresolved reference 'pubDate'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:58:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:61:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:63:5 Modifier 'private' is not applicable to 'local function'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/GuardianApiClient.kt:64:2 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:23:13 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:34:29 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:58:13 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:67:13 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:95:16 Return type mismatch: expected 'List<String>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:96:28 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  No value passed for parameter 'url'.
+  'operator' modifier is required on 'suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse'.
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  No value passed for parameter 'builder'.
+  'operator' modifier is required on 'suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse'.
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  No value passed for parameter 'block'.
+  'operator' modifier is required on 'suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse'.
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  No value passed for parameter 'urlString'.
+  'operator' modifier is required on 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse'.
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  No value passed for parameter 'url'.
+  'operator' modifier is required on 'suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:96:35 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:96:35 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:97:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:100:26 Unresolved reference 'status'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:106:33 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:114:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:114:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:114:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:115:25 Operator '!=' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:117:31 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:117:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:117:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:118:44 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:118:52 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:118:52 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:120:35 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:120:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:120:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:121:47 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:123:21 'if' must have both main and 'else' branches when used as an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:123:26 Unresolved reference 'isDown'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:124:29 Unresolved reference 'apiEnabled'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:125:50 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:127:47 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:133:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:186:21 Conflicting declarations:
+local val response: HttpResponse
+local val response: Response
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:186:39 Suspend function 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:187:21 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:190:21 Conflicting declarations:
+local val response: HttpResponse
+local val response: Response
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:190:52 Unresolved reference 'request'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:191:30 Unresolved reference 'status'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:198:37 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:198:37 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:206:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:206:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:206:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:207:60 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:209:32 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:211:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:211:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:211:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:212:41 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:212:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:212:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:213:35 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:213:46 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:226:36 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:226:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:226:64 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:226:64 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:228:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:228:43 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:228:47 Syntax error: Expecting '(' to open a loop range.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:228:60 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:230:32 Return type mismatch: expected 'String?', actual 'JsonElement'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:235:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:235:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:235:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:236:64 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:239:32 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:241:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:241:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:241:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:242:29 Unresolved reference 'not' for operator '!'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:242:39 None of the following candidates is applicable:
+
+fun String.startsWith(prefix: String, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.startsWith(prefix: String, ignoreCase: Boolean = ...): Boolean
+
+fun String.startsWith(prefix: String, startIndex: Int, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.startsWith(prefix: String, startIndex: Int, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.startsWith(char: Char, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.startsWith(char: Char, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.startsWith(prefix: CharSequence, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.startsWith(prefix: CharSequence, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.startsWith(prefix: CharSequence, startIndex: Int, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.startsWith(prefix: CharSequence, startIndex: Int, ignoreCase: Boolean = ...): Boolean
+
+fun File.startsWith(other: File): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun File.startsWith(other: File): Boolean
+
+fun File.startsWith(other: String): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun File.startsWith(other: String): Boolean
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:243:41 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:243:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:243:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:244:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:244:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:244:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:245:38 None of the following candidates is applicable:
+
+fun <T> Array<out T>.contains(element: T): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Array<out T>.contains(element: T): Boolean
+
+fun ByteArray.contains(element: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ByteArray.contains(element: Byte): Boolean
+
+fun ShortArray.contains(element: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ShortArray.contains(element: Short): Boolean
+
+fun IntArray.contains(element: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntArray.contains(element: Int): Boolean
+
+fun LongArray.contains(element: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongArray.contains(element: Long): Boolean
+
+fun BooleanArray.contains(element: Boolean): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun BooleanArray.contains(element: Boolean): Boolean
+
+fun CharArray.contains(element: Char): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharArray.contains(element: Char): Boolean
+
+fun <T> Iterable<T>.contains(element: T): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.contains(element: T): Boolean
+
+fun <K, V> Map<out K, V>.contains(key: K): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <K, V> Map<out K, V>.contains(key: K): Boolean
+
+fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T : Comparable<T>, R : ClosedRange<T>, Iterable<T>> R.contains(element: T?): Boolean
+
+fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T : Comparable<T>, R : OpenEndRange<T>, Iterable<T>> R.contains(element: T?): Boolean
+
+fun IntRange.contains(element: Int?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntRange.contains(element: Int?): Boolean
+
+fun LongRange.contains(element: Long?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongRange.contains(element: Long?): Boolean
+
+fun CharRange.contains(element: Char?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharRange.contains(element: Char?): Boolean
+
+fun ClosedRange<Int>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Int>.contains(value: Byte): Boolean
+
+fun ClosedRange<Long>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Long>.contains(value: Byte): Boolean
+
+fun ClosedRange<Short>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Short>.contains(value: Byte): Boolean
+
+fun OpenEndRange<Int>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Int>.contains(value: Byte): Boolean
+
+fun OpenEndRange<Long>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Long>.contains(value: Byte): Boolean
+
+fun OpenEndRange<Short>.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Short>.contains(value: Byte): Boolean
+
+fun IntRange.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntRange.contains(value: Byte): Boolean
+
+fun LongRange.contains(value: Byte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongRange.contains(value: Byte): Boolean
+
+fun ClosedRange<Float>.contains(value: Double): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Float>.contains(value: Double): Boolean
+
+fun ClosedRange<Double>.contains(value: Float): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Double>.contains(value: Float): Boolean
+
+fun OpenEndRange<Double>.contains(value: Float): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Double>.contains(value: Float): Boolean
+
+fun ClosedRange<Long>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Long>.contains(value: Int): Boolean
+
+fun ClosedRange<Byte>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Byte>.contains(value: Int): Boolean
+
+fun ClosedRange<Short>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Short>.contains(value: Int): Boolean
+
+fun OpenEndRange<Long>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Long>.contains(value: Int): Boolean
+
+fun OpenEndRange<Byte>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Byte>.contains(value: Int): Boolean
+
+fun OpenEndRange<Short>.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Short>.contains(value: Int): Boolean
+
+fun LongRange.contains(value: Int): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongRange.contains(value: Int): Boolean
+
+fun ClosedRange<Int>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Int>.contains(value: Long): Boolean
+
+fun ClosedRange<Byte>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Byte>.contains(value: Long): Boolean
+
+fun ClosedRange<Short>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Short>.contains(value: Long): Boolean
+
+fun OpenEndRange<Int>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Int>.contains(value: Long): Boolean
+
+fun OpenEndRange<Byte>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Byte>.contains(value: Long): Boolean
+
+fun OpenEndRange<Short>.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Short>.contains(value: Long): Boolean
+
+fun IntRange.contains(value: Long): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntRange.contains(value: Long): Boolean
+
+fun ClosedRange<Int>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Int>.contains(value: Short): Boolean
+
+fun ClosedRange<Long>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Long>.contains(value: Short): Boolean
+
+fun ClosedRange<Byte>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ClosedRange<Byte>.contains(value: Short): Boolean
+
+fun OpenEndRange<Int>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Int>.contains(value: Short): Boolean
+
+fun OpenEndRange<Long>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Long>.contains(value: Short): Boolean
+
+fun OpenEndRange<Byte>.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun OpenEndRange<Byte>.contains(value: Short): Boolean
+
+fun IntRange.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntRange.contains(value: Short): Boolean
+
+fun LongRange.contains(value: Short): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongRange.contains(value: Short): Boolean
+
+fun UIntRange.contains(element: UInt?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntRange.contains(element: UInt?): Boolean
+
+fun ULongRange.contains(element: ULong?): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongRange.contains(element: ULong?): Boolean
+
+fun UIntRange.contains(value: UByte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntRange.contains(value: UByte): Boolean
+
+fun ULongRange.contains(value: UByte): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongRange.contains(value: UByte): Boolean
+
+fun ULongRange.contains(value: UInt): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongRange.contains(value: UInt): Boolean
+
+fun UIntRange.contains(value: ULong): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntRange.contains(value: ULong): Boolean
+
+fun UIntRange.contains(value: UShort): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntRange.contains(value: UShort): Boolean
+
+fun ULongRange.contains(value: UShort): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongRange.contains(value: UShort): Boolean
+
+fun <T> Sequence<T>.contains(element: T): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Sequence<T>.contains(element: T): Boolean
+
+fun CharSequence.contains(other: CharSequence, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.contains(other: CharSequence, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.contains(char: Char, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.contains(char: Char, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.contains(regex: Regex): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.contains(regex: Regex): Boolean
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:245:65 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.compareTo(other: String, ignoreCase: Boolean = ...): Int
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:246:43 Assignment type mismatch: actual type is 'JsonElement?', but 'Int' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:247:39 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:249:39 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:253:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:278:48 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:278:67 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:278:67 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:281:30 Unresolved reference 'isSuccessful'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:282:41 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:288:33 Unresolved reference 'parseVideoArray'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:314:48 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:314:67 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:314:67 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:317:30 Unresolved reference 'isSuccessful'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:318:41 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:324:33 Unresolved reference 'parseVideoArray'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:342:5 Modifier 'private' is not applicable to 'local function'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:347:31 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:347:33 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:347:33 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:348:29 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:348:31 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:348:31 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:349:30 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:349:32 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:349:32 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:350:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:350:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:350:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:351:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:351:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:351:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:352:43 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:352:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:352:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:356:41 Unresolved reference 'lengthSeconds'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:356:66 Unresolved reference 'lengthSeconds'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:357:29 Unresolved reference 'lengthSeconds'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:358:29 Unresolved reference 'lengthSeconds'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:364:25 Unresolved reference 'desc'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:364:46 Unresolved reference 'desc'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:372:29 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:374:30 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:377:35 Unresolved reference 'published'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:385:10 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:387:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:388:1 Missing return statement.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/InvidiousApiClient.kt:388:2 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:18:17 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:21:13 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:25:16 Return type mismatch: expected 'List<FeedItem>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:44:27 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:44:32 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:44:32 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:45:33 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:46:17 Operator '!=' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:51:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:51:37 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:51:37 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:54:29 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:57:30 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:57:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:57:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:58:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:58:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:58:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:59:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:59:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:59:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:60:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:60:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:60:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:61:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:61:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:61:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:62:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:62:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:62:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:64:48 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:64:54 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:64:54 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:65:50 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:65:81 Unresolved reference 'releaseDateStr'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:68:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:68:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:68:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:69:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:70:47 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:71:47 None of the following candidates is applicable:
+
+fun <T, R : Any> Array<out T>.mapNotNull(transform: (T) -> R?): List<R>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R : Any> Array<out T>.mapNotNull(transform: (T) -> R?): List<R>
+
+fun <T, R : Any> Iterable<T>.mapNotNull(transform: (T) -> R?): List<R>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R : Any> Iterable<T>.mapNotNull(transform: (T) -> R?): List<R>
+
+fun <K, V, R : Any> Map<out K, V>.mapNotNull(transform: (Map.Entry<K, V>) -> R?): List<R>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <K, V, R : Any> Map<out K, V>.mapNotNull(transform: (Map.Entry<K, V>) -> R?): List<R>
+
+fun <T, R : Any> Sequence<T>.mapNotNull(transform: (T) -> R?): Sequence<R>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R : Any> Sequence<T>.mapNotNull(transform: (T) -> R?): Sequence<R>
+
+fun <R : Any> CharSequence.mapNotNull(transform: (Char) -> R?): List<R>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <R : Any> CharSequence.mapNotNull(transform: (Char) -> R?): List<R>
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:71:60 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:77:37 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:78:35 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:79:38 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:81:44 Unresolved reference 'image'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:83:40 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:91:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/JamendoApiClient.kt:100:2 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:9:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:13:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:23:17 Const 'val' is only allowed on top level, in named objects, or in companion objects.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:32:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:36:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:41:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:54:13 Only expressions are allowed here.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:57:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:57:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:57:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:58:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:58:37 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:58:37 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:59:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:59:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:59:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:60:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:60:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:60:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:61:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:61:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:61:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:62:35 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:62:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:62:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:63:43 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:63:48 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:63:48 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:64:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:64:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:64:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:68:46 Operator '==' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:73:33 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:74:31 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:75:34 Unresolved reference 'copyright'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:76:35 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:77:40 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:77:44 Operator '==' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:78:39 Unresolved reference 'FeedParser'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:79:36 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:80:41 Operator '==' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:86:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:90:11 Unresolved reference 'catch'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:90:18 Unresolved reference 'e'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:90:19 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:90:19 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:90:32 Argument type mismatch: actual type is 'Function0<ERROR CLASS: Unknown return lambda parameter type>', but 'List<FeedItem>' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:92:13 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:94:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:107:16 Return type mismatch: expected 'List<FeedItem>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:109:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:120:30 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:120:35 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:120:35 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:121:30 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:121:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:121:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:124:29 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:127:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:127:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:127:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:128:56 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:129:32 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:131:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:131:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:131:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:132:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:132:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:132:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:133:45 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:133:50 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:133:50 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:134:45 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:134:50 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:134:50 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:135:46 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:135:51 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:135:51 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:136:47 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:136:52 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:136:52 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:140:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:140:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:140:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:141:48 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:142:40 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:142:40 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:142:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:142:60 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:142:60 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:146:46 Unresolved reference 'nasaMediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:147:25 Unresolved reference 'resolveNasaVideoUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:155:33 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:157:34 Unresolved reference 'photographer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:158:35 Unresolved reference 'description'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:160:39 Unresolved reference 'FeedParser'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:160:60 Unresolved reference 'dateCreated'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:162:41 Unresolved reference 'nasaMediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:168:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:176:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:182:5 Modifier 'private' is not applicable to 'local function'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:185:35 Suspension functions can only be called within coroutine body.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:189:33 Suspension functions can only be called within coroutine body.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:191:25 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:191:30 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:191:30 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:195:26 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:196:28 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:196:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:196:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:197:26 None of the following candidates is applicable:
+
+fun String.endsWith(suffix: String, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.endsWith(suffix: String, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.endsWith(char: Char, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.endsWith(char: Char, ignoreCase: Boolean = ...): Boolean
+
+fun CharSequence.endsWith(suffix: CharSequence, ignoreCase: Boolean = ...): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.endsWith(suffix: CharSequence, ignoreCase: Boolean = ...): Boolean
+
+fun File.endsWith(other: File): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun File.endsWith(other: File): Boolean
+
+fun File.endsWith(other: String): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun File.endsWith(other: String): Boolean
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:198:33 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NasaApiClient.kt:219:2 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:9:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:13:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:19:85 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:20:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:22:155 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:25:63 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:26:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:28:112 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:32:16 Return type mismatch: expected 'List<FeedItem>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:33:35 Suspend function 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:33:44 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:33:62 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:33:62 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:35:33 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:35:33 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:37:28 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:37:33 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:37:33 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:39:24 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:42:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:42:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:42:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:43:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:43:35 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:43:35 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:44:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:44:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:44:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:45:25 Syntax error: Expecting an element.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:45:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:45:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:45:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:46:38 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:46:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:46:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:47:42 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:47:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:47:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:48:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:48:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:48:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:49:106 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:50:31 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:50:48 Unresolved reference 'author'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:50:66 Unresolved reference 'desc'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:50:87 Unresolved reference 'imageUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:51:39 Unresolved reference 'FeedParser'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:51:60 Unresolved reference 'pubAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:55:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:58:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/NewsApiClient.kt:59:2 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:9:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:25:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:29:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:35:33 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:40:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:44:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:51:33 Argument type mismatch: actual type is 'Any', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:55:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:59:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:65:16 Unresolved reference 'fetchVideos'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:70:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:74:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:81:16 Unresolved reference 'fetchVideos'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:86:35 Suspend function 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:87:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:88:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:97:33 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:99:26 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:99:31 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:99:31 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:102:13 Only expressions are allowed here.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:102:29 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:105:30 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:105:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:105:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:106:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:106:46 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:106:46 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:107:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:107:43 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:107:43 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:108:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:108:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:108:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:109:31 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:109:37 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:109:37 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:111:27 None of the following candidates is applicable:
+
+fun add(element: FeedItem): Boolean:
+  Too many arguments for 'fun add(element: FeedItem): Boolean'.
+  No parameter with name 'mediaUrl' found.
+
+fun add(index: Int, element: FeedItem): Unit:
+  No parameter with name 'mediaUrl' found.
+  Argument type mismatch: actual type is 'FeedItem', but 'Int' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:111:31 No value passed for parameter 'publishedAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:114:33 Unresolved reference 'alt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:115:31 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:116:34 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:118:40 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:118:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:118:44 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:118:45 Syntax error: Expecting ','.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:118:86 Syntax error: Expecting '"'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:119:25 Unresolved reference 'publishedAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:119:37 Syntax error: Expecting an element.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:119:45 Syntax error: Expecting an element.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:119:64 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:120:36 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:120:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:120:40 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:120:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:121:25 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:121:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:122:25 Unresolved reference 'apiSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:123:21 Syntax error: Expecting an element.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:123:22 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:127:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:131:11 Unresolved reference 'catch'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:131:18 Unresolved reference 'e'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:131:19 Syntax error: Expecting ')'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:131:19 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:131:32 Argument type mismatch: actual type is 'Function0<ERROR CLASS: Unknown return lambda parameter type>', but 'List<FeedItem>' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:133:13 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:135:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:137:5 Modifier 'private' is not applicable to 'local function'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:139:35 Suspend function 'suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:140:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:141:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:150:33 Suspend function 'suspend fun HttpResponse.bodyAsText(fallbackCharset: Charset = ...): String' can only be called from a coroutine or another suspend function.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:152:26 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:152:31 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:152:31 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:155:29 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:158:30 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:158:36 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:158:36 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:159:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:159:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:159:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:160:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:160:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:160:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:161:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:164:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:164:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:164:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:165:73 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:166:25 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:166:25 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:166:48 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:166:48 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:170:38 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:170:44 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:170:44 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:172:34 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:174:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:174:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:174:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:175:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:175:42 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:175:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:176:29 Operator '==' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:176:48 Operator '==' cannot be applied to 'JsonElement?' and 'String'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:177:43 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:177:43 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:177:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:177:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:181:59 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:182:39 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:182:39 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:182:39 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:182:64 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:182:64 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:189:31 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:190:34 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:192:40 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/PexelsApiClient.kt:210:2 Syntax error: Missing '}.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:9:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:13:19 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:20:21 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:24:33 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:29:16 Return type mismatch: expected 'List<FeedItem>', actual 'Unit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:32:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:33:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:39:24 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:39:29 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:39:29 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:41:24 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:44:31 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:44:33 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:44:33 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:45:39 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.removePrefix(prefix: CharSequence): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:46:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:46:34 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:46:34 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:47:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:47:34 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:47:34 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:48:38 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:48:40 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:48:40 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:49:45 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:49:47 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:49:47 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:50:32 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:50:34 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:50:34 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:51:46 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:55:37 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:55:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:55:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:52 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:75 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:75 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:81 None of the following candidates is applicable:
+
+fun <T> Array<out T>.last(): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Array<out T>.last(): T
+
+fun ByteArray.last(): Byte:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ByteArray.last(): Byte
+
+fun ShortArray.last(): Short:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ShortArray.last(): Short
+
+fun IntArray.last(): Int:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntArray.last(): Int
+
+fun LongArray.last(): Long:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongArray.last(): Long
+
+fun FloatArray.last(): Float:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun FloatArray.last(): Float
+
+fun DoubleArray.last(): Double:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun DoubleArray.last(): Double
+
+fun BooleanArray.last(): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun BooleanArray.last(): Boolean
+
+fun CharArray.last(): Char:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharArray.last(): Char
+
+fun <T> Array<out T>.last(predicate: (T) -> Boolean): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Array<out T>.last(predicate: (T) -> Boolean): T
+
+fun ByteArray.last(predicate: (Byte) -> Boolean): Byte:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ByteArray.last(predicate: (Byte) -> Boolean): Byte
+
+fun ShortArray.last(predicate: (Short) -> Boolean): Short:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ShortArray.last(predicate: (Short) -> Boolean): Short
+
+fun IntArray.last(predicate: (Int) -> Boolean): Int:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntArray.last(predicate: (Int) -> Boolean): Int
+
+fun LongArray.last(predicate: (Long) -> Boolean): Long:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongArray.last(predicate: (Long) -> Boolean): Long
+
+fun FloatArray.last(predicate: (Float) -> Boolean): Float:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun FloatArray.last(predicate: (Float) -> Boolean): Float
+
+fun DoubleArray.last(predicate: (Double) -> Boolean): Double:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun DoubleArray.last(predicate: (Double) -> Boolean): Double
+
+fun BooleanArray.last(predicate: (Boolean) -> Boolean): Boolean:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun BooleanArray.last(predicate: (Boolean) -> Boolean): Boolean
+
+fun CharArray.last(predicate: (Char) -> Boolean): Char:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharArray.last(predicate: (Char) -> Boolean): Char
+
+fun <T> Iterable<T>.last(): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.last(): T
+
+fun <T> List<T>.last(): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> List<T>.last(): T
+
+fun <T> Iterable<T>.last(predicate: (T) -> Boolean): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.last(predicate: (T) -> Boolean): T
+
+fun <T> List<T>.last(predicate: (T) -> Boolean): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> List<T>.last(predicate: (T) -> Boolean): T
+
+fun UIntArray.last(): UInt:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntArray.last(): UInt
+
+fun ULongArray.last(): ULong:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongArray.last(): ULong
+
+fun UByteArray.last(): UByte:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UByteArray.last(): UByte
+
+fun UShortArray.last(): UShort:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UShortArray.last(): UShort
+
+fun UIntArray.last(predicate: (UInt) -> Boolean): UInt:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntArray.last(predicate: (UInt) -> Boolean): UInt
+
+fun ULongArray.last(predicate: (ULong) -> Boolean): ULong:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongArray.last(predicate: (ULong) -> Boolean): ULong
+
+fun UByteArray.last(predicate: (UByte) -> Boolean): UByte:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UByteArray.last(predicate: (UByte) -> Boolean): UByte
+
+fun UShortArray.last(predicate: (UShort) -> Boolean): UShort:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UShortArray.last(predicate: (UShort) -> Boolean): UShort
+
+fun IntProgression.last(): Int:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntProgression.last(): Int
+
+fun LongProgression.last(): Long:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongProgression.last(): Long
+
+fun CharProgression.last(): Char:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharProgression.last(): Char
+
+fun UIntProgression.last(): UInt:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntProgression.last(): UInt
+
+fun ULongProgression.last(): ULong:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongProgression.last(): ULong
+
+fun <T> Sequence<T>.last(): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Sequence<T>.last(): T
+
+fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Sequence<T>.last(predicate: (T) -> Boolean): T
+
+fun CharSequence.last(): Char:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.last(): Char
+
+fun CharSequence.last(predicate: (Char) -> Boolean): Char:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.last(predicate: (Char) -> Boolean): Char
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:99 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:56:99 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:58:92 Argument type mismatch: actual type is 'JsonElement?', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:58:104 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:59:34 Unresolved reference 'userName'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:59:54 Unresolved reference 'desc'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:60:39 Unresolved reference 'FeedParser'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:60:60 Unresolved reference 'createdTime'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:64:14 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:67:6 Syntax error: Expecting 'catch' or 'finally'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/VimeoApiClient.kt:68:2 Syntax error: Expecting '}'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:35:17 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun HttpMessageBuilder.header(key: String, value: Any?): Unit
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:48:33 Assignment type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:48:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:48:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:48:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:50:25 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:50:30 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:50:30 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:51:25 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:51:31 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:51:31 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:54:33 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:54:33 Unresolved reference 'entrySet'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:57:34 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:57:39 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:57:39 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:58:33 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:58:38 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:58:38 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:59:40 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:59:45 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:59:45 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:60:38 Unresolved reference 'size'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:61:32 None of the following candidates is applicable:
+
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: URL, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(builder: HttpRequestBuilder): HttpResponse
+
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(block: HttpRequestBuilder.() -> Unit): HttpResponse
+
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(urlString: String, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+suspend fun HttpClient.get(url: Url, block: HttpRequestBuilder.() -> Unit = ...): HttpResponse
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:63:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:63:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:63:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:64:42 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:64:47 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:64:47 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:66:36 No value passed for parameter 'key'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:66:41 Syntax error: Expecting an expression.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:66:41 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:67:42 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:68:47 Syntax error: Unexpected tokens (use ';' to separate expressions on the same line).
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:71:66 Argument type mismatch: actual type is 'JsonElement?', but 'String!' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:72:64 Argument type mismatch: actual type is 'JsonElement?', but 'String!' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:77:39 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.removePrefix(prefix: CharSequence): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:78:31 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:81:40 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/feeds/api/WikimediaApiClient.kt:83:36 Argument type mismatch: actual type is 'JsonElement?', but 'String?' was expected.
+
+[Incubating] Problems report is available at: file:///home/tom/NoSlop/mvp/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':composeApp:compileDebugKotlinAndroid'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1s
+11 actionable tasks: 2 executed, 9 up-to-date

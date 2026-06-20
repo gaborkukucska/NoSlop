@@ -53,6 +53,7 @@ class MeshPacketHandler(
             "MESSAGE" -> dm.handleDirectMessage(packet, localKeys)
             "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)
+            "CONNECTION_REJECTED" -> handshake.handleConnectionRejected(packet)
             "ANNOUNCE_PEER" -> handshake.handleAnnouncePeer(packet)
             "CHAT_REACTION" -> reaction.handleChatReaction(packet)
             "COMMENT_REACTION" -> reaction.handleCommentReaction(packet)

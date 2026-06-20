@@ -2,6 +2,9 @@ package com.noslop.mvp
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import com.noslop.mvp.feeds.FeedItem
+import com.noslop.mvp.feeds.BackgroundScheduler
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
@@ -18,8 +21,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.Icon
+import com.noslop.mvp.ui.theme.MyApplicationTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -41,30 +53,69 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+import com.noslop.mvp.ui.onboarding.OnboardingScreen
+import com.noslop.mvp.ui.settings.SettingsScreen
+import com.noslop.mvp.ui.settings.ContentPreferencesScreen
+import com.noslop.mvp.data.SettingsRepository
+import com.noslop.mvp.data.PreferencesRepository
+import com.noslop.mvp.ui.tabs.ChatScreen
+import com.noslop.mvp.ui.tabs.LogsViewerScreen
+import com.noslop.mvp.ui.tabs.ApiKeysScreen
+import com.noslop.mvp.ui.tabs.NotificationsScreen
+
 /** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
 @Composable
 fun App() {
-    MaterialTheme {
-        var tab by remember { mutableStateOf(0) }
-        // Mesh state + the live connection live here (above the tab switch) so they survive tab changes —
-        // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
-        val meshScope = rememberCoroutineScope()
-        val mesh = remember { MeshUiState(meshScope) }
-        // Start dialing the saved hub at launch (any tab) so the Tor circuit pre-builds in the background.
-        LaunchedEffect(Unit) { mesh.autoConnectOnce() }
-        Scaffold { padding ->
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                TabRow(selectedTabIndex = tab) {
-                    Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Identity") })
-                    Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Feed") })
-                    Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Mesh") })
-                    Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("DMs") })
-                }
-                when (tab) {
-                    0 -> IdentityScreen()
-                    1 -> FeedScreen()
-                    2 -> MeshScreen(mesh)
-                    else -> DmScreen(mesh)
+    MyApplicationTheme {
+        var handle by remember { mutableStateOf(HandleStore.load()) }
+        var showOnboarding by remember { mutableStateOf(handle == "anon") }
+
+        if (showOnboarding) {
+            OnboardingScreen(onComplete = {
+                handle = HandleStore.load()
+                showOnboarding = false
+            })
+        } else {
+            var tab by remember { mutableStateOf(0) }
+            // Mesh state + the live connection live here (above the tab switch) so they survive tab changes —
+            // switching to Feed and back keeps the scanned hub + the open link instead of tearing it down.
+            val meshScope = rememberCoroutineScope()
+            val mesh = remember { MeshUiState(meshScope) }
+            // Start dialing the saved hub at launch (any tab) so the Tor circuit pre-builds in the background.
+            LaunchedEffect(Unit) { mesh.autoConnectOnce() }
+            Scaffold { padding ->
+                Column(Modifier.fillMaxSize().padding(padding)) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        when (tab) {
+                            0 -> FeedScreen()
+                            1 -> MeshScreen(mesh)
+                            2 -> DmScreen(mesh)          // our working E2E leaf-to-leaf DMs (not the ChatScreen stub)
+                            3 -> IdentityScreen()
+                            else -> SettingsTabWrapper()
+                        }
+                    }
+                    NavigationBar(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surface) {
+                        NavigationBarItem(
+                            selected = tab == 0, onClick = { tab = 0 },
+                            icon = { Icon(Icons.Filled.Home, "Feed") }, label = { Text("Feed") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 1, onClick = { tab = 1 },
+                            icon = { Icon(Icons.Filled.Share, "Mesh") }, label = { Text("HaiNet") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 2, onClick = { tab = 2 },
+                            icon = { Icon(Icons.Filled.Chat, "Chat") }, label = { Text("DMs") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 3, onClick = { tab = 3 },
+                            icon = { Icon(Icons.Filled.Person, "Identity") }, label = { Text("Identity") }
+                        )
+                        NavigationBarItem(
+                            selected = tab == 4, onClick = { tab = 4 },
+                            icon = { Icon(Icons.Filled.Settings, "Settings") }, label = { Text("Settings") }
+                        )
+                    }
                 }
             }
         }
@@ -160,7 +211,7 @@ private fun FeedScreen() {
     val scope = rememberCoroutineScope()
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val repo = remember { FeedRepository() }
-    var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
+    var stories by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var videoUrl by remember { mutableStateOf("https://www.w3schools.com/html/mov_bbb.mp4") }
@@ -169,6 +220,8 @@ private fun FeedScreen() {
     var mutedText by remember { mutableStateOf(saved.first) }
     var requiredText by remember { mutableStateOf(saved.second) }
     var showFilters by remember { mutableStateOf(false) }
+    var backgroundSyncEnabled by remember { mutableStateOf(false) }
+    val scheduler = remember { BackgroundScheduler() }
 
     fun load() {
         loading = true; error = null
@@ -192,9 +245,16 @@ private fun FeedScreen() {
                 Text("▶  Play video")
             }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { load() }, enabled = !loading, modifier = Modifier.weight(1f)) { Text(if (loading) "Loading…" else "Refresh feed") }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
             Button(onClick = { showFilters = !showFilters }) { Text(if (showFilters) "Hide filters" else "🧹 Filters") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Auto sync", fontSize = 13.sp)
+                Switch(checked = backgroundSyncEnabled, onCheckedChange = {
+                    backgroundSyncEnabled = it
+                    if (it) scheduler.scheduleFeedSync(1) else scheduler.cancelFeedSync()
+                })
+            }
         }
         // Curation panel: mute words (hide) + must-have words (only show matching). Persisted as you type.
         if (showFilters) {
@@ -227,10 +287,11 @@ private fun FeedScreen() {
                 items(shown) { s ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(s.source.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(s.sourceId.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Text(s.title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            if (s.excerpt.isNotBlank()) {
-                                Text(s.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
+                            val excerpt = s.excerpt
+                            if (!excerpt.isNullOrBlank()) {
+                                Text(excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
                             }
                         }
                     }
@@ -738,6 +799,36 @@ private fun DmScreen(state: MeshUiState) {
                     )
                     Text(e.text, fontSize = 14.sp)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTabWrapper() {
+    var currentRoute by remember { mutableStateOf("settings") }
+    val settingsRepo = remember { SettingsRepository() }
+    val prefsRepo = remember { PreferencesRepository() }
+
+    when (currentRoute) {
+        "preferences" -> ContentPreferencesScreen(
+            repository = prefsRepo,
+            onBack = { currentRoute = "settings" }
+        )
+        "logs" -> LogsViewerScreen(onBack = { currentRoute = "settings" })
+        "apikeys" -> ApiKeysScreen(onBack = { currentRoute = "settings" })
+        "notifications" -> NotificationsScreen(onBack = { currentRoute = "settings" })
+        else -> {
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Button(onClick = { currentRoute = "notifications" }) { Text("Notifications") }
+                    Button(onClick = { currentRoute = "logs" }) { Text("System Logs") }
+                    Button(onClick = { currentRoute = "apikeys" }) { Text("API Keys") }
+                }
+                SettingsScreen(
+                    repository = settingsRepo,
+                    onNavigateToPreferences = { currentRoute = "preferences" }
+                )
             }
         }
     }

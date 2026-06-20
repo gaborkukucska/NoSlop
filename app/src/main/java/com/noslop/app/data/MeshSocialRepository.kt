@@ -53,6 +53,18 @@ class MeshSocialRepository(
     /** Pending inbound connection request awaiting the user's accept/decline (null when none). */
     val incomingRequestFlow: StateFlow<Peer?> = _incomingRequestFlow.asStateFlow()
 
+    private val _acceptedHandshakeFlow = MutableStateFlow<Peer?>(null)
+    /** Fires once when a peer accepts our outgoing connection request; cleared after consumption. */
+    val acceptedHandshakeFlow: StateFlow<Peer?> = _acceptedHandshakeFlow.asStateFlow()
+
+    fun setHandshakeAccepted(peer: Peer) {
+        _acceptedHandshakeFlow.value = peer
+    }
+
+    fun clearHandshakeAccepted() {
+        _acceptedHandshakeFlow.value = null
+    }
+
     fun startPresenceHeartbeat() {
         if (presenceJob?.isActive == true) return
         presenceJob = repositoryScope.launch {
@@ -307,6 +319,39 @@ class MeshSocialRepository(
             }
         }
         true
+    }
+
+    suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
+        peerDao.deletePeer(peer)
+        _incomingRequestFlow.value = null
+
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+            val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            
+            val rejectPay = com.noslop.app.mesh.ConnectionRejectedPayload(
+                fromUserId = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = peer.publicKeyB64,
+                type = "CONNECTION_REJECTED",
+                payload = com.google.gson.Gson().toJsonTree(rejectPay),
+                signature = signature
+            )
+            
+            repositoryScope.launch {
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+            }
+        }
+        return@withContext true
     }
 
     suspend fun togglePeerTrust(peer: Peer) = withContext(Dispatchers.IO) {

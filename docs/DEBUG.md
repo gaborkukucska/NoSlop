@@ -1,8 +1,8 @@
 # Debugging NoSlop Android
 
 NoSlop includes an offline-first, local-only logging architecture designed for decentralized node debugging. There are no analytics trackers, telemetry SDKs, or central reporting backends. All diagnostics write to:
-1.  An in-memory **1000-line ring buffer** for real-time viewing in the Settings tab.
-2.  A local, persistent, newline-delimited JSON log file on the device.
+1.  An in-memory **500-entry ring buffer** (`Logger.kt`'s `MAX_ENTRIES`) for real-time viewing in the Settings tab.
+2.  A local, persistent, newline-delimited text log file on the device.
 
 This document describes how to access, filter, and share these diagnostic details.
 
@@ -76,7 +76,7 @@ adb exec-out run-as com.noslop.app cat files/noslop-debug.log > ./noslop-debug.l
 Filters are applied in the logger to help isolate specific subsystem issues:
 
 *   **`ONBOARDING`**: Documents the user wizard. Look here if keys or feeds aren't writing on first-run.
-*   **`CRYPTO`**: Details public key creation, sha-256 derivations, signing, and ECDH encryption procedures.
+*   **`CRYPTO`**: Details public key creation, SHA3-256 derivations (tripcode, onion address), Ed25519 signing, and X25519 DM key-agreement procedures (see [TECHNICAL_REFERENCE.md §3](TECHNICAL_REFERENCE.md#3-identity--cryptography) for the exact derivations).
     *   *Security Precaution: The cryptography engine NEVER logs raw private keys or seed variables.*
 *   **`TOR`**: Details embedded Tor daemon lifecycle, SOCKS5 port checks, hidden service registration, and result parameters from pings to `check.torproject.org`.
 *   **`FEED`**: Audits RSS/Atom XML parsing, HTML sanitization, API pipeline fetches (Jamendo, YouTube, Archive.org), and database insertions.
@@ -117,3 +117,7 @@ When debugging issues or seeking help:
 3.  Paste the **copied log dump** into your bug report, chat thread, or issue tracker.
 4.  Add a brief description of what you expected to see on screen vs. what actually occurred.
 5.  Include the device model and Android version for hardware-specific debugging (e.g., MediaCodec exhaustion varies by chipset).
+
+---
+
+**Related docs**: [SUPPORT.md](SUPPORT.md) for general troubleshooting steps before you reach for logs · [TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) if a log message references an internal module/function you want to look up.

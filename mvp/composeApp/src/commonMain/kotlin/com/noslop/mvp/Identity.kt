@@ -20,6 +20,9 @@ data class Identity(
  */
 expect object IdentityKeyStore {
     fun loadOrCreatePublicKey(): ByteArray
+    fun getPrivateKey(): ByteArray?
+    fun getEncPublicKey(): ByteArray?
+    fun getEncPrivateKey(): ByteArray?
     val isRealKeypair: Boolean
     fun reset()
 }

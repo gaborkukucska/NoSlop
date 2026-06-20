@@ -1,5 +1,6 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.feeds.FeedItem
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -7,7 +8,7 @@ import kotlin.test.assertTrue
 
 class FeedFiltersTest {
     private fun story(title: String, source: String = "hn", excerpt: String = "") =
-        FeedStory(title = title, url = null, source = source, excerpt = excerpt)
+        FeedItem(id = title, sourceId = source, title = title, excerpt = excerpt, publishedAt = 0L)
 
     @Test
     fun mute_words_hide_matching_stories_case_insensitive() {

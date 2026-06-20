@@ -14,7 +14,7 @@ android {
         minSdk = 24
         targetSdk = 35
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "0.1.5-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -50,6 +50,12 @@ android {
         debug {
             isDebuggable = true
             // No signingConfig needed — Android uses the default debug keystore automatically
+
+            // Gives the debug build its own package name (com.noslop.app.debug)
+            // and a distinct app label, so it installs side-by-side with the
+            // Release build instead of overwriting it.
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "NoSlop Debug")
         }
     }
 

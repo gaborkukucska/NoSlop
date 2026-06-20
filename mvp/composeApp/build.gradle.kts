@@ -59,6 +59,7 @@ kotlin {
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.materialIconsExtended)
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(libs.kotlinx.coroutines.core)
@@ -67,14 +68,19 @@ kotlin {
             implementation(libs.ktor.serialization.json)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlincrypto.sha3)
+            implementation(libs.kotlincrypto.sha1)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.primitive.adapters)
             implementation(libs.ktor.network)
             implementation("io.github.alexzhirkevich:qrose:1.0.1") // Compose-MP QR rendering (share-my-contact)
+            implementation(libs.xmlutil.core)
+            implementation(libs.xmlutil.serialization)
+            implementation(libs.kotlinx.datetime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
         }
         androidMain.dependencies {
             implementation(compose.uiTooling)
@@ -83,6 +89,11 @@ kotlin {
             implementation(libs.bouncycastle)
             implementation(libs.androidx.security.crypto)
             implementation(libs.sqldelight.android.driver)
+            implementation(libs.androidx.work.runtime.ktx)
+            implementation(libs.media3.exoplayer)
+            implementation(libs.media3.ui)
+            implementation(libs.media3.common)
+            implementation(libs.androidx.core.ktx)
         }
         // Android unit tests run on the JVM — use the JDBC (in-memory) driver, no Robolectric/device needed.
         androidUnitTest.dependencies {
@@ -213,13 +224,38 @@ android {
     namespace = "com.noslop.mvp"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()
 
+    if (project.hasProperty("NOSLOP_STORE_FILE")) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
+                storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
+                keyAlias = project.property("NOSLOP_KEY_ALIAS") as String
+                keyPassword = project.property("NOSLOP_KEY_PASSWORD") as String
+            }
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.noslop.mvp"
+        applicationId = "com.noslop.app"
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidCompileSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
     }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (project.hasProperty("NOSLOP_STORE_FILE")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

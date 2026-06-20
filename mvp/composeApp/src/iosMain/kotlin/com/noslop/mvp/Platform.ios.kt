@@ -24,6 +24,9 @@ import platform.Security.kSecRandomDefault
 interface IosKeychain {
     /** Base64 of the persisted Ed25519 public key, creating + storing a keypair on first use. */
     fun loadOrCreatePublicKeyBase64(): String
+    fun getPrivateKeyBase64(): String?
+    fun getEncPublicKeyBase64(): String?
+    fun getEncPrivateKeyBase64(): String?
     /** Delete the stored keypair so the next load creates a fresh one. */
     fun reset()
     /** Load the stored X25519 DM private key (raw 32-byte, base64), or null if none. */
@@ -54,6 +57,21 @@ actual object IdentityKeyStore {
         IosKeychainBridge.keychain?.let { return Base64.decode(it.loadOrCreatePublicKeyBase64()) }
         // Fallback (no bridge): stable within the process so derivations are reproducible in tests.
         return fallbackKey ?: secureRandom32().also { fallbackKey = it }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getPrivateKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getPrivateKeyBase64()?.let { Base64.decode(it) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getEncPublicKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getEncPublicKeyBase64()?.let { Base64.decode(it) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getEncPrivateKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getEncPrivateKeyBase64()?.let { Base64.decode(it) }
     }
 
     actual val isRealKeypair: Boolean get() = IosKeychainBridge.keychain != null
@@ -285,16 +303,47 @@ interface IosVideoPlayer {
     fun play(url: String)
 }
 
-object IosVideoPlayerBridge {
+// Our simple full-screen quick-play bridge. Distinct from the inline component player
+// ([IosVideoPlayerBridge] with `factory`, below) so both can coexist after the upstream media-stack merge.
+object IosFullscreenVideoBridge {
     var player: IosVideoPlayer? = null
 }
 
 actual object VideoPlayer {
-    actual val isAvailable: Boolean get() = IosVideoPlayerBridge.player != null
-    actual fun play(url: String) { IosVideoPlayerBridge.player?.play(url) }
+    actual val isAvailable: Boolean get() = IosFullscreenVideoBridge.player != null
+    actual fun play(url: String) { IosFullscreenVideoBridge.player?.play(url) }
 }
 
 actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 actual fun randomId(): String = NSUUID().UUIDString()
+
+/** Swift→Kotlin bridge for the iOS AVPlayer component */
+interface IosMediaPlayer {
+    val isPlaying: Boolean
+    val progressMs: Long
+    val durationMs: Long
+    
+    fun play()
+    fun pause()
+    fun seekTo(positionMs: Long)
+    fun release()
+    
+    fun setListener(
+        onStateChanged: (isPlaying: Boolean, isBuffering: Boolean) -> Unit,
+        onError: (message: String) -> Unit
+    )
+}
+
+/** Holder returned by the factory — avoids Kotlin Pair cross-bridge issues. */
+class MediaPlayerResult(val player: IosMediaPlayer, val view: platform.UIKit.UIView)
+
+/** Factory to create IosMediaPlayer and provide its view. */
+interface IosVideoPlayerFactory {
+    fun createPlayer(url: String): MediaPlayerResult
+}
+
+object IosVideoPlayerBridge {
+    var factory: IosVideoPlayerFactory? = null
+}

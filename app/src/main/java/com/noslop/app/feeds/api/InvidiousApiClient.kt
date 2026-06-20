@@ -20,20 +20,14 @@ object InvidiousApiClient {
     private val gson = Gson()
     private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
 
+    private const val BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
     /**
      * Dedicated probe client for resolveStreamUrl().
-     *
      * Built once from scratch (not from clearnetClient.newBuilder()) so it has
      * NO interceptors — in particular, clearnetClient's browser User-Agent
-     * interceptor does NOT apply here.  OkHttpClient.Builder.interceptors()
-     * returns an unmodifiable snapshot, so calling .clear() on it throws
-     * UnsupportedOperationException silently caught by the JVM, meaning the
-     * workaround of `client.newBuilder().apply { interceptors().clear() }` is
-     * a no-op and the browser UA leaks through.  Building from scratch avoids
-     * this entirely.
-     *
-     * Short per-instance timeouts (5 s) so dead instances are skipped quickly.
-     * Shares clearnetClient's DNS resolver for DoH fallback support.
+     * interceptor does NOT apply here. Building from scratch avoids UA leakage.
+     * Short per-instance timeouts so dead instances are skipped quickly.
      */
     private val probeClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
@@ -67,10 +61,7 @@ object InvidiousApiClient {
      * Per-instance failure tracking for the current session.
      * Maps instance URL → timestamp of first consecutive failure.
      * An instance is skipped (blacklisted) for INSTANCE_COOLDOWN_MS after its
-     * first failure — this stops a dead instance from being hammered by every
-     * concurrent resolveStreamUrl call in the same scroll session.
-     * The cooldown is intentionally short (5 min) so a transiently-down
-     * instance is retried eventually rather than permanently excluded.
+     * first failure.
      */
     private val instanceFailureTime = ConcurrentHashMap<String, Long>()
     private const val INSTANCE_COOLDOWN_MS = 5 * 60_000L // 5 minutes
@@ -81,8 +72,6 @@ object InvidiousApiClient {
     }
 
     private fun markInstanceFailed(instance: String) {
-        // putIfAbsent so the first failure timestamp is preserved (not overwritten
-        // by a later concurrent call that also saw this instance fail).
         instanceFailureTime.putIfAbsent(instance, System.currentTimeMillis())
     }
 
@@ -106,7 +95,7 @@ object InvidiousApiClient {
         return try {
             val request = Request.Builder()
                 .url("https://api.invidious.io/instances.json?sort_by=type,health")
-                .header("User-Agent", "NoSlop-Android/1.0")
+                .header("User-Agent", BROWSER_USER_AGENT)
                 .build()
             val response = client.newCall(request).execute()
             if (!response.isSuccessful) {
@@ -127,23 +116,16 @@ object InvidiousApiClient {
                     if (type != "https") continue
 
                     val uri = details.get("uri")?.asString ?: continue
-
-                    // Prefer instances with API enabled
                     val apiEnabled = try { details.get("api")?.asBoolean ?: false } catch (_: Exception) { false }
 
-                    // Check if monitor says it's up.
-                    // The "down" key is only present when the instance IS down.
-                    // Absent monitor or absent "down" key → assume the instance is up
-                    // (the registry sorts by health, so instances at the top of the
-                    // list without a monitor are still healthy candidates).
                     val monitor = details.getAsJsonObject("monitor")
                     val isDown = try { monitor?.get("down")?.asBoolean ?: false } catch (_: Exception) { false }
 
                     if (!isDown) {
                         if (apiEnabled) {
-                            liveInstances.add(0, uri) // API-enabled instances first
+                            liveInstances.add(0, uri)
                         } else {
-                            liveInstances.add(uri) // Non-API instances as backup
+                            liveInstances.add(uri)
                         }
                     }
                 } catch (e: Exception) {
@@ -152,7 +134,6 @@ object InvidiousApiClient {
             }
 
             if (liveInstances.isNotEmpty()) {
-                // Take top 12 to give more candidates without excessive retry cost
                 val result = liveInstances.take(12)
                 cachedInstances = result
                 cacheTimestamp = now
@@ -170,10 +151,7 @@ object InvidiousApiClient {
 
     /**
      * Returns the best available Invidious instance synchronously, for use from non-suspending
-     * contexts (e.g. VideoPlayer's WebView factory block).
-     *
-     * Returns the first non-cooling-down entry from the cached dynamic list if it has been
-     * populated, otherwise falls back to the first hardcoded fallback instance.
+     * contexts.
      */
     fun getPrimaryInstance(): String {
         val instances = cachedInstances ?: FALLBACK_INSTANCES
@@ -183,72 +161,32 @@ object InvidiousApiClient {
 
     /**
      * Resolve a direct playable stream URL for a YouTube video ID via the Invidious API.
-     *
-     * Invidious's /api/v1/videos/{id} endpoint returns an `adaptiveFormats` array (DASH)
-     * and a `formatStreams` array (muxed audio+video).  We prefer a muxed stream so ExoPlayer
-     * can play it without DASH parsing — no extra complexity, no manifest issues.
-     *
-     * Resolution preference (muxed streams):
-     *   720p → 480p → 360p → first available
-     *
-     * If no muxed streams are available we fall back to the highest-quality adaptive video
-     * stream and let ExoPlayer handle it (it will be video-only, but that's better than nothing).
-     *
-     * Returns null if every instance fails or the video is unavailable, letting the caller
-     * fall back to the Invidious WebView embed.
-     *
-     * Instance failures update [instanceFailureTime] so subsequent calls in the same
-     * session skip dead instances immediately rather than timing out against them.
      */
     fun resolveStreamUrl(videoId: String): String? {
         val allInstances = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
 
-        // Partition: prefer instances that haven't recently failed, try the rest as last resort
-        val (healthy, cooling) = allInstances.partition { !isInstanceCoolingDown(it) }
-        val instances = healthy + cooling   // healthy first, then retry cooling ones as fallback
+        // FIX: Only try healthy instances. If all instances have failed recently (cooldown),
+        // fast-fail immediately to the WebView embed. This prevents the UI from locking up 
+        // for 45 seconds per video trying to probe dead instances!
+        val healthy = allInstances.filter { !isInstanceCoolingDown(it) }
 
         if (healthy.isEmpty()) {
-            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, trying anyway")
+            Logger.warn(TAG, "resolveStreamUrl: all instances are in cooldown for $videoId, fast-failing to WebView embed")
+            return null
         }
 
-        // Hard wall-clock deadline for the entire resolution attempt.
-        // Per-instance timeout = 5 s; if ALL instances are unreachable (e.g. device
-        // is briefly offline, VPN is reconnecting, Tor proxy is down) this caps the
-        // total wait to ~20 s rather than 5 s × N instances, after which we return
-        // null quickly and the caller falls through to the youtube-nocookie embed.
-        val deadlineMs = System.currentTimeMillis() + 20_000L
+        val deadlineMs = System.currentTimeMillis() + 45_000L
 
-        for (instance in instances) {
+        for (instance in healthy) {
             if (System.currentTimeMillis() >= deadlineMs) {
                 Logger.warn(TAG, "resolveStreamUrl: deadline exceeded for $videoId, aborting")
                 break
             }
             try {
-                // Do NOT use local=1 here.
-                //
-                // local=1 rewrites stream URLs so they proxy through the Invidious
-                // instance rather than going straight to googlevideo.com.  While this
-                // sounds appealing (avoids a 403 that was once observed on raw
-                // googlevideo.com URLs), in practice it causes far worse problems:
-                //
-                //  • ExoPlayer issues many parallel byte-range requests; proxying them
-                //    all through a single Invidious instance quickly hits that
-                //    instance's rate-limit / connection cap, producing the
-                //    "all instances exhausted" errors seen in the logs.
-                //
-                //  • The proxied URL is session-scoped to the instance — if it
-                //    restarts or the session expires, the URL stops working mid-stream
-                //    even though the video is fine.
-                //
-                //  • Modern Invidious instances (2024+) sign googlevideo.com URLs with
-                //    `alr=yes` which suppresses the 403 for direct device requests.
-                //
-                // Omitting local=1 lets ExoPlayer fetch from googlevideo.com directly,
-                // which is dramatically faster and more reliable.
                 val url = "$instance/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats"
                 val request = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "NoSlop-Android/1.0")
+                    .header("User-Agent", BROWSER_USER_AGENT)
                     .build()
 
                 val response = probeClient.newCall(request).execute()
@@ -321,7 +259,6 @@ object InvidiousApiClient {
                 }
 
                 Logger.warn(TAG, "resolveStreamUrl: no usable streams for $videoId from $instance")
-                // Don't blacklist — the instance responded fine, just no streams for this video
             } catch (e: Exception) {
                 Logger.warn(TAG, "resolveStreamUrl: instance $instance failed: ${e.message}")
                 markInstanceFailed(instance)
@@ -340,7 +277,7 @@ object InvidiousApiClient {
             val url = "$instance/api/v1/search?q=$encodedQuery&type=video"
             try {
                 Logger.info(TAG, "Trying Invidious instance: $instance")
-                val request = Request.Builder().url(url).header("User-Agent", "NoSlop-Android/1.0").build()
+                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
@@ -376,7 +313,7 @@ object InvidiousApiClient {
             val url = "$instance/api/v1/trending?type=Video"
             try {
                 Logger.info(TAG, "Trying Invidious instance: $instance")
-                val request = Request.Builder().url(url).header("User-Agent", "NoSlop-Android/1.0").build()
+                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
                 val response = client.newCall(request).execute()
 
                 if (response.isSuccessful) {
@@ -416,7 +353,6 @@ object InvidiousApiClient {
                 val published = try { v.get("published")?.asLong?.times(1000) } catch (e: Exception) { System.currentTimeMillis() }
                 val lengthSeconds = try { v.get("lengthSeconds")?.asInt } catch (_: Exception) { null }
 
-                // Use direct YouTube thumbnail URL — always works, no instance dependency
                 val thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 
                 val durationLabel = if (lengthSeconds != null && lengthSeconds > 0) {
@@ -430,16 +366,18 @@ object InvidiousApiClient {
                     if (desc != null) append(desc)
                 }
 
+                val ytUrl = "https://www.youtube.com/watch?v=$videoId"
+
                 items.add(FeedItem(
-                    id = "invidious_$videoId",
+                    id = "yt_api_v2_$videoId",
                     sourceId = sourceId,
                     title = title,
-                    url = "https://www.youtube.com/watch?v=$videoId",
+                    url = ytUrl,
                     author = author,
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
                     publishedAt = published ?: System.currentTimeMillis(),
-                    mediaUrl = "https://www.youtube.com/watch?v=$videoId",
+                    mediaUrl = ytUrl,
                     mediaType = "video",
                     apiSource = "youtube"
                 ))

@@ -11,6 +11,14 @@ data class BuiltInSource(
 
 object SourceLibrary {
 
+    /**
+     * Categories always included in the pipeline regardless of user selection.
+     * Their sources are auto-enabled and they should never appear in the
+     * onboarding/settings category picker.
+     */
+    val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet")
+
+    /** Full internal category list — used by the pipeline / recovery logic. */
     val categories = listOf(
         "Technology",
         "Privacy & Security",
@@ -29,6 +37,9 @@ object SourceLibrary {
         "Music",
         "Reddit"
     )
+
+    /** Categories shown to the user for selection (excludes always-included source categories). */
+    val selectableCategories = categories.filter { it !in alwaysIncludedCategories }
 
     val sources = listOf(
         // Technology
