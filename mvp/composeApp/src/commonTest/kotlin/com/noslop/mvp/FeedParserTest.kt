@@ -1,11 +1,12 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.feeds.FeedParser
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 /**
- * Tests the dependency-free RSS/Atom parser ([RssParser]) deterministically (no network), covering
+ * Tests the FeedParser using xmlutil + kotlinx.serialization deterministically (no network), covering
  * the two formats and the messy bits real feeds use: entity escaping, CDATA, embedded HTML, and the
  * RSS `<link>text</link>` vs Atom `<link href="…"/>` difference.
  */
@@ -28,10 +29,10 @@ class FeedParserTest {
             </channel></rss>
         """.trimIndent()
 
-        val blocks = RssParser.itemBlocks(rss)
-        assertEquals(2, blocks.size)
+        val items = FeedParser.parseStream(rss, "Test")
+        assertEquals(2, items.size)
 
-        val first = RssParser.parseItem(blocks[0], "Test")
+        val first = items[0]
         assertNotNull(first)
         assertEquals("Hello & World", first.title)        // entity decoded, not the channel title
         assertEquals("https://example.com/1", first.url)
@@ -41,7 +42,7 @@ class FeedParserTest {
     @Test
     fun parsesAtom_withHrefLink() {
         val atom = """
-            <feed>
+            <feed xmlns="http://www.w3.org/2005/Atom">
               <entry>
                 <title>Atom Title</title>
                 <link href="https://example.com/a" rel="alternate"/>
@@ -50,10 +51,10 @@ class FeedParserTest {
             </feed>
         """.trimIndent()
 
-        val blocks = RssParser.itemBlocks(atom)
-        assertEquals(1, blocks.size)
+        val items = FeedParser.parseStream(atom, "Atom")
+        assertEquals(1, items.size)
 
-        val item = RssParser.parseItem(blocks[0], "Atom")
+        val item = items[0]
         assertNotNull(item)
         assertEquals("Atom Title", item.title)
         assertEquals("https://example.com/a", item.url)    // pulled from the href attribute

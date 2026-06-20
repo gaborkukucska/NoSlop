@@ -15,7 +15,7 @@
 
 ## What is NoSlop?
 
-**NoSlop** is a privacy-first Android app for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
+**NoSlop** is a privacy-first Kotlin Multiplatform app (Android & iOS) for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
 
 It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. All mesh network traffic is routed through **Tor by default**. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
 
@@ -85,11 +85,11 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 | Layer | Technology |
 |---|---|
-| UI | Jetpack Compose + Material Design 3 |
-| Media | ExoPlayer (HLS/DASH/MP4), WebView (YouTube), Coil (images) |
-| Content | RSS/Atom parser, Jamendo API, Archive.org, YouTube RSS |
-| Networking | Embedded Tor SOCKS5 daemon (onion-routed), OkHttp + DNS-over-HTTPS |
-| Signing | Ed25519 (Android Keystore / Bouncy Castle) |
+| UI | Compose Multiplatform (Material Design 3) |
+| Media | ExoPlayer (Android), WebView, Coil (images) |
+| Content | Ktor, Kotlinx-serialization, xmlutil, RSS/Atom parser |
+| Networking | Embedded Tor SOCKS5 daemon (onion-routed), Ktor + OkHttp/Darwin |
+| Signing | Ed25519 (Android Keystore / Bouncy Castle / Apple CryptoKit) |
 | Key exchange | X25519 |
 | Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
 | Storage | Room SQLite (WAL mode) + EncryptedSharedPreferences |
@@ -100,7 +100,7 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 ## Getting Started
 
-1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md).
+1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is now the `mvp/` (Kotlin Multiplatform) directory.
 2. **Run the onboarding flow** — 6 steps: generate your Word Cloud, pick your interests, optionally scan a friend's QR to add your first contact.
 3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
 

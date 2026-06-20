@@ -1,5 +1,8 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.feeds.FeedItem
+import com.noslop.mvp.feeds.BackgroundScheduler
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -151,9 +154,11 @@ private fun Field(label: String, value: String) {
 private fun FeedScreen() {
     val scope = rememberCoroutineScope()
     val repo = remember { FeedRepository() }
-    var stories by remember { mutableStateOf<List<FeedStory>>(emptyList()) }
+    var stories by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var backgroundSyncEnabled by remember { mutableStateOf(false) }
+    val scheduler = remember { BackgroundScheduler() }
 
     fun load() {
         loading = true; error = null
@@ -167,7 +172,16 @@ private fun FeedScreen() {
     LaunchedEffect(Unit) { load() } // auto-load on first open
 
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Auto sync", fontSize = 13.sp)
+                Switch(checked = backgroundSyncEnabled, onCheckedChange = { 
+                    backgroundSyncEnabled = it
+                    if (it) scheduler.scheduleFeedSync(1) else scheduler.cancelFeedSync()
+                })
+            }
+        }
         when {
             loading && stories.isEmpty() -> CircularProgressIndicator()
             error != null && stories.isEmpty() -> Text("Error: $error", color = MaterialTheme.colorScheme.error)
@@ -175,10 +189,11 @@ private fun FeedScreen() {
                 items(stories) { s ->
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(s.source.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            Text(s.sourceId.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Text(s.title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            if (s.excerpt.isNotBlank()) {
-                                Text(s.excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
+                            val excerpt = s.excerpt
+                            if (!excerpt.isNullOrBlank()) {
+                                Text(excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
                             }
                         }
                     }

@@ -67,13 +67,18 @@ kotlin {
             implementation(libs.ktor.serialization.json)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlincrypto.sha3)
+            implementation(libs.kotlincrypto.sha1)
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.primitive.adapters)
             implementation(libs.ktor.network)
+            implementation(libs.xmlutil.core)
+            implementation(libs.xmlutil.serialization)
+            implementation(libs.kotlinx.datetime)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
         }
         androidMain.dependencies {
             implementation(compose.uiTooling)
@@ -82,6 +87,7 @@ kotlin {
             implementation(libs.bouncycastle)
             implementation(libs.androidx.security.crypto)
             implementation(libs.sqldelight.android.driver)
+            implementation(libs.androidx.work.runtime.ktx)
         }
         // Android unit tests run on the JVM — use the JDBC (in-memory) driver, no Robolectric/device needed.
         androidUnitTest.dependencies {
