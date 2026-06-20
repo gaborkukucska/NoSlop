@@ -21,7 +21,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Icon
-import com.noslop.mvp.ui.theme.NoSlopTheme
+import com.noslop.mvp.ui.theme.MyApplicationTheme
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
@@ -62,7 +62,7 @@ import com.noslop.mvp.ui.tabs.NotificationsScreen
 /** Root MVP UI: three tabs — Identity, Feed, and Mesh (live hub connection). */
 @Composable
 fun App() {
-    NoSlopTheme {
+    MyApplicationTheme {
         var handle by remember { mutableStateOf(HandleStore.load()) }
         var showOnboarding by remember { mutableStateOf(handle == "anon") }
 
