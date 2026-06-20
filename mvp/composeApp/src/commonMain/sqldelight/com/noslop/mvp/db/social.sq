@@ -1,0 +1,112 @@
+CREATE TABLE meshComment (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    postId               TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    authorHandle         TEXT NOT NULL,
+    authorAvatarB64      TEXT,
+    content              TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL,
+    parentCommentId      TEXT
+);
+
+CREATE INDEX meshComment_postId ON meshComment(postId);
+
+insertComment:
+INSERT OR REPLACE INTO meshComment VALUES ?;
+
+getCommentsForPost:
+SELECT * FROM meshComment WHERE postId = ? ORDER BY timestamp ASC;
+
+CREATE TABLE meshReaction (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    postId               TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    reactionType         TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL
+);
+
+insertReaction:
+INSERT OR REPLACE INTO meshReaction VALUES ?;
+
+getReactionById:
+SELECT * FROM meshReaction WHERE id = ?;
+
+deleteReactionById:
+DELETE FROM meshReaction WHERE id = ?;
+
+getReactionsForPost:
+SELECT * FROM meshReaction WHERE postId = ?;
+
+CREATE TABLE chatReaction (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    messageId            TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    reactionType         TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL
+);
+
+insertChatReaction:
+INSERT OR REPLACE INTO chatReaction VALUES ?;
+
+getChatReactionById:
+SELECT * FROM chatReaction WHERE id = ?;
+
+deleteChatReactionById:
+DELETE FROM chatReaction WHERE id = ?;
+
+CREATE TABLE commentReaction (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    commentId            TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    reactionType         TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL
+);
+
+insertCommentReaction:
+INSERT OR REPLACE INTO commentReaction VALUES ?;
+
+getCommentReactionById:
+SELECT * FROM commentReaction WHERE id = ?;
+
+deleteCommentReactionById:
+DELETE FROM commentReaction WHERE id = ?;
+
+CREATE TABLE meshVote (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    postId               TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    voteType             TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL
+);
+
+insertMeshVote:
+INSERT OR REPLACE INTO meshVote VALUES ?;
+
+getMeshVoteById:
+SELECT * FROM meshVote WHERE id = ?;
+
+deleteMeshVoteById:
+DELETE FROM meshVote WHERE id = ?;
+
+CREATE TABLE commentVote (
+    id                   TEXT NOT NULL PRIMARY KEY,
+    commentId            TEXT NOT NULL,
+    authorPublicKeyB64   TEXT NOT NULL,
+    voteType             TEXT NOT NULL,
+    timestamp            INTEGER NOT NULL,
+    signature            TEXT NOT NULL
+);
+
+insertCommentVote:
+INSERT OR REPLACE INTO commentVote VALUES ?;
+
+getCommentVoteById:
+SELECT * FROM commentVote WHERE id = ?;
+
+deleteCommentVoteById:
+DELETE FROM commentVote WHERE id = ?;

@@ -6,6 +6,7 @@ import com.noslop.mvp.db.MeshDatabase
 import com.noslop.mvp.db.MeshPost
 import com.noslop.mvp.db.Message
 import com.noslop.mvp.db.Peer
+import com.noslop.mvp.db.SwipeTracker
 
 /** Opens the platform SQLite database (Android = AndroidSqliteDriver, iOS = NativeSqliteDriver). */
 expect object DbDriverFactory {
@@ -22,11 +23,13 @@ expect object DbDriverFactory {
  */
 class MeshStore(driver: SqlDriver) {
     // gossipCount is INTEGER AS kotlin.Int → needs a primitive adapter (Boolean columns are native).
-    private val db = MeshDatabase(driver, MeshPost.Adapter(gossipCountAdapter = IntColumnAdapter))
-    private val posts = db.meshPostQueries
-    private val messages = db.messageQueries
-    private val peers = db.peerQueries
-    private val meta = db.appMetaQueries
+    private val db = MeshDatabase(driver, MeshPost.Adapter(gossipCountAdapter = IntColumnAdapter), SwipeTracker.Adapter(swipeCountAdapter = IntColumnAdapter))
+    val posts = db.meshPostQueries
+    val messages = db.messageQueries
+    val peers = db.peerQueries
+    val meta = db.appMetaQueries
+    val engagement = db.engagementQueries
+    val social = db.socialQueries
 
     // --- Posts (gossip dedup: a re-seen id bumps the gossip count instead of overwriting) ---
     fun savePost(post: MeshPost) {

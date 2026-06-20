@@ -24,6 +24,9 @@ import platform.Security.kSecRandomDefault
 interface IosKeychain {
     /** Base64 of the persisted Ed25519 public key, creating + storing a keypair on first use. */
     fun loadOrCreatePublicKeyBase64(): String
+    fun getPrivateKeyBase64(): String?
+    fun getEncPublicKeyBase64(): String?
+    fun getEncPrivateKeyBase64(): String?
     /** Delete the stored keypair so the next load creates a fresh one. */
     fun reset()
 }
@@ -48,6 +51,21 @@ actual object IdentityKeyStore {
         IosKeychainBridge.keychain?.let { return Base64.decode(it.loadOrCreatePublicKeyBase64()) }
         // Fallback (no bridge): stable within the process so derivations are reproducible in tests.
         return fallbackKey ?: secureRandom32().also { fallbackKey = it }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getPrivateKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getPrivateKeyBase64()?.let { Base64.decode(it) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getEncPublicKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getEncPublicKeyBase64()?.let { Base64.decode(it) }
+    }
+
+    @OptIn(ExperimentalEncodingApi::class)
+    actual fun getEncPrivateKey(): ByteArray? {
+        return IosKeychainBridge.keychain?.getEncPrivateKeyBase64()?.let { Base64.decode(it) }
     }
 
     actual val isRealKeypair: Boolean get() = IosKeychainBridge.keychain != null

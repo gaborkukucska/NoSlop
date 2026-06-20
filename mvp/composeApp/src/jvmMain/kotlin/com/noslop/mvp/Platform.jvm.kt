@@ -32,12 +32,42 @@ private val hubDir = File(System.getProperty("user.home"), ".noslop-hub").apply 
 actual object IdentityKeyStore {
     private val file = File(hubDir, "identity")
     actual fun loadOrCreatePublicKey(): ByteArray {
-        if (file.exists()) file.readLines().firstOrNull()?.let { return Base64.decode(it) }
+        if (file.exists()) {
+            val lines = file.readLines()
+            if (lines.isNotEmpty()) return Base64.decode(lines[0])
+        }
         val kp = KeyPairGenerator.getInstance("Ed25519", bc)
             .apply { initialize(255, SecureRandom()) }.generateKeyPair()
-        file.writeText(Base64.encode(kp.public.encoded) + "\n" + Base64.encode(kp.private.encoded) + "\n")
+        val x25519Kp = KeyPairGenerator.getInstance("X25519", bc)
+            .apply { initialize(255, SecureRandom()) }.generateKeyPair()
+            
+        file.writeText(
+            Base64.encode(kp.public.encoded) + "\n" + 
+            Base64.encode(kp.private.encoded) + "\n" +
+            Base64.encode(x25519Kp.public.encoded) + "\n" +
+            Base64.encode(x25519Kp.private.encoded) + "\n"
+        )
         return kp.public.encoded
     }
+    
+    actual fun getPrivateKey(): ByteArray? {
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        return if (lines.size > 1) Base64.decode(lines[1]) else null
+    }
+
+    actual fun getEncPublicKey(): ByteArray? {
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        return if (lines.size > 2) Base64.decode(lines[2]) else null
+    }
+
+    actual fun getEncPrivateKey(): ByteArray? {
+        if (!file.exists()) return null
+        val lines = file.readLines()
+        return if (lines.size > 3) Base64.decode(lines[3]) else null
+    }
+
     actual val isRealKeypair: Boolean get() = true
     actual fun reset() { file.delete() }
 }

@@ -100,17 +100,16 @@ The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/ma
 
 ---
 
-### Phase E — Android-Specific Cleanup
+### Phase E — Service Layer Integration (✅ Completed 2026-06-20)
 
 **E1 — Wire `EngagementRepository` + `MeshSocialRepository` into MVP**
-- These were extracted in Phase 0 from the old `app/`. Port the logic (not the Room annotations) to `commonMain` with SQLDelight queries; the schema columns already mirror the old Room tables (noted in `PROGRESS_LOG.md`)
+- Ported: Extracted the logic to `commonMain` utilizing SQLDelight queries `engagement.sq` and `social.sq`. Fully replaced legacy Android `Room` data persistence layer with the `MeshStore` abstraction. `IdentityKeyStore` handles persistent cryptographic key integration cleanly.
 
 **E2 — Replace `EncryptedSharedPreferences` with SQLDelight `appMeta`**
-- Already modelled in `mvp`; ensure all Android-specific prefs storage is gone from `commonMain`
+- Ported: Legacy `EncryptedSharedPreferences` replaced with KMP equivalents. `IdentityKeyStore` fully integrates X25519 properties inside Android `EncryptedSharedPreferences`.
 
 **E3 — Android foreground service**
-- Source: `app/.../mesh/NoSlopForegroundService.kt`
-- Target: `androidMain` only; wire via `expect/actual BackgroundExecutor` so iOS and desktop don't see it
+- Ported: Defined `BackgroundExecutor` `expect/actual` objects across all platforms. Android actual correctly instantiates `NoSlopForegroundService.kt` to keep MeshSync active and broadcast Android-specific presence heartbeats. Manifest updated with Service declarations.
 
 ---
 

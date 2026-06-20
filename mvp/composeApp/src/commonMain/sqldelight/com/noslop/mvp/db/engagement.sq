@@ -1,0 +1,40 @@
+-- Viewed history used to track what the user has already seen (for feed de-duplication)
+CREATE TABLE viewedHistoryItem (
+    itemId    TEXT NOT NULL PRIMARY KEY,
+    itemType  TEXT NOT NULL,
+    viewedAt  INTEGER NOT NULL
+);
+
+insertViewedItem:
+INSERT OR REPLACE INTO viewedHistoryItem VALUES ?;
+
+getAllViewedIds:
+SELECT itemId FROM viewedHistoryItem;
+
+getAllViewedItems:
+SELECT * FROM viewedHistoryItem ORDER BY viewedAt DESC;
+
+getCount:
+SELECT count(*) FROM viewedHistoryItem;
+
+pruneOldest:
+DELETE FROM viewedHistoryItem WHERE itemId IN (
+    SELECT itemId FROM viewedHistoryItem ORDER BY viewedAt ASC LIMIT ?
+);
+
+-- Swipe tracker used to detect if the user repeatedly dismissed an item
+CREATE TABLE swipeTracker (
+    itemId       TEXT NOT NULL PRIMARY KEY,
+    swipeCount   INTEGER AS kotlin.Int NOT NULL DEFAULT 1,
+    lastSwipedAt INTEGER NOT NULL
+);
+
+upsertSwipe:
+INSERT OR REPLACE INTO swipeTracker VALUES ?;
+
+getSwipeForItem:
+SELECT * FROM swipeTracker WHERE itemId = ?;
+
+-- IDs of items that have been swiped away 2 or more times
+getExcludedIds:
+SELECT itemId FROM swipeTracker WHERE swipeCount >= 2;

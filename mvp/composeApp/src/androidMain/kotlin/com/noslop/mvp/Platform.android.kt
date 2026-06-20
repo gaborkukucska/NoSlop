@@ -25,6 +25,8 @@ actual object IdentityKeyStore {
     private const val PREFS = "noslop_identity"
     private const val KEY_PUB = "ed25519_pub_x509_b64"
     private const val KEY_PRIV = "ed25519_priv_pkcs8_b64"
+    private const val KEY_ENC_PUB = "x25519_pub_x509_b64"
+    private const val KEY_ENC_PRIV = "x25519_priv_pkcs8_b64"
     private val bc = org.bouncycastle.jce.provider.BouncyCastleProvider()
     private var fallbackKey: ByteArray? = null
 
@@ -45,11 +47,32 @@ actual object IdentityKeyStore {
 
         val kp = KeyPairGenerator.getInstance("Ed25519", bc)
             .apply { initialize(255, SecureRandom()) }.generateKeyPair()
+            
+        val x25519Kp = KeyPairGenerator.getInstance("X25519", bc)
+            .apply { initialize(255, SecureRandom()) }.generateKeyPair()
+            
         p.edit()
             .putString(KEY_PUB, Base64.encodeToString(kp.public.encoded, Base64.NO_WRAP))
             .putString(KEY_PRIV, Base64.encodeToString(kp.private.encoded, Base64.NO_WRAP))
+            .putString(KEY_ENC_PUB, Base64.encodeToString(x25519Kp.public.encoded, Base64.NO_WRAP))
+            .putString(KEY_ENC_PRIV, Base64.encodeToString(x25519Kp.private.encoded, Base64.NO_WRAP))
             .apply()
         return kp.public.encoded // X.509 (44 bytes); IdentityDerivation strips the header
+    }
+
+    actual fun getPrivateKey(): ByteArray? {
+        val p = prefs() ?: return null
+        return p.getString(KEY_PRIV, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
+    }
+
+    actual fun getEncPublicKey(): ByteArray? {
+        val p = prefs() ?: return null
+        return p.getString(KEY_ENC_PUB, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
+    }
+
+    actual fun getEncPrivateKey(): ByteArray? {
+        val p = prefs() ?: return null
+        return p.getString(KEY_ENC_PRIV, null)?.let { Base64.decode(it, Base64.NO_WRAP) }
     }
 
     actual val isRealKeypair: Boolean get() = AndroidAppContext.isSet

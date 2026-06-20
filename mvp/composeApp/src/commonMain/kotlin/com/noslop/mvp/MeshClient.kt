@@ -17,7 +17,7 @@ class MeshClient(
 ) {
     val nodeId: String = identity.publicKeyHex
     private val transport = SocketTransport(nodeId, scope)
-    private val node = MeshNode(
+    val node = MeshNode(
         nodeId, transport,
         sink = object : MeshSink {
             override suspend fun onPost(packet: NetworkPacket, post: PostPayload) {
