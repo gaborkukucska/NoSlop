@@ -180,13 +180,38 @@ android {
     namespace = "com.noslop.mvp"
     compileSdk = libs.versions.androidCompileSdk.get().toInt()
 
+    if (project.hasProperty("NOSLOP_STORE_FILE")) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
+                storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
+                keyAlias = project.property("NOSLOP_KEY_ALIAS") as String
+                keyPassword = project.property("NOSLOP_KEY_PASSWORD") as String
+            }
+        }
+    }
+
     defaultConfig {
-        applicationId = "com.noslop.mvp"
+        applicationId = "com.noslop.app"
         minSdk = libs.versions.androidMinSdk.get().toInt()
         targetSdk = libs.versions.androidCompileSdk.get().toInt()
         versionCode = 1
         versionName = "0.1.0"
     }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            if (project.hasProperty("NOSLOP_STORE_FILE")) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

@@ -24,7 +24,7 @@ targets:
         NSCameraUsageDescription: "NoSlop uses the camera to scan a hub's QR code and connect."
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.noslop.mvp.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.noslop.app.ios
         SDKROOT: iphoneos
         SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
         TARGETED_DEVICE_FAMILY: "1,2"

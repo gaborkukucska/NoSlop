@@ -113,13 +113,13 @@ The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/ma
 
 ---
 
-### Phase F — App Store Prep
+### Phase F — App Store Prep (✅ Completed 2026-06-20)
 
 **Do not start any task in this phase without explicit owner sign-off.** These require credentials and policy decisions.
 
-- **F1 — Android release signing**: guard `signingConfigs.release` with `project.hasProperty(...)` (known papercut from Phase 0)
-- **F2 — iOS App Store**: add `ITSAppUsesNonExemptEncryption = false` to Info.plist; add content-moderation narrative; bump bundle id from `com.noslop.mvp` to `com.noslop.app`
-- **F3 — Android Play Store**: update `applicationId`, add privacy policy URL, configure ProGuard rules
+- **F1 — Android release signing**: Guarded `signingConfigs.release` with `project.hasProperty("NOSLOP_STORE_FILE")` and linked to `~/.gradle/gradle.properties`.
+- **F2 — iOS App Store**: Added `ITSAppUsesNonExemptEncryption = false` to Info.plist; added content-moderation narrative and privacy policy deep-links to `SettingsScreen`; bumped bundle id from `com.noslop.mvp.ios` to `com.noslop.app.ios`.
+- **F3 — Android Play Store**: Updated `applicationId` to `com.noslop.app`; configured ProGuard rules in `proguard-rules.pro` to ensure Tor, BouncyCastle, and Compose survive R8 minification.
 
 ---
 

@@ -1,0 +1,964 @@
+openjdk version "25.0.3" 2026-04-21
+OpenJDK Runtime Environment (build 25.0.3+9-2-26.04.2-Ubuntu)
+OpenJDK 64-Bit Server VM (build 25.0.3+9-2-26.04.2-Ubuntu, mixed mode, sharing)
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/tom/.gradle/wrapper/dists/gradle-9.4.1-bin/arn2x92ynaizyzdaamcbpbhtj/gradle-9.4.1/lib/native-platform-0.22-milestone-29.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+Type-safe project accessors is an incubating feature.
+
+> Configure project :composeApp
+WARNING: The option setting 'android.builtInKotlin=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: The option setting 'android.newDsl=false' is deprecated.
+The current default is 'true'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+WARNING: API 'applicationVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling applicationVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'testVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling testVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+WARNING: API 'unitTestVariants' is obsolete and has been replaced with 'AndroidComponentsExtension'.
+It will be removed in version 10.0 of the Android Gradle plugin.
+The legacy variant API is disabled by default in AGP 9.0, but can be re-enabled by adding 
+    android.newDsl=false
+to this project's gradle.properties file.
+For more information, see http://developer.android.com/build/r/new-dsl.
+
+To determine what is calling unitTestVariants, use -Pandroid.debug.obsoleteApi=true on the command line to display more information.
+w: ⚠️ The 'org.jetbrains.kotlin.multiplatform' plugin deprecated compatibility with Android Gradle plugin: 'com.android.application'
+The 'org.jetbrains.kotlin.multiplatform' plugin is not compatible with 'com.android.application' starting with Android Gradle Plugin 9.0.0.
+
+Please change the structure of the your project and move the usage of 'com.android.application' into a separate subproject. The new subproject should add a dependency on this KMP subproject.
+
+Read more: https://kotl.in/kmp-project-structure-migration
+Solution: Please change the structure of your project and move the usage of 'com.android.application' into a separate subproject.
+See https://kotl.in/gradle/agp-new-kmp for more details.
+
+
+> Task :composeApp:kmpPartiallyResolvedDependenciesChecker
+> Task :composeApp:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :composeApp:convertXmlValueResourcesForAndroidMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForAndroidMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForAndroidMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForAndroidMain NO-SOURCE
+> Task :composeApp:convertXmlValueResourcesForCommonMain NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForCommonMain NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForCommonMain NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForCommonMain NO-SOURCE
+> Task :composeApp:generateActualResourceCollectorsForAndroidMain UP-TO-DATE
+> Task :composeApp:generateCommonMainMeshDatabaseInterface UP-TO-DATE
+> Task :composeApp:generateComposeResClass UP-TO-DATE
+> Task :composeApp:preBuild UP-TO-DATE
+> Task :composeApp:preDebugBuild UP-TO-DATE
+> Task :composeApp:generateDebugResources UP-TO-DATE
+> Task :composeApp:packageDebugResources UP-TO-DATE
+> Task :composeApp:processDebugNavigationResources UP-TO-DATE
+> Task :composeApp:parseDebugLocalResources UP-TO-DATE
+> Task :composeApp:generateDebugRFile UP-TO-DATE
+> Task :composeApp:generateExpectResourceCollectorsForCommonMain UP-TO-DATE
+> Task :composeApp:convertXmlValueResourcesForAndroidDebug NO-SOURCE
+> Task :composeApp:copyNonXmlValueResourcesForAndroidDebug NO-SOURCE
+> Task :composeApp:prepareComposeResourcesTaskForAndroidDebug NO-SOURCE
+> Task :composeApp:generateResourceAccessorsForAndroidDebug NO-SOURCE
+
+> Task :composeApp:compileDebugKotlinAndroid FAILED
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/NoSlopApp.kt:12:59 Unresolved reference 'UpdateInfo'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/NoSlopApp.kt:12:72 Null cannot be a value of a non-null type 'uninferred T (of fun <T> MutableStateFlow)'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:5:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:11:31 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:11:46 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:11:53 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:17:37 Unresolved reference 'NotificationItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:17:58 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:17:65 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:19:34 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:19:50 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:19:57 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:21:57 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:22:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:22:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:30:62 Unresolved reference 'ReactionDao'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:31:16 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:31:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:48:37 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:49:24 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:53:57 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:96:38 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:100:38 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:102:38 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:181:35 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:190:57 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/data/NoSlopRepository.kt:230:35 Unresolved reference 'app'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:37:11 Unresolved reference 'MeshPost'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:45:44 Unresolved reference 'mediaUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:45:71 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:59:35 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:64:35 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:68:35 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:75:21 Unresolved reference 'VideoPlayer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:75:95 Unresolved reference 'thumbnailB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:78:21 Unresolved reference 'AudioPlayer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:81:21 Unresolved reference 'BlurredImageBackground'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:81:83 Unresolved reference 'thumbnailB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:84:21 Unresolved reference 'SegmentedArticleReader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:85:40 Unresolved reference 'content'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:86:38 Unresolved reference 'clearnetTitle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:87:39 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:89:45 Unresolved reference 'clearnetThumbnailUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:90:43 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:95:13 Unresolved reference 'SegmentedArticleReader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:96:32 Unresolved reference 'content'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:98:31 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:106:30 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:106:64 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:131:34 Unresolved reference 'authorAvatarB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:132:56 Unresolved reference 'authorAvatarB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:134:81 Unresolved reference 'authorAvatarB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:135:100 Function invocation 'size(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:148:37 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:148:58 Unresolved reference 'authorTripcode'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:158:30 Unresolved reference 'clearnetTitle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:160:41 Unresolved reference 'clearnetTitle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:174:109 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:179:63 Unresolved reference 'gossipCount'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:190:23 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshReaction>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:190:63 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:190:70 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:190:108 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:191:19 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshVote>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:191:55 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:191:62 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:191:100 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:192:22 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshComment>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:192:61 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:192:68 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:192:106 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:195:37 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:196:39 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:197:48 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:215:13 Unresolved reference 'OverlayInteractions'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:218:53 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:220:32 Cannot infer type for value parameter 'type'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:221:53 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:225:52 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:225:84 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:226:32 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:226:37 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:226:37 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:226:37 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:226:58 Function invocation 'size(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:236:13 Unresolved reference 'ContentHealthOverlay'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/MainScreen.kt:259:27 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:6:27 Conflicting import: imported name 'ViewModel' is ambiguous.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:7:27 Conflicting import: imported name 'ViewModel' is ambiguous.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:11:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:17:23 Unresolved reference 'tor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:18:23 Unresolved reference 'tor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:25:31 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:25:60 Unresolved reference 'publishedAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:26:46 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:28:31 Unresolved reference 'MeshPost'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:28:60 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:29:46 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:33:36 Unresolved reference 'Application'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:39:16 Unresolved reference 'initialize'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:40:30 Unresolved reference 'getLogFilePath'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:55:30 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:55:72 Unresolved reference 'identityUpdateFlow'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:56:10 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:56:10 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:56:24 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:57:37 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:64:10 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:64:10 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:64:10 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R> Flow<T>.flatMapLatest(crossinline transform: suspend (T) -> Flow<R>): Flow<R>
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:64:24 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:86:36 Unresolved reference 'Peer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:86:56 Unresolved reference 'incomingRequestFlow'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:90:33 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:91:72 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:117:38 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:118:39 Unresolved reference 'MeshPost'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:120:35 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:126:36 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:129:31 Unresolved reference 'Peer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:132:35 Unresolved reference 'MeshPost'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:135:62 Unresolved reference 'NotificationItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:136:72 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:141:39 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:142:72 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:144:62 Unresolved reference 'mediaSettingsFlow'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:148:51 Unresolved reference 'UpdateInfo'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:150:96 Unresolved reference 'notificationSettingsFlow'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:153:69 Unresolved reference 'isForegroundServiceEnabled'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:156:63 Unresolved reference 'isSendOnEnterEnabled'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:159:55 Unresolved reference 'MeshComment'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:162:56 Unresolved reference 'MeshReaction'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:165:62 Unresolved reference 'ReactionDao'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:174:52 Unresolved reference 'MeshVote'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:177:58 Unresolved reference 'CommentVote'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:205:49 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:206:45 Unresolved reference 'isUsingInsecureStorage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:211:38 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:213:37 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:216:72 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:221:74 Unresolved reference 'onionAddress'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:262:13 Unresolved reference 'TorService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:262:43 Cannot infer type for value parameter 'state'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:263:30 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:263:57 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:316:28 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:348:28 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:361:44 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:368:36 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:368:43 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:368:48 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:368:95 Unresolved reference 'publishedAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:369:38 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:369:45 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:369:50 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:369:97 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:375:45 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:375:52 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:375:57 Unresolved reference 'authorPublicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:384:47 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:384:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:384:59 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:385:49 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:385:56 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:385:61 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:393:39 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:393:46 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:393:51 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:394:41 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:394:48 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:394:53 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:396:39 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:396:46 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:396:51 Unresolved reference 'isSaved'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:397:28 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:403:45 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:403:52 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:405:36 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:406:35 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:407:36 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:408:38 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:412:78 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:417:40 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:417:53 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:417:57 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:418:26 Argument type mismatch: actual type is 'Flow<uninferred R (of fun <T, R> Flow<T>.map)>', but 'Collection<UnifiedItem>' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:418:41 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:418:67 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:418:67 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:418:71 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:432:40 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:432:40 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:432:48 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:432:56 Unresolved reference 'sourceId'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:432:71 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:433:30 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:433:30 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:433:30 Destructuring of type 'Map.Entry<uninferred ERROR CLASS: Cannot infer argument for type parameter K, uninferred ERROR CLASS: Cannot infer argument for type parameter V>' requires operator function 'component1()'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:433:30 Destructuring of type 'Map.Entry<uninferred ERROR CLASS: Cannot infer argument for type parameter K, uninferred ERROR CLASS: Cannot infer argument for type parameter V>' requires operator function 'component2()'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:433:30 For-loop range must have an 'iterator()' method.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:435:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:435:31 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:435:31 'fun <T> Flow<T>.forEach(action: suspend (T) -> Unit): Unit' is deprecated. Flow analogue of 'forEach' is 'collect'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:435:39 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:437:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:437:31 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:437:31 'fun <T> Flow<T>.forEach(action: suspend (T) -> Unit): Unit' is deprecated. Flow analogue of 'forEach' is 'collect'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:437:39 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:439:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:439:31 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:439:31 'fun <T> Flow<T>.forEach(action: suspend (T) -> Unit): Unit' is deprecated. Flow analogue of 'forEach' is 'collect'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:439:39 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:443:22 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:443:30 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:443:38 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:496:48 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:498:34 Unresolved reference 'copy'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:498:58 'val FlowCollector<*>.isActive: Boolean' is deprecated. isActive is resolved into the extension of outer CoroutineScope which is likely to be an error.Use currentCoroutineContext().isActive or cancellable() operator instead or specify the receiver of isActive explicitly. Additionally, flow {} builder emissions are cancellable by default.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:509:42 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:523:21 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:541:21 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:589:24 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:595:21 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:614:21 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:700:24 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:701:25 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:742:33 Unresolved reference 'BackupManager'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:748:37 Unresolved reference 'BackupManager'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:777:28 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:778:29 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:847:38 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:847:43 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:847:48 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:871:34 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:882:53 Unresolved reference 'resolveRssUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:891:17 Unresolved reference 'FeedSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:906:49 Unresolved reference 'meshTransport'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:925:27 Unresolved reference 'getApplication'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:927:32 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:929:32 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:955:103 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:962:80 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:976:40 Unresolved reference 'MeshPost'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:977:18 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:979:28 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:980:35 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:982:30 Unresolved reference 'clearnetTitle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:983:28 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:984:31 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:985:32 Unresolved reference 'content'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:985:40 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1012:31 Unresolved reference 'Peer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1022:52 Argument type mismatch: actual type is 'Any', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1029:31 Unresolved reference 'Peer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1041:31 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1046:50 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1083:35 Unresolved reference 'peerDao'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1085:52 Argument type mismatch: actual type is 'Any', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1093:35 Unresolved reference 'peerDao'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1095:52 Argument type mismatch: actual type is 'Any', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1112:28 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1112:63 Unresolved reference 'getApplication'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1113:13 Unresolved reference 'TorService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1113:33 Unresolved reference 'getApplication'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1113:61 Unresolved reference 'privateKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1123:29 Unresolved reference 'TorService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1133:35 Unresolved reference 'getLogs'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1133:66 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1142:16 Unresolved reference 'clearLog'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/NoSlopViewModel.kt:1146:44 Unresolved reference 'Application'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:9:35 Unresolved reference 'okhttp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:11:23 Unresolved reference 'net'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:12:37 Unresolved reference 'VideoSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:13:37 Unresolved reference 'resolveSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:65:13 Unresolved reference 'resolveSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:72:16 Unresolved reference 'VideoSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:78:46 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:81:16 Unresolved reference 'VideoSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:85:83 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:87:16 Unresolved reference 'VideoSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:99:33 Unresolved reference 'OkHttpDataSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/PreloadManager.kt:99:58 Unresolved reference 'HttpClientProvider'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:1:20 Annotation argument must be a compile-time constant.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:1:31 Unresolved reference 'accompanist'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:11:17 Unresolved reference 'camera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:12:17 Unresolved reference 'camera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:13:17 Unresolved reference 'camera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:40:19 Unresolved reference 'accompanist'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:41:19 Unresolved reference 'accompanist'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:42:19 Unresolved reference 'accompanist'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:43:19 Unresolved reference 'gson'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:44:19 Unresolved reference 'mlkit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:45:19 Unresolved reference 'mlkit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:46:19 Unresolved reference 'mlkit'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:59:8 Unresolved reference 'ExperimentalPermissionsApi'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:59:8 Annotation argument must be a compile-time constant.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:66:33 Unresolved reference 'rememberPermissionState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:93:28 Unresolved reference 'Gson'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:360:26 Unresolved reference 'InputImage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:361:23 Unresolved reference 'BarcodeScanning'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:363:37 Cannot infer type for value parameter 'barcodes'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:364:50 Unresolved reference 'rawValue'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:380:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:380:34 Unresolved reference 'PreviewView'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:384:5 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:384:81 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:385:36 Unresolved reference 'ProcessCameraProvider'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:388:27 Unresolved reference 'Preview'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:388:53 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:388:58 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:388:63 Unresolved reference 'surfaceProvider'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:388:86 Unresolved reference 'surfaceProvider'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:389:34 Unresolved reference 'BarcodeScanning'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:391:33 Unresolved reference 'ImageAnalysis'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:392:42 Unresolved reference 'ImageAnalysis'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:395:57 Cannot infer type for value parameter 'imageProxy'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:396:45 Unresolved reference 'image'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:398:38 Unresolved reference 'InputImage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:398:87 Unresolved reference 'imageInfo'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:400:49 Cannot infer type for value parameter 'barcodes'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:401:45 Method 'iterator()' is ambiguous for this expression. Applicable candidates:
+fun <T> Enumeration<T>.iterator(): Iterator<T>
+fun <T> Iterator<T>.iterator(): Iterator<T>
+fun <K, V> Map<out K, V>.iterator(): Iterator<Map.Entry<K, V>>
+fun <K, V> MutableMap<K, V>.iterator(): MutableIterator<MutableMap.MutableEntry<K, V>>
+fun CharSequence.iterator(): CharIterator
+fun BufferedInputStream.iterator(): ByteIterator
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:402:51 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:402:51 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:402:57 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:406:61 Unresolved reference 'close'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:408:32 Unresolved reference 'close'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:413:32 Unresolved reference 'unbindAll'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:414:32 Unresolved reference 'bindToLifecycle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRScanScreen.kt:414:64 Unresolved reference 'CameraSelector'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:33:19 Unresolved reference 'gson'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:34:19 Unresolved reference 'zxing'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:35:19 Unresolved reference 'zxing'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:36:19 Unresolved reference 'zxing'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:37:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:45:16 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:51:21 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:52:26 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:53:22 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:53:35 Unresolved reference 'displayName'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:54:25 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:54:38 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:55:28 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:55:41 Unresolved reference 'encPublicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:56:28 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:56:41 Unresolved reference 'onionAddress'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:58:9 Unresolved reference 'Gson'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:65:28 Unresolved reference 'BitMatrix'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:65:40 Unresolved reference 'MultiFormatWriter'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:67:17 Unresolved reference 'BarcodeFormat'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:71:35 Function invocation 'width(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:72:36 Function invocation 'height(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:78:47 Condition type mismatch: inferred type is 'MatchGroup?' but 'Boolean' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:78:61 Argument type mismatch: actual type is 'Int', but 'String' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:78:64 Too many arguments for 'fun MatchGroupCollection.get(name: String): MatchGroup?'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/QRShareSheet.kt:142:49 Unresolved reference 'tripcode'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:25:23 Unresolved reference 'tor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:26:23 Unresolved reference 'tor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:30:21 Property delegate must have a 'getValue(Nothing?, KProperty0<ERROR CLASS: Cannot infer argument for type parameter T>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:30:24 Unresolved reference 'TorService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:30:24 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:30:44 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:35:24 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:40:24 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:40:56 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:40:92 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:62:25 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:63:25 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:70:36 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:83:24 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:133:50 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/TorWarningPanel.kt:133:86 Unresolved reference 'TorState'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:42:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:59:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:60:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:61:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:62:23 Unresolved reference 'net'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:63:35 Unresolved reference 'okhttp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:78:23 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:79:9 Unresolved reference 'ImageLoader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:80:29 Unresolved reference 'HttpClientProvider'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:83:17 Unresolved reference 'add'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:83:30 Unresolved reference 'Interceptor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:84:59 Unresolved reference 'Interceptor'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:84:79 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:85:45 Unresolved reference 'request'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:90:46 Unresolved reference 'proceed'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:93:38 Unresolved reference 'proceed'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:100:30 Unresolved reference 'LocalImageLoader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:101:9 @Composable invocations can only happen from the context of a @Composable function
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:112:25 Property delegate must have a 'getValue(Nothing?, KProperty0<*>)' method. None of the following functions is applicable:
+fun FloatState.getValue(thisObj: Any?, property: KProperty<*>): Float
+fun DoubleState.getValue(thisObj: Any?, property: KProperty<*>): Double
+fun IntState.getValue(thisObj: Any?, property: KProperty<*>): Int
+fun LongState.getValue(thisObj: Any?, property: KProperty<*>): Long
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:112:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:112:54 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> StateFlow<T>.collectAsState(context: CoroutineContext = ...): State<T>
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:362:21 Unresolved reference 'SettingsTab'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:382:22 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:382:22 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:382:22 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T, R> T.let(block: (T) -> R): R
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:382:28 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:402:40 Unresolved reference 'handle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:402:55 Unresolved reference 'tripcode'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:491:66 Unresolved reference 'isSaved'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:492:67 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:493:67 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:494:66 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:495:69 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:507:39 Unresolved reference 'apiSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:507:71 Unresolved reference 'isSaved'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:508:40 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:508:83 Unresolved reference 'excerpt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:510:54 Unresolved reference 'content'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:510:99 Unresolved reference 'clearnetTitle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:571:82 Unresolved reference 'isRead'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:572:74 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:633:21 Unresolved reference 'LoadingShimmer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:979:30 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:979:56 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1005:35 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1005:55 Unresolved reference 'camera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1008:17 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1011:36 Unresolved reference 'startCamera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1021:44 Unresolved reference 'takePhoto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1021:56 Cannot infer type for value parameter 'file'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1034:48 Unresolved reference 'stopVideoRecording'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1038:48 Unresolved reference 'startVideoRecording'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1038:70 Cannot infer type for value parameter 'file'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1051:56 Unresolved reference 'flipCamera'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1144:63 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1145:48 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1151:77 Unresolved reference 'onionAddress'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1152:74 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1153:67 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1173:49 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1174:65 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1177:49 Unresolved reference 'author'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1178:52 Unresolved reference 'authorHandle'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1178:81 Unresolved reference 'authorTripcode'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1181:49 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1185:49 Unresolved reference 'thumbnailUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1237:38 Unresolved reference 'mediaUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1238:27 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1238:61 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1241:27 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1241:61 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1242:43 Unresolved reference 'mediaUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/UnifiedFeedTab.kt:1242:75 Unresolved reference 'clearnetUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:26:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:27:26 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:29:23 Unresolved reference 'mesh'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:38:20 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:39:16 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:41:29 Unresolved reference 'MediaMetadata'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:102:27 Argument type mismatch: actual type is 'List<ERROR CLASS: Symbol not found for ChatMessage>', but 'Int' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:103:42 Unresolved reference 'senderPub'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:104:45 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:104:58 Unresolved reference 'ciphertext'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:107:33 Unresolved reference 'CryptoService'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:107:61 Unresolved reference 'ciphertext'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:107:77 Unresolved reference 'nonce'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:107:110 Unresolved reference 'encPrivateKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:107:135 Unresolved reference 'ciphertext'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:109:37 Unresolved reference 'ciphertext'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:113:79 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:142:45 Unresolved reference 'mediaId'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:142:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:142:54 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:142:60 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:176:115 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:192:92 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:198:114 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:220:79 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:250:58 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:251:25 Unresolved reference 'MediaMetadata'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:257:53 Unresolved reference 'onionAddress'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/ChatThreadScreen.kt:258:50 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:36:18 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshComment>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:36:83 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:37:19 Property delegate must have a 'getValue(Nothing?, KProperty0<*>)' method. None of the following functions is applicable:
+fun FloatState.getValue(thisObj: Any?, property: KProperty<*>): Float
+fun DoubleState.getValue(thisObj: Any?, property: KProperty<*>): Double
+fun IntState.getValue(thisObj: Any?, property: KProperty<*>): Int
+fun LongState.getValue(thisObj: Any?, property: KProperty<*>): Long
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:37:42 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:37:42 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> StateFlow<T>.collectAsState(context: CoroutineContext = ...): State<T>
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:74:23 Argument type mismatch: actual type is 'List<ERROR CLASS: Symbol not found for MeshComment>', but 'Int' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:75:33 Argument type mismatch: actual type is 'Int', but 'MeshComment' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:116:93 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:118:15 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for CommentVote>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:118:84 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:169:44 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:169:56 Cannot infer type for type parameter 'A'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:169:56 Cannot infer type for type parameter 'B'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:169:59 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:170:50 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:179:35 Cannot infer type for implicit value parameter 'it'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:179:35 Operator call 'component1()' is ambiguous for destructuring of type 'ERROR CLASS: Cannot infer type for parameter <destruct>'. Applicable candidates:
+fun <T> Array<out T>.component1(): T
+fun ByteArray.component1(): Byte
+fun ShortArray.component1(): Short
+fun IntArray.component1(): Int
+fun LongArray.component1(): Long
+fun FloatArray.component1(): Float
+fun DoubleArray.component1(): Double
+fun BooleanArray.component1(): Boolean
+fun CharArray.component1(): Char
+fun <T> List<T>.component1(): T
+fun <K, V> Map.Entry<K, V>.component1(): K
+fun UIntArray.component1(): UInt
+fun ULongArray.component1(): ULong
+fun UByteArray.component1(): UByte
+fun UShortArray.component1(): UShort
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:179:35 Operator call 'component2()' is ambiguous for destructuring of type 'ERROR CLASS: Cannot infer type for parameter <destruct>'. Applicable candidates:
+fun <T> Array<out T>.component2(): T
+fun ByteArray.component2(): Byte
+fun ShortArray.component2(): Short
+fun IntArray.component2(): Int
+fun LongArray.component2(): Long
+fun FloatArray.component2(): Float
+fun DoubleArray.component2(): Double
+fun BooleanArray.component2(): Boolean
+fun CharArray.component2(): Char
+fun <T> List<T>.component2(): T
+fun <K, V> Map.Entry<K, V>.component2(): V
+fun UIntArray.component2(): UInt
+fun ULongArray.component2(): ULong
+fun UByteArray.component2(): UByte
+fun UShortArray.component2(): UShort
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:181:21 @Composable invocations can only happen from the context of a @Composable function
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:189:60 Function invocation 'size(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:191:54 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/CommentsBottomSheet.kt:191:78 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:42:23 Unresolved reference 'crypto'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:58:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:59:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:60:8 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:61:23 Unresolved reference 'net'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:62:35 Unresolved reference 'okhttp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:67:34 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:68:23 Unresolved reference 'apiSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:80:22 Unresolved reference 'sourceId'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:80:55 Unresolved reference 'sourceId'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:94:9 Unresolved reference 'coil'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:105:11 Unresolved reference 'FeedItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:112:29 Unresolved reference 'fullContent'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:112:63 Unresolved reference 'fullContent'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:113:34 Unresolved reference 'excerpt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:113:64 Unresolved reference 'excerpt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:115:19 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:115:71 Unresolved reference 'stripHtml'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:117:44 Unresolved reference 'mediaUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:119:55 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:119:79 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:122:33 Unresolved reference 'apiSource'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:122:79 Unresolved reference 'sourceId'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:123:31 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:135:22 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:142:21 Unresolved reference 'VideoPlayer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:142:95 Unresolved reference 'thumbnailUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:144:22 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:151:21 Unresolved reference 'AudioPlayer'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:154:21 Unresolved reference 'BlurredImageBackground'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:156:22 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:162:21 Unresolved reference 'BlurredImageBackground'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:165:89 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:167:21 Unresolved reference 'SegmentedArticleReader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:169:38 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:170:39 Unresolved reference 'author'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:172:45 Unresolved reference 'thumbnailUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:173:43 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:179:13 Unresolved reference 'SegmentedArticleReader'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:181:30 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:182:31 Unresolved reference 'author'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:184:37 Unresolved reference 'thumbnailUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:185:35 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:190:30 Unresolved reference 'mediaType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:191:13 Unresolved reference 'not' for operator '!'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:216:35 Unresolved reference 'author'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:222:37 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:233:111 Unresolved reference 'publishedAt'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:24 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:38 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:50 Unresolved reference 'url'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:55 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:55 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:59 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:104 Inapplicable candidate(s): fun <K> ELVIS_CALL(x: K?, y: K): K
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:243:112 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:244:23 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshReaction>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:244:71 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:244:109 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:245:19 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshVote>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:245:63 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:245:101 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:246:22 Property delegate must have a 'getValue(Nothing?, KProperty0<List<ERROR CLASS: Symbol not found for MeshComment>>)' method. None of the following functions is applicable:
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:246:69 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:246:107 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:249:37 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:250:39 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:251:48 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:269:13 Unresolved reference 'OverlayInteractions'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:276:32 Cannot infer type for value parameter 'type'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:281:52 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:281:84 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:282:32 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:282:37 Cannot infer type for type parameter 'K'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:282:37 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:282:37 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:282:58 Function invocation 'size(...)' expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/FeedCard.kt:292:13 Unresolved reference 'ContentHealthOverlay'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/PeerItem.kt:30:26 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/PeerItem.kt:36:35 Unresolved reference 'ChatMessage'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/components/PeerItem.kt:91:37 Unresolved reference 'ciphertext'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:20:28 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:27:22 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:27:33 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:49:19 Unresolved reference 'ApiKeyRepository'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:50:34 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:50:75 Unresolved reference 'getKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:50:90 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:61:42 Unresolved reference 'displayName'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:62:42 Unresolved reference 'requiresUserKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:70:50 Unresolved reference 'signupUrl'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:93:56 Unresolved reference 'removeKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:93:74 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:95:56 Unresolved reference 'setKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:95:71 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:116:61 None of the following candidates is applicable:
+
+fun <T> Array<out T>.take(n: Int): List<T>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Array<out T>.take(n: Int): List<T>
+
+fun ByteArray.take(n: Int): List<Byte>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ByteArray.take(n: Int): List<Byte>
+
+fun ShortArray.take(n: Int): List<Short>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ShortArray.take(n: Int): List<Short>
+
+fun IntArray.take(n: Int): List<Int>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntArray.take(n: Int): List<Int>
+
+fun LongArray.take(n: Int): List<Long>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongArray.take(n: Int): List<Long>
+
+fun FloatArray.take(n: Int): List<Float>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun FloatArray.take(n: Int): List<Float>
+
+fun DoubleArray.take(n: Int): List<Double>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun DoubleArray.take(n: Int): List<Double>
+
+fun BooleanArray.take(n: Int): List<Boolean>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun BooleanArray.take(n: Int): List<Boolean>
+
+fun CharArray.take(n: Int): List<Char>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharArray.take(n: Int): List<Char>
+
+fun <T> Iterable<T>.take(n: Int): List<T>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Iterable<T>.take(n: Int): List<T>
+
+fun UIntArray.take(n: Int): List<UInt>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntArray.take(n: Int): List<UInt>
+
+fun ULongArray.take(n: Int): List<ULong>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongArray.take(n: Int): List<ULong>
+
+fun UByteArray.take(n: Int): List<UByte>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UByteArray.take(n: Int): List<UByte>
+
+fun UShortArray.take(n: Int): List<UShort>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UShortArray.take(n: Int): List<UShort>
+
+fun <T> Sequence<T>.take(n: Int): Sequence<T>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Sequence<T>.take(n: Int): Sequence<T>
+
+fun CharSequence.take(n: Int): CharSequence:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.take(n: Int): CharSequence
+
+fun String.take(n: Int): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.take(n: Int): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:116:95 None of the following candidates is applicable:
+
+fun <T> Array<out T>.takeLast(n: Int): List<T>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> Array<out T>.takeLast(n: Int): List<T>
+
+fun ByteArray.takeLast(n: Int): List<Byte>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ByteArray.takeLast(n: Int): List<Byte>
+
+fun ShortArray.takeLast(n: Int): List<Short>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ShortArray.takeLast(n: Int): List<Short>
+
+fun IntArray.takeLast(n: Int): List<Int>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun IntArray.takeLast(n: Int): List<Int>
+
+fun LongArray.takeLast(n: Int): List<Long>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun LongArray.takeLast(n: Int): List<Long>
+
+fun FloatArray.takeLast(n: Int): List<Float>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun FloatArray.takeLast(n: Int): List<Float>
+
+fun DoubleArray.takeLast(n: Int): List<Double>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun DoubleArray.takeLast(n: Int): List<Double>
+
+fun BooleanArray.takeLast(n: Int): List<Boolean>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun BooleanArray.takeLast(n: Int): List<Boolean>
+
+fun CharArray.takeLast(n: Int): List<Char>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharArray.takeLast(n: Int): List<Char>
+
+fun <T> List<T>.takeLast(n: Int): List<T>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> List<T>.takeLast(n: Int): List<T>
+
+fun UIntArray.takeLast(n: Int): List<UInt>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UIntArray.takeLast(n: Int): List<UInt>
+
+fun ULongArray.takeLast(n: Int): List<ULong>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ULongArray.takeLast(n: Int): List<ULong>
+
+fun UByteArray.takeLast(n: Int): List<UByte>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UByteArray.takeLast(n: Int): List<UByte>
+
+fun UShortArray.takeLast(n: Int): List<UShort>:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun UShortArray.takeLast(n: Int): List<UShort>
+
+fun CharSequence.takeLast(n: Int): CharSequence:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun CharSequence.takeLast(n: Int): CharSequence
+
+fun String.takeLast(n: Int): String:
+  Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun String.takeLast(n: Int): String
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:125:60 Unresolved reference 'removeKey'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/ApiKeysScreen.kt:125:78 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:29:19 Property delegate must have a 'getValue(Nothing?, KProperty0<*>)' method. None of the following functions is applicable:
+fun FloatState.getValue(thisObj: Any?, property: KProperty<*>): Float
+fun DoubleState.getValue(thisObj: Any?, property: KProperty<*>): Double
+fun IntState.getValue(thisObj: Any?, property: KProperty<*>): Int
+fun LongState.getValue(thisObj: Any?, property: KProperty<*>): Long
+fun <T> State<T>.getValue(thisObj: Any?, property: KProperty<*>): T
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:29:42 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:29:42 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun <T> StateFlow<T>.collectAsState(context: CoroutineContext = ...): State<T>
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:37:35 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ArrayList<Anchor>.find(index: Int, effectiveSize: Int): Anchor?
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:37:42 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:40:24 Argument type mismatch: actual type is 'Anchor', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:44:40 Unresolved reference 'MediaMetadata'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:44:91 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:122:51 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:123:43 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:140:34 Argument type mismatch: actual type is 'Int', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:140:54 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ArrayList<Anchor>.find(index: Int, effectiveSize: Int): Anchor?
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:140:61 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:140:88 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:155:34 Argument type mismatch: actual type is 'Int', but 'Peer' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:155:54 Unresolved reference. None of the following candidates is applicable because of a receiver type mismatch:
+fun ArrayList<Anchor>.find(index: Int, effectiveSize: Int): Anchor?
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:155:61 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:155:88 Unresolved reference 'publicKeyB64'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/DMsTab.kt:181:29 Smart cast to 'TypeVariable(K)?' is impossible, because 'localKeys' is a delegated property.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:32:32 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:32:65 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:32:73 Null cannot be a value of a non-null type 'uninferred T (of fun <T> mutableStateOf)'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:33:23 Unresolved reference 'getLogs'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:35:81 Unresolved reference 'it'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:67:39 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:68:38 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:69:38 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:70:39 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:102:27 'when' expression must be exhaustive. Add an 'else' branch.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:102:37 Unresolved reference 'level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:103:28 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:104:28 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:105:28 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:106:28 Unresolved reference 'Level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:110:40 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:110:59 Unresolved reference 'level'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:110:74 Unresolved reference 'module'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:117:36 Unresolved reference 'message'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:123:25 Unresolved reference 'details'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:123:34 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:123:34 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/LogsViewerScreen.kt:123:38 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:68:23 Argument type mismatch: actual type is 'List<ERROR CLASS: Symbol not found for com.noslop.mvp.data.NotificationItem>', but 'Int' was expected.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:68:49 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:72:68 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:73:39 Unresolved reference 'targetRoute'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:74:57 Unresolved reference 'targetRoute'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:88:32 Unresolved reference 'NotificationItem'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:93:28 Unresolved reference 'iconType'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:105:35 Unresolved reference 'isRead'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:129:38 Unresolved reference 'title'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:130:48 Unresolved reference 'isRead'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:135:105 Unresolved reference 'timestamp'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:142:34 Unresolved reference 'body'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:143:39 Unresolved reference 'isRead'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:150:24 Unresolved reference 'isRead'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:150:40 Unresolved reference 'type'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:156:19 Unresolved reference 'type'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:165:39 Unresolved reference 'senderPub'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:165:50 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:165:50 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:165:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:165:71 Unresolved reference 'id'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:172:39 Unresolved reference 'senderPub'.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:172:50 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:172:50 Cannot infer type for type parameter 'R'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:172:54 Cannot infer type for type parameter 'T'. Specify it explicitly.
+e: file:///home/tom/NoSlop/mvp/composeApp/src/commonMain/kotlin/com/noslop/mvp/ui/tabs/NotificationsScreen.kt:172:72 Unresolved reference 'id'.
+
+[Incubating] Problems report is available at: file:///home/tom/NoSlop/mvp/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':composeApp:compileDebugKotlinAndroid'.
+> A failure occurred while executing org.jetbrains.kotlin.compilerRunner.GradleCompilerRunnerWithWorkers$GradleKotlinCompilerWorkAction
+   > Compilation error. See log for more details
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 10.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/9.4.1/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 2s
+11 actionable tasks: 2 executed, 9 up-to-date

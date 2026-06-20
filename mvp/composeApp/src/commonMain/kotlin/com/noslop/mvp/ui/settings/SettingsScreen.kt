@@ -349,6 +349,47 @@ fun SettingsScreen(
                     }
                 }
             }
+            item {
+                Text(
+                    text = "LEGAL & POLICIES",
+                    style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                    color = TextMuted,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, BorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Content Moderation & EULA",
+                            fontWeight = FontWeight.Bold,
+                            color = TextLight,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                        Text(
+                            text = "NoSlop is a p2p dm and community mesh app with up and down voting. We are implementing temporary onion addresses for connections via node discoverability. How you interact with content is entirely up to you and the network nodes you choose to connect to.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextMuted,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+                        
+                        HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                        
+                        val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { uriHandler.openUri("https://noslop.me/privacy") }.padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Privacy Policy", fontWeight = FontWeight.Bold, color = TextLight)
+                            Icon(Icons.Default.OpenInNew, contentDescription = "Open Privacy Policy", tint = AccentGreen)
+                        }
+                    }
+                }
+            }
         }
     }
 }

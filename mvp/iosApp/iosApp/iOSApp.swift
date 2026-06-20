@@ -7,7 +7,7 @@ import ComposeApp
 /// in the iOS Keychain, so the same identity is returned on every launch. Bridged into the shared
 /// Kotlin core via `IosKeychain`.
 class KeychainIdentity: IosKeychain {
-    private let service = "com.noslop.mvp.identity"
+    private let service = "com.noslop.app.identity"
     private let account = "ed25519-private-key"
 
     func loadOrCreatePublicKeyBase64() -> String {
