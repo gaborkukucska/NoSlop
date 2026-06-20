@@ -1,6 +1,11 @@
 # NoSlop — Migration Plan: `app/` → `mvp/`
 **Last updated 2026-06-20**
 
+> **🚨 MIGRATION PAUSED: PLEASE READ 🚨**
+> The migration to KMP has achieved foundational architectural equivalence but **lacks UI and functional parity**. Specifically, the complex UI elements (like the TikTok-style VerticalPager feed) and the orchestrating `NoSlopViewModel` have not been ported. 
+> 
+> **Decision (2026-06-20)**: Active development will **continue on the original Android app (`app/`)** for now. Further migration efforts are documented in [docs/KMP_PARITY_PLAN.md](KMP_PARITY_PLAN.md) and should be executed on the `kmp-parity` branch.
+
 ---
 
 ## Context
