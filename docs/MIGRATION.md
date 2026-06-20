@@ -23,12 +23,12 @@
 | QR scan (iOS) | ✅ AVFoundation, wired to `MeshInvite` | None |
 | SQLDelight persistence | ✅ Posts, DMs, peers, meta — iOS + Android | None |
 | Desktop HUB | ✅ JVM `HubMain`, runnable | None |
-| **Clearnet feed aggregator** | ⚠️ Basic RSS/Atom only | ~14 API clients in `app/` |
-| **Full UI** | ⚠️ Functional mesh tabs; no full settings/onboarding | Full UI in `app/` |
+| **Clearnet feed aggregator** | ✅ Full (all 14 clients ported) | None |
+| **Full UI** | ✅ Functional mesh tabs, full settings and onboarding | None |
 | Notifications | ✅ Full (`expect/actual Notifier`) | None |
-| Background sync (Android) | ❌ Not ported | `FeedSyncWorker` + `WorkManager` |
+| Background sync (Android) | ✅ Full (`BackgroundScheduler` / `NoSlopForegroundService`) | None |
 | Media playback | ✅ Full (`MediaPlayer`, ExoPlayer, AVPlayer) | None |
-| Onboarding flow | ❌ Not ported | `OnboardingScreen.kt` (1 236 lines, partly split) |
+| Onboarding flow | ✅ Full | None |
 
 ---
 
@@ -38,7 +38,7 @@ Complete one task fully (compiles + tests green) before starting the next. Each 
 
 ---
 
-### Phase A — Feed Layer
+### Phase A — Feed Layer (✅ Completed)
 
 The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/main/java/com/noslop/app/feeds/api/`.
 
@@ -62,7 +62,7 @@ The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/ma
 
 ---
 
-### Phase B — Onboarding
+### Phase B — Onboarding (✅ Completed)
 
 **B1 — Port `OnboardingScreen.kt`**
 - Source: `app/.../ui/OnboardingScreen.kt` and its Phase-0 splits under `app/.../ui/onboarding/`
@@ -73,7 +73,7 @@ The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/ma
 
 ---
 
-### Phase C — Settings + Notifications
+### Phase C — Settings + Notifications (✅ Completed)
 
 **C1 — Port `SettingsTab.kt` + `SettingsRepository`**
 - Source: `app/.../ui/tabs/SettingsTab.kt`, `app/.../data/SettingsRepository.kt`
