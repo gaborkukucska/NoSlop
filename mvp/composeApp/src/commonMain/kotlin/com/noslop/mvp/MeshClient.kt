@@ -36,6 +36,12 @@ class MeshClient(
                 // which the bridge does NOT re-stamp — only re-encodes — so it's the true sender).
                 onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, text)
             }
+            override suspend fun onHandshake(packet: NetworkPacket, hs: PeerHandshakePayload) {
+                onHandshake?.invoke(packet.type, hs)
+            }
+            override suspend fun onReaction(packet: NetworkPacket, r: ReactionPayload) {
+                onReaction?.invoke(r)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
     )
@@ -48,6 +54,15 @@ class MeshClient(
 
     /** Resolve a sender's X25519 enc-pubkey from a stored contact (for Android DMs lacking it in-payload). */
     var resolveEncPub: ((nodeId: String) -> String?)? = null
+
+    /** Called for an incoming handshake: (packetType "CONNECTION_REQUEST"|"USER_HANDSHAKE", payload). */
+    var onHandshake: ((type: String, hs: PeerHandshakePayload) -> Unit)? = null
+
+    /** Called for every incoming REACTION (emoji on a post) — add or remove, see [ReactionPayload.action]. */
+    var onReaction: ((r: ReactionPayload) -> Unit)? = null
+
+    /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
+    val androidId: String get() = NodeId.toAndroid(nodeId)
 
     /** Our X25519 DM public key (X.509 b64) — share via a [MeshContact] so peers can encrypt to us. */
     fun dmPublicKeyB64(): String = DmKeys.publicKeyX509B64()
@@ -95,6 +110,24 @@ class MeshClient(
         return true
     }
 
+    /**
+     * React to a post with an emoji [reactionType] (e.g. "👍"). [add]=false sends a "remove" (toggle off).
+     * Signed the way Android verifies — `"$postId|$reactionType|$authorId|$timestamp"` with our identity key,
+     * authorId being our Android base64 id — so existing Android nodes accept and aggregate it. Broadcast to
+     * the mesh; the bridge relays it both ways. Returns false if we can't sign with our identity key.
+     */
+    suspend fun sendReaction(postId: String, reactionType: String, add: Boolean): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$postId|$reactionType|$authorId|$ts") ?: return false
+        val payload = ReactionPayload(
+            postId = postId, reactionType = reactionType, authorId = authorId,
+            timestamp = ts, signature = signature, action = if (add) "add" else "remove",
+        )
+        node.broadcast(reactionPacket(nodeId, payload))
+        return true
+    }
+
     /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */
     suspend fun disconnectLinks() = transport.disconnectLinks()
 
@@ -112,7 +145,14 @@ class MeshClient(
      * accepts our DMs. [myHomeNode] is the onion the peer should reply to (the bridge's onion), and it's part
      * of the signed payload. Returns false if we can't sign with our identity key.
      */
-    suspend fun sendConnectionRequest(contact: MeshContact, myHomeNode: String): Boolean {
+    suspend fun sendConnectionRequest(contact: MeshContact, myHomeNode: String): Boolean =
+        sendHandshake(contact, myHomeNode, "CONNECTION_REQUEST")
+
+    /** Accept an incoming request: reply with a signed USER_HANDSHAKE so the peer marks us trusted. */
+    suspend fun sendUserHandshake(contact: MeshContact, myHomeNode: String): Boolean =
+        sendHandshake(contact, myHomeNode, "USER_HANDSHAKE")
+
+    private suspend fun sendHandshake(contact: MeshContact, myHomeNode: String, type: String): Boolean {
         val myUserId = NodeId.toAndroid(nodeId)               // base64 X.509 Ed25519 (Android id form)
         val username = identity.handle.substringBefore(".")
         val ts = nowMillis()
@@ -122,7 +162,7 @@ class MeshClient(
             fromDisplayName = "${identity.handle}.${identity.tripcode}", fromHomeNode = myHomeNode,
             fromEncryptionPublicKey = DmKeys.publicKeyX509B64(), timestamp = ts, signature = signature,
         )
-        node.broadcast(connectionRequestPacket(myUserId, NodeId.toAndroid(contact.nodeId), hs))
+        node.broadcast(handshakePacket(myUserId, NodeId.toAndroid(contact.nodeId), hs, type))
         return true
     }
 

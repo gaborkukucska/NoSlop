@@ -8,6 +8,10 @@ package com.noslop.mvp
 interface MeshSink {
     suspend fun onPost(packet: NetworkPacket, post: PostPayload)
     suspend fun onMessage(packet: NetworkPacket, dm: EncryptedPayload)
+    /** A peer handshake arrived — CONNECTION_REQUEST (they want to connect) or USER_HANDSHAKE (they accepted). */
+    suspend fun onHandshake(packet: NetworkPacket, hs: PeerHandshakePayload) {}
+    /** A REACTION arrived (an emoji on a post). [r.action] is "add" or "remove". */
+    suspend fun onReaction(packet: NetworkPacket, r: ReactionPayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -57,6 +61,8 @@ class MeshNode(
     private suspend fun deliverLocal(packet: NetworkPacket) {
         packet.getPostPayload()?.let { sink.onPost(packet, it) }
         packet.getMessagePayload()?.let { sink.onMessage(packet, it) }
+        (packet.getConnectionRequestPayload() ?: packet.getUserHandshakePayload())?.let { sink.onHandshake(packet, it) }
+        packet.getReactionPayload()?.let { sink.onReaction(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {
@@ -88,9 +94,18 @@ fun dialPacket(senderId: String, dial: DialPayload, hops: Int = 2): NetworkPacke
         payload = NetworkPacket.payloadOf(dial, DialPayload.serializer()),
     )
 
-/** Build a signed CONNECTION_REQUEST (the Android handshake). [senderId]/[targetUserId] are base64 (Android). */
-fun connectionRequestPacket(senderId: String, targetUserId: String, hs: PeerHandshakePayload, hops: Int = 6): NetworkPacket =
+/** Build a REACTION packet (an emoji on a post). The payload carries its own author signature (Android-verified);
+ *  we also stamp it at the packet level for parity with Android. [senderId] is this node's id (hex on our side). */
+fun reactionPacket(senderId: String, r: ReactionPayload, hops: Int = 6): NetworkPacket =
     NetworkPacket(
-        id = hs.id, hops = hops, senderId = senderId, targetUserId = targetUserId, type = "CONNECTION_REQUEST",
+        id = randomId(), hops = hops, senderId = senderId, type = "REACTION",
+        payload = NetworkPacket.payloadOf(r, ReactionPayload.serializer()), signature = r.signature,
+    )
+
+/** Build a signed handshake packet — [type] is "CONNECTION_REQUEST" (request) or "USER_HANDSHAKE" (accept).
+ *  [senderId]/[targetUserId] are base64 (Android). */
+fun handshakePacket(senderId: String, targetUserId: String, hs: PeerHandshakePayload, type: String, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = hs.id, hops = hops, senderId = senderId, targetUserId = targetUserId, type = type,
         payload = NetworkPacket.payloadOf(hs, PeerHandshakePayload.serializer()), signature = hs.signature,
     )

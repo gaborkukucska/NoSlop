@@ -1,6 +1,7 @@
 package com.noslop.mvp
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
@@ -25,6 +26,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -255,6 +257,11 @@ private class MeshUiState(private val scope: CoroutineScope) {
     val savedNodes = mutableStateListOf<MeshInvite>()      // persisted hubs, newest first (see SavedNodes)
     val contacts = mutableStateListOf<MeshContact>()       // DM contacts (in-memory for now)
     val dmLog = mutableStateListOf<DmEntry>()              // DM history this session, newest first
+    // Reactions: aggregated counts keyed "postId|emoji", plus whether *I* reacted (for the toggle/highlight).
+    val reactionCounts = mutableStateMapOf<String, Int>()
+    val myReactions = mutableStateMapOf<String, Boolean>()
+    private val reactionSeen = mutableSetOf<String>()      // "postId|emoji|authorId" — dedup across gossip echoes
+    val reactionEmojis = listOf("👍", "❤️", "😂", "🔥")
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -287,6 +294,29 @@ private class MeshUiState(private val scope: CoroutineScope) {
         }
         // For Android DMs (which omit the sender's enc-key in the payload), resolve it from a stored contact.
         client.resolveEncPub = { id -> SavedContacts.list().firstOrNull { it.nodeId == id }?.encPublicKeyX509B64 }
+        client.onReaction = { r -> scope.launch { applyReaction(r.postId, r.reactionType, r.authorId, r.action != "remove") } }
+        // Incoming handshake: add/learn the peer as a contact; for a request, auto-accept (reply USER_HANDSHAKE).
+        client.onHandshake = { type, hs ->
+            scope.launch {
+                val contact = MeshContact(
+                    handle = hs.fromUsername.ifBlank { hs.fromUserId.take(8) },
+                    nodeId = NodeId.androidToHex(hs.fromUserId),
+                    encPublicKeyX509B64 = hs.fromEncryptionPublicKey ?: "",
+                    onionAddress = hs.fromHomeNode.takeIf { it.isNotBlank() },
+                )
+                if (contact.encPublicKeyX509B64.isNotBlank() && contacts.none { it.nodeId == contact.nodeId }) {
+                    SavedContacts.add(contact); reloadContacts()
+                }
+                // Either direction of a handshake means the peer is mutually linked — stop re-sending requests.
+                SavedContacts.markAccepted(contact.nodeId); reloadContacts()
+                if (type == "CONNECTION_REQUEST") {
+                    activeInvite?.host?.let { home -> client.sendUserHandshake(contact, home) }  // accept them back
+                    status = "🤝 ${contact.handle} connected — added to contacts"
+                } else {
+                    status = "🤝 ${contact.handle} accepted your request ✓"
+                }
+            }
+        }
         reloadSaved()
         reloadContacts()
         // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
@@ -432,15 +462,25 @@ private class MeshUiState(private val scope: CoroutineScope) {
      * bridge's dial to their onion takes a little while — the request must arrive after their link is up.
      * `fromHomeNode` is the bridge's onion (what we're connected through), so their replies route back to us.
      */
+    private val handshaking = mutableSetOf<String>()   // contacts with a handshake loop in flight (no stacking)
+
     private fun handshakeAndroidContact(contact: MeshContact) {
         val onion = contact.onionAddress ?: return
         val homeNode = activeInvite?.host ?: return       // the bridge onion we're connected through
+        // Already handshake-complete (persisted), or a loop is already running for them — don't re-spam.
+        if (contact.accepted || !handshaking.add(contact.nodeId)) return
         scope.launch {
-            client.requestDial(contact)
-            repeat(5) {
-                val ok = client.sendConnectionRequest(contact, homeNode)
-                if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
-                delay(12_000)                              // give the bridge time to link their onion
+            try {
+                client.requestDial(contact)
+                repeat(5) {
+                    // Stop as soon as they've accepted (their USER_HANDSHAKE flipped the persisted flag).
+                    if (contacts.firstOrNull { it.nodeId == contact.nodeId }?.accepted == true) return@launch
+                    val ok = client.sendConnectionRequest(contact, homeNode)
+                    if (!ok) { status = "Can't sign handshake (identity key)"; return@launch }
+                    delay(12_000)                          // give the bridge time to link their onion
+                }
+            } finally {
+                handshaking.remove(contact.nodeId)
             }
         }
     }
@@ -470,6 +510,27 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     fun publish() {
         scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" }
+    }
+
+    /** Fold one reaction (ours or a peer's) into the aggregated counts, deduped by (post, emoji, author). */
+    private fun applyReaction(postId: String, type: String, authorId: String, add: Boolean) {
+        val key = "$postId|$type"
+        val dedup = "$key|$authorId"
+        if (add) {
+            if (reactionSeen.add(dedup)) reactionCounts[key] = (reactionCounts[key] ?: 0) + 1
+        } else {
+            if (reactionSeen.remove(dedup)) reactionCounts[key] = ((reactionCounts[key] ?: 1) - 1).coerceAtLeast(0)
+        }
+        if (authorId == client.androidId) myReactions[key] = add
+    }
+
+    /** Toggle my reaction on a post: broadcast a signed add/remove and reflect it locally right away. */
+    fun react(post: PostPayload, type: String) {
+        scope.launch {
+            val on = !(myReactions["${post.id}|$type"] ?: false)
+            if (client.sendReaction(post.id, type, add = on)) applyReaction(post.id, type, client.androidId, on)
+            else status = "Reaction failed (identity key)"
+        }
     }
 }
 
@@ -560,9 +621,25 @@ private fun MeshScreen(state: MeshUiState) {
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(state.received) { p ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(p.authorName, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text(p.content, fontSize = 14.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            state.reactionEmojis.forEach { emoji ->
+                                val key = "${p.id}|$emoji"
+                                val count = state.reactionCounts[key] ?: 0
+                                val mine = state.myReactions[key] == true
+                                Text(
+                                    text = if (count > 0) "$emoji $count" else emoji,
+                                    fontSize = 13.sp,
+                                    color = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    fontWeight = if (mine) FontWeight.Bold else FontWeight.Normal,
+                                    modifier = Modifier
+                                        .clickable(enabled = state.connected) { state.react(p, emoji) }
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }

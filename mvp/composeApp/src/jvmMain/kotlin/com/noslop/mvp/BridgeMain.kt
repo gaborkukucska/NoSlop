@@ -82,6 +82,10 @@ fun main(args: Array<String>) = runBlocking {
     println(QrConsole.render(invite.toUri()))
     println(invite.toUri() + "\n")
 
+    // Backlog (store-and-forward): packets for a leaf that's offline are queued by target id and flushed when
+    // it reconnects — so a DM sent while the phone is offline isn't lost. Bounded per target to avoid growth.
+    val backlog = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<NetworkPacket>>()
+
     // Inbound from Android peers: they dial our onion on MESH_PORT (9999) to deliver USER_HANDSHAKE / DM
     // replies (Android's connectionless per-send model — write a packet, close). Accept handshake-less, read
     // packets, translate ids to our hex form, and forward to the iOS leaves. We don't reply on these sockets
@@ -103,10 +107,31 @@ fun main(args: Array<String>) = runBlocking {
                         val out = pkt.idsToHex()
                         val leaves = transport.links.filter { !NodeId.isAndroidId(it) }
                         leaves.forEach { leaf -> launch { transport.send(leaf, out) } }
-                        println("[bridge] inbound android→ios ${pkt.type} ${(pkt.id ?: "?").take(8)}… → ${leaves.size} leaf(s)")
+                        // If the target leaf isn't connected, hold it for delivery on reconnect (store-and-forward).
+                        val target = out.targetUserId
+                        if (target != null && transport.links.none { it == target }) {
+                            val q = backlog.getOrPut(target) { java.util.concurrent.ConcurrentLinkedQueue() }
+                            q.add(out); while (q.size > 200) q.poll()
+                            println("[bridge] inbound ${pkt.type} ${(pkt.id ?: "?").take(8)}… → queued (${target.take(8)}… offline)")
+                        } else {
+                            println("[bridge] inbound android→ios ${pkt.type} ${(pkt.id ?: "?").take(8)}… → ${leaves.size} leaf(s)")
+                        }
                     }
                 }
                 runCatching { sock.close() }
+            }
+        }
+    }
+
+    // Flush the backlog to a leaf as soon as it (re)connects.
+    scope.launch {
+        while (true) {
+            delay(2500)
+            for (leaf in transport.links.filter { !NodeId.isAndroidId(it) }) {
+                val q = backlog.remove(leaf) ?: continue
+                var n = 0; var p = q.poll()
+                while (p != null) { transport.send(leaf, p); n++; p = q.poll() }
+                if (n > 0) println("[bridge] flushed $n queued message(s) to ${leaf.take(8)}…")
             }
         }
     }

@@ -21,6 +21,9 @@ data class MeshContact(
     @SerialName("enc_pub") val encPublicKeyX509B64: String,
     // The peer's own onion (Android peers host one). The bridge dials this to reach them; null for an iOS leaf.
     @SerialName("onion") val onionAddress: String? = null,
+    // True once this Android peer has completed the handshake (we've received their USER_HANDSHAKE/request).
+    // Persisted locally so we stop re-sending CONNECTION_REQUEST on every reconnect (no handshake spam).
+    @SerialName("accepted") val accepted: Boolean = false,
 ) {
     fun toQrJson(): String = WireJson.encodeToString(serializer(), this)
 
@@ -83,6 +86,13 @@ object SavedContacts {
     }
 
     fun remove(contact: MeshContact) = persist(list().filter { it.nodeId != contact.nodeId })
+
+    /** Mark a peer as handshake-complete (persisted), so we stop re-sending CONNECTION_REQUEST to them. */
+    fun markAccepted(nodeId: String) {
+        val cur = list()
+        if (cur.none { it.nodeId == nodeId && !it.accepted }) return   // unknown or already accepted — no-op
+        persist(cur.map { if (it.nodeId == nodeId) it.copy(accepted = true) else it })
+    }
 
     private fun persist(contacts: List<MeshContact>) {
         if (contacts.isEmpty()) ContactStore.clear() else ContactStore.save(contacts.joinToString("\n") { it.toQrJson() })
