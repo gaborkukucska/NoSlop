@@ -89,6 +89,10 @@ kotlin {
             implementation(libs.androidx.security.crypto)
             implementation(libs.sqldelight.android.driver)
             implementation(libs.androidx.work.runtime.ktx)
+            implementation(libs.media3.exoplayer)
+            implementation(libs.media3.ui)
+            implementation(libs.media3.common)
+            implementation(libs.androidx.core.ktx)
         }
         // Android unit tests run on the JVM — use the JDBC (in-memory) driver, no Robolectric/device needed.
         androidUnitTest.dependencies {

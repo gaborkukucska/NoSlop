@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.interop.UIKitView
 import com.noslop.mvp.IosMediaPlayer
 import com.noslop.mvp.IosVideoPlayerBridge
+import com.noslop.mvp.MediaPlayerResult
 import com.noslop.mvp.debug.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,9 +54,9 @@ actual class MediaPlayer actual constructor(val url: String) {
             return
         }
 
-        val pair = factory.createPlayer(url)
-        iosPlayer = pair.first
-        uiView = pair.second
+        val result = factory.createPlayer(url)
+        iosPlayer = result.player
+        uiView = result.view
 
         iosPlayer?.setListener(
             onStateChanged = { playing, buffering ->
@@ -123,6 +124,7 @@ actual class MediaPlayer actual constructor(val url: String) {
     }
 }
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 @Composable
 actual fun NativeVideoPlayer(
     player: MediaPlayer,

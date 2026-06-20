@@ -10,6 +10,7 @@ import kotlinx.cinterop.alloc
 import kotlinx.cinterop.ptr
 import kotlinx.cinterop.nativeHeap
 
+@OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
 actual class ConcurrentMap<K, V> actual constructor() {
     private val map = mutableMapOf<K, V>()
     private val mutex = nativeHeap.alloc<pthread_mutex_t>()

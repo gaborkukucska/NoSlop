@@ -222,20 +222,18 @@ interface IosMediaPlayer {
     fun seekTo(positionMs: Long)
     fun release()
     
-    // Callback block set from Kotlin to be called by Swift when state changes
     fun setListener(
         onStateChanged: (isPlaying: Boolean, isBuffering: Boolean) -> Unit,
         onError: (message: String) -> Unit
     )
 }
 
+/** Holder returned by the factory — avoids Kotlin Pair cross-bridge issues. */
+class MediaPlayerResult(val player: IosMediaPlayer, val view: platform.UIKit.UIView)
+
 /** Factory to create IosMediaPlayer and provide its view. */
 interface IosVideoPlayerFactory {
-    /** 
-     * Creates a media player for the given URL.
-     * Returns a pair: the controller (IosMediaPlayer) and the UIView that renders it.
-     */
-    fun createPlayer(url: String): Pair<IosMediaPlayer, platform.UIKit.UIView>
+    fun createPlayer(url: String): MediaPlayerResult
 }
 
 object IosVideoPlayerBridge {

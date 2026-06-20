@@ -1,11 +1,11 @@
 import Foundation
 import AVFoundation
 import AVKit
+import UIKit
 import ComposeApp
 
 class SwiftMediaPlayer: NSObject, IosMediaPlayer {
     private var player: AVPlayer
-    private var timeObserverToken: Any?
     private var statusObservation: NSKeyValueObservation?
     private var playingObservation: NSKeyValueObservation?
     private var bufferingObservation: NSKeyValueObservation?
@@ -13,7 +13,7 @@ class SwiftMediaPlayer: NSObject, IosMediaPlayer {
     private var _isPlaying = false
     private var _isBuffering = true
     
-    private var stateChangedCallback: ((Bool, Bool) -> Void)?
+    private var stateChangedCallback: ((KotlinBoolean, KotlinBoolean) -> Void)?
     private var errorCallback: ((String) -> Void)?
 
     init(url: URL) {
@@ -84,13 +84,13 @@ class SwiftMediaPlayer: NSObject, IosMediaPlayer {
         player.replaceCurrentItem(with: nil)
     }
 
-    func setListener(onStateChanged: @escaping (Bool, Bool) -> Void, onError: @escaping (String) -> Void) {
+    func setListener(onStateChanged: @escaping (KotlinBoolean, KotlinBoolean) -> Void, onError: @escaping (String) -> Void) {
         self.stateChangedCallback = onStateChanged
         self.errorCallback = onError
     }
 
     private func notifyState() {
-        stateChangedCallback?(_isPlaying, _isBuffering)
+        stateChangedCallback?(KotlinBoolean(bool: _isPlaying), KotlinBoolean(bool: _isBuffering))
     }
     
     func getPlayer() -> AVPlayer {
@@ -99,22 +99,20 @@ class SwiftMediaPlayer: NSObject, IosMediaPlayer {
 }
 
 class SwiftVideoPlayerFactory: NSObject, IosVideoPlayerFactory {
-    func createPlayer(url: String) -> KotlinPair {
+    func createPlayer(url: String) -> MediaPlayerResult {
         guard let parsedUrl = URL(string: url) else {
             let player = SwiftMediaPlayer(url: URL(fileURLWithPath: ""))
-            return KotlinPair(first: player, second: UIView())
+            return MediaPlayerResult(player: player, view: UIView())
         }
         
         let player = SwiftMediaPlayer(url: parsedUrl)
         
-        // Use AVPlayerViewController for built-in controls (like Android's PlayerView)
         let controller = AVPlayerViewController()
         controller.player = player.getPlayer()
         controller.showsPlaybackControls = true
         
-        // Extract the underlying view to return to KMP Compose UIKitView
         let view = controller.view!
         
-        return KotlinPair(first: player, second: view)
+        return MediaPlayerResult(player: player, view: view)
     }
 }
