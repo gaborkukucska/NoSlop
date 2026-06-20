@@ -210,3 +210,34 @@ actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 actual fun randomId(): String = NSUUID().UUIDString()
+
+/** Swift→Kotlin bridge for the iOS AVPlayer component */
+interface IosMediaPlayer {
+    val isPlaying: Boolean
+    val progressMs: Long
+    val durationMs: Long
+    
+    fun play()
+    fun pause()
+    fun seekTo(positionMs: Long)
+    fun release()
+    
+    // Callback block set from Kotlin to be called by Swift when state changes
+    fun setListener(
+        onStateChanged: (isPlaying: Boolean, isBuffering: Boolean) -> Unit,
+        onError: (message: String) -> Unit
+    )
+}
+
+/** Factory to create IosMediaPlayer and provide its view. */
+interface IosVideoPlayerFactory {
+    /** 
+     * Creates a media player for the given URL.
+     * Returns a pair: the controller (IosMediaPlayer) and the UIView that renders it.
+     */
+    fun createPlayer(url: String): Pair<IosMediaPlayer, platform.UIKit.UIView>
+}
+
+object IosVideoPlayerBridge {
+    var factory: IosVideoPlayerFactory? = null
+}
