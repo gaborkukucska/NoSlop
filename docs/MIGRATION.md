@@ -25,9 +25,9 @@
 | Desktop HUB | ✅ JVM `HubMain`, runnable | None |
 | **Clearnet feed aggregator** | ⚠️ Basic RSS/Atom only | ~14 API clients in `app/` |
 | **Full UI** | ⚠️ Functional mesh tabs; no full settings/onboarding | Full UI in `app/` |
-| Notifications | ❌ Not ported | `NotificationHelper` in `app/` |
+| Notifications | ✅ Full (`expect/actual Notifier`) | None |
 | Background sync (Android) | ❌ Not ported | `FeedSyncWorker` + `WorkManager` |
-| Media playback | ❌ Not ported | ExoPlayer + `VideoPlayer.kt` |
+| Media playback | ✅ Full (`MediaPlayer`, ExoPlayer, AVPlayer) | None |
 | Onboarding flow | ❌ Not ported | `OnboardingScreen.kt` (1 236 lines, partly split) |
 
 ---
@@ -90,16 +90,13 @@ The MVP has a basic RSS parser. The old app has 14 API clients under `app/src/ma
 
 ---
 
-### Phase D — Media Playback
+### Phase D — Media Playback (✅ Completed 2026-06-20)
 
 **D1 — Port `VideoPlayer.kt` + `AudioPlayer.kt`**
-- Source: `app/.../ui/components/VideoPlayer.kt` (604 lines), `AudioPlayer.kt`
-- Target: `expect/actual MediaPlayer` in `commonMain`; Android actual uses `media3`/ExoPlayer; iOS actual uses `AVPlayer` via Swift bridge (same pattern as `TorManager.swift`)
-- The Swift bridge pattern is already established in `mvp/iosApp/iosApp/TorManager.swift` — follow it
+- Ported: Created `expect/actual MediaPlayer`. Android actual uses `media3`/ExoPlayer; iOS actual uses `AVPlayer` via `MediaManager.swift` and `IosMediaPlayer` bridge.
 
 **D2 — Port `MediaComponents.kt`**
-- Source: `app/.../ui/MediaComponents.kt` (821 lines) and its Phase-0 splits
-- Target: `mvp/.../commonMain/.../ui/media/` — one file per media type (`ArticleReader`, `ImageMedia`, `AudioMedia`, `VideoMedia`)
+- Ported: Split into `ui/media/ArticleReader.kt`, `ImageMedia.kt`, `AudioPlayer.kt`, `VideoPlayer.kt`, `EmbedWebViewPlayer.kt`, and `OverlayInteractions.kt`.
 
 ---
 
@@ -169,6 +166,7 @@ RULES FOR THIS MIGRATION:
 | Tor control | `commonMain/TorControl.kt`, `TorService.kt` |
 | iOS Tor bridge | `iosApp/iosApp/TorManager.swift` |
 | iOS QR bridge | `iosApp/iosApp/QrScanner.swift` |
+| iOS Media bridge | `iosApp/iosApp/MediaManager.swift` |
 | Desktop HUB | `jvmMain/HubMain.kt` |
 | Android entry | `androidMain/MainActivity.kt` |
 | iOS entry | `iosMain/MainViewController.kt` |

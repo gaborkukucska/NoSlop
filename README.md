@@ -86,15 +86,15 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 | Layer | Technology |
 |---|---|
 | UI | Compose Multiplatform (Material Design 3) |
-| Media | ExoPlayer (Android), WebView, Coil (images) |
+| Media | ExoPlayer (Android), AVPlayer (iOS), WKWebView/WebView, Coil |
 | Content | Ktor, Kotlinx-serialization, xmlutil, RSS/Atom parser |
 | Networking | Embedded Tor SOCKS5 daemon (onion-routed), Ktor + OkHttp/Darwin |
 | Signing | Ed25519 (Android Keystore / Bouncy Castle / Apple CryptoKit) |
 | Key exchange | X25519 |
 | Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
-| Storage | Room SQLite (WAL mode) + EncryptedSharedPreferences |
-| Background sync | WorkManager |
-| Camera | CameraX + ML Kit (QR scanning) |
+| Storage | SQLDelight SQLite + native key-value stores |
+| Background sync | WorkManager (Android) |
+| Camera | CameraX (Android) + AVFoundation (iOS) |
 
 ---
 
