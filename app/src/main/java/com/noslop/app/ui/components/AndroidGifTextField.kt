@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/components/AndroidGifTextField.kt
 package com.noslop.app.ui.components
 
 import android.content.ClipDescription
@@ -61,12 +62,14 @@ fun AndroidGifTextField(
                         }
                         
                         val uri = inputContentInfo.contentUri
+                        // Determine extension based on MIME type rather than URI string
                         val mime = inputContentInfo.description.getMimeType(0)
                         val ext = when {
                             mime.contains("gif") -> ".gif"
                             mime.contains("png") -> ".png"
                             mime.contains("video") -> ".mp4"
-                            else -> ".jpg"
+                            mime.contains("jpeg") || mime.contains("jpg") -> ".jpg"
+                            else -> ".bin"
                         }
                         
                         try {
@@ -122,7 +125,7 @@ fun AndroidGifTextField(
         update = { view ->
             if (view.text.toString() != value) {
                 view.setText(value)
-                view.setSelection(value.length)
+                view.setSelection(view.length())
             }
         }
     )

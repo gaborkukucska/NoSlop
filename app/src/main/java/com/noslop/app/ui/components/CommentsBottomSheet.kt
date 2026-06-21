@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/components/CommentsBottomSheet.kt
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
@@ -15,6 +16,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.AddReaction
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,8 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.app.data.MeshComment
+import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
+import com.noslop.app.ui.resolveMediaUrl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +45,10 @@ fun CommentsBottomSheet(
     val localKeys by viewModel.localKeys.collectAsState()
     var commentText by remember { mutableStateOf("") }
     var replyToCommentId by remember { mutableStateOf<String?>(null) }
-    var showGifPrompt by remember { mutableStateOf(false) }
-    var attachedGifUrl by remember { mutableStateOf<String?>(null) }
+    
+    // Store the File instead of a Base64 string
+    var attachedGifFile by remember { mutableStateOf<java.io.File?>(null) }
+    
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -106,11 +112,8 @@ fun CommentsBottomSheet(
                     onValueChange = { commentText = it },
                     hint = "Write a comment...",
                     onMediaAttached = { file ->
-                        if (file.name.endsWith(".gif")) {
-                            val bytes = file.readBytes()
-                            val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                            attachedGifUrl = "noslop-gif://data:image/gif;base64,$base64"
-                        }
+                        // Inclusive: Accept any rich content attached via keyboard
+                        attachedGifFile = file
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -119,24 +122,43 @@ fun CommentsBottomSheet(
                 
                 IconButton(
                     onClick = {
-                        val finalContent = if (attachedGifUrl != null) {
-                            if (commentText.isNotBlank()) "$commentText\n$attachedGifUrl" else attachedGifUrl!!
-                        } else {
-                            commentText
+                        val mediaMetadata = attachedGifFile?.let { file ->
+                            val isGif = file.name.endsWith(".gif", ignoreCase = true)
+                            val type = if (isGif) "image" else "image" // Both map to image for storage
+                            val id = "comment_attach_${System.currentTimeMillis()}${if (isGif) ".gif" else ".jpg"}"
+                            
+                            // Save to local mesh media storage
+                            com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
+                            com.noslop.app.mesh.MediaMetadata(
+                                id = id,
+                                type = type,
+                                mimeType = if (isGif) "image/gif" else "image/jpeg",
+                                size = file.length(),
+                                chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
+                                originNode = localKeys?.onionAddress,
+                                ownerId = localKeys?.publicKeyB64
+                            )
                         }
-                        viewModel.composeAndBroadcastComment(postId, finalContent, replyToCommentId)
+
+                        viewModel.composeAndBroadcastComment(
+                            postId = postId, 
+                            content = commentText, 
+                            parentCommentId = replyToCommentId,
+                            mediaMetadata = mediaMetadata
+                        )
+                        
                         commentText = ""
-                        attachedGifUrl = null
+                        attachedGifFile = null
                         replyToCommentId = null
                     },
-                    enabled = commentText.isNotBlank() || attachedGifUrl != null,
+                    enabled = commentText.isNotBlank() || attachedGifFile != null,
                     modifier = Modifier.background(AccentGreen, CircleShape)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
                 }
             }
 
-            if (attachedGifUrl != null) {
+            if (attachedGifFile != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -146,7 +168,7 @@ fun CommentsBottomSheet(
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "GIF Attached",
+                        "Attachment Ready",
                         color = TextLight,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.weight(1f)
@@ -155,36 +177,9 @@ fun CommentsBottomSheet(
                         Icons.Default.Close,
                         contentDescription = "Remove attachment",
                         tint = TextMuted,
-                        modifier = Modifier.size(16.dp).clickable { attachedGifUrl = null }
+                        modifier = Modifier.size(16.dp).clickable { attachedGifFile = null }
                     )
                 }
-            }
-            if (showGifPrompt) {
-                var gifUrl by remember { mutableStateOf("") }
-                AlertDialog(
-                    onDismissRequest = { showGifPrompt = false },
-                    title = { Text("Insert GIF URL", color = TextLight) },
-                    containerColor = SurfaceDark,
-                    text = {
-                        OutlinedTextField(
-                            value = gifUrl,
-                            onValueChange = { gifUrl = it },
-                            placeholder = { Text("https://example.com/anim.gif") },
-                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            if (gifUrl.isNotBlank()) {
-                                attachedGifUrl = "noslop-gif://$gifUrl"
-                            }
-                            showGifPrompt = false
-                        }) { Text("Send", color = AccentGreen) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { showGifPrompt = false }) { Text("Cancel", color = TextMuted) }
-                    }
-                )
             }
         }
     }
@@ -199,7 +194,17 @@ fun CommentItem(
 ) {
     val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
     val votes by viewModel.getVotesForComment(comment.id).collectAsState(initial = emptyList())
+    val peers by viewModel.peers.collectAsState()
     var showReactionPicker by remember { mutableStateOf(false) }
+
+    // Resolve author onion for media rendering
+    val authorOnion = remember(comment.authorPublicKeyB64, peers) {
+        if (comment.authorPublicKeyB64 == localKeys?.publicKeyB64) {
+            localKeys?.onionAddress
+        } else {
+            peers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }?.onionAddress
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -258,34 +263,30 @@ fun CommentItem(
             }
         }
         
-        if (comment.content.contains("noslop-gif://")) {
-            val lines = comment.content.split("\n")
-            lines.forEach { line ->
-                if (line.startsWith("noslop-gif://")) {
-                    val url = line.removePrefix("noslop-gif://")
-                    var model: Any? = url
-                    if (url.startsWith("data:image/gif;base64,")) {
-                        val b64 = url.substringAfter("base64,")
-                        model = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                    }
-                    coil.compose.AsyncImage(
-                        model = model,
-                        contentDescription = "GIF",
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp).clip(RoundedCornerShape(8.dp)).padding(vertical = 4.dp)
-                    )
-                } else {
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = TextLight
-                    )
-                }
-            }
-        } else {
+        // ─── Content Rendering ───
+        if (comment.content.isNotBlank()) {
             Text(
                 comment.content,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextLight
+            )
+        }
+
+        // ─── Structured Media Rendering (GIFs / Images) ───
+        if (comment.mediaId != null && authorOnion != null) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val resolvedMediaUrl = remember(comment.mediaId, authorOnion) {
+                resolveMediaUrl("noslop://$authorOnion/${comment.mediaId}", context)
+            }
+            
+            coil.compose.AsyncImage(
+                model = resolvedMediaUrl,
+                contentDescription = "Comment Media",
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 250.dp)
+                    .clip(RoundedCornerShape(8.dp))
             )
         }
 

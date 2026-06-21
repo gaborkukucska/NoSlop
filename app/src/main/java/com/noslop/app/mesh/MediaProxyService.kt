@@ -96,16 +96,22 @@ object MediaProxyService {
 
             Logger.info(TAG, "Proxying request for media $mediaId from $targetOnion")
 
-            // 1. Check if file is already on disk
+            // 1. Check if file is already on disk (using robust multi-directory scan)
             val localFile = MediaManager.getLocalFile(mediaId)
             if (localFile != null && localFile.exists()) {
-                Logger.info(TAG, "Serving $mediaId from disk cache")
+                Logger.info(TAG, "Serving $mediaId from disk cache at ${localFile.absolutePath}")
                 val metadata = MediaManager.getMetadataSync(mediaId)
                 streamFile(localFile, metadata?.mimeType ?: "application/octet-stream", output)
                 return@withContext
             }
 
-            // 2. Not on disk, stream from MediaManager sequentially
+            // 2. Not on disk, stream from MediaManager sequentially via Mesh
+            if (targetOnion.isEmpty()) {
+                Logger.warn(TAG, "Media $mediaId not on disk and no target onion provided. Aborting.")
+                sendHttpError(output, 404, "Media not found and no source node known")
+                return@withContext
+            }
+
             val metadata = MediaManager.getMetadataSync(mediaId)
             val contentType = metadata?.mimeType ?: "application/octet-stream"
             Logger.info(TAG, "Streaming $mediaId from mesh. Content-Type: $contentType")
@@ -114,10 +120,10 @@ object MediaProxyService {
             if (!MediaManager.isMediaDownloaded(mediaId, null)) {
                 val placeholderMetadata = metadata ?: MediaMetadata(
                     id = mediaId,
-                    type = if (mediaId.endsWith(".jpg") || mediaId.endsWith(".png") || mediaId.endsWith(".jpeg")) "image" else "video",
+                    type = if (mediaId.lowercase().let { it.endsWith(".jpg") || it.endsWith(".png") || it.endsWith(".jpeg") || it.endsWith(".gif") }) "image" else "video",
                     mimeType = contentType,
                     size = 0,
-                    chunkCount = 999, 
+                    chunkCount = 999, // Sentinel for unknown size
                     originNode = targetOnion
                 )
                 Logger.info(TAG, "Initiating download for $mediaId from $targetOnion")

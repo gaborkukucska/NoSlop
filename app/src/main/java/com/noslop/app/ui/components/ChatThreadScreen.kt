@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt
 package com.noslop.app.ui.components
 
 import android.Manifest
@@ -351,7 +352,9 @@ fun ChatThreadScreen(
                                 // Media display (GIF or chunked download)
                                 msg.mediaId?.let { mid ->
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    if (msg.mediaType == "gif") {
+                                    
+                                    // Robust check for legacy GIF format or structured media
+                                    if (mid.startsWith("noslop-gif://")) {
                                         val url = mid.removePrefix("noslop-gif://")
                                         var model: Any? = url
                                         if (url.startsWith("data:image/gif;base64,")) {
@@ -369,9 +372,9 @@ fun ChatThreadScreen(
                                     } else {
                                         val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(mid, msg.mediaType)
                                         if (isDownloaded) {
-                                            val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid)
+                                            val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
                                             if (localFile != null) {
-                                                if (msg.mediaType?.startsWith("image") == true) {
+                                                if (msg.mediaType?.startsWith("image") == true || msg.mediaType == "gif") {
                                                     coil.compose.AsyncImage(
                                                         model = localFile,
                                                         contentDescription = "Image",

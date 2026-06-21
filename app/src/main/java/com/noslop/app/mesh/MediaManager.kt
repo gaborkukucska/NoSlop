@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/mesh/MediaManager.kt
 package com.noslop.app.mesh
 
 import android.content.Context
@@ -46,6 +47,7 @@ object MediaManager {
     }
 
     fun initialize(repo: NoSlopRepository) {
+        if (this.repository != null) return // Already initialized
         this.repository = repo
         
         val powerManager = repo.context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -59,6 +61,7 @@ object MediaManager {
                 delay(5000)
             }
         }
+        Logger.info(TAG, "MediaManager initialized successfully")
     }
 
     private fun updateWakeLock() {
@@ -75,7 +78,7 @@ object MediaManager {
     private fun getMediaDirectory(type: String?): File {
         val repo = repository ?: throw IllegalStateException("MediaManager not initialized")
         val subDir = when {
-            type?.startsWith("image") == true -> Environment.DIRECTORY_PICTURES
+            type?.startsWith("image") == true || type == "gif" -> Environment.DIRECTORY_PICTURES
             type?.startsWith("video") == true -> Environment.DIRECTORY_MOVIES
             type?.startsWith("audio") == true -> Environment.DIRECTORY_MUSIC
             else -> Environment.DIRECTORY_DOWNLOADS
@@ -87,6 +90,10 @@ object MediaManager {
     }
 
     fun copyFileToMediaDirectory(source: File, type: String?, id: String): File? {
+        if (repository == null) {
+            Logger.error(TAG, "Cannot copy file: MediaManager not initialized")
+            return null
+        }
         return try {
             val destDir = getMediaDirectory(type)
             val destFile = File(destDir, id)
@@ -98,13 +105,13 @@ object MediaManager {
         }
     }
 
+    /**
+     * Checks if a media item is already downloaded and available locally.
+     * Robust: Scans all potential media directories if not found in the primary one.
+     */
     fun isMediaDownloaded(id: String, type: String?): Boolean {
-        return try {
-            val file = File(getMediaDirectory(type), id)
-            file.exists()
-        } catch (e: Exception) {
-            false
-        }
+        if (repository == null) return false
+        return getLocalFile(id, type) != null
     }
 
     /**
@@ -408,7 +415,7 @@ object MediaManager {
                     id = UUID.randomUUID().toString(),
                     hops = 1,
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
-                    type = "MEDIA_METADATA_RESPONSE", // Add new type
+                    type = "MEDIA_METADATA_RESPONSE", 
                     payload = com.google.gson.Gson().toJsonTree(metadata)
                 )
                 repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
@@ -463,6 +470,9 @@ object MediaManager {
         _downloadProgress.value = current
     }
 
+    /**
+     * Finds a file by ID across all known media directories.
+     */
     private fun findLocalFile(repo: NoSlopRepository, mediaId: String): File? {
         val possibleDirs = listOf(
             Environment.DIRECTORY_PICTURES,
@@ -505,8 +515,18 @@ object MediaManager {
         )
     }
 
-    fun getLocalFile(mediaId: String): File? {
-        return findLocalFile(repository ?: return null, mediaId)
+    /**
+     * Gets a local file handle for a media ID. 
+     * If [type] is provided, it checks the primary directory first; 
+     * otherwise (or if not found), it scans all directories.
+     */
+    fun getLocalFile(mediaId: String, type: String? = null): File? {
+        val repo = repository ?: return null
+        if (type != null) {
+            val primary = File(getMediaDirectory(type), mediaId)
+            if (primary.exists()) return primary
+        }
+        return findLocalFile(repo, mediaId)
     }
 
     /**

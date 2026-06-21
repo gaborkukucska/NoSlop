@@ -369,8 +369,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun composeAndBroadcastComment(
         postId: String,
         content: String,
-        parentCommentId: String? = null
-    ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId)
+        parentCommentId: String? = null,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+    ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata)
 
     suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToMeshPost(postId, reactionType)

@@ -334,14 +334,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * Reverses [searchAndCreateCustomFeed]: discards the search-result items that
      * were injected into the feed/database for the now-cleared search query, and
      * repopulates the unified feed from the normal aggregation pipeline.
-     *
-     * Without this, clearing the search box left the previously fetched
-     * search-result items sitting in `feed_items` and `_unifiedFeed` forever —
-     * they kept showing up (and kept "passing" the search filter, since an empty
-     * query matches everything) until the user ran a brand new search, which was
-     * the only other code path that calls `clearFeedData()`. A manual
-     * "Refresh Feed" tap didn't help either, since `refreshFeeds()` only adds new
-     * items on top of the existing (still-contaminated) cache.
      */
     fun clearSearchAndRestoreFeed() {
         if (_isRefreshingFeeds.value) return // Prevent concurrent refreshes
@@ -460,9 +452,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         val v = videos.take(2)
         val a = audios.take(1)
-        // FIX: clamp to maxOf(0, ...) — when v.size + a.size already equals or
-        // exceeds `needed` (e.g. needed=2, v=2, a=1) the remainder is negative,
-        // which causes Kotlin's take() to throw IllegalArgumentException and crash.
         val t = textImages.take(maxOf(0, needed - v.size - a.size))
         
         val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size))
@@ -668,14 +657,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (profile.displayName.isNotBlank() && profile.displayName != currentHandle) {
                 repository.updateLocalHandle(profile.displayName)
             }
-            // If avatar changed, we should probably broadcast IDENTITY_UPDATE too, 
-            // but updateLocalHandle handles the IDENTITY_UPDATE broadcast internally.
-            // We'll let updateLocalHandle broadcast the new avatar since it queries the latest UserProfile.
             repository.broadcastIdentityUpdate(profile.displayName)
         }
     }
-
-
 
     fun updateContentPreferences(
         selectedCategories: List<String>, 
@@ -762,8 +746,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isRefreshingFeeds.value = true
             try {
-                // Do not clear the current feed, cache, or database here.
-                // We want to load new items below the current feed instead of resetting it.
                 repository.refreshFeeds()
             } catch (e: Exception) {
                 Logger.error("VM", "Manual refresh exception: ${e.message}")
@@ -798,10 +780,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Mark a content item as viewed (after 5s dwell threshold).
-     * Adds to the persistent viewed_history table and refreshes the exclusion cache.
-     */
     fun markItemViewed(itemId: String, isMesh: Boolean) {
         viewModelScope.launch {
             repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed")
@@ -809,42 +787,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Record that the user swiped past a content item quickly (<5s).
-     * After 2 swipes, the item is excluded from future feeds.
-     * Items already in viewed history are NOT removed.
-     */
     fun recordItemSwiped(itemId: String) {
         viewModelScope.launch {
             repository.recordSwipe(itemId)
             cachedExcludedIds = repository.getSwipeExcludedIds()
-            // Do NOT remove the item from the in-memory feed immediately.
-            // Deleting items preceding the current pager index causes the list to shrink,
-            // shifting the indices and forcing the UI to snap to the wrong slide.
-            // The item is recorded in the DB and will be excluded from future feed generations.
         }
     }
 
-    /**
-     * Refresh the cached sets of viewed and swiped-excluded item IDs from the database.
-     */
     private suspend fun refreshExclusionCaches() {
         cachedViewedIds = repository.getViewedItemIds()
         cachedExcludedIds = repository.getSwipeExcludedIds()
     }
 
-    /**
-     * Update the active search query state. When a search is active, all feed exclusions
-     * (self-broadcast, viewed history, swipe tracking) are bypassed.
-     */
     fun updateActiveSearchQuery(query: String) {
         activeSearchQuery = query
     }
 
-    /**
-     * Force-insert a specific mesh post into the unified feed (for notification deep links).
-     * Bypasses self-broadcast filtering.
-     */
     fun ensurePostInFeed(postId: String) {
         viewModelScope.launch {
             val alreadyInFeed = _unifiedFeed.value.any { it.id == postId }
@@ -882,7 +840,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun addCustomFeedSource(title: String, url: String, category: String, feedType: String) {
         viewModelScope.launch {
-            // Auto-discover the real RSS/Atom feed URL if the user provided a website landing page
             val resolvedUrl = try {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     com.noslop.app.feeds.FeedParser.resolveRssUrl(url)
@@ -907,8 +864,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- Message & Social Actions ---
-
     fun isMeshListening(): Boolean = repository.meshTransport.isListening()
 
     fun updateMediaSettings(settings: MediaSettings) {
@@ -926,8 +881,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun setForegroundServiceEnabled(enabled: Boolean) {
         viewModelScope.launch {
             repository.setForegroundServiceEnabled(enabled)
-            
-            // Start or stop the actual service based on toggle
             val context = getApplication<android.app.Application>()
             if (enabled) {
                 com.noslop.app.mesh.NoSlopForegroundService.start(context)
@@ -970,7 +923,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             val post = repository.composeAndBroadcastPost(content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, clearnetMediaType)
             if (post != null) {
-                // Prepend to unifiedFeed so it shows at the top immediately
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.add(0, UnifiedItem.Mesh(post))
                 _unifiedFeed.value = currentFeed
@@ -990,11 +942,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 author = post.authorHandle,
                 excerpt = post.content.take(100),
                 publishedAt = System.currentTimeMillis(),
-                isRead = true, // viewed in history
+                isRead = true,
                 isSaved = false
             )
             repository.insertFeedItem(feedItem)
-            // Prepend to unifiedFeed so it shows at the top
             val currentFeed = _unifiedFeed.value.toMutableList()
             currentFeed.add(0, UnifiedItem.Feed(feedItem))
             _unifiedFeed.value = currentFeed
@@ -1002,10 +953,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun composeAndBroadcastComment(postId: String, content: String, parentCommentId: String? = null) {
-        if (content.isBlank()) return
+    fun composeAndBroadcastComment(
+        postId: String, 
+        content: String, 
+        parentCommentId: String? = null,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+    ) {
+        if (content.isBlank() && mediaMetadata == null) return
         viewModelScope.launch {
-            repository.composeAndBroadcastComment(postId, content, parentCommentId)
+            repository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata)
         }
     }
 
@@ -1047,7 +1003,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {
             repository.reactToFeedItemWithType(item, reactionType)
-            // Auto-save to "Liked" list on explicit positive interactions
             if (reactionType == "like") {
                 repository.updateSavedState(item.id, true)
             }
@@ -1083,7 +1038,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // NEW CONNECTION REQUEST HANDLERS FROM NOTIFICATION
     fun acceptConnectionFromNotification(notifId: String, senderPub: String) {
         viewModelScope.launch {
             val peer = repository.peerDao.getPeerByPublicKey(senderPub)
@@ -1107,19 +1061,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Start Embedded Tor daemon
-     */
     fun startTor() {
         Logger.info("VM", "Instructing TorService to start embedded daemon")
         viewModelScope.launch {
             val identity = repository.getLocalIdentity()
-            // Start the foreground service to ensure background persistence
             com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
             TorService.startTor(getApplication(), identity?.privateKeyB64)
         }
     }
-
 
     fun refreshTorStatus() {
         if (_isTorChecking.value) return
@@ -1148,7 +1097,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         Logger.clearLog()
     }
 
-    // Class Factory to wire NoSlopViewModel correctly
     class Factory(private val application: Application) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(NoSlopViewModel::class.java)) {

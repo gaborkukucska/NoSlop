@@ -46,6 +46,10 @@ class MeshSocialRepository(
     private val messageDao = db.messageDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+    private val chatReactionDao = db.chatReactionDao()
+    private val commentReactionDao = db.commentReactionDao()
+    private val voteDao = db.voteDao()
+    private val commentVoteDao = db.commentVoteDao()
 
     private var presenceJob: kotlinx.coroutines.Job? = null
 
@@ -453,7 +457,8 @@ class MeshSocialRepository(
     suspend fun composeAndBroadcastComment(
         postId: String,
         content: String,
-        parentCommentId: String? = null
+        parentCommentId: String? = null,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
@@ -475,7 +480,9 @@ class MeshSocialRepository(
             authorAvatarB64 = avatarB64,
             content = content,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            mediaId = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type
         )
 
         val commentPay = com.noslop.app.mesh.CommentPayload(
@@ -502,7 +509,9 @@ class MeshSocialRepository(
             content = content,
             timestamp = timestamp,
             signature = signature,
-            parentCommentId = parentCommentId
+            parentCommentId = parentCommentId,
+            mediaId = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type
         )
 
         commentDao.insertComment(localComment)
@@ -559,7 +568,6 @@ class MeshSocialRepository(
 
     suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val voteDao = db.voteDao()
         
         val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
         val existingVote = voteDao.getVoteById(voteId)
@@ -637,7 +645,6 @@ class MeshSocialRepository(
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val chatReactionDao = db.chatReactionDao()
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -691,7 +698,6 @@ class MeshSocialRepository(
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
-        val commentReactionDao = db.commentReactionDao()
         val reactionId = "${commentId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = commentReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -740,7 +746,6 @@ class MeshSocialRepository(
 
     suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val commentVoteDao = db.commentVoteDao()
         
         val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"
         val existingVote = commentVoteDao.getVoteById(voteId)

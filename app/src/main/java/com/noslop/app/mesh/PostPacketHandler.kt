@@ -38,6 +38,16 @@ class PostPacketHandler(
         val peer = peerDao.getPeerByPublicKey(postPay.authorPublicKey)
         val handle = peer?.handle ?: postPay.authorName
 
+        // Robustness: Sniff media type from URL if it's missing in the packet
+        var effectiveClearnetType = postPay.clearnetMediaType
+        if (effectiveClearnetType == null && postPay.clearnetUrl != null) {
+            val url = postPay.clearnetUrl.lowercase()
+            if (url.contains("youtube.com") || url.contains("youtu.be") || 
+                url.contains("vimeo.com") || url.contains("archive.org/embed")) {
+                effectiveClearnetType = "video"
+            }
+        }
+
         val meshPost = MeshPost(
             id = postPay.id,
             authorPublicKeyB64 = postPay.authorPublicKey,
@@ -55,7 +65,8 @@ class PostPacketHandler(
             clearnetUrl = postPay.clearnetUrl,
             clearnetTitle = postPay.clearnetTitle,
             clearnetThumbnailUrl = postPay.clearnetThumbnailUrl,
-            clearnetMediaType = postPay.clearnetMediaType
+            clearnetMediaType = effectiveClearnetType,
+            isOrphaned = false
         )
         postDao.insertPost(meshPost)
         

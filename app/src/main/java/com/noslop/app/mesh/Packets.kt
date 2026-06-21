@@ -46,7 +46,9 @@ data class CommentData(
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null
 )
 
 data class MediaMetadata(
@@ -196,9 +198,6 @@ data class DeletePostPayload(
     val signature: String
 )
 
-
-
-
 data class SyncRequestPayload(
     val since: Long
 )
@@ -221,7 +220,9 @@ data class CommentSyncData(
     val content: String,
     val timestamp: Long,
     val signature: String,
-    @SerializedName("parent_comment_id") val parentCommentId: String? = null
+    @SerializedName("parent_comment_id") val parentCommentId: String? = null,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null
 )
 
 data class ReactionSyncData(

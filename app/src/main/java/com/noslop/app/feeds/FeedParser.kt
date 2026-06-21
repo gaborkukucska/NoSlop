@@ -99,12 +99,37 @@ object FeedParser {
         return list
     }
 
+    /**
+     * Identifies content type based on URL patterns and provided MIME types.
+     * Robust: Detects common video platforms even if explicit metadata is missing.
+     */
     private fun getMediaType(url: String, mimeType: String?): String? {
         val type = mimeType?.lowercase(Locale.US) ?: ""
+        val lowerUrl = url.lowercase(Locale.US)
+        
         return when {
-            type.contains("video") || url.endsWith(".mp4") || url.endsWith(".mkv") -> "video"
-            type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".wav") -> "audio"
-            type.contains("image") || url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".png") || url.endsWith(".webp") -> "image"
+            // 1. Explicit Video MIME or known extension
+            type.contains("video") || 
+            lowerUrl.endsWith(".mp4") || lowerUrl.endsWith(".mkv") || 
+            lowerUrl.endsWith(".webm") || lowerUrl.endsWith(".mov") || 
+            lowerUrl.endsWith(".m3u8") -> "video"
+
+            // 2. Video platform patterns (for feeds that omit MIME types)
+            lowerUrl.contains("youtube.com/embed") || lowerUrl.contains("youtu.be/") ||
+            lowerUrl.contains("vimeo.com/") || lowerUrl.contains("archive.org/embed") -> "video"
+
+            // 3. Audio patterns
+            type.contains("audio") || 
+            lowerUrl.endsWith(".mp3") || lowerUrl.endsWith(".wav") || 
+            lowerUrl.endsWith(".m4a") || lowerUrl.endsWith(".aac") || 
+            lowerUrl.endsWith(".ogg") || lowerUrl.endsWith(".flac") -> "audio"
+
+            // 4. Image patterns
+            type.contains("image") || 
+            lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") || 
+            lowerUrl.endsWith(".png") || lowerUrl.endsWith(".webp") || 
+            lowerUrl.endsWith(".gif") -> "image"
+
             else -> null
         }
     }
@@ -391,9 +416,6 @@ object FeedParser {
      * RSS Auto-Discovery: Given a URL that may be a website landing page rather than a
      * direct feed URL, fetch the HTML and look for `<link rel="alternate" type="application/rss+xml">`
      * or `<link rel="alternate" type="application/atom+xml">` tags.
-     *
-     * Returns the resolved feed URL if found, or the original URL as-is if the URL
-     * already returns valid XML or no alternate link is found.
      */
     fun resolveRssUrl(inputUrl: String): String {
         try {

@@ -70,6 +70,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
         com.noslop.app.util.NotificationHelper.createNotificationChannel(this)
 
+        // FIX: Ensure MediaManager is initialized immediately for existing sessions
+        // so that file copies and auto-downloads don't fail with "not initialized" errors.
+        com.noslop.app.mesh.MediaManager.initialize(repository)
+
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
 

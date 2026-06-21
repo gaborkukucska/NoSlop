@@ -46,6 +46,11 @@ class DmPacketHandler(
                         mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
                         mediaId = mediaMetadata.id
                         mediaType = mediaMetadata.type
+                        
+                        // Robustness: If the ID looks like a GIF but type is generic, fix it for the renderer
+                        if (mediaId?.endsWith(".gif", ignoreCase = true) == true && mediaType == "image") {
+                            mediaType = "gif"
+                        }
                     }
                     if (obj.has("replyTo")) {
                         replyToMessageId = obj.get("replyTo").asString
