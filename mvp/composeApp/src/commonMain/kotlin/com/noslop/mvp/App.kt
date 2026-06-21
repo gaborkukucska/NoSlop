@@ -340,7 +340,7 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
             ) {
                 Text(sourceLabel(item).uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                 item.author?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f)) }
-                Text(item.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3)
+                Text(stripFeedHtml(item.title), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3)
             }
         }
     }
@@ -351,8 +351,8 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
 @Composable
 private fun ArticleView(item: FeedItem) {
     SegmentedArticleReader(
-        content = item.fullContent ?: item.excerpt ?: item.title,
-        title = item.title,
+        content = stripFeedHtml(item.fullContent ?: item.excerpt ?: item.title),
+        title = stripFeedHtml(item.title),
         author = item.author,
         sourceLabel = sourceLabel(item),
         thumbnailUrl = item.thumbnailUrl,
@@ -377,6 +377,14 @@ private fun feedKind(item: FeedItem, url: String): FeedKind {
 }
 
 private fun sourceLabel(item: FeedItem): String = (item.apiSource ?: item.sourceId).replace('_', ' ')
+
+/** Strip HTML tags + decode common entities for display (FeedParser keeps fullContent raw; Android strips at
+ *  render too — FeedCard.kt). Collapses whitespace so the article reader shows clean text, not markup. */
+private fun stripFeedHtml(s: String): String =
+    s.replace(Regex("<[^>]*>"), " ")
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&apos;", "'").replace("&#x27;", "'").replace("&#x2F;", "/").replace("&nbsp;", " ")
+        .replace(Regex("\\s+"), " ").trim()
 
 /**
  * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
