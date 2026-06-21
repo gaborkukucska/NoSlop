@@ -341,6 +341,54 @@ object InvidiousApiClient {
         return emptyList()
     }
 
+    suspend fun searchChannels(query: String): List<String> {
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val instances = getInstances()
+
+        for (instance in instances) {
+            val url = "$instance/api/v1/search?q=$encodedQuery&type=channel"
+            try {
+                Logger.info(TAG, "Trying Invidious instance for channel search: $instance")
+                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
+                val response = client.newCall(request).execute()
+
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
+                    if (body == null) {
+                        response.close()
+                        continue
+                    }
+                    val array = gson.fromJson(body, JsonArray::class.java)
+                    val channels = mutableListOf<String>()
+                    for (element in array) {
+                        try {
+                            val v = element.asJsonObject
+                            val author = v.get("author")?.asString
+                            if (author != null && author.isNotBlank()) {
+                                channels.add(author)
+                            }
+                        } catch (e: Exception) {
+                            // Skip malformed
+                        }
+                    }
+                    Logger.info(TAG, "Channel search successful via $instance. Fetched ${channels.size} channels")
+                    markInstanceOk(instance)
+                    return channels.take(3)
+                } else {
+                    response.close()
+                    Logger.warn(TAG, "Instance $instance returned HTTP ${response.code}")
+                    markInstanceFailed(instance)
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Instance $instance failed: ${e.message}")
+                markInstanceFailed(instance)
+            }
+        }
+
+        Logger.error(TAG, "All Invidious instances failed for channel search", null)
+        return emptyList()
+    }
+
     private fun parseVideoArray(array: JsonArray, sourceId: String): List<FeedItem> {
         val items = mutableListOf<FeedItem>()
         for (element in array) {

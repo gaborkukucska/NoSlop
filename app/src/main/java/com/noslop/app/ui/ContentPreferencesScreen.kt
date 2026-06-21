@@ -336,25 +336,75 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
             // Creator word-cloud suggestion chips (derived from current selected interests)
             // Shown ABOVE the text field so users pick from suggestions first
-            run {
+            item {
+                var channelSearchQuery by remember { mutableStateOf("") }
+                var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
+                var isSearchingChannels by remember { mutableStateOf(false) }
+
+                LaunchedEffect(channelSearchQuery) {
+                    if (channelSearchQuery.isBlank()) {
+                        searchedChannels = emptyList()
+                        isSearchingChannels = false
+                        return@LaunchedEffect
+                    }
+                    isSearchingChannels = true
+                    kotlinx.coroutines.delay(600) // Debounce typing
+                    try {
+                        searchedChannels = com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery)
+                    } catch (e: Exception) {
+                        com.noslop.app.debug.Logger.error("SETTINGS", "Channel search failed: ${e.message}")
+                    } finally {
+                        isSearchingChannels = false
+                    }
+                }
+                
                 val suggestions = SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
-                if (suggestions.isNotEmpty()) {
-                    item {
+                val combinedSuggestions = (searchedChannels + suggestions).distinct()
+
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = channelSearchQuery,
+                        onValueChange = { channelSearchQuery = it },
+                        label = { Text("Search channel names...") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+                        trailingIcon = {
+                            if (isSearchingChannels) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
+                            } else if (channelSearchQuery.isNotBlank()) {
+                                IconButton(onClick = { channelSearchQuery = "" }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted)
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedTextColor = TextLight,
+                            unfocusedTextColor = TextLight,
+                            focusedLabelColor = AccentGreen,
+                            unfocusedLabelColor = TextMuted
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    )
+
+                    if (combinedSuggestions.isNotEmpty()) {
                         Text(
-                            "SUGGESTED",
+                            "SUGGESTED CHANNELS & CREATORS",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(bottom = 6.dp)
                         )
-                    }
-                    item {
+                        
                         FlowRow(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            suggestions.forEach { creator ->
+                            combinedSuggestions.forEach { creator ->
                                 val currentSet = creatorKeywords.split(",")
                                     .map { it.trim() }
                                     .filter { it.isNotEmpty() }
@@ -388,7 +438,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
-                    item { Spacer(modifier = Modifier.height(12.dp)) }
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
 
