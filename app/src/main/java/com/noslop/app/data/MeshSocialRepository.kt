@@ -117,6 +117,7 @@ class MeshSocialRepository(
         clearnetUrl: String? = null,
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
+        clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext null
@@ -147,7 +148,8 @@ class MeshSocialRepository(
             mediaMetadata = mediaMetadata,
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
-            clearnetThumbnailUrl = clearnetThumbnailUrl
+            clearnetThumbnailUrl = clearnetThumbnailUrl,
+            clearnetMediaType = clearnetMediaType
         )
 
         val gson = com.google.gson.Gson()
@@ -177,7 +179,8 @@ class MeshSocialRepository(
             thumbnailB64 = mediaMetadata?.thumbnailB64,
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
-            clearnetThumbnailUrl = clearnetThumbnailUrl
+            clearnetThumbnailUrl = clearnetThumbnailUrl,
+            clearnetMediaType = clearnetMediaType
         )
 
         postDao.insertPost(localPost)
@@ -624,6 +627,7 @@ class MeshSocialRepository(
                 clearnetUrl = clearnetUrl,
                 clearnetTitle = item.title,
                 clearnetThumbnailUrl = item.thumbnailUrl,
+                clearnetMediaType = item.mediaType,
                 postIdOverride = anchorId
             )
         }

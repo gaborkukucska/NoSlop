@@ -307,9 +307,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         clearnetUrl: String? = null,
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
+        clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = meshSocialRepository.composeAndBroadcastPost(
-        content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, postIdOverride
+        content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, clearnetMediaType, postIdOverride
     )
 
     suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 

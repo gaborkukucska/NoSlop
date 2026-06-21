@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/MainScreen.kt
 package com.noslop.app.ui
 
 import androidx.compose.animation.*
@@ -56,16 +57,18 @@ fun FullScreenMeshCard(
                 resolvedUrl.substringAfter("id=").substringBefore("&").lowercase()
             } else resolvedUrl.lowercase()
 
-            val isVideoUrl = post.mediaType == "video" ||
+            // Use clearnetMediaType as fallback when no local mesh media is attached
+            val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
+            val isVideoUrl = effectiveMediaType == "video" ||
                     idExtension.endsWith(".mp4") || idExtension.endsWith(".mkv") ||
                     idExtension.endsWith(".webm") || idExtension.endsWith(".mov") ||
                     resolvedUrl.contains("youtube") || resolvedUrl.contains("vimeo") ||
                     resolvedUrl.contains("archive.org/embed")
-            val isAudioUrl = post.mediaType == "audio" ||
+            val isAudioUrl = effectiveMediaType == "audio" ||
                     idExtension.endsWith(".mp3") || idExtension.endsWith(".wav") ||
                     idExtension.endsWith(".m4a") || idExtension.endsWith(".aac") ||
                     idExtension.endsWith(".ogg") || idExtension.endsWith(".flac")
-            val isImageUrl = post.mediaType == "image" ||
+            val isImageUrl = effectiveMediaType == "image" ||
                     idExtension.endsWith(".jpg") || idExtension.endsWith(".jpeg") ||
                     idExtension.endsWith(".png") || idExtension.endsWith(".webp") ||
                     idExtension.endsWith(".gif")
@@ -94,16 +97,16 @@ fun FullScreenMeshCard(
         } else {
             SegmentedArticleReader(
                 content = post.content,
-                title = "Mesh Post",
+                title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
                 author = post.authorHandle,
                 sourceLabel = "MESH",
-                thumbnailUrl = null,
-                articleUrl = null
+                thumbnailUrl = post.clearnetThumbnailUrl,
+                articleUrl = post.clearnetUrl
             )
         }
 
         // 2. Overlaid author details and timestamp (Hidden for articles)
-        val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetUrl == null
+        val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetMediaType.isNullOrEmpty() && post.clearnetUrl == null
         if (!isArticle) {
             Box(
                 modifier = Modifier

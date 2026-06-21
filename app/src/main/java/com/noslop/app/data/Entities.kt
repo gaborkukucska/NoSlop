@@ -76,6 +76,7 @@ data class MeshPost(
     val clearnetUrl: String? = null,
     val clearnetTitle: String? = null,
     val clearnetThumbnailUrl: String? = null,
+    val clearnetMediaType: String? = null, // "video", "audio", "image", or null for article
     val isOrphaned: Boolean = false
 )
 

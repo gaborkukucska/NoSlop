@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/mesh/Packets.kt
 package com.noslop.app.mesh
 
 import com.google.gson.Gson
@@ -28,7 +29,8 @@ data class PostPayload(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
     @SerializedName("clearnet_url") val clearnetUrl: String? = null,
     @SerializedName("clearnet_title") val clearnetTitle: String? = null,
-    @SerializedName("clearnet_thumbnail_url") val clearnetThumbnailUrl: String? = null
+    @SerializedName("clearnet_thumbnail_url") val clearnetThumbnailUrl: String? = null,
+    @SerializedName("clearnet_media_type") val clearnetMediaType: String? = null // "video", "audio", "image", or null for article
 )
 
 data class CommentPayload(

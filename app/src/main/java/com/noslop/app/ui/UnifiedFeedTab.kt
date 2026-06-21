@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt
 package com.noslop.app.ui
 
 import android.Manifest
@@ -1188,6 +1189,10 @@ fun UnifiedFeedTab(
             is UnifiedItem.Feed -> unified.item.thumbnailUrl
             is UnifiedItem.Mesh -> null
         }
+        val mediaType = when(unified) {
+            is UnifiedItem.Feed -> unified.item.mediaType
+            is UnifiedItem.Mesh -> null
+        }
 
         AlertDialog(
             onDismissRequest = { showShareDialog = null },
@@ -1213,7 +1218,8 @@ fun UnifiedFeedTab(
                             content = shareText,
                             clearnetUrl = if (url.isNotEmpty()) url else null,
                             clearnetTitle = if (url.isNotEmpty()) title else null,
-                            clearnetThumbnailUrl = thumbUrl
+                            clearnetThumbnailUrl = thumbUrl,
+                            clearnetMediaType = mediaType
                         )
                         showShareDialog = null
                     },
