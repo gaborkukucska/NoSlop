@@ -3,10 +3,27 @@ package com.noslop.mvp
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import com.noslop.mvp.ui.theme.AccentGreen
+import com.noslop.mvp.ui.theme.PrimaryBlack
+import com.noslop.mvp.ui.theme.SurfaceDark
+import com.noslop.mvp.ui.theme.TextLight
+import com.noslop.mvp.ui.theme.TextMuted
 import com.noslop.mvp.feeds.FeedItem
 import com.noslop.mvp.feeds.BackgroundScheduler
 import com.noslop.mvp.ui.media.AudioPlayer
@@ -24,6 +41,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +80,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.datetime.toLocalDateTime
 
 import com.noslop.mvp.ui.onboarding.OnboardingScreen
 import com.noslop.mvp.ui.settings.SettingsScreen
@@ -414,7 +433,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
                     if (selectedContact == null) selectedContact = c
                 }
                 val name = contacts.firstOrNull { it.nodeId == fromNodeId }?.handle ?: fromNodeId.take(8)
-                dmLog.add(0, DmEntry(from = name, text = text, mine = false))
+                dmLog.add(0, DmEntry(id = randomId(), peerNodeId = fromNodeId, from = name, text = text, mine = false, timestamp = nowMillis()))
             }
         }
         // For Android DMs (which omit the sender's enc-key in the payload), resolve it from a stored contact.
@@ -637,9 +656,15 @@ private class MeshUiState(private val scope: CoroutineScope) {
         if (text.isEmpty()) return
         scope.launch {
             val ok = client.sendDm(to, text)
-            if (ok) { dmLog.add(0, DmEntry(from = to.handle, text = text, mine = true)); dmDraft = "" }
+            if (ok) { dmLog.add(0, DmEntry(id = randomId(), peerNodeId = to.nodeId, from = to.handle, text = text, mine = true, timestamp = nowMillis())); dmDraft = "" }
             else status = "DM failed (no link or bad key)"
         }
+    }
+
+    /** Local reaction on a DM (messageId → my emoji, or absent). Cross-device DM-reaction sync is a follow-up. */
+    val dmReactions = mutableStateMapOf<String, String>()
+    fun reactToDm(messageId: String, emoji: String) {
+        if (dmReactions[messageId] == emoji) dmReactions.remove(messageId) else dmReactions[messageId] = emoji
     }
 
     fun publish() {
@@ -669,7 +694,14 @@ private class MeshUiState(private val scope: CoroutineScope) {
 }
 
 /** One line of DM history for the UI. [mine] = we sent it. */
-data class DmEntry(val from: String, val text: String, val mine: Boolean)
+data class DmEntry(
+    val id: String,
+    val peerNodeId: String,   // the other party's node id — keys the conversation thread
+    val from: String,
+    val text: String,
+    val mine: Boolean,
+    val timestamp: Long,
+)
 
 /**
  * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
@@ -788,93 +820,154 @@ private fun MeshScreen(state: MeshUiState) {
  */
 @Composable
 private fun DmScreen(state: MeshUiState) {
-    val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    var showMyQr by remember { mutableStateOf(false) }
-    var renaming by remember { mutableStateOf("") }
+    // Android-style two-pane flow: a conversation/contact list, and (when one is picked) a chat thread.
+    val sel = state.selectedContact
+    if (sel == null) DmContactList(state) else DmThread(state, sel)
+}
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+/** The DMs landing list — my contact QR + scan, and each contact as an avatar row that opens its thread. */
+@Composable
+private fun DmContactList(state: MeshUiState) {
+    var showMyQr by remember { mutableStateOf(false) }
+    LazyColumn(Modifier.fillMaxSize().background(PrimaryBlack).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.weight(1f))
+                Button(onClick = { showMyQr = !showMyQr }) { Text(if (showMyQr) "Hide ID" else "My ID") }
+                if (QrScanner.isAvailable) Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }) { Text("＋ Add") }
+            }
             Text(
-                if (state.connected) "Linked — DMs route through the hub, end-to-end encrypted (the hub can't read them)."
-                else "Connect to a hub on the Mesh tab first.",
-                fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
+                if (state.connected) "🔒 Linked — DMs are end-to-end encrypted; the hub only relays ciphertext."
+                else "Connect to a hub on the HaiNet tab first.",
+                fontSize = 12.sp, color = if (state.connected) AccentGreen else TextMuted,
             )
         }
-        // My contact QR — others scan this to add me (carries my handle, node id, DM public key).
-        item {
-            Button(onClick = { showMyQr = !showMyQr }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (showMyQr) "Hide my contact QR" else "📇  Show my contact QR")
-            }
-            if (showMyQr) {
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("I am: ${state.myHandle()}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                        Image(
-                            painter = io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()),
-                            contentDescription = "My contact QR",
-                            modifier = Modifier.size(220.dp),
-                        )
-                        Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                    }
-                }
-            }
-        }
-        item {
-            if (QrScanner.isAvailable) {
-                Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }, modifier = Modifier.fillMaxWidth()) {
-                    Text("📷  Scan a contact QR")
-                }
-            }
-        }
-        if (state.contacts.isNotEmpty()) {
-            item { Text("Contacts (${state.contacts.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-            items(state.contacts) { c ->
-                val selected = state.selectedContact?.nodeId == c.nodeId
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { state.selectedContact = c; renaming = "" }, modifier = Modifier.weight(1f)) {
-                        Text((if (selected) "● " else "○ ") + c.handle + "  ·  " + c.nodeId.take(8) + "…", fontSize = 13.sp)
-                    }
-                    Button(onClick = { state.removeContact(c) }) { Text("✕") }
-                }
-            }
-        }
-        // Compose to + rename the selected contact.
-        state.selectedContact?.let { to ->
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        renaming, { renaming = it }, label = { Text("Name for ${to.handle}") }, singleLine = true,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Button(onClick = { state.renameContact(to, renaming); renaming = ""; focus.clearFocus() }, enabled = renaming.isNotBlank()) { Text("Rename") }
-                }
-                Text("To: ${to.handle}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        state.dmDraft, { state.dmDraft = it }, label = { Text("Message") }, singleLine = true,
-                        modifier = Modifier.weight(1f),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
-                    )
-                    Button(onClick = { state.sendDm(); focus.clearFocus() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
-                }
-            }
-        }
-        item { Text("Messages (${state.dmLog.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) }
-        items(state.dmLog) { e ->
+        if (showMyQr) item {
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(10.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("I am: ${state.myHandle()}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Image(io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()), "My contact QR", modifier = Modifier.size(220.dp))
+                    Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        }
+        if (state.contacts.isEmpty()) item {
+            Text("No contacts yet — tap ＋ Add to scan a peer's QR.", fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(top = 8.dp))
+        } else items(state.contacts) { c ->
+            val last = state.dmLog.firstOrNull { it.peerNodeId == c.nodeId }   // dmLog is newest-first
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(SurfaceDark)
+                    .clickable { state.selectedContact = c }.padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Avatar(c.handle, online = state.connected)
+                Column(Modifier.weight(1f)) {
+                    Text(c.handle, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1)
                     Text(
-                        if (e.mine) "me → ${e.from}" else "${e.from} → me",
-                        fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                        color = if (e.mine) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                        last?.let { (if (it.mine) "You: " else "") + it.text } ?: "${c.nodeId.take(10)}…",
+                        fontSize = 12.sp, color = TextMuted, maxLines = 1,
                     )
-                    Text(e.text, fontSize = 14.sp)
+                }
+                Text("✕", color = TextMuted, modifier = Modifier.clickable { state.removeContact(c) }.padding(8.dp))
+            }
+        }
+    }
+}
+
+/** One conversation thread — Android ChatThreadScreen look: E2EE header, message bubbles, long-press reactions. */
+@Composable
+private fun DmThread(state: MeshUiState, peer: MeshContact) {
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    var renaming by remember(peer.nodeId) { mutableStateOf<String?>(null) }
+    // dmLog is newest-first; this thread shows just this peer's messages, oldest→newest for a chat feel.
+    val thread = state.dmLog.filter { it.peerNodeId == peer.nodeId }.asReversed()
+    val listState = rememberLazyListState()
+    LaunchedEffect(thread.size) { if (thread.isNotEmpty()) listState.animateScrollToItem(thread.size - 1) }
+
+    Column(Modifier.fillMaxSize().background(PrimaryBlack)) {
+        // Header: back + lock + peer + E2EE status.
+        Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.ArrowBack, "Back", tint = AccentGreen, modifier = Modifier.clickable { state.selectedContact = null }.padding(4.dp))
+            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.Lock, null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(peer.handle, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1)
+                Text(if (state.connected) "Direct E2EE session active" else "Offline — messages queue at the hub", fontSize = 11.sp, color = if (state.connected) AccentGreen else TextMuted)
+            }
+            Text("✎", color = TextMuted, modifier = Modifier.clickable { renaming = if (renaming == null) peer.handle else null }.padding(8.dp))
+        }
+        if (renaming != null) {
+            Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(renaming!!, { renaming = it }, label = { Text("Rename") }, singleLine = true, modifier = Modifier.weight(1f))
+                Button(onClick = { state.renameContact(peer, renaming ?: ""); renaming = null; focus.clearFocus() }) { Text("Save") }
+            }
+        }
+
+        // Messages.
+        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(thread) { e -> MessageBubble(e, state) }
+        }
+
+        // Input.
+        Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                state.dmDraft, { state.dmDraft = it }, placeholder = { Text("Message ${peer.handle}…") }, singleLine = true, modifier = Modifier.weight(1f),
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
+            )
+            Button(onClick = { state.sendDm(); focus.clearFocus() }, enabled = state.connected && state.dmDraft.isNotBlank()) { Text("Send") }
+        }
+    }
+}
+
+/** A single message bubble: mine = right/green, theirs = left/dark; long-press for the emoji reaction picker. */
+@Composable
+private fun MessageBubble(e: DmEntry, state: MeshUiState) {
+    var showPicker by remember { mutableStateOf(false) }
+    val mine = e.mine
+    Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
+        Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            Column(
+                Modifier.clip(RoundedCornerShape(12.dp)).background(if (mine) AccentGreen else SurfaceDark)
+                    .pointerInput(e.id) { detectTapGestures(onLongPress = { showPicker = true }) }
+                    .padding(horizontal = 12.dp, vertical = 8.dp).widthIn(max = 280.dp),
+            ) {
+                Text(e.text, color = if (mine) PrimaryBlack else TextLight, fontSize = 14.sp)
+                Text(hhmm(e.timestamp), color = if (mine) PrimaryBlack.copy(alpha = 0.6f) else TextMuted, fontSize = 9.sp, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
+            }
+            state.dmReactions[e.id]?.let { emoji ->
+                Box(Modifier.padding(top = 4.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceDark).clickable { state.reactToDm(e.id, emoji) }.padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(emoji, fontSize = 13.sp)
+                }
+            }
+            if (showPicker) {
+                Row(Modifier.padding(top = 4.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf("👍", "❤️", "😂", "😮", "😢", "😡").forEach { emoji ->
+                        Text(emoji, fontSize = 20.sp, modifier = Modifier.clickable { state.reactToDm(e.id, emoji); showPicker = false })
+                    }
+                    Icon(Icons.Filled.Close, "Close", tint = TextMuted, modifier = Modifier.size(20.dp).clickable { showPicker = false })
                 }
             }
         }
     }
+}
+
+/** Circular monogram avatar with an online dot — stands in for Android's PeerItem avatar. */
+@Composable
+private fun Avatar(name: String, online: Boolean) {
+    Box(contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(AccentGreen.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+            Text(name.firstOrNull()?.uppercase() ?: "?", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        }
+        if (online) Box(Modifier.align(Alignment.BottomEnd).size(11.dp).clip(CircleShape).background(SurfaceDark).padding(2.dp).clip(CircleShape).background(AccentGreen))
+    }
+}
+
+/** HH:mm for a message timestamp (local time), via kotlinx-datetime. */
+private fun hhmm(ts: Long): String {
+    val dt = kotlinx.datetime.Instant.fromEpochMilliseconds(ts).toLocalDateTime(kotlinx.datetime.TimeZone.currentSystemDefault())
+    return "${dt.hour.toString().padStart(2, '0')}:${dt.minute.toString().padStart(2, '0')}"
 }
 
 @Composable
