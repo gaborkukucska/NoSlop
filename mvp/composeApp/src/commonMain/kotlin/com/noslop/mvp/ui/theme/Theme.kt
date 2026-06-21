@@ -20,7 +20,7 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = TextLight,
     surfaceVariant = SurfaceDark,
     onSurfaceVariant = TextMuted,
-    outline = BorderSubtle
+    outline = TextMuted   // used as muted-text color in several screens; BorderSubtle was invisible on black
 )
 
 private val LightColorScheme = lightColorScheme(

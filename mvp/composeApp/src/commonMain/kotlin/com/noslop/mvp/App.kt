@@ -19,6 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import com.noslop.mvp.ui.theme.AccentGreen
 import com.noslop.mvp.ui.theme.PrimaryBlack
 import com.noslop.mvp.ui.theme.SurfaceDark
@@ -834,6 +836,7 @@ private fun DmScreen(state: MeshUiState) {
 @Composable
 private fun DmContactList(state: MeshUiState) {
     var showMyQr by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
     LazyColumn(Modifier.fillMaxSize().background(PrimaryBlack).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -850,9 +853,15 @@ private fun DmContactList(state: MeshUiState) {
         if (showMyQr) item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("I am: ${state.myHandle()}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Image(io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()), "My contact QR", modifier = Modifier.size(220.dp))
-                    Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                    Text("I am: ${state.myHandle()}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextLight)
+                    // White backdrop so the (dark-module) QR is high-contrast + scannable on the black theme.
+                    Box(Modifier.background(Color.White, RoundedCornerShape(10.dp)).padding(12.dp)) {
+                        Image(io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()), "My contact QR", modifier = Modifier.size(220.dp))
+                    }
+                    Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = TextMuted)
+                    Button(onClick = { clipboard.setText(AnnotatedString(state.myContactQr())) }, modifier = Modifier.fillMaxWidth()) {
+                        Text("📋  Copy my ID (to paste/share)")
+                    }
                 }
             }
         }
