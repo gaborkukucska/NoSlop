@@ -344,16 +344,18 @@ object MediaManager {
             
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)
-            val packet = NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 1,
-                senderId = "", // Placeholder
-                type = "MEDIA_TRANSFER_ACK",
-                payload = com.google.gson.Gson().toJsonTree(ack)
-            )
             val peer = dl.peerOnion
             if (peer != null) {
-                scope.launch { repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet) }
+                scope.launch {
+                    val packet = NetworkPacket(
+                        id = UUID.randomUUID().toString(),
+                        hops = 1,
+                        senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        type = "MEDIA_TRANSFER_ACK",
+                        payload = com.google.gson.Gson().toJsonTree(ack)
+                    )
+                    repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                }
             }
             
         } catch (e: Exception) {
@@ -399,6 +401,12 @@ object MediaManager {
     suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {
         val repo = repository ?: return
         
+        val targetOnion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
+        if (targetOnion.isNullOrBlank()) {
+            Logger.warn(TAG, "Cannot send media to $senderId: no onion address found")
+            return
+        }
+
         // 0. If it's a metadata request (chunkSize == 0)
         if (payload.chunkSize == 0) {
             val file = findLocalFile(repo, payload.mediaId)
@@ -418,7 +426,7 @@ object MediaManager {
                     type = "MEDIA_METADATA_RESPONSE", 
                     payload = com.google.gson.Gson().toJsonTree(metadata)
                 )
-                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
+                repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)
                 return
             }
         }
@@ -450,12 +458,12 @@ object MediaManager {
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 1,
-                    senderId = "", // Placeholder
+                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                     type = "MEDIA_CHUNK",
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)
                 )
                 
-                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
+                repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)
             }
         } else {
             // 2. We don't have it, are we relaying it?

@@ -354,7 +354,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var lastFilterMode: String? = null
+
     fun loadMoreFeedItems(filterMode: String? = null) {
+        if (lastFilterMode != filterMode) {
+            _unifiedFeed.value = emptyList()
+            lastFilterMode = filterMode
+        }
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()

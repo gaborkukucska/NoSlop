@@ -123,7 +123,19 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
 
     when {
         // ── 1. Direct file / local proxy ─────────────────────────────────
-        isDirectFileUrl(rawUrl) -> VideoSource.Direct(rawUrl)
+        isDirectFileUrl(rawUrl) -> {
+            if (rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) {
+                val id = rawUrl.substringAfter("id=").substringBefore("&")
+                if (id.isNotBlank()) {
+                    val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(id, "video")
+                    if (localFile != null && localFile.exists()) {
+                        Logger.info("VIDEO_RESOLVE", "Found local file, bypassing proxy: ${localFile.absolutePath}")
+                        return@withContext VideoSource.Direct("file://${localFile.absolutePath}")
+                    }
+                }
+            }
+            VideoSource.Direct(rawUrl)
+        }
 
         // ── 2. YouTube ───────────────────────────────────────────────────
         isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl)
