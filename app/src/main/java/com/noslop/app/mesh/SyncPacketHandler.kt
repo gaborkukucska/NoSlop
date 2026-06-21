@@ -5,6 +5,7 @@ import com.noslop.app.data.*
 import android.util.Base64
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.delay
 import java.util.*
 
 /**
@@ -75,22 +76,54 @@ class SyncPacketHandler(
             )
         }
 
-        val syncResp = SyncResponsePayload(
-            posts = postPayloads,
-            comments = commentSyncList,
-            reactions = reactionSyncList
-        )
-        val respPacket = NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 1,
-            senderId = localKeys.publicKeyB64,
-            targetUserId = packet.senderId,
-            type = "SYNC_RESPONSE",
-            payload = com.google.gson.Gson().toJsonTree(syncResp)
-        )
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+            val maxBatchSize = 5
+            
+            // Send posts in batches
+            for (postBatch in postPayloads.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
+            
+            // Send comments in batches
+            for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
+            
+            // Send reactions in batches
+            for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
         }
         Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
@@ -162,22 +195,54 @@ class SyncPacketHandler(
             )
         }
 
-        val syncResp = SyncResponsePayload(
-            posts = postPayloads,
-            comments = commentSyncList,
-            reactions = reactionSyncList
-        )
-        val respPacket = NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 1,
-            senderId = localKeys.publicKeyB64,
-            targetUserId = packet.senderId,
-            type = "SYNC_RESPONSE",
-            payload = com.google.gson.Gson().toJsonTree(syncResp)
-        )
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+            val maxBatchSize = 5
+
+            // Send posts in batches
+            for (postBatch in postPayloads.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
+
+            // Send comments in batches
+            for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
+
+            // Send reactions in batches
+            for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
         }
         Logger.info(TAG, "INVENTORY_SYNC_REQUEST handled — sent ${missingOrUpdatedPosts.size} missing posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
