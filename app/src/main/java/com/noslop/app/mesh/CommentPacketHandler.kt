@@ -42,7 +42,9 @@ class CommentPacketHandler(
             content = commPay.comment.content,
             timestamp = commPay.comment.timestamp,
             signature = commPay.comment.signature,
-            parentCommentId = commPay.parentCommentId
+            parentCommentId = commPay.parentCommentId,
+            mediaId = commPay.comment.mediaId,
+            mediaType = commPay.comment.mediaType
         )
         commentDao.insertComment(meshComment)
         

@@ -45,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -76,6 +76,14 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE mesh_comments ADD COLUMN mediaId TEXT")
+                database.execSQL("ALTER TABLE mesh_comments ADD COLUMN mediaType TEXT")
+                database.execSQL("DELETE FROM mesh_comments WHERE content LIKE '%noslop-gif://data:image%'")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -84,7 +92,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 INSTANCE = instance
                 instance

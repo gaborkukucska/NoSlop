@@ -110,7 +110,9 @@ data class MeshComment(
     val content: String,
     val timestamp: Long,
     val signature: String,
-    val parentCommentId: String? = null
+    val parentCommentId: String? = null,
+    val mediaId: String? = null,
+    val mediaType: String? = null
 )
 
 @Entity(tableName = "mesh_reactions")
