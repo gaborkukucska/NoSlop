@@ -53,3 +53,4 @@ tests/
 tcls/
 .vscode/
 .temp/
+get-git.sh
