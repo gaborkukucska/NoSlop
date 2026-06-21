@@ -21,6 +21,16 @@ It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok
 
 ---
 
+## Reasons to stop the slop with NoSlop
+
+- **Background Playback** — Keep listening to content seamlessly without keeping the app open. NoSlop fully supports background playback out of the box.
+- **No Advertisements** — Say goodbye to annoying banners and video interruptions. Your messaging and content experience on NoSlop is 100% ad-free, always.
+- **Complete Feed Control** — No obscure algorithms. You curate your content, you organize your sources, you decide what you see. Total chronological freedom.
+- **P2P Mesh Engagement** — Connect locally and globally with peers. Bypass central platforms and establish direct, censorship-resistant connections.
+- **Secure Direct Messaging** — End-to-end encrypted communications over our peer-to-peer mesh. Your conversations are mathematically secure and truly private.
+
+---
+
 ## Features
 
 ### Immersive Snapping Feed
@@ -103,6 +113,16 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is now the `mvp/` (Kotlin Multiplatform) directory.
 2. **Run the onboarding flow** — 6 steps: generate your Word Cloud, pick your interests, optionally scan a friend's QR to add your first contact.
 3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
+
+---
+
+## Your Responsibilities
+
+- **Open Source & Your Responsibility** — NoSlop is well-built open-source software with all functionalities in open code. Therefore, all responsibilities for its use fall entirely on you, the user.
+- **No Server & No Automatic Backups** — Because there is no central server, there is NO cloud data backup. You must back up your identity and data yourself using the built-in export function.
+- **Content Filtering** — While we do compile with some negative keywords to avoid certain content (see the repo), you should also set up your own negative keywords to avoid unwanted content in your feed.
+- **Bring Your Own Network** — NoSlop is much better with friends, HOWEVER, it holds no user directory whatsoever. You must manually add peers to build your mesh. It is entirely up to you.
+- **Installing the APK** — Android will likely show security warnings about installing apps from unknown sources since this is downloaded directly and not from the Play Store. You will likely need to search your phone's settings for `unknown` to find the 'Install unknown apps' section and allow installing from unknown sources to be able to install this app.
 
 ---
 

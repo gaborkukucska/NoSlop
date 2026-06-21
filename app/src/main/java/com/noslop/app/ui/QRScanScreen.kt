@@ -180,40 +180,40 @@ fun QRScanScreen(
                                             .background(PrimaryBlack.copy(alpha = 0.7f), RoundedCornerShape(8.dp))
                                             .padding(horizontal = 12.dp, vertical = 6.dp)
                                     )
-                                }
-                            }
-                            
-                            // Bottom Controls Row (Overlaid to prevent being pushed off-screen)
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .fillMaxWidth()
-                                    .background(PrimaryBlack.copy(alpha = 0.85f))
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Button(
-                                    onClick = { imagePickerLauncher.launch("image/*") },
-                                    modifier = Modifier.weight(1f).height(50.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
-                                    border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                }
-                                
-                                Button(
-                                    onClick = { showManualEntry = true },
-                                    modifier = Modifier.weight(1f).height(50.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
-                                    border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Paste Raw", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    
+                                    // Bottom Controls Row (Padded beneath the grid to guarantee visibility)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 32.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                    ) {
+                                        Button(
+                                            onClick = { imagePickerLauncher.launch("image/*") },
+                                            modifier = Modifier.weight(1f).height(50.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                                            border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        }
+                                        
+                                        Button(
+                                            onClick = { showManualEntry = true },
+                                            modifier = Modifier.weight(1f).height(50.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                                            border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Paste Raw", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                        }
+                                    }
                                 }
                             }
                         }

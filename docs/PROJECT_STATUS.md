@@ -107,3 +107,11 @@
 ### 5. Hardware Capture & Layout Polish
 *   **CameraX Audio Enforcement**: Fixed a bug where in-app recorded videos lacked audio tracks. `MediaCaptureManager` now aggressively attempts to bind `withAudioEnabled()` and gracefully catches `SecurityExceptions` if permissions are explicitly denied, rather than silently failing the `ContextCompat` context check.
 *   **QR Scanner Form Factor Support**: Fixed a layout bug on smaller devices where the "Select from Gallery" and "Paste Raw" buttons fell off the bottom of the Dialog screen. The buttons are now safely overlaid inside the Camera viewfinder bounds, mimicking native camera apps and ensuring 100% visibility regardless of screen height.
+
+### 6. Video Audio, QR UI & Search Fixes
+*   **Audio Recording Fixed**: Added `android.permission.RECORD_AUDIO` to the `AndroidManifest.xml` which was mysteriously missing, allowing the OS to actually grant the permission to the `MediaCaptureManager`.
+*   **QR Scanner Buttons Fixed**: Shifted the "Gallery" and "Paste Raw" buttons into the center HUD column right underneath the QR scanning boundary, escaping the bottom edge that gets cut off on smaller screens.
+*   **Mesh Search Results Fixed**: Updated the pagination logic in `NoSlopViewModel.loadMoreFeedItems()` to pre-filter mesh posts by the active search query. This prevents the ViewModel from paginating non-matching items that the UI promptly hides, fixing the bug where the feed appeared "empty" and refused to scroll.
+
+### 7. Runtime Permissions & Final UI Polish
+*   **Audio Capture Runtime Check**: Fixed the final hurdle with silent videos. The camera launcher in `UnifiedFeedTab.kt` was bypassing the microphone runtime permission prompt if the camera permission was already granted (e.g., from earlier QR scanning). It now strictly enforces both `CAMERA` and `RECORD_AUDIO` checks before opening the video capture UI, triggering the OS prompt correctly and ensuring videos always have sound.

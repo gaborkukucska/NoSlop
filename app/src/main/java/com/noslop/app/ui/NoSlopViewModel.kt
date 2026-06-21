@@ -380,6 +380,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         var unseenFeeds = allFeeds.filter { it.id !in currentIds && (anchorTime == null || it.publishedAt <= anchorTime) }
         var unseenMeshes = allMeshes.filter { it.id !in currentIds && (anchorTime == null || it.timestamp <= anchorTime) }
 
+        if (isSearchActive) {
+            val q = activeSearchQuery.lowercase()
+            unseenMeshes = unseenMeshes.filter {
+                it.content.lowercase().contains(q) || it.clearnetTitle?.lowercase()?.contains(q) == true
+            }
+        }
+
         // --- Apply exclusions (all bypassed when a search query is active) ---
         if (!isSearchActive) {
             // 1. Exclude self-authored mesh broadcasts unless filtering for Mesh

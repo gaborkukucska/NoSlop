@@ -1,0 +1,74 @@
+  "downloadModal": {
+    "pages": [
+      {
+        "icon": "Shield",
+        "iconColor": "text-green-500",
+        "title": "OPEN SOURCE & YOUR RESPONSIBILITY",
+        "content": "NoSlop is a well built open source software with all functionalities in open code. Therefore, all responsibilities for its use fall entirely on you, the user."
+      },
+      {
+        "icon": "AlertTriangle",
+        "iconColor": "text-yellow-500",
+        "title": "NO SERVER & NO AUTOMATIC BACKUPS",
+        "content": "Because there is no central server, there is NO cloud data backup. You must back up your identity and data yourself using the built-in export function."
+      },
+      {
+        "icon": "Info",
+        "iconColor": "text-green-500",
+        "title": "CONTENT FILTERING",
+        "content": "While we do compile with some negative keywords to avoid certain content (see the repo), you should also set up your own negative keywords to avoid unwanted content in your feed."
+      },
+      {
+        "icon": "Check",
+        "iconColor": "text-blue-500",
+        "title": "BRING YOUR OWN NETWORK",
+        "content": "NoSlop is much better with friends HOWEVER it holds no user directory whatsoever. You must manually add peers to build your mesh. It is entirely up to you."
+      },
+      {
+        "icon": "Download",
+        "iconColor": "text-white",
+        "title": "INSTALLING THE APK",
+        "content": "Android will likely show security warnings about installing apps from unknown sources since this is downloaded directly and not from the Play Store. You will likely need to search your phone's settings for `unknown` to find the 'Install unknown apps' section and allow installing from unknown sources to be able to install this app."
+      }
+    ],
+    "buttonNext": "I UNDERSTAND",
+    "buttonDownload": "DOWNLOAD APK"
+  },
+  "exitModal": {
+    "pages": [
+      {
+        "icon": "PlayCircle",
+        "iconColor": "text-purple-500",
+        "title": "BACKGROUND PLAYBACK",
+        "content": "Keep listening to content seamlessly without keeping the app open. NoSlop fully supports background playback out of the box."
+      },
+      {
+        "icon": "Ban",
+        "iconColor": "text-red-500",
+        "title": "NO ADVERTISEMENTS",
+        "content": "Say goodbye to annoying banners and video interruptions. Your messaging and content experience on NoSlop is 100% ad-free, always."
+      },
+      {
+        "icon": "Sliders",
+        "iconColor": "text-blue-500",
+        "title": "COMPLETE FEED CONTROL",
+        "content": "No obscure algorithms. You curate your content, you organize your sources, you decide what you see. Total chronological freedom."
+      },
+      {
+        "icon": "Network",
+        "iconColor": "text-green-500",
+        "title": "P2P MESH ENGAGEMENT",
+        "content": "Connect locally and globally with peers. Bypass central platforms and establish direct, censorship-resistant connections."
+      },
+      {
+        "icon": "Lock",
+        "iconColor": "text-yellow-500",
+        "title": "SECURE DIRECT MESSAGING",
+        "content": "End-to-end encrypted communications over our peer-to-peer mesh. Your conversations are mathematically secure and truly private."
+      }
+    ],
+    "buttonGet": "GET NOSLOP",
+    "buttonNext": "NOT CONVINCED",
+    "buttonClose": "MAYBE LATER",
+    "timeoutSeconds": 15
+  },
