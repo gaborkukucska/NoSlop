@@ -230,6 +230,20 @@ object MediaManager {
                     dl.lastAttemptAt = now
                     scope.launch { attemptMeshRecovery(dl) }
                 }
+                
+                // SURGICAL FIX: Drop chunk memory for abandoned partial downloads over 10 minutes old
+                if (now - dl.lastAttemptAt > 600_000L) {
+                    var cleared = false
+                    for (i in dl.chunks.indices) {
+                        if (dl.chunks[i] != null) {
+                            dl.chunks[i] = null
+                            cleared = true
+                        }
+                    }
+                    if (cleared) {
+                        Logger.warn(TAG, "Media ${dl.metadata.id} abandoned in recovery. Freed chunk memory to prevent OOM.")
+                    }
+                }
             }
         }
     }
@@ -381,6 +395,18 @@ object MediaManager {
             updateProgress(dl.metadata.id, 100)
             Logger.info(TAG, "Download completed for ${dl.metadata.id}")
             updateWakeLock()
+            
+            // SURGICAL FIX: Free the massive memory arrays immediately!
+            // This stops the permanent memory leak that causes OOMs!
+            for (i in dl.chunks.indices) {
+                dl.chunks[i] = null
+            }
+            
+            // SURGICAL FIX: Free the massive memory arrays immediately!
+            // This stops the permanent memory leak that causes OOMs!
+            for (i in dl.chunks.indices) {
+                dl.chunks[i] = null
+            }
             
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)

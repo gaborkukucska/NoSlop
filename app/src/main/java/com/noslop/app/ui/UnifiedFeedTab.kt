@@ -539,6 +539,14 @@ fun UnifiedFeedTab(
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.restoreScrollPositionEvent.collect { index ->
+            if (unifiedItems.isNotEmpty() && index < unifiedItems.size) {
+                pagerState.scrollToPage(index)
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // Full-screen content — no header taking space
         if (unifiedItems.isEmpty()) {
@@ -810,6 +818,7 @@ fun UnifiedFeedTab(
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                             onSearch = {
                                 if (localSearchQuery.isNotBlank()) {
+                                    viewModel.saveFeedPosition(pagerState.currentPage)
                                     searchQuery = localSearchQuery
                                     filterMode = localFilterMode
                                     searchResultsActive = true
@@ -912,6 +921,7 @@ fun UnifiedFeedTab(
                     if (localSearchQuery.isNotBlank()) {
                         Button(
                             onClick = {
+                                viewModel.saveFeedPosition(pagerState.currentPage)
                                 searchQuery = localSearchQuery
                                 filterMode = localFilterMode
                                 searchResultsActive = true
