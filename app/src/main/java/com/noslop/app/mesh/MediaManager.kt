@@ -2,6 +2,7 @@ package com.noslop.app.mesh
 
 import android.content.Context
 import android.os.Environment
+import android.os.PowerManager
 import android.util.Base64
 import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.debug.Logger
@@ -23,6 +24,7 @@ object MediaManager {
     private var repository: NoSlopRepository? = null
 
     private val activeDownloads = ConcurrentHashMap<String, ActiveDownload>()
+    private var wakeLock: PowerManager.WakeLock? = null
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val downloadProgress = _downloadProgress.asStateFlow()
 
@@ -45,12 +47,28 @@ object MediaManager {
 
     fun initialize(repo: NoSlopRepository) {
         this.repository = repo
+        
+        val powerManager = repo.context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NoSlop::MediaTransfer")
+        
         // Start maintenance loop
         scope.launch {
             while (isActive) {
                 maintainDownloads()
+                updateWakeLock()
                 delay(5000)
             }
+        }
+    }
+
+    private fun updateWakeLock() {
+        val hasActive = activeDownloads.values.any { it.status == ActiveDownload.Status.ACTIVE }
+        if (hasActive && wakeLock?.isHeld == false) {
+            Logger.info(TAG, "Acquiring WakeLock for active media transfers")
+            wakeLock?.acquire(10 * 60 * 1000L) // 10 minutes max
+        } else if (!hasActive && wakeLock?.isHeld == true) {
+            Logger.info(TAG, "Releasing WakeLock")
+            wakeLock?.release()
         }
     }
 
@@ -149,12 +167,13 @@ object MediaManager {
 
         val chunks = arrayOfNulls<ByteArray>(totalChunks)
         val inflight = ConcurrentHashMap<Int, Long>() // index -> sentAt
+        val pendingRetries = ConcurrentHashMap<Int, Long>() // index -> retryAfterMs
         var receivedCount = 0
         var lastAttemptAt = 0L
 
-        // AIMD State
-        var windowSize = 4.0
-        var ssthresh = 128.0
+        // AIMD State (gChat Conservative Limits)
+        var windowSize = 2.0
+        var ssthresh = 6.0
         var rttEma = 5000L
         var currentTimeoutMs = 5000L
     }
@@ -166,12 +185,15 @@ object MediaManager {
                 // Check for timeouts
                 dl.inflight.forEach { (index, sentAt) ->
                     if (now - sentAt > dl.currentTimeoutMs) {
-                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying. (Window shrank)")
+                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying in 5s. (Window shrank)")
                         dl.inflight.remove(index)
                         
-                        // AIMD Multiplicative Decrease
-                        dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
-                        dl.windowSize = 1.0
+                        // Penalty Box: Retry after 5 seconds
+                        dl.pendingRetries[index] = now + 5000L
+                        
+                        // AIMD Multiplicative Decrease (conservative)
+                        dl.windowSize = Math.max(1.0, dl.windowSize * 0.5)
+                        // ssthresh doesn't need to drop to 2, it stays at 6 for gChat
                     }
                 }
                 
@@ -191,10 +213,19 @@ object MediaManager {
     private fun requestNextChunks(dl: ActiveDownload) {
         val repo = repository ?: return
         val peer = dl.peerOnion ?: return
+        val now = System.currentTimeMillis()
         
         for (i in 0 until dl.totalChunks) {
+            val penaltyExpiry = dl.pendingRetries[i]
+            if (penaltyExpiry != null && now < penaltyExpiry) {
+                continue // Still in penalty box
+            }
+            if (penaltyExpiry != null && now >= penaltyExpiry) {
+                dl.pendingRetries.remove(i)
+            }
+            
             if (dl.chunks[i] == null && !dl.inflight.containsKey(i)) {
-                dl.inflight[i] = System.currentTimeMillis()
+                dl.inflight[i] = now
                 
                 val payload = MediaRequestPayload(
                     mediaId = dl.metadata.id,
@@ -245,6 +276,7 @@ object MediaManager {
         
         activeDownloads[metadata.id] = dl
         updateProgress(metadata.id, 0)
+        updateWakeLock()
         
         if (dl.status == ActiveDownload.Status.ACTIVE) {
             requestNextChunks(dl)
@@ -265,13 +297,11 @@ object MediaManager {
                 dl.rttEma = (dl.rttEma * 7 + rtt) / 8
                 dl.currentTimeoutMs = Math.max(2000L, dl.rttEma * 2) // Timeout is 2x RTT EMA, min 2s
 
-                // AIMD Additive Increase
-                if (dl.windowSize < dl.ssthresh) {
-                    dl.windowSize += 1.0 // Slow start
-                } else {
-                    dl.windowSize += 1.0 / dl.windowSize // Congestion avoidance
+                // AIMD Additive Increase (gChat conservative logic)
+                if (rtt < 2000L && dl.windowSize < 6.0) {
+                    dl.windowSize += 0.1
                 }
-                if (dl.windowSize > 128.0) dl.windowSize = 128.0
+                if (dl.windowSize > 6.0) dl.windowSize = 6.0
             }
             
             Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks}) [Win: ${dl.windowSize.toInt()}, RTT: ${dl.rttEma}ms]")
@@ -303,6 +333,7 @@ object MediaManager {
             dl.status = ActiveDownload.Status.COMPLETED
             updateProgress(dl.metadata.id, 100)
             Logger.info(TAG, "Download completed for ${dl.metadata.id}")
+            updateWakeLock()
             
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)
