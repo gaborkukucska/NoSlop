@@ -441,7 +441,8 @@ private fun ExoVideoPlayer(
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
             }
         } else {
-            val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+            val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
             androidx.media3.exoplayer.ExoPlayer.Builder(context)

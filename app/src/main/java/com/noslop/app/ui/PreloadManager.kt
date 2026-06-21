@@ -96,7 +96,8 @@ object PreloadManager {
         
         Logger.info("PRELOAD", "Warming up media: $url")
         
-        val dataSourceFactory = OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
+            val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
         
         // Use a smaller buffer for preloads to save memory/bandwidth

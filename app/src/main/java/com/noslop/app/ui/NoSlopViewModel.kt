@@ -300,12 +300,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 allFeeds = feeds
                 allMeshes = meshes
                 
-                // Always try to append new items when the database updates.
-                // This is critical because video sources (Invidious, Archive.org)
-                // arrive much later than RSS/image sources. Without this, late-arriving
-                // videos never make it into the unified feed.
-                if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
-                    loadMoreFeedItems()
+                // Update existing items in the feed (for live reaction counts) without appending infinitely
+                if (_unifiedFeed.value.isEmpty()) {
+                    if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
+                        loadMoreFeedItems()
+                    }
+                } else {
+                    val updatedFeed = _unifiedFeed.value.map { currentItem ->
+                        when (currentItem) {
+                            is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
+                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id }?.let { UnifiedItem.Mesh(it) } ?: currentItem
+                        }
+                    }
+                    _unifiedFeed.value = updatedFeed
                 }
             }
         }
@@ -354,12 +361,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private var lastFilterMode: String? = null
+    private var currentFilterMode: String = "Live Feed"
 
     fun loadMoreFeedItems(filterMode: String? = null) {
-        if (lastFilterMode != filterMode) {
+        val actualFilter = filterMode ?: currentFilterMode
+        if (currentFilterMode != actualFilter) {
             _unifiedFeed.value = emptyList()
-            lastFilterMode = filterMode
+            currentFilterMode = actualFilter
         }
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
