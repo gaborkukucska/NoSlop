@@ -1,0 +1,48 @@
+package com.noslop.mvp.ui.media
+
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import com.noslop.mvp.httpClientEngineFactory
+import io.ktor.client.HttpClient
+import io.ktor.client.call.body
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+/** Decode encoded image bytes (jpg/png/webp/gif) to a Compose bitmap, or null on failure. Platform codec. */
+expect fun decodeImageBitmapOrNull(bytes: ByteArray): ImageBitmap?
+
+// One shared client for all image fetches — reuses the ktor engine we already ship (NOT Coil, so it can't
+// drag in its own ktor and crash the iOS Darwin engine — see the ktor-3.0.3 pin).
+private val imageClient: HttpClient by lazy { httpClientEngineFactory() }
+
+/**
+ * Minimal, dependency-free network image: fetch bytes with our ktor client, decode via the platform codec
+ * (Skia on iOS/desktop, BitmapFactory on Android). The media components ([BlurredImageBackground],
+ * [SegmentedArticleReader]) take this as their injected `imageContent`. Fail-safe: any error just leaves an
+ * empty box — it never throws, so a bad URL or decode can't crash the feed.
+ */
+@Composable
+fun NetworkImage(url: String, contentScale: ContentScale, modifier: Modifier) {
+    var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(url) {
+        bitmap = runCatching {
+            val bytes: ByteArray = imageClient.get(url) { header("User-Agent", "NoSlopMVP/0.1") }.body()
+            withContext(Dispatchers.Default) { decodeImageBitmapOrNull(bytes) }
+        }.getOrNull()
+    }
+    val bmp = bitmap
+    if (bmp != null) Image(bitmap = bmp, contentDescription = null, contentScale = contentScale, modifier = modifier)
+    else Box(modifier.fillMaxSize())   // neutral placeholder while loading / on failure
+}

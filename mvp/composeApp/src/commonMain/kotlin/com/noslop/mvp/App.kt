@@ -27,6 +27,8 @@ import com.noslop.mvp.ui.theme.TextMuted
 import com.noslop.mvp.feeds.FeedItem
 import com.noslop.mvp.feeds.BackgroundScheduler
 import com.noslop.mvp.ui.media.AudioPlayer
+import com.noslop.mvp.ui.media.BlurredImageBackground
+import com.noslop.mvp.ui.media.NetworkImage
 import com.noslop.mvp.ui.media.SegmentedArticleReader
 
 import androidx.compose.foundation.layout.Arrangement
@@ -327,11 +329,12 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
             url != null && kind == FeedKind.VIDEO ->
                 com.noslop.mvp.ui.media.VideoPlayer(url = url, isVisible = isVisible, modifier = Modifier.fillMaxSize())
             url != null && kind == FeedKind.AUDIO -> AudioPlayer(url = url, isVisible = isVisible)
-            // IMAGE items fall back to the article view (no bundled image loader — see note on ArticleView).
+            url != null && kind == FeedKind.IMAGE ->
+                BlurredImageBackground(url = url, imageContent = { u, cs, m -> NetworkImage(u, cs, m) })
             else -> ArticleView(item)
         }
-        // Only video/audio get the bottom overlay; image + article render via the reader (own header).
-        if (kind == FeedKind.VIDEO || kind == FeedKind.AUDIO) {
+        // Video/audio/image fill the screen and get the bottom overlay; the article reader has its own header.
+        if (kind != FeedKind.ARTICLE) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
@@ -346,8 +349,7 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
     }
 }
 
-/** Article / image fallback: paginated text reader. (No bundled network image loader — hero image is
- *  omitted via the reader's default no-op imageContent; a ktor-independent image loader is a follow-up.) */
+/** Article reader: paginated text + hero image, for items with no playable media. */
 @Composable
 private fun ArticleView(item: FeedItem) {
     SegmentedArticleReader(
@@ -357,6 +359,7 @@ private fun ArticleView(item: FeedItem) {
         sourceLabel = sourceLabel(item),
         thumbnailUrl = item.thumbnailUrl,
         articleUrl = item.url,
+        imageContent = { u, cs, m -> NetworkImage(u, cs, m) },
     )
 }
 
