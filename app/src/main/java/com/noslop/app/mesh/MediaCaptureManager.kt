@@ -131,8 +131,13 @@ class MediaCaptureManager(private val context: Context) {
 
         var pendingRecording = videoCapture.output.prepareRecording(context, outputOptions)
         
-        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        try {
             pendingRecording = pendingRecording.withAudioEnabled()
+            Logger.info(TAG, "Audio explicitly enabled for video recording")
+        } catch (e: SecurityException) {
+            Logger.warn(TAG, "RECORD_AUDIO permission missing, recording video silently")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to enable audio: ${e.message}")
         }
 
         recording = pendingRecording.start(ContextCompat.getMainExecutor(context)) { recordEvent ->
