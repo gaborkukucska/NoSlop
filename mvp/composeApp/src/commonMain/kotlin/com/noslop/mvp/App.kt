@@ -27,9 +27,6 @@ import com.noslop.mvp.ui.theme.TextMuted
 import com.noslop.mvp.feeds.FeedItem
 import com.noslop.mvp.feeds.BackgroundScheduler
 import com.noslop.mvp.ui.media.AudioPlayer
-import com.noslop.mvp.ui.media.BlurredImageBackground
-import com.noslop.mvp.ui.media.InstallCoilLoader
-import com.noslop.mvp.ui.media.NetworkImage
 import com.noslop.mvp.ui.media.SegmentedArticleReader
 
 import androidx.compose.foundation.layout.Arrangement
@@ -251,8 +248,6 @@ private fun FeedScreen() {
     var backgroundSyncEnabled by remember { mutableStateOf(false) }
     val scheduler = remember { BackgroundScheduler() }
 
-    InstallCoilLoader()   // wire Coil's image loader once (feed images / article heroes)
-
     fun load() {
         loading = true; error = null
         scope.launch {
@@ -332,12 +327,11 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
             url != null && kind == FeedKind.VIDEO ->
                 com.noslop.mvp.ui.media.VideoPlayer(url = url, isVisible = isVisible, modifier = Modifier.fillMaxSize())
             url != null && kind == FeedKind.AUDIO -> AudioPlayer(url = url, isVisible = isVisible)
-            url != null && kind == FeedKind.IMAGE ->
-                BlurredImageBackground(url = url, imageContent = { u, cs, m -> NetworkImage(u, cs, m) })
+            // IMAGE items fall back to the article view (no bundled image loader — see note on ArticleView).
             else -> ArticleView(item)
         }
-        // Articles carry their own header/title; for media, overlay source + author + title at the bottom.
-        if (kind != FeedKind.ARTICLE) {
+        // Only video/audio get the bottom overlay; image + article render via the reader (own header).
+        if (kind == FeedKind.VIDEO || kind == FeedKind.AUDIO) {
             Column(
                 Modifier.align(Alignment.BottomStart).fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
@@ -352,7 +346,8 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
     }
 }
 
-/** Article fallback (no playable media): paginated reader with the item's text + hero image. */
+/** Article / image fallback: paginated text reader. (No bundled network image loader — hero image is
+ *  omitted via the reader's default no-op imageContent; a ktor-independent image loader is a follow-up.) */
 @Composable
 private fun ArticleView(item: FeedItem) {
     SegmentedArticleReader(
@@ -362,7 +357,6 @@ private fun ArticleView(item: FeedItem) {
         sourceLabel = sourceLabel(item),
         thumbnailUrl = item.thumbnailUrl,
         articleUrl = item.url,
-        imageContent = { u, cs, m -> NetworkImage(u, cs, m) },
     )
 }
 

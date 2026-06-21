@@ -73,8 +73,6 @@ kotlin {
             implementation(libs.sqldelight.primitive.adapters)
             implementation(libs.ktor.network)
             implementation("io.github.alexzhirkevich:qrose:1.0.1") // Compose-MP QR rendering (share-my-contact)
-            implementation("io.coil-kt.coil3:coil-compose:3.2.0")          // KMP image loading (feed images / article heroes)
-            implementation("io.coil-kt.coil3:coil-network-ktor3:3.2.0")    // network fetcher over the ktor3 engine we already use
             implementation(libs.xmlutil.core)
             implementation(libs.xmlutil.serialization)
             implementation(libs.kotlinx.datetime)
