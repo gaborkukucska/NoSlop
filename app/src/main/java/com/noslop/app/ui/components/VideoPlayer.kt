@@ -146,13 +146,48 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
         // ── 4. Archive.org embed / details ───────────────────────────────
         rawUrl.contains("archive.org/embed") ||
         rawUrl.contains("archive.org/details") -> {
-            val embedUrl = if (rawUrl.contains("/details/")) {
-                val id = rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
-                "https://archive.org/embed/$id"
+            val id = if (rawUrl.contains("/details/")) {
+                rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
             } else {
-                rawUrl
+                rawUrl.substringAfter("/embed/").substringBefore("?").substringBefore("/")
             }
-            VideoSource.Embed(embedUrl)
+            // Try to resolve the direct mp4 URL using metadata API
+            try {
+                val metadataUrl = "https://archive.org/metadata/$id"
+                val request = okhttp3.Request.Builder().url(metadataUrl).build()
+                val response = HttpClientProvider.clearnetClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
+                    if (body != null) {
+                        val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                        val server = root?.get("server")?.asString ?: "archive.org"
+                        val dir = root?.get("dir")?.asString ?: ""
+                        val files = root?.getAsJsonArray("files")
+                        
+                        var bestMp4: String? = null
+                        if (files != null) {
+                            for (el in files) {
+                                val obj = el.asJsonObject
+                                val name = obj.get("name")?.asString ?: continue
+                                val format = obj.get("format")?.asString ?: ""
+                                if (name.endsWith(".mp4", ignoreCase = true) || format.contains("MPEG4") || format.contains("h.264")) {
+                                    val encodedName = android.net.Uri.encode(name)
+                                    bestMp4 = "https://$server$dir/$encodedName"
+                                    break
+                                }
+                            }
+                        }
+                        if (bestMp4 != null) {
+                            Logger.info("VIDEO_RESOLVE", "Resolved archive.org to direct stream: $bestMp4")
+                            return@withContext VideoSource.Direct(bestMp4)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.warn("VIDEO_RESOLVE", "Archive.org metadata resolution failed: ${e.message}")
+            }
+            
+            VideoSource.Embed("https://archive.org/embed/$id")
         }
 
         // ── 5. Generic http(s) — treat as direct stream ─────────────────

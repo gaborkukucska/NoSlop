@@ -155,13 +155,12 @@ object MediaProxyService {
                 // Wait for chunk 0 before sending headers (ensures correct sniffing)
                 Logger.info(TAG, "Waiting for chunk 0 of $mediaId...")
                 while (isActive && !pendingChunks.containsKey(0)) {
-                    val next = queue.poll(10, TimeUnit.SECONDS)
+                    val next = queue.poll(5, TimeUnit.SECONDS)
                     if (next != null) {
                         pendingChunks[next.first] = next.second
-                    } else if (!MediaManager.isMediaDownloaded(mediaId, null)) {
-                        Logger.warn(TAG, "Still waiting for chunk 0 for $mediaId...")
-                    } else {
-                        break // Download might have finished while we were waiting
+                    } else if (!MediaManager.isMediaDownloadingOrRecovering(mediaId) && !MediaManager.isMediaDownloaded(mediaId, null)) {
+                        Logger.error(TAG, "Download failed or aborted for $mediaId. Aborting stream.")
+                        break
                     }
                 }
 
@@ -203,13 +202,16 @@ object MediaProxyService {
                         break
                     }
 
-                    // 3. Wait for more chunks - slightly longer timeout for mesh latency
-                    val next = queue.poll(120, TimeUnit.SECONDS)
-                    if (next == null) {
-                        Logger.warn(TAG, "Timeout waiting for chunk $nextIndexToSend for $mediaId")
-                        break
+                    // 3. Wait for more chunks
+                    val next = queue.poll(5, TimeUnit.SECONDS)
+                    if (next != null) {
+                        pendingChunks[next.first] = next.second
+                    } else {
+                        if (!MediaManager.isMediaDownloadingOrRecovering(mediaId) && !MediaManager.isMediaDownloaded(mediaId, null)) {
+                            Logger.warn(TAG, "Download failed or aborted for $mediaId. Terminating proxy stream.")
+                            break
+                        }
                     }
-                    pendingChunks[next.first] = next.second
                 }
             } catch (e: Exception) {
                 Logger.error(TAG, "Error during sequential streaming $mediaId: ${e.message}")

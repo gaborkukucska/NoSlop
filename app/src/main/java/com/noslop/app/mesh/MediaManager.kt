@@ -177,12 +177,13 @@ object MediaManager {
         val pendingRetries = ConcurrentHashMap<Int, Long>() // index -> retryAfterMs
         var receivedCount = 0
         var lastAttemptAt = 0L
+        var consecutiveTimeouts = 0
 
         // AIMD State (gChat Conservative Limits)
-        var windowSize = 2.0
-        var ssthresh = 6.0
-        var rttEma = 5000L
-        var currentTimeoutMs = 5000L
+        var windowSize = 4.0
+        var ssthresh = 128.0
+        var rttEma = 30000L
+        var currentTimeoutMs = 120000L // 120s initial timeout for Tor
     }
 
     private fun maintainDownloads() {
@@ -190,6 +191,7 @@ object MediaManager {
         activeDownloads.forEach { (id, dl) ->
             if (dl.status == ActiveDownload.Status.ACTIVE) {
                 // Check for timeouts
+                var anyTimeout = false
                 dl.inflight.forEach { (index, sentAt) ->
                     if (now - sentAt > dl.currentTimeoutMs) {
                         Logger.warn(TAG, "Chunk $index for $id timed out. Retrying in 5s. (Window shrank)")
@@ -198,9 +200,24 @@ object MediaManager {
                         // Penalty Box: Retry after 5 seconds
                         dl.pendingRetries[index] = now + 5000L
                         
-                        // AIMD Multiplicative Decrease (conservative)
-                        dl.windowSize = Math.max(1.0, dl.windowSize * 0.5)
-                        // ssthresh doesn't need to drop to 2, it stays at 6 for gChat
+                        // AIMD Multiplicative Decrease
+                        dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
+                        dl.windowSize = 1.0
+                        anyTimeout = true
+                    }
+                }
+                
+                if (anyTimeout) {
+                    dl.consecutiveTimeouts++
+                    if (dl.consecutiveTimeouts >= 3) {
+                        Logger.warn(TAG, "Media $id: 3 consecutive timeouts. Falling back to mesh recovery.")
+                        dl.peerOnion = null
+                        dl.status = ActiveDownload.Status.RECOVERING
+                        dl.inflight.clear()
+                        dl.consecutiveTimeouts = 0
+                        dl.lastAttemptAt = now
+                        scope.launch { attemptMeshRecovery(dl) }
+                        return@forEach // Skip requestNextChunks
                     }
                 }
                 
@@ -250,7 +267,27 @@ object MediaManager {
                         type = "MEDIA_REQUEST",
                         payload = com.google.gson.Gson().toJsonTree(payload)
                     )
-                    repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                    val success = repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                    if (!success) {
+                        val sentAt = dl.inflight.remove(i)
+                        if (sentAt != null) {
+                            Logger.warn(TAG, "Chunk $i for ${dl.metadata.id} failed to send. Forcing timeout.")
+                            dl.pendingRetries[i] = System.currentTimeMillis() + 5000L
+                            dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
+                            dl.windowSize = 1.0
+                            
+                            dl.consecutiveTimeouts++
+                            if (dl.consecutiveTimeouts >= 3 && dl.status == ActiveDownload.Status.ACTIVE) {
+                                Logger.warn(TAG, "Media ${dl.metadata.id}: 3 consecutive send failures to $peer. Falling back to mesh recovery.")
+                                dl.peerOnion = null
+                                dl.status = ActiveDownload.Status.RECOVERING
+                                dl.inflight.clear()
+                                dl.consecutiveTimeouts = 0
+                                dl.lastAttemptAt = System.currentTimeMillis()
+                                attemptMeshRecovery(dl)
+                            }
+                        }
+                    }
                 }
                 
                 if (dl.inflight.size >= dl.windowSize.toInt()) break
@@ -297,18 +334,21 @@ object MediaManager {
         if (dl.chunks[payload.chunkIndex] == null) {
             dl.chunks[payload.chunkIndex] = chunkData
             dl.receivedCount++
+            dl.consecutiveTimeouts = 0 // Reset on success!
             val sentAt = dl.inflight.remove(payload.chunkIndex)
             
             if (sentAt != null) {
                 val rtt = System.currentTimeMillis() - sentAt
                 dl.rttEma = (dl.rttEma * 7 + rtt) / 8
-                dl.currentTimeoutMs = Math.max(2000L, dl.rttEma * 2) // Timeout is 2x RTT EMA, min 2s
+                dl.currentTimeoutMs = Math.max(30000L, dl.rttEma * 3) // Timeout is 3x RTT EMA, min 30s
 
-                // AIMD Additive Increase (gChat conservative logic)
-                if (rtt < 2000L && dl.windowSize < 6.0) {
-                    dl.windowSize += 0.1
+                // AIMD Additive Increase
+                if (dl.windowSize < dl.ssthresh) {
+                    dl.windowSize += 1.0
+                } else {
+                    dl.windowSize += 1.0 / dl.windowSize
                 }
-                if (dl.windowSize > 6.0) dl.windowSize = 6.0
+                if (dl.windowSize > 128.0) dl.windowSize = 128.0
             }
             
             Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks}) [Win: ${dl.windowSize.toInt()}, RTT: ${dl.rttEma}ms]")
@@ -394,8 +434,14 @@ object MediaManager {
             Logger.info(TAG, "Media $mediaId found at $senderId")
             dl.peerOnion = senderId
             dl.status = ActiveDownload.Status.ACTIVE
+            dl.consecutiveTimeouts = 0 // Reset
             requestNextChunks(dl)
         }
+    }
+    
+    fun isMediaDownloadingOrRecovering(mediaId: String): Boolean {
+        val dl = activeDownloads[mediaId]
+        return dl != null && (dl.status == ActiveDownload.Status.ACTIVE || dl.status == ActiveDownload.Status.RECOVERING)
     }
 
     suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {

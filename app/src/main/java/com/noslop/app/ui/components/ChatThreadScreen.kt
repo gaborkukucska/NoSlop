@@ -384,13 +384,39 @@ fun ChatThreadScreen(
                                                             .clip(RoundedCornerShape(8.dp))
                                                     )
                                                 } else if (msg.mediaType?.startsWith("video") == true) {
+                                                    var isPlaying by remember { mutableStateOf(false) }
                                                     Box(
                                                         modifier = Modifier
                                                             .fillMaxWidth()
-                                                            .heightIn(max = 200.dp)
+                                                            .heightIn(min = 150.dp, max = 200.dp)
                                                             .clip(RoundedCornerShape(8.dp))
+                                                            .background(PrimaryBlack)
                                                     ) {
-                                                        VideoPlayer(url = "file://${localFile.absolutePath}")
+                                                        if (isPlaying) {
+                                                            VideoPlayer(url = "file://${localFile.absolutePath}")
+                                                        } else {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .fillMaxSize()
+                                                                    .clickable { isPlaying = true },
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                coil.compose.AsyncImage(
+                                                                    model = localFile,
+                                                                    contentDescription = "Video Thumbnail",
+                                                                    modifier = Modifier.fillMaxSize(),
+                                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                                )
+                                                                Box(
+                                                                    modifier = Modifier
+                                                                        .size(48.dp)
+                                                                        .background(PrimaryBlack.copy(alpha = 0.6f), androidx.compose.foundation.shape.CircleShape),
+                                                                    contentAlignment = Alignment.Center
+                                                                ) {
+                                                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = AccentGreen, modifier = Modifier.size(32.dp))
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 } else {
                                                     // Audio or other file, just show a placeholder for now
