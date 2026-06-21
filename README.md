@@ -39,7 +39,8 @@ A vertical feed purpose-built for signal-to-noise ratio.
 
 - **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
 - **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
-- **Media playback** — seamless audio and video streaming (HLS/m3u8, MP4, MP3, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
+- **Media playback** — seamless native audio and video streaming (HLS/m3u8, MP4, MP3, Archive.org, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
+- **Immersive landscape mode** — rotate your device horizontally to automatically hide the UI, allowing edge-to-edge viewing for video and image content.
 - **Interest-based curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) during onboarding. NoSlop pre-loads curated RSS/Atom feeds from sources like Hacker News, BBC World, NASA, EFF Deeplinks, and Krebs on Security — no account required.
 
 ### Serverless Social Mesh
@@ -66,7 +67,7 @@ This is how NoSlop unites entertainment, community, and communication in one pla
 - **Community** — a single tap broadcasts that content into your mesh, making it a shared reference point for your circle.
 - **Communication** — every reply, comment, and reaction threads through the gossip protocol, end-to-end encrypted where needed, and fully offline-capable.
 
-> ✅ **Implemented** — The clearnet interaction-to-broadcast pipeline is live. The `PostPayload` schema carries `clearnet_url`, `clearnet_title`, and `clearnet_thumbnail_url`; liking, sharing, or commenting on a clearnet item creates (or reuses) a deterministic SHA3-256-derived mesh anchor post for that URL, and `REACTION` packets are signed, gossiped, and toggleable (add/remove). Peers can tap "View on Clearnet" to open shared links. Remaining polish work (richer clearnet preview cards, reaction-count UI on feed cards, hybrid feed mixing) is tracked in [PROJECT_STATUS.md](docs/PROJECT_STATUS.md).
+> 🌉 **The Bridge in Action:** The clearnet interaction-to-broadcast pipeline is fully live. Liking, sharing, or commenting on a clearnet item creates a deterministic SHA3-256-derived mesh anchor post for that URL. `REACTION` packets are signed, gossiped, and toggleable. Peers see rich clearnet preview cards seamlessly mixed into their feed alongside native mesh posts, complete with live reaction counts and a "View on Clearnet" button.
 
 ---
 
@@ -130,10 +131,13 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 - 🏗️ **[BUILD.md](docs/BUILD.md)** — how to compile and install NoSlop.
 - 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
-- 📦 **[PACKET_SCHEMA.md](docs/PACKET_SCHEMA.md)** — HAI-Net wire protocol reference.
+- 📡 **[WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — the complete HAI-Net wire protocol reference (supersedes the old packet schema docs).
+- 🔬 **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — deep technical reference: crypto derivations, gossip pipeline internals, media/Tor internals, build config.
+- 🏠 **[HUB_INTEGRATION_PLAN.md](docs/HUB_INTEGRATION_PLAN.md)** — phased plan for the upcoming Home HUB architecture.
+- 🔀 **[MIGRATION.md](docs/MIGRATION.md)** & **[KMP_PARITY_PLAN.md](docs/KMP_PARITY_PLAN.md)** — architecture shift and parity details for the Kotlin Multiplatform migration.
+- 🛡️ **[PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — clear breakdown of data sovereignty and privacy expectations.
 - 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
 - 🛠️ **[SUPPORT.md](docs/SUPPORT.md)** — operations guide, backup/restore, and troubleshooting.
-- 🔬 **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — deep technical reference: crypto derivations, gossip pipeline internals, wire protocol, media/Tor internals, build config.
 - 🔭 **[GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)** — feature gaps vs. gChat/HAI-Net (presence, group chats, hash-based sync, etc.) and a backlog checklist.
 
 ---
