@@ -777,7 +777,7 @@ fun Step6Creators(
         isSearchingChannels = true
         kotlinx.coroutines.delay(600) // Debounce typing
         try {
-            searchedChannels = com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery)
+            searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.error("ONBOARDING", "Channel search failed: ${e.message}")
         } finally {

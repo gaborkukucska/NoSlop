@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -350,7 +352,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     isSearchingChannels = true
                     kotlinx.coroutines.delay(600) // Debounce typing
                     try {
-                        searchedChannels = com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery)
+                        searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
                     } catch (e: Exception) {
                         com.noslop.app.debug.Logger.error("SETTINGS", "Channel search failed: ${e.message}")
                     } finally {

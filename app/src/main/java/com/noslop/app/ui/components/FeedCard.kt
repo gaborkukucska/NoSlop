@@ -139,7 +139,13 @@ fun FullScreenFeedCard(
                 resolvedUrl.contains("youtube") ||
                 resolvedUrl.contains("vimeo") ||
                 resolvedUrl.contains("archive.org/embed") -> {
-                    VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl)
+                    // Conditionally mount the VideoPlayer ONLY when visible to prevent ExoPlayer MediaCodec OOM limits,
+                    // while completely preserving the immersive auto-play experience!
+                    if (isVisible) {
+                        VideoPlayer(url = resolvedUrl, isVisible = true, thumbnailUrl = item.thumbnailUrl)
+                    } else {
+                        BlurredImageBackground(url = item.thumbnailUrl ?: resolvedUrl)
+                    }
                 }
                 item.mediaType == "audio" || 
                 resolvedUrl.contains(".mp3") || 

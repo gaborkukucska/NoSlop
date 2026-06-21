@@ -60,6 +60,12 @@
 *   Added logic to notify the sender of a connection request when it is accepted (`USER_HANDSHAKE`).
 *   Introduced new packet type `CONNECTION_REJECTED` to notify the sender if their request is declined, safely removing the pending peer and displaying a local notification.
 
+### 8. Feed OOM Prevention & Settings Build Fix
+*   **Settings Build Error Fix**: Added missing `Search` and `Close` icon imports in `ContentPreferencesScreen.kt` introduced by the new creator search bar.
+*   **Auto-Play Video Player with OOM Prevention in Feed**: Fixed a fatal `OutOfMemoryError` (MediaCodec buffer exhaustion) when swiping through the vertical video feed. `FeedCard.kt` now conditionally mounts the `VideoPlayer` only when the item is fully visible on screen. This preserves the immersive auto-play experience while ensuring off-screen ExoPlayer instances are instantly destroyed to free up hardware resources.
+
+*   **Creator Search Fix**: Moved the `InvidiousApiClient.searchChannels` network call off the Main Thread to `Dispatchers.IO` to prevent silent `NetworkOnMainThreadException` failures. Capped the appended search results to the top 3 matches as intended.
+*   **SD Card Installation Support**: Added `android:installLocation="auto"` to the AndroidManifest to allow the app to be installed or moved to an external SD card on storage-constrained devices.
 ## Pending / Future Work
 *   Add more no-auth image and video sources.
 *   Enhance WebView with ad-blocking or reader mode if possible.
