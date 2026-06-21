@@ -1,9 +1,19 @@
 package com.noslop.mvp
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import com.noslop.mvp.feeds.FeedItem
 import com.noslop.mvp.feeds.BackgroundScheduler
+import com.noslop.mvp.ui.media.AudioPlayer
+import com.noslop.mvp.ui.media.BlurredImageBackground
+import com.noslop.mvp.ui.media.InstallCoilLoader
+import com.noslop.mvp.ui.media.NetworkImage
+import com.noslop.mvp.ui.media.SegmentedArticleReader
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -214,7 +224,6 @@ private fun FeedScreen() {
     var stories by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var videoUrl by remember { mutableStateOf("https://www.w3schools.com/html/mov_bbb.mp4") }
     // Feed curation (the "NoSlop" core). Persisted raw text; applied live.
     val saved = remember { SavedFilters.loadTexts() }
     var mutedText by remember { mutableStateOf(saved.first) }
@@ -222,6 +231,8 @@ private fun FeedScreen() {
     var showFilters by remember { mutableStateOf(false) }
     var backgroundSyncEnabled by remember { mutableStateOf(false) }
     val scheduler = remember { BackgroundScheduler() }
+
+    InstallCoilLoader()   // wire Coil's image loader once (feed images / article heroes)
 
     fun load() {
         loading = true; error = null
@@ -237,69 +248,122 @@ private fun FeedScreen() {
     val filters = FeedFilters.from(mutedText, requiredText)
     val shown = filters.apply(stories)
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Media playback: play a clearnet video URL full-screen via the native player.
-        if (VideoPlayer.isAvailable) {
-            OutlinedTextField(videoUrl, { videoUrl = it }, label = { Text("Video URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = { focus.clearFocus(); VideoPlayer.play(videoUrl.trim()) }, enabled = videoUrl.isNotBlank(), modifier = Modifier.fillMaxWidth()) {
-                Text("▶  Play video")
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "Loading…" else "Refresh feed") }
-            Button(onClick = { showFilters = !showFilters }) { Text(if (showFilters) "Hide filters" else "🧹 Filters") }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Auto sync", fontSize = 13.sp)
-                Switch(checked = backgroundSyncEnabled, onCheckedChange = {
-                    backgroundSyncEnabled = it
-                    if (it) scheduler.scheduleFeedSync(1) else scheduler.cancelFeedSync()
-                })
-            }
-        }
-        // Curation panel: mute words (hide) + must-have words (only show matching). Persisted as you type.
-        if (showFilters) {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        mutedText, { mutedText = it; SavedFilters.saveTexts(it, requiredText) },
-                        label = { Text("Mute words (comma-separated)") }, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
-                    )
-                    OutlinedTextField(
-                        requiredText, { requiredText = it; SavedFilters.saveTexts(mutedText, it) },
-                        label = { Text("Must-have words (optional)") }, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
-                    )
-                    Text("Hide anything containing a mute word; with must-have words set, show only matches.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+    // Full-screen vertical pager (one item per screen, swipe up) — the Android NoSlop feed feel. Each page
+    // renders its media inline (video/audio/image/article) with a metadata overlay; curation filters apply live.
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            loading && stories.isEmpty() -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+            error != null && stories.isEmpty() ->
+                Text("Error: $error", color = MaterialTheme.colorScheme.error, modifier = Modifier.align(Alignment.Center).padding(24.dp))
+            shown.isEmpty() ->
+                Text(if (stories.isEmpty()) "No items yet" else "All ${stories.size} filtered out",
+                    color = Color.White, modifier = Modifier.align(Alignment.Center))
+            else -> {
+                val pager = rememberPagerState { shown.size }
+                VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
+                    FeedMediaCard(shown[page], isVisible = page == pager.currentPage)
                 }
             }
         }
-        if (stories.isNotEmpty()) {
-            val muted = stories.size - shown.size
-            Text("Showing ${shown.size} of ${stories.size}${if (muted > 0) " · $muted filtered" else ""}", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-        }
-        when {
-            loading && stories.isEmpty() -> CircularProgressIndicator()
-            error != null && stories.isEmpty() -> Text("Error: $error", color = MaterialTheme.colorScheme.error)
-            else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(shown) { s ->
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(s.sourceId.uppercase(), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text(s.title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                            val excerpt = s.excerpt
-                            if (!excerpt.isNullOrBlank()) {
-                                Text(excerpt, fontSize = 12.sp, color = MaterialTheme.colorScheme.outline, maxLines = 3)
-                            }
-                        }
+
+        // Translucent top controls over the media: refresh, curation toggle, auto-sync, filter count.
+        Column(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { load() }, enabled = !loading) { Text(if (loading) "…" else "↻") }
+                Button(onClick = { showFilters = !showFilters }) { Text(if (showFilters) "Hide" else "🧹") }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Auto", fontSize = 12.sp, color = Color.White)
+                    Switch(checked = backgroundSyncEnabled, onCheckedChange = {
+                        backgroundSyncEnabled = it
+                        if (it) scheduler.scheduleFeedSync(1) else scheduler.cancelFeedSync()
+                    })
+                }
+                if (stories.isNotEmpty()) Text("${shown.size}/${stories.size}", fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+            }
+            if (showFilters) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            mutedText, { mutedText = it; SavedFilters.saveTexts(it, requiredText) },
+                            label = { Text("Mute words (comma-separated)") }, modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+                        )
+                        OutlinedTextField(
+                            requiredText, { requiredText = it; SavedFilters.saveTexts(mutedText, it) },
+                            label = { Text("Must-have words (optional)") }, modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { focus.clearFocus() }),
+                        )
+                        Text("Hide anything with a mute word; with must-have words set, show only matches.", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                     }
                 }
             }
         }
     }
 }
+
+/** One full-screen feed page: media routed by type, with a bottom gradient metadata overlay (Android parity). */
+@Composable
+private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
+    val url = item.mediaUrl
+    val kind = if (url == null) FeedKind.ARTICLE else feedKind(item, url)
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
+        when {
+            url != null && kind == FeedKind.VIDEO ->
+                com.noslop.mvp.ui.media.VideoPlayer(url = url, isVisible = isVisible, modifier = Modifier.fillMaxSize())
+            url != null && kind == FeedKind.AUDIO -> AudioPlayer(url = url, isVisible = isVisible)
+            url != null && kind == FeedKind.IMAGE ->
+                BlurredImageBackground(url = url, imageContent = { u, cs, m -> NetworkImage(u, cs, m) })
+            else -> ArticleView(item)
+        }
+        // Articles carry their own header/title; for media, overlay source + author + title at the bottom.
+        if (kind != FeedKind.ARTICLE) {
+            Column(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(sourceLabel(item).uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                item.author?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f)) }
+                Text(item.title, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3)
+            }
+        }
+    }
+}
+
+/** Article fallback (no playable media): paginated reader with the item's text + hero image. */
+@Composable
+private fun ArticleView(item: FeedItem) {
+    SegmentedArticleReader(
+        content = item.fullContent ?: item.excerpt ?: item.title,
+        title = item.title,
+        author = item.author,
+        sourceLabel = sourceLabel(item),
+        thumbnailUrl = item.thumbnailUrl,
+        articleUrl = item.url,
+        imageContent = { u, cs, m -> NetworkImage(u, cs, m) },
+    )
+}
+
+private enum class FeedKind { VIDEO, AUDIO, IMAGE, ARTICLE }
+
+/** Route a feed item to a renderer the way the Android FeedCard does — by mediaType then URL extension. */
+private fun feedKind(item: FeedItem, url: String): FeedKind {
+    val u = url.lowercase()
+    return when {
+        item.mediaType == "video" || u.contains(".mp4") || u.contains(".mkv") || u.contains(".m3u8") ||
+            u.contains("youtube") || u.contains("vimeo") || u.contains("archive.org/embed") -> FeedKind.VIDEO
+        item.mediaType == "audio" || u.contains(".mp3") || u.contains(".wav") || u.contains(".m4a") ||
+            u.contains(".aac") || u.contains(".ogg") || u.contains(".flac") -> FeedKind.AUDIO
+        item.mediaType == "image" || u.contains(".jpg") || u.contains(".jpeg") || u.contains(".png") ||
+            u.contains(".webp") || u.contains(".gif") -> FeedKind.IMAGE
+        else -> FeedKind.ARTICLE
+    }
+}
+
+private fun sourceLabel(item: FeedItem): String = (item.apiSource ?: item.sourceId).replace('_', ' ')
 
 /**
  * Live mesh: dial a HUB and gossip through it. Connecting opens a real TCP link to an always-on hub
