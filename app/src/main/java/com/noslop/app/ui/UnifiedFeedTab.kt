@@ -79,6 +79,11 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
             .okHttpClient { HttpClientProvider.clearnetClient }
             .interceptorDispatcher(Dispatchers.IO)
             .components {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
                 add(object : Interceptor {
                     override suspend fun intercept(chain: Interceptor.Chain): coil.request.ImageResult {
                         val request = chain.request
@@ -419,8 +424,13 @@ fun UnifiedFeedTab(
 
     var filterMode by remember { mutableStateOf("Live Feed") }
     var searchQuery by remember { mutableStateOf("") }
-    var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
+    var sharedItem by remember { mutableStateOf<UnifiedItem?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
+    val isComposing = showComposeDialog || sharedItem != null
+    val handleDismiss = {
+        onComposeDismiss()
+        sharedItem = null
+    }
 
     var searchResultsActive by remember { mutableStateOf(false) }
 
@@ -444,6 +454,13 @@ fun UnifiedFeedTab(
 
     val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
         unifiedFeed.filter { item ->
+            val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == viewModel.localKeys.value?.publicKeyB64
+            if (filterMode == "My Content") {
+                if (!isOwnPost) return@filter false
+            } else if (isOwnPost) {
+                return@filter false
+            }
+
             val matchesMode = when (filterMode) {
                 "Live Feed" -> true
                 "History" -> item.id in viewedHistoryIds
@@ -582,7 +599,7 @@ fun UnifiedFeedTab(
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
                             isVisible = isVisible,
-                            onShareToMesh = { showShareDialog = item },
+                            onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
                             rightSlideOffset = rightSlideOffset
@@ -590,7 +607,7 @@ fun UnifiedFeedTab(
                         is UnifiedItem.Mesh -> FullScreenMeshCard(
                             post = item.post,
                             isVisible = isVisible,
-                            onShareToMesh = { showShareDialog = item },
+                            onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
                             rightSlideOffset = rightSlideOffset
@@ -715,6 +732,20 @@ fun UnifiedFeedTab(
                         )
                     )
 
+                    Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    val myContentSelected = localFilterMode == "My Content"
+                    Box(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (myContentSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "My Content" }
+                            .then(if (myContentSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, contentDescription = null, tint = if (myContentSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("My Content", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -798,7 +829,7 @@ fun UnifiedFeedTab(
         )
     }
 
-    if (showComposeDialog) {
+    if (isComposing) {
         var postContent by remember { mutableStateOf("") }
         var selectedPrivacy by remember { mutableStateOf("public") }
         var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
@@ -850,7 +881,7 @@ fun UnifiedFeedTab(
 
         if (!showCamera) {
             AlertDialog(
-                onDismissRequest = onComposeDismiss, containerColor = SurfaceDark,
+                onDismissRequest = handleDismiss, containerColor = SurfaceDark,
                 title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
@@ -864,10 +895,26 @@ fun UnifiedFeedTab(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp)
+                                Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { attachedFile = null }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed) }
                             }
                         }
+
+                        if (sharedItem != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val title = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> "Mesh Post by ${u.post.authorHandle}"; else -> "" }
+                            val author = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.author ?: "Unknown"; is UnifiedItem.Mesh -> "${u.post.authorHandle}.${u.post.authorTripcode}"; else -> "" }
+                            val thumbUrl = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.thumbnailUrl; is UnifiedItem.Mesh -> u.post.clearnetThumbnailUrl ?: u.post.thumbnailB64; else -> null }
+                            
+                            ClearnetAttachment(
+                                title = title,
+                                thumbnailUrl = thumbUrl,
+                                author = author,
+                                onClick = {},
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -897,40 +944,31 @@ fun UnifiedFeedTab(
                                 com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
                                 com.noslop.app.mesh.MediaMetadata(id = id, type = type, mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4", size = file.length(), chunkCount = (file.length() / (256 * 1024)).toInt() + 1, originNode = viewModel.localKeys.value?.onionAddress, ownerId = viewModel.localKeys.value?.publicKeyB64, thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type))
                             }
-                            viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
-                            onComposeDismiss()
+                            
+                            val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }
+                            val cTitle = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> u.post.clearnetTitle ?: u.post.content; else -> null }
+                            val cThumb = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.thumbnailUrl; is UnifiedItem.Mesh -> u.post.clearnetThumbnailUrl ?: u.post.thumbnailB64; else -> null }
+                            val cType = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.mediaType; is UnifiedItem.Mesh -> u.post.clearnetMediaType ?: u.post.mediaType; else -> null }
+                            
+                            val finalContent = if (postContent.isBlank() && sharedItem != null) "🔥 Shared Post" else postContent
+                            
+                            viewModel.composeAndBroadcastPost(
+                                content = finalContent, 
+                                mediaMetadata = mediaMetadata, 
+                                privacy = selectedPrivacy,
+                                clearnetUrl = url,
+                                clearnetTitle = cTitle,
+                                clearnetThumbnailUrl = cThumb,
+                                clearnetMediaType = cType
+                            )
+                            handleDismiss()
                         },
-                        enabled = postContent.isNotBlank() || attachedFile != null, colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        enabled = postContent.isNotBlank() || attachedFile != null || sharedItem != null, colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
                 },
-                dismissButton = { TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) } }
+                dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel", color = TextMuted) } }
             )
         }
-    }
-
-    showShareDialog?.let { unified ->
-        val title = when(unified) { is UnifiedItem.Feed -> unified.item.title; is UnifiedItem.Mesh -> "Mesh Post by ${unified.post.authorHandle}" }
-        val author = when(unified) { is UnifiedItem.Feed -> unified.item.author ?: "Unknown"; is UnifiedItem.Mesh -> "${unified.post.authorHandle}.${unified.post.authorTripcode}" }
-        val url = when(unified) { is UnifiedItem.Feed -> unified.item.url ?: ""; is UnifiedItem.Mesh -> "" }
-        val thumbUrl = when(unified) { is UnifiedItem.Feed -> unified.item.thumbnailUrl; is UnifiedItem.Mesh -> null }
-        val mediaType = when(unified) { is UnifiedItem.Feed -> unified.item.mediaType; is UnifiedItem.Mesh -> null }
-
-        AlertDialog(
-            onDismissRequest = { showShareDialog = null }, containerColor = SurfaceDark,
-            title = { Text("Share to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
-            text = { Column { Text("Share this content to your decentralized mesh peers?", color = TextMuted, style = MaterialTheme.typography.bodySmall); Spacer(modifier = Modifier.height(12.dp)); Text(title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(author, color = AccentGreen, style = MaterialTheme.typography.labelSmall) } },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val shareText = if (url.isNotEmpty()) "\uD83D\uDCE2 Shared Clearnet Post:\n$title\n— via NoSlop" else "\uD83D\uDCE2 Shared Mesh Post:\n$title\n— via NoSlop"
-                        viewModel.composeAndBroadcastPost(content = shareText, clearnetUrl = if (url.isNotEmpty()) url else null, clearnetTitle = if (url.isNotEmpty()) title else null, clearnetThumbnailUrl = thumbUrl, clearnetMediaType = mediaType)
-                        showShareDialog = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) { Text("Share", fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = { TextButton(onClick = { showShareDialog = null }) { Text("Cancel", color = TextMuted) } }
-        )
     }
 }
 

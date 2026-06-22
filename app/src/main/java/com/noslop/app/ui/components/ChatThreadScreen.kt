@@ -65,6 +65,8 @@ fun ChatThreadScreen(
     var showGifPrompt by remember { mutableStateOf(false) }
     var showCamera by remember { mutableStateOf(false) }
     var isRecordingVideo by remember { mutableStateOf(false) }
+    var fullscreenImage by remember { mutableStateOf<String?>(null) }
+    var fullscreenVideo by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val captureManager = remember { MediaCaptureManager(context) }
@@ -271,6 +273,7 @@ fun ChatThreadScreen(
 
         LazyColumn(
             state = listState,
+            contentPadding = PaddingValues(bottom = 120.dp),
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -382,6 +385,7 @@ fun ChatThreadScreen(
                                                             .fillMaxWidth()
                                                             .heightIn(max = 200.dp)
                                                             .clip(RoundedCornerShape(8.dp))
+                                                            .clickable { fullscreenImage = localFile.absolutePath }
                                                     )
                                                 } else if (msg.mediaType?.startsWith("video") == true) {
                                                     var isPlaying by remember { mutableStateOf(false) }
@@ -398,7 +402,7 @@ fun ChatThreadScreen(
                                                             Box(
                                                                 modifier = Modifier
                                                                     .fillMaxSize()
-                                                                    .clickable { isPlaying = true },
+                                                                    .clickable { fullscreenVideo = localFile.absolutePath },
                                                                 contentAlignment = Alignment.Center
                                                             ) {
                                                                 coil.compose.AsyncImage(
@@ -658,6 +662,28 @@ fun ChatThreadScreen(
                     .background(AccentGreen)
             ) {
                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = PrimaryBlack)
+            }
+        }
+
+        // ── Fullscreen Media Overlays ──
+        fullscreenImage?.let { path ->
+            com.noslop.app.ui.ZoomableImageDialog(url = "file://$path", onDismiss = { fullscreenImage = null })
+        }
+        
+        fullscreenVideo?.let { path ->
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { fullscreenVideo = null }, 
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    VideoPlayer(url = "file://$path", isVisible = true)
+                    IconButton(
+                        onClick = { fullscreenVideo = null }, 
+                        modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color.Black.copy(alpha=0.5f), androidx.compose.foundation.shape.CircleShape)
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription="Close", tint=Color.White)
+                    }
+                }
             }
         }
 

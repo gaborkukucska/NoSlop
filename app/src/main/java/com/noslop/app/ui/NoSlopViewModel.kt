@@ -266,15 +266,26 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         loadMoreFeedItems()
                     }
                 } else {
+                    val currentIds = _unifiedFeed.value.map { it.id }.toSet()
+                    val topTimestamp = _unifiedFeed.value.firstOrNull()?.timestamp ?: 0L
+                    
+                    val newFeeds = feeds.filter { it.id !in currentIds && it.publishedAt > topTimestamp }
+                    val newMeshes = meshes.filter { it.id !in currentIds && it.timestamp > topTimestamp }
+
                     val updatedFeed = _unifiedFeed.value.map { currentItem ->
                         when (currentItem) {
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
                             is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id }?.let { UnifiedItem.Mesh(it) } ?: currentItem
                         }
-                    }.toList()
+                    }.toMutableList()
+                    
+                    if (newFeeds.isNotEmpty() || newMeshes.isNotEmpty()) {
+                        val newItems = newFeeds.map { UnifiedItem.Feed(it) } + newMeshes.map { UnifiedItem.Mesh(it) }
+                        updatedFeed.addAll(0, newItems.sortedByDescending { it.timestamp })
+                    }
                     
                     if (!isSearchModeActive) {
-                        cachedDefaultFeed = updatedFeed
+                        cachedDefaultFeed = updatedFeed.toList()
                     }
                     
                     _unifiedFeed.value = updatedFeed
@@ -303,7 +314,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearSearchAndRestoreFeed() {
-        if (_isRefreshingFeeds.value) return
+        // Removed `if (_isRefreshingFeeds.value) return` to fix the race condition where the feed doesn't clear
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
@@ -349,11 +360,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        if (!isSearchActive) {
-            if (filterMode != "Mesh" && localPubKey != null) {
-                unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
-            }
+        if (filterMode == "My Content" && localPubKey != null) {
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == localPubKey }
+            unseenFeeds = emptyList()
+        } else if (localPubKey != null) {
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
+        }
 
+        if (!isSearchActive) {
             if (filterMode == null || filterMode == "Live Feed" || 
                 filterMode == "Videos" || filterMode == "Audio" || 
                 filterMode == "Images" || filterMode == "Articles") {
@@ -389,7 +403,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     else -> false
                 }
             }
-            val specificMeshes = if (!isSpecificFilter || filterMode == "Mesh") unseenMeshes else emptyList()
+            val specificMeshes = if (!isSpecificFilter || filterMode == "Mesh" || filterMode == "My Content") unseenMeshes else emptyList()
             
             val batch = mutableListOf<UnifiedItem>()
             val needed = if (_unifiedFeed.value.isEmpty()) (if(isSearchActive) 5 else 2) else 5

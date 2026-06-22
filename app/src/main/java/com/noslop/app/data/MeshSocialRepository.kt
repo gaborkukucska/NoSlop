@@ -482,7 +482,8 @@ class MeshSocialRepository(
             timestamp = timestamp,
             signature = signature,
             mediaId = mediaMetadata?.id,
-            mediaType = mediaMetadata?.type
+            mediaType = mediaMetadata?.type,
+            mediaMetadata = mediaMetadata
         )
 
         val commentPay = com.noslop.app.mesh.CommentPayload(
@@ -627,9 +628,16 @@ class MeshSocialRepository(
         digest.doFinal(hash, 0)
         val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
 
+        val isNegative = reactionType in listOf("downvote", "angry", "sad")
+
         // Ensure anchor post exists locally and on mesh
         val existingCount = postDao.hasPost(anchorId)
         if (existingCount == 0) {
+            if (isNegative) {
+                Logger.info(TAG, "Negative reaction to clearnet item. Skipping mesh broadcast to prevent spam.")
+                return@withContext false
+            }
+            
             composeAndBroadcastPost(
                 content = "🔥 Shared Clearnet Post: ${item.title}",
                 clearnetUrl = clearnetUrl,

@@ -48,7 +48,8 @@ data class CommentData(
     val timestamp: Long,
     val signature: String,
     @SerializedName("media_id") val mediaId: String? = null,
-    @SerializedName("media_type") val mediaType: String? = null
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
 data class MediaMetadata(
@@ -222,7 +223,8 @@ data class CommentSyncData(
     val signature: String,
     @SerializedName("parent_comment_id") val parentCommentId: String? = null,
     @SerializedName("media_id") val mediaId: String? = null,
-    @SerializedName("media_type") val mediaType: String? = null
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
 data class ReactionSyncData(

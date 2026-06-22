@@ -121,3 +121,19 @@
 
 ### 7. Runtime Permissions & Final UI Polish
 *   **Audio Capture Runtime Check**: Fixed the final hurdle with silent videos. The camera launcher in `UnifiedFeedTab.kt` was bypassing the microphone runtime permission prompt if the camera permission was already granted (e.g., from earlier QR scanning). It now strictly enforces both `CAMERA` and `RECORD_AUDIO` checks before opening the video capture UI, triggering the OS prompt correctly and ensuring videos always have sound.
+
+### 9. Interaction, Media & Networking Fixes
+*   **Search Clear Race Condition**: Removed the `isRefreshingFeeds` guard in `clearSearchAndRestoreFeed()` so tapping the 'x' reliably clears the feed filters and instantly restores the user's scroll state.
+*   **Global GIF Support**: Injected Coil's `GifDecoder`/`ImageDecoder` factories into the custom `LocalImageLoader` provided by `UnifiedFeedTab`, instantly fixing static GIF rendering across the feed, DMs, and comments.
+*   **Mesh Broadcast Media URLs**: Fixed a bug where missing `originNode` declarations in mesh posts defaulted to the raw `PublicKey` instead of resolving the local peer's `onionAddress`. Videos now route correctly over Tor to the proxy service.
+*   **Comment Media Sync**: Added synthesized `MediaMetadata` extraction and explicitly bound it to `MediaManager.checkAndAutoDownload()` inside `CommentPacketHandler.kt` so media attached to comments actively syncs to receiving peers.
+*   **OkHttp Connection Leak**: Fixed a critical leak in `WikimediaApiClient.kt` where `response.body` was never closed on API read errors, ensuring connection pool integrity.
+
+### 10. Advanced UI, Filtering & Interaction Polish (2026-06-22)
+*   **DM Fullscreen Media**: Tapping images or videos in Direct Messages now opens a full-screen zoomable image dialog or a full-screen video player overlay.
+*   **Feed Video "Tap to Download"**: Mesh videos on the main feed now accurately check `MediaManager.isMediaDownloaded()`. If absent, they display a rich "Tap to Download" overlay with a live progress indicator, preventing black screens.
+*   **Clearnet Engagement Shadow-blocking**: Negative reactions (downvote, angry, sad) on unsynced clearnet items are now intercepted. The action is dropped locally and blocks the item from being broadcasted to the mesh to prevent spamming peers with disliked content.
+*   **Rich Share Modal**: Tapping "Share" on a clearnet item now opens the main Compose Modal instead of a basic alert. The shared item is embedded as a rich preview attachment, allowing the user to type custom context before broadcasting.
+*   **"My Content" Filter & Feed Isolation**: The user's own mesh broadcasts are now globally excluded from the Live Feed, Video, Audio, and Image filters. They are securely isolated into a dedicated "My Content" toggle in the Search & Filter modal.
+*   **Reaction Menu UX**: Added `120.dp` bottom padding to `LazyColumn`s in Chat and Comment sheets, ensuring long-press reaction popups are never clipped or hidden beneath the bottom input bar.
+*   **Search Clear UX**: Fixed a race condition in `NoSlopViewModel.clearSearchAndRestoreFeed()` that prevented the feed from restoring its state when clearing a search query.

@@ -75,6 +75,7 @@ fun CommentsBottomSheet(
             
             LazyColumn(
                 modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (comments.isEmpty()) {

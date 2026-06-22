@@ -48,6 +48,7 @@ class PostPacketHandler(
             }
         }
 
+        val resolvedOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
         val meshPost = MeshPost(
             id = postPay.id,
             authorPublicKeyB64 = postPay.authorPublicKey,
@@ -57,7 +58,7 @@ class PostPacketHandler(
             content = postPay.content,
             timestamp = postPay.timestamp,
             signature = postPay.signature ?: "",
-            mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
+            mediaUrl = postPay.mediaId?.let { "noslop://$resolvedOnion/$it" },
             mediaType = postPay.mediaMetadata?.type,
             gossipCount = 1,
             privacy = postPay.privacy,
