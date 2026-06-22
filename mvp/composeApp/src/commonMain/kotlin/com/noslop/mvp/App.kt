@@ -354,6 +354,7 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
 /** Article reader: paginated text + hero image, for items with no playable media. */
 @Composable
 private fun ArticleView(item: FeedItem) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     SegmentedArticleReader(
         content = stripFeedHtml(item.fullContent ?: item.excerpt ?: item.title),
         title = stripFeedHtml(item.title),
@@ -361,6 +362,7 @@ private fun ArticleView(item: FeedItem) {
         sourceLabel = sourceLabel(item),
         thumbnailUrl = item.thumbnailUrl,
         articleUrl = item.url,
+        onOpenArticle = { url -> runCatching { uriHandler.openUri(url) } },   // read the full article in the browser
         imageContent = { u, cs, m -> NetworkImage(u, cs, m) },
     )
 }
@@ -389,6 +391,12 @@ private fun stripFeedHtml(s: String): String =
     s.replace(Regex("<[^>]*>"), " ")
         .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
         .replace("&#39;", "'").replace("&apos;", "'").replace("&#x27;", "'").replace("&#x2F;", "/").replace("&nbsp;", " ")
+        // Common named entities that show up raw in feeds (smart quotes, dashes, ellipsis).
+        .replace("&rsquo;", "’").replace("&lsquo;", "‘").replace("&rdquo;", "”").replace("&ldquo;", "“")
+        .replace("&mdash;", "—").replace("&ndash;", "–").replace("&hellip;", "…").replace("&trade;", "™")
+        // Numeric entities (&#8217; etc.) — the "encoding errors" in article text.
+        .replace(Regex("&#x([0-9a-fA-F]+);")) { m -> m.groupValues[1].toInt(16).let { if (it in 0..0xFFFF) it.toChar().toString() else m.value } }
+        .replace(Regex("&#([0-9]+);")) { m -> m.groupValues[1].toInt().let { if (it in 0..0xFFFF) it.toChar().toString() else m.value } }
         .replace(Regex("\\s+"), " ").trim()
 
 /**
