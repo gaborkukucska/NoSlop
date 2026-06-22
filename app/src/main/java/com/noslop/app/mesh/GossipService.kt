@@ -129,15 +129,19 @@ object GossipService {
         }
 
         // 3. Rate limit: 20 packets per sender per 10-second window
-        val now = System.currentTimeMillis()
-        val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
-        synchronized(limitList) {
-            limitList.removeAll { now - it > 10000 }
-            if (limitList.size >= 20) {
-                Logger.warn("FIREWALL", "Rate limit exceeded for $senderId. Dropping packet $packetId.")
-                return false
+        // Whitelist media streams to prevent chunk blocking during heavy transfers
+        val isMediaPacket = packet.type.startsWith("MEDIA_")
+        if (!isMediaPacket) {
+            val now = System.currentTimeMillis()
+            val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
+            synchronized(limitList) {
+                limitList.removeAll { now - it > 10000 }
+                if (limitList.size >= 20) {
+                    Logger.warn("FIREWALL", "Rate limit exceeded for $senderId. Dropping packet $packetId.")
+                    return false
+                }
+                limitList.add(now)
             }
-            limitList.add(now)
         }
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay

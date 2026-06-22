@@ -58,10 +58,58 @@ object MediaManager {
             while (isActive) {
                 maintainDownloads()
                 updateWakeLock()
+                enforceStorageLimits()
                 delay(5000)
             }
         }
         Logger.info(TAG, "MediaManager initialized successfully")
+    }
+
+    private var lastStorageCheck = 0L
+
+    private fun enforceStorageLimits() {
+        val now = System.currentTimeMillis()
+        if (now - lastStorageCheck < 3600_000L) return // Run once per hour
+        lastStorageCheck = now
+        
+        val repo = repository ?: return
+        val maxBytes = 2L * 1024 * 1024 * 1024 // 2 GB limit
+        val maxAgeMs = 5L * 24 * 60 * 60 * 1000 // 5 days retention
+        
+        try {
+            val possibleDirs = listOf(
+                Environment.DIRECTORY_PICTURES,
+                Environment.DIRECTORY_MOVIES,
+                Environment.DIRECTORY_MUSIC,
+                Environment.DIRECTORY_DOWNLOADS
+            ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(repo.context.filesDir, "NoSlop")
+            
+            val allFiles = possibleDirs.filter { it.exists() }.flatMap { it.listFiles()?.toList() ?: emptyList() }
+            var currentSize = 0L
+            val sortedFiles = allFiles.sortedBy { it.lastModified() }
+            
+            for (file in sortedFiles) {
+                if (now - file.lastModified() > maxAgeMs) {
+                    Logger.info(TAG, "LRU Cache: Purging old media > 5 days: ${file.name}")
+                    file.delete()
+                    continue
+                }
+                currentSize += file.length()
+            }
+            
+            // If still over 2GB, delete oldest
+            val remainingFiles = possibleDirs.filter { it.exists() }.flatMap { it.listFiles()?.toList() ?: emptyList() }.sortedBy { it.lastModified() }
+            for (file in remainingFiles) {
+                if (currentSize <= maxBytes) break
+                val len = file.length()
+                if (file.delete()) {
+                    Logger.info(TAG, "LRU Cache: Purging media to stay under 2GB limit: ${file.name}")
+                    currentSize -= len
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to enforce storage limits: ${e.message}")
+        }
     }
 
     private fun updateWakeLock() {
@@ -183,7 +231,7 @@ object MediaManager {
         var windowSize = 4.0
         var ssthresh = 128.0
         var rttEma = 30000L
-        var currentTimeoutMs = 120000L // 120s initial timeout for Tor
+        var currentTimeoutMs = 30000L // 30s initial timeout for Tor (faster retry/recovery)
     }
 
     private fun maintainDownloads() {

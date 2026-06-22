@@ -507,9 +507,15 @@ private fun ExoVideoPlayer(
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            hasError = true
-                            errorMessage = error.message ?: "Playback failed"
-                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                            val cause = error.cause
+                            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
+                                Logger.warn("VIDEO", "403 Forbidden detected for $url. Auto-retrying resolution...")
+                                onRetry()
+                            } else {
+                                hasError = true
+                                errorMessage = error.message ?: "Playback failed"
+                                Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                            }
                         }
                     })
                 }

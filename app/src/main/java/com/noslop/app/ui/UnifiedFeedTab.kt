@@ -38,8 +38,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.noslop.app.ui.components.*
 import com.noslop.app.ui.tabs.*
-import com.noslop.app.ui.components.*
-import com.noslop.app.ui.tabs.*
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.*
 import com.noslop.app.debug.Logger
@@ -111,7 +109,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
-
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
 
     // ─── Landscape auto-hide UI ───
@@ -238,7 +235,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 )
                 
-                // Spacer for the middle FAB or Notifications Icon
                 if (selectedTab == 0) {
                     Spacer(modifier = Modifier.weight(1f))
                 } else {
@@ -328,7 +324,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 detectTapGestures {
                                     if (!uiVisible) {
                                         uiVisible = true
-                                        // Re-arm the auto-hide timer
                                         hideJob?.cancel()
                                         hideJob = coroutineScope.launch {
                                             kotlinx.coroutines.delay(1000L)
@@ -353,15 +348,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         rightSlideOffset = rightSlide
                     )
                 }
-                if (selectedTab == 1) {
-                    DMsTab(viewModel)
-                }
-                if (selectedTab == 2) {
-                    HaiNetTab()
-                }
-                if (selectedTab == 3) {
-                    SettingsTab(viewModel)
-                }
+                if (selectedTab == 1) DMsTab(viewModel)
+                if (selectedTab == 2) HaiNetTab()
+                if (selectedTab == 3) SettingsTab(viewModel)
                 if (selectedTab == 4) {
                     com.noslop.app.ui.tabs.NotificationsScreen(
                         viewModel = viewModel,
@@ -385,43 +374,23 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             onDismissRequest = { viewModel.rejectHandshake() },
             containerColor = SurfaceDark,
             title = {
-                Text(
-                    text = "Accept Handshake?",
-                    color = TextLight,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Accept Handshake?", color = TextLight, fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
-                    Text(
-                        text = "Incoming mesh connection request from:",
-                        color = TextMuted,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Text("Incoming mesh connection request from:", color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "${peer.handle}.${peer.tripcode}",
-                        color = AccentGreen,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 16.sp
-                    )
+                    Text("${peer.handle}.${peer.tripcode}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                 }
             },
             confirmButton = {
                 Button(
                     onClick = { viewModel.acceptHandshake(peer) },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) {
-                    Text("Accept", fontWeight = FontWeight.Bold)
-                }
+                ) { Text("Accept", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { viewModel.rejectHandshake() }
-                ) {
-                    Text("Reject", color = DestructiveRed)
-                }
+                TextButton(onClick = { viewModel.rejectHandshake() }) { Text("Reject", color = DestructiveRed) }
             }
         )
     }
@@ -431,8 +400,6 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 // ==========================================
 // UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
-
-// (UnifiedItem definition moved to NoSlopViewModel)
 
 @Composable
 fun UnifiedFeedTab(
@@ -455,15 +422,8 @@ fun UnifiedFeedTab(
     var showShareDialog by remember { mutableStateOf<UnifiedItem?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
 
-    // Tracks whether the currently displayed feed contains items injected by
-    // searchAndCreateCustomFeed(). Used to know whether clearing the search box
-    // needs to also clear those injected items via clearSearchAndRestoreFeed().
     var searchResultsActive by remember { mutableStateOf(false) }
 
-    // Applies a new search query, undoing any active custom search results
-    // when the query is cleared back to blank. This prevents a previously
-    // searched term from continuing to influence the aggregated feed after
-    // the search box is cleared.
     val applySearchQuery: (String) -> Unit = { newQuery ->
         if (newQuery.isBlank() && searchResultsActive) {
             searchResultsActive = false
@@ -472,7 +432,6 @@ fun UnifiedFeedTab(
         searchQuery = newQuery
     }
 
-    // Active filter label for the floating indicator
     val activeFilterLabel = remember(filterMode, searchQuery) {
         buildString {
             if (filterMode != "Live Feed") append(filterMode)
@@ -483,7 +442,6 @@ fun UnifiedFeedTab(
         }
     }
 
-    // Filter the pre-computed appended list
     val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
         unifiedFeed.filter { item ->
             val matchesMode = when (filterMode) {
@@ -495,7 +453,7 @@ fun UnifiedFeedTab(
                 "Audio" -> item is UnifiedItem.Feed && item.item.mediaType == "audio"
                 "Articles" -> item is UnifiedItem.Feed && item.item.mediaType.isNullOrEmpty()
                 "Mesh" -> item is UnifiedItem.Mesh
-                "HUBs" -> false // Placeholder for HUBs tab content filtering if needed
+                "HUBs" -> false 
                 else -> true
             }
 
@@ -503,8 +461,6 @@ fun UnifiedFeedTab(
                 val q = searchQuery.lowercase()
                 when (item) {
                     is UnifiedItem.Feed -> {
-                        // If it's an API source and NOT saved, it was just fetched explicitly for this search query.
-                        // We must let it through, even if the keyword isn't perfectly in the title/excerpt.
                         if (item.item.apiSource != null && !item.item.isSaved) true
                         else item.item.title.lowercase().contains(q) || item.item.excerpt?.lowercase()?.contains(q) == true
                     }
@@ -518,11 +474,10 @@ fun UnifiedFeedTab(
 
     val pagerState = rememberPagerState { unifiedItems.size }
     val preWarmedUrls = remember { mutableSetOf<String>() }
+    val preloadScope = rememberCoroutineScope()
 
     LaunchedEffect(filterMode, searchQuery) {
-        // Sync search query state to the ViewModel so it can bypass exclusions
         viewModel.updateActiveSearchQuery(searchQuery)
-        
         if (unifiedItems.isNotEmpty()) {
             pagerState.scrollToPage(0)
         }
@@ -548,7 +503,6 @@ fun UnifiedFeedTab(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Full-screen content — no header taking space
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -565,15 +519,14 @@ fun UnifiedFeedTab(
                 beyondViewportPageCount = 2,
                 key = { index -> unifiedItems[index].id }
             ) { index ->
-                // Trigger infinite load when nearing the end
+                
+                // Trigger infinite load strictly when nearing the bottom of the list
                 if (index >= unifiedItems.size - 3) {
                     LaunchedEffect(index) {
                         viewModel.loadMoreFeedItems(filterMode)
                     }
                 }
 
-                // Track 5-second dwell for viewed history (mark item as read
-                // immediately, mark as "viewed" if the user stays 5s+).
                 LaunchedEffect(pagerState.settledPage, filterMode) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
@@ -581,43 +534,29 @@ fun UnifiedFeedTab(
                             viewModel.markItemReadState(currentItem.item.id, true)
                         }
 
-                        // After 5 seconds of dwell, mark the item as viewed in history.
-                        // This LaunchedEffect is keyed on settledPage, so when the user
-                        // swipes to a new page the delay is automatically cancelled.
                         kotlinx.coroutines.delay(5000L)
                         viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
                     }
                 }
 
-                // Preload upcoming videos/audio as soon as the settled page changes —
-                // no dwell delay, so resolution/buffering starts the instant the user
-                // lands on a page, not 5s later. Covers the next 2 items ahead in
-                // every filter mode. PreloadManager.preWarm() handles both direct
-                // media (buffers an ExoPlayer) and YouTube/Vimeo/archive.org (resolves
-                // the stream source so it's cached by the time the card is visible).
                 LaunchedEffect(pagerState.settledPage, filterMode) {
                     if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
-
                     val preloadAheadCount = 2
                     val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
-
                     for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
                         val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
                         if (preWarmedUrls.add(preloadUrl)) {
-                            launch { PreloadManager.preWarm(context, preloadUrl) }
+                            // Launch in the broader scope so fast scrolling doesn't cancel the preload!
+                            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
                         }
                     }
                 }
 
-                // Swipe-away detection: track items the user swiped past quickly (<5s)
                 LaunchedEffect(Unit) {
                     var previousPage = -1
                     var pageEnteredAt = 0L
-
                     snapshotFlow { pagerState.settledPage }.collect { currentPage ->
                         val now = System.currentTimeMillis()
-
-                        // Record swipe for the page we just left (if dwell < 5s = swiped away)
                         if (previousPage >= 0 && previousPage in unifiedItems.indices) {
                             val dwellMs = now - pageEnteredAt
                             if (dwellMs < 5000L) {
@@ -625,7 +564,6 @@ fun UnifiedFeedTab(
                                 viewModel.recordItemSwiped(leftItem.id)
                             }
                         }
-
                         previousPage = currentPage
                         pageEnteredAt = now
                     }
@@ -671,7 +609,6 @@ fun UnifiedFeedTab(
                 .graphicsLayer { translationY = topSlideOffset }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Show active filter indicator chip if any filter is active
                 if (activeFilterLabel.isNotBlank()) {
                     Box(
                         modifier = Modifier
@@ -681,13 +618,7 @@ fun UnifiedFeedTab(
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = activeFilterLabel,
-                                color = AccentGreen,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
+                            Text(activeFilterLabel, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 Icons.Default.Close,
@@ -704,25 +635,12 @@ fun UnifiedFeedTab(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                 }
-                
 
-                
-                // The main floating search button
                 IconButton(
                     onClick = { showSearchModal = true },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            SurfaceDark.copy(alpha = 0.6f),
-                            RoundedCornerShape(50)
-                        )
+                    modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search & Filter",
-                        tint = TextLight.copy(alpha = 0.85f),
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(Icons.Default.Search, contentDescription = "Search & Filter", tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -736,39 +654,22 @@ fun UnifiedFeedTab(
                 .graphicsLayer { translationY = topSlideOffset }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Notifications button
                 IconButton(
                     onClick = { onTabChange(4) },
-                    modifier = Modifier
-                        .size(40.dp)
-                        .background(
-                            SurfaceDark.copy(alpha = 0.6f),
-                            RoundedCornerShape(50)
-                        )
+                    modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
                     BadgedBox(
                         badge = {
-                            if (unreadNotifs > 0) {
-                                Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
-                            }
+                            if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
                         }
                     ) {
-                        Icon(
-                            Icons.Default.Notifications,
-                            contentDescription = "Notifications",
-                            tint = TextLight.copy(alpha = 0.85f),
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Icon(Icons.Default.Notifications, contentDescription = "Notifications", tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
                     }
                 }
 
                 if (isRefreshing) {
                     Spacer(modifier = Modifier.width(8.dp))
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(20.dp),
-                        color = AccentGreen,
-                        strokeWidth = 2.dp
-                    )
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
                 }
             }
         }
@@ -782,15 +683,9 @@ fun UnifiedFeedTab(
         AlertDialog(
             onDismissRequest = { showSearchModal = false },
             containerColor = SurfaceDark,
-            title = {
-                Text("Search & Filter", color = AccentGreen, fontWeight = FontWeight.Bold)
-            },
+            title = { Text("Search & Filter", color = AccentGreen, fontWeight = FontWeight.Bold) },
             text = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    // ── Keyword search ──
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     OutlinedTextField(
                         value = localSearchQuery,
                         onValueChange = { localSearchQuery = it },
@@ -798,23 +693,14 @@ fun UnifiedFeedTab(
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                         trailingIcon = {
                             if (localSearchQuery.isNotBlank()) {
-                                IconButton(onClick = { localSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted)
-                                }
+                                IconButton(onClick = { localSearchQuery = "" }) { Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted) }
                             }
                         },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen,
-                            unfocusedBorderColor = BorderSubtle,
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight
-                        ),
+                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, focusedTextColor = TextLight, unfocusedTextColor = TextLight),
                         shape = RoundedCornerShape(12.dp),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                            imeAction = androidx.compose.ui.text.input.ImeAction.Search
-                        ),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                             onSearch = {
                                 if (localSearchQuery.isNotBlank()) {
@@ -829,95 +715,48 @@ fun UnifiedFeedTab(
                         )
                     )
 
-                    // ── Content type filters ──
                     Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    
-                    val contentTypes = listOf(
-                        "Live Feed" to Icons.Default.PlayArrow,
-                        "Videos" to Icons.Default.PlayArrow,
-                        "Images" to Icons.Default.Image,
-                        "Audio" to Icons.Default.MusicNote,
-                        "Articles" to Icons.Default.Article,
-                        "Mesh" to Icons.Default.Hub
-                    )
-                    
-                    // Grid of content type chips (2 columns)
+                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         contentTypes.chunked(2).forEach { row ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 row.forEach { (mode, icon) ->
                                     val selected = localFilterMode == mode
                                     Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack)
-                                            .clickable { localFilterMode = mode }
-                                            .then(
-                                                if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp))
-                                                else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                                            )
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = mode }
+                                            .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(icon, contentDescription = null, tint = if (selected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                mode,
-                                                color = if (selected) AccentGreen else TextLight,
-                                                fontSize = 13.sp,
-                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                            )
+                                            Text(mode, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                         }
                                     }
                                 }
-                                // Pad last row if odd
                                 if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
 
-                    // ── Lists section ──
                     Text("Lists", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("History" to Icons.Default.History, "Liked" to Icons.Default.Favorite).forEach { (mode, icon) ->
                             val selected = localFilterMode == mode
                             Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack)
-                                    .clickable { localFilterMode = mode }
-                                    .then(
-                                        if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp))
-                                        else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = mode }
+                                    .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(icon, contentDescription = null, tint = if (selected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        mode,
-                                        color = if (selected) AccentGreen else TextLight,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
-                                    )
+                                    Text(mode, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                 }
                             }
                         }
                     }
 
-                    // ── Online search button ──
                     if (localSearchQuery.isNotBlank()) {
                         Button(
                             onClick = {
@@ -929,8 +768,7 @@ fun UnifiedFeedTab(
                                 showSearchModal = false
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            modifier = Modifier.fillMaxWidth().height(44.dp),
-                            shape = RoundedCornerShape(12.dp)
+                            modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
@@ -938,15 +776,9 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    // ── Refresh button ──
                     OutlinedButton(
-                        onClick = {
-                            viewModel.forceResetFeed()
-                            showSearchModal = false
-                        },
-                        modifier = Modifier.fillMaxWidth().height(40.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.dp, AccentGreen)
+                        onClick = { viewModel.forceResetFeed(); showSearchModal = false },
+                        modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, AccentGreen)
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
@@ -956,36 +788,20 @@ fun UnifiedFeedTab(
             },
             confirmButton = {
                 Button(
-                    onClick = {
-                        applySearchQuery(localSearchQuery)
-                        filterMode = localFilterMode
-                        showSearchModal = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text("Apply", fontWeight = FontWeight.Bold)
-                }
+                    onClick = { applySearchQuery(localSearchQuery); filterMode = localFilterMode; showSearchModal = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack), shape = RoundedCornerShape(8.dp)
+                ) { Text("Apply", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    // Reset everything
-                    applySearchQuery("")
-                    filterMode = "Live Feed"
-                    showSearchModal = false
-                }) {
-                    Text("Clear All", color = TextMuted)
-                }
+                TextButton(onClick = { applySearchQuery(""); filterMode = "Live Feed"; showSearchModal = false }) { Text("Clear All", color = TextMuted) }
             }
         )
     }
 
-    // Compose Mesh Post Dialog
     if (showComposeDialog) {
         var postContent by remember { mutableStateOf("") }
         var selectedPrivacy by remember { mutableStateOf("public") }
         var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
-        
         val contextWrapper = LocalContext.current
         val captureManager = remember { com.noslop.app.mesh.MediaCaptureManager(contextWrapper) }
         var showCamera by remember { mutableStateOf(false) }
@@ -993,21 +809,14 @@ fun UnifiedFeedTab(
 
         val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri != null) {
-                // Copy selected file to private storage
                 try {
                     val contentResolver = contextWrapper.contentResolver
                     val mimeType = contentResolver.getType(uri)
                     val ext = if (mimeType?.contains("video") == true) ".mp4" else ".jpg"
                     val tempFile = java.io.File(contextWrapper.cacheDir, "mesh_attach_${System.currentTimeMillis()}$ext")
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        tempFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    }
+                    contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                     attachedFile = tempFile
-                } catch (e: Exception) {
-                    Logger.error("MAIN", "Failed to copy attached file", e.message)
-                }
+                } catch (e: Exception) { Logger.error("MAIN", "Failed to copy attached file", e.message) }
             }
         }
 
@@ -1015,62 +824,25 @@ fun UnifiedFeedTab(
             Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
                 val previewView = remember { androidx.camera.view.PreviewView(contextWrapper) }
                 val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-                
                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-                
-                LaunchedEffect(Unit) {
-                    captureManager.startCamera(lifecycleOwner, previewView) {}
-                }
+                LaunchedEffect(Unit) { captureManager.startCamera(lifecycleOwner, previewView) {} }
 
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
-                    horizontalArrangement = Arrangement.spacedBy(20.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(
-                        onClick = { 
-                            captureManager.takePhoto { file -> 
-                                attachedFile = file
-                                showCamera = false
-                            }
-                        },
-                        modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))
-                    ) {
-                        Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack)
-                    }
-
+                    IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack) }
                     IconButton(
                         onClick = {
-                            if (isRecordingVideo) {
-                                captureManager.stopVideoRecording()
-                                isRecordingVideo = false
-                                showCamera = false
-                            } else {
-                                captureManager.startVideoRecording { file ->
-                                    attachedFile = file
-                                }
-                                isRecordingVideo = true
-                            }
+                            if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
+                            else { captureManager.startVideoRecording { file -> attachedFile = file }; isRecordingVideo = true }
                         },
                         modifier = Modifier.size(70.dp).background(if (isRecordingVideo) DestructiveRed else SurfaceDark, RoundedCornerShape(50))
-                    ) {
-                        Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) PrimaryBlack else TextLight)
-                    }
+                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) PrimaryBlack else TextLight) }
                     
                     if (!isRecordingVideo) {
-                        IconButton(
-                            onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} },
-                            modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
-                        ) {
-                            Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight)
-                        }
-                        
-                        IconButton(
-                            onClick = { showCamera = false },
-                            modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
-                        }
+                        IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
+                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight) }
                     }
                 }
             }
@@ -1078,75 +850,40 @@ fun UnifiedFeedTab(
 
         if (!showCamera) {
             AlertDialog(
-                onDismissRequest = onComposeDismiss,
-                containerColor = SurfaceDark,
+                onDismissRequest = onComposeDismiss, containerColor = SurfaceDark,
                 title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
                         OutlinedTextField(
-                            value = postContent,
-                            onValueChange = { postContent = it },
-                            placeholder = { Text("What's on your mind?") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                                focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                            ),
+                            value = postContent, onValueChange = { postContent = it }, placeholder = { Text("What's on your mind?") },
+                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, focusedTextColor = TextLight, unfocusedTextColor = TextLight),
                             modifier = Modifier.fillMaxWidth().height(120.dp)
                         )
-                        
                         if (attachedFile != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp)
-                                IconButton(onClick = { attachedFile = null }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed)
-                                }
+                                IconButton(onClick = { attachedFile = null }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed) }
                             }
                         }
-
                         Spacer(modifier = Modifier.height(16.dp))
-                        
                         Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
-                                if (results[Manifest.permission.CAMERA] == true) {
-                                    showCamera = true
-                                }
-                            }
-                            
+                            val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results -> if (results[Manifest.permission.CAMERA] == true) showCamera = true }
                             IconButton(onClick = { 
                                 val hasCamera = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 val hasAudio = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                if (hasCamera && hasAudio) {
-                                    showCamera = true
-                                } else {
-                                    permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
-                                }
-                            }) {
-                                Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen)
-                            }
-                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
-                                Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen)
-                            }
+                                if (hasCamera && hasAudio) showCamera = true else permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                            }) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen) }
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) { Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen) }
                         }
-                        
                         Spacer(modifier = Modifier.height(16.dp))
-                        
                         Text("Privacy", color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("public", "friends").forEach { priv ->
-                                FilterChip(
-                                    selected = selectedPrivacy == priv,
-                                    onClick = { selectedPrivacy = priv },
-                                    label = { Text(priv.replaceFirstChar { it.uppercase() }) },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = AccentGreen,
-                                        selectedLabelColor = PrimaryBlack,
-                                        labelColor = TextMuted
-                                    )
-                                )
+                                FilterChip(selected = selectedPrivacy == priv, onClick = { selectedPrivacy = priv }, label = { Text(priv.replaceFirstChar { it.uppercase() }) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted))
                             }
                         }
                     }
@@ -1158,100 +895,45 @@ fun UnifiedFeedTab(
                                 val type = if (file.name.endsWith(".jpg")) "image" else "video"
                                 val id = file.name
                                 com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
-                                com.noslop.app.mesh.MediaMetadata(
-                                    id = id,
-                                    type = type,
-                                    mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4",
-                                    size = file.length(),
-                                    chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
-                                    originNode = viewModel.localKeys.value?.onionAddress,
-                                    ownerId = viewModel.localKeys.value?.publicKeyB64,
-                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
-                                )
+                                com.noslop.app.mesh.MediaMetadata(id = id, type = type, mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4", size = file.length(), chunkCount = (file.length() / (256 * 1024)).toInt() + 1, originNode = viewModel.localKeys.value?.onionAddress, ownerId = viewModel.localKeys.value?.publicKeyB64, thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type))
                             }
                             viewModel.composeAndBroadcastPost(postContent, mediaMetadata, selectedPrivacy)
                             onComposeDismiss()
                         },
-                        enabled = postContent.isNotBlank() || attachedFile != null,
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        enabled = postContent.isNotBlank() || attachedFile != null, colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
                 },
-                dismissButton = {
-                    TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) }
-                }
+                dismissButton = { TextButton(onClick = onComposeDismiss) { Text("Cancel", color = TextMuted) } }
             )
         }
     }
 
-    // Share to Mesh Dialog
     showShareDialog?.let { unified ->
-        val title = when(unified) {
-            is UnifiedItem.Feed -> unified.item.title
-            is UnifiedItem.Mesh -> "Mesh Post by ${unified.post.authorHandle}"
-        }
-        val author = when(unified) {
-            is UnifiedItem.Feed -> unified.item.author ?: "Unknown"
-            is UnifiedItem.Mesh -> "${unified.post.authorHandle}.${unified.post.authorTripcode}"
-        }
-        val url = when(unified) {
-            is UnifiedItem.Feed -> unified.item.url ?: ""
-            is UnifiedItem.Mesh -> ""
-        }
-        val thumbUrl = when(unified) {
-            is UnifiedItem.Feed -> unified.item.thumbnailUrl
-            is UnifiedItem.Mesh -> null
-        }
-        val mediaType = when(unified) {
-            is UnifiedItem.Feed -> unified.item.mediaType
-            is UnifiedItem.Mesh -> null
-        }
+        val title = when(unified) { is UnifiedItem.Feed -> unified.item.title; is UnifiedItem.Mesh -> "Mesh Post by ${unified.post.authorHandle}" }
+        val author = when(unified) { is UnifiedItem.Feed -> unified.item.author ?: "Unknown"; is UnifiedItem.Mesh -> "${unified.post.authorHandle}.${unified.post.authorTripcode}" }
+        val url = when(unified) { is UnifiedItem.Feed -> unified.item.url ?: ""; is UnifiedItem.Mesh -> "" }
+        val thumbUrl = when(unified) { is UnifiedItem.Feed -> unified.item.thumbnailUrl; is UnifiedItem.Mesh -> null }
+        val mediaType = when(unified) { is UnifiedItem.Feed -> unified.item.mediaType; is UnifiedItem.Mesh -> null }
 
         AlertDialog(
-            onDismissRequest = { showShareDialog = null },
-            containerColor = SurfaceDark,
+            onDismissRequest = { showShareDialog = null }, containerColor = SurfaceDark,
             title = { Text("Share to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Share this content to your decentralized mesh peers?", color = TextMuted, style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(author, color = AccentGreen, style = MaterialTheme.typography.labelSmall)
-                }
-            },
+            text = { Column { Text("Share this content to your decentralized mesh peers?", color = TextMuted, style = MaterialTheme.typography.bodySmall); Spacer(modifier = Modifier.height(12.dp)); Text(title, color = TextLight, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis); Text(author, color = AccentGreen, style = MaterialTheme.typography.labelSmall) } },
             confirmButton = {
                 Button(
                     onClick = {
-                        val shareText = if (url.isNotEmpty()) {
-                            "\uD83D\uDCE2 Shared Clearnet Post:\n$title\n— via NoSlop"
-                        } else {
-                            "\uD83D\uDCE2 Shared Mesh Post:\n$title\n— via NoSlop"
-                        }
-                        viewModel.composeAndBroadcastPost(
-                            content = shareText,
-                            clearnetUrl = if (url.isNotEmpty()) url else null,
-                            clearnetTitle = if (url.isNotEmpty()) title else null,
-                            clearnetThumbnailUrl = thumbUrl,
-                            clearnetMediaType = mediaType
-                        )
+                        val shareText = if (url.isNotEmpty()) "\uD83D\uDCE2 Shared Clearnet Post:\n$title\n— via NoSlop" else "\uD83D\uDCE2 Shared Mesh Post:\n$title\n— via NoSlop"
+                        viewModel.composeAndBroadcastPost(content = shareText, clearnetUrl = if (url.isNotEmpty()) url else null, clearnetTitle = if (url.isNotEmpty()) title else null, clearnetThumbnailUrl = thumbUrl, clearnetMediaType = mediaType)
                         showShareDialog = null
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) { Text("Share", fontWeight = FontWeight.Bold) }
             },
-            dismissButton = {
-                TextButton(onClick = { showShareDialog = null }) { Text("Cancel", color = TextMuted) }
-            }
+            dismissButton = { TextButton(onClick = { showShareDialog = null }) { Text("Cancel", color = TextMuted) } }
         )
     }
 }
 
-/**
- * Returns the raw media URL for [item] if it's something worth preloading
- * (video or audio). Unlike the old direct-only filter, this now includes
- * YouTube/Vimeo/archive.org URLs too — [PreloadManager.preWarm] performs the
- * async source-resolution step for those itself, so by the time the card
- * becomes visible the resolved source is already cached.
- */
 private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
     return when (item) {
         is UnifiedItem.Feed -> {
@@ -1259,28 +941,7 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
             if (item.item.mediaType == "video" || item.item.mediaType == "audio") mediaUrl else null
         }
         is UnifiedItem.Mesh -> {
-            if (item.post.mediaType == "video" || item.post.mediaType == "audio") {
-                resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl
-            } else null
+            if (item.post.mediaType == "video" || item.post.mediaType == "audio") resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl else null
         }
     }
-}
-
-/**
- * Returns true if [url] is a directly-streamable media file that ExoPlayer can
- * preload without any prior network resolution step.
- * YouTube, Vimeo, and other embed-based URLs are excluded — they need the async
- * stream-resolution pass that VideoPlayer performs on first render.
- */
-private fun isDirectlyPreloadable(url: String): Boolean {
-    if (url.contains("youtube") || url.contains("youtu.be") ||
-        url.contains("youtube-nocookie") || url.contains("vimeo.com") ||
-        url.contains("archive.org/embed") || url.contains("archive.org/details")) {
-        return false
-    }
-    val lower = url.lowercase()
-    return lower.endsWith(".mp4") || lower.endsWith(".m3u8") || lower.endsWith(".mkv") ||
-           lower.endsWith(".webm") || lower.endsWith(".mpd") || lower.endsWith(".mp3") ||
-           lower.endsWith(".m4a") || lower.endsWith(".ogg") || lower.endsWith(".flac") ||
-           lower.endsWith(".aac") || lower.contains("/download/") || lower.contains("127.0.0.1")
 }

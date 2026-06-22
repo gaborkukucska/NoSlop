@@ -29,23 +29,30 @@ class SyncPacketHandler(
         val syncPay = packet.getSyncRequestPayload() ?: return false
         val recentPosts = postDao.getPostsSince(syncPay.since)
         val postPayloads = recentPosts.map { post ->
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
                 id = post.id,
                 authorId = post.authorPublicKeyB64,
                 authorName = post.authorHandle,
                 authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
                 originNode = null,
                 content = post.content,
                 timestamp = post.timestamp,
                 signature = post.signature,
-                mediaId = post.mediaUrl,
-                mediaMetadata = if (post.mediaUrl != null) MediaMetadata(
-                    id = post.mediaUrl,
+                mediaId = rawMediaId,
+                mediaMetadata = if (rawMediaId != null) MediaMetadata(
+                    id = rawMediaId,
                     type = post.mediaType ?: "image",
                     mimeType = "application/octet-stream",
                     size = 0,
-                    chunkCount = 0
-                ) else null
+                    chunkCount = 0,
+                    thumbnailB64 = post.thumbnailB64
+                ) else null,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
             )
         }
 
@@ -147,6 +154,7 @@ class SyncPacketHandler(
         }
 
         val postPayloads = missingOrUpdatedPosts.map { post ->
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
                 id = post.id,
                 authorId = post.authorPublicKeyB64,
@@ -157,14 +165,19 @@ class SyncPacketHandler(
                 content = post.content,
                 timestamp = post.timestamp,
                 signature = post.signature,
-                mediaId = post.mediaUrl,
-                mediaMetadata = if (post.mediaUrl != null) MediaMetadata(
-                    id = post.mediaUrl,
+                mediaId = rawMediaId,
+                mediaMetadata = if (rawMediaId != null) MediaMetadata(
+                    id = rawMediaId,
                     type = post.mediaType ?: "image",
                     mimeType = "application/octet-stream",
                     size = 0,
-                    chunkCount = 0
-                ) else null
+                    chunkCount = 0,
+                    thumbnailB64 = post.thumbnailB64
+                ) else null,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
             )
         }
 

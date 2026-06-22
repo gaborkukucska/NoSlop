@@ -92,7 +92,7 @@ fun FullScreenMeshCard(
                         content = post.content,
                         title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
                         author = post.authorHandle,
-                        sourceLabel = "MESH",
+                        sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
                         thumbnailUrl = post.clearnetThumbnailUrl ?: resolvedUrl,
                         articleUrl = post.clearnetUrl
                     )
@@ -103,16 +103,16 @@ fun FullScreenMeshCard(
                 content = post.content,
                 title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
                 author = post.authorHandle,
-                sourceLabel = "MESH",
+                sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
                 thumbnailUrl = post.clearnetThumbnailUrl,
                 articleUrl = post.clearnetUrl
             )
         }
 
-        // 2. Overlaid author details and timestamp (Hidden for articles)
-        // Robust check: it's an article only if no media metadata exists AND it's not detected as media via URL
+        // 2. Overlaid author details and timestamp
+        // Always rendered now so native text mesh posts still display the beautiful Avatar/Tripcode overlay!
         val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetMediaType.isNullOrEmpty() && post.clearnetUrl == null
-        if (!isArticle) {
+        if (true) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()

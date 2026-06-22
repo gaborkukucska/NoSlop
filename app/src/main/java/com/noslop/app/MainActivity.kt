@@ -46,7 +46,22 @@ class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(Unit) {
                         if (showSplash) {
-                            kotlinx.coroutines.delay(3000)
+                            // 1. Artificial minimum delay for the sleek pulsing animation to be enjoyed
+                            kotlinx.coroutines.delay(1800)
+                            
+                            // 2. Wait up to an additional 3.5 seconds for the feed to populate from local cache/network
+                            try {
+                                kotlinx.coroutines.withTimeout(3500) {
+                                    viewModel.unifiedFeed.collect { items ->
+                                        if (items.isNotEmpty()) {
+                                            throw java.util.concurrent.CancellationException("Feed Loaded")
+                                        }
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                // Caught timeout or our deliberate success cancellation
+                            }
+                            
                             showSplash = false
                         }
                     }

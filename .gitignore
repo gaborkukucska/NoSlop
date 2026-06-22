@@ -54,3 +54,4 @@ tcls/
 .vscode/
 .temp/
 get-git.sh
+*.py
