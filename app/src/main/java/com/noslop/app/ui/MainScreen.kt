@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/MainScreen.kt
 package com.noslop.app.ui
 
 import androidx.compose.animation.*
@@ -56,19 +57,25 @@ fun FullScreenMeshCard(
                 resolvedUrl.substringAfter("id=").substringBefore("&").lowercase()
             } else resolvedUrl.lowercase()
 
-            val isVideoUrl = post.mediaType == "video" ||
+            // Robustness: Determine type based on metadata AND URL patterns
+            val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
+            val rawUrl = (post.mediaUrl ?: post.clearnetUrl ?: "").lowercase()
+            
+            val isVideoUrl = effectiveMediaType == "video" ||
                     idExtension.endsWith(".mp4") || idExtension.endsWith(".mkv") ||
                     idExtension.endsWith(".webm") || idExtension.endsWith(".mov") ||
-                    resolvedUrl.contains("youtube") || resolvedUrl.contains("vimeo") ||
-                    resolvedUrl.contains("archive.org/embed")
-            val isAudioUrl = post.mediaType == "audio" ||
+                    rawUrl.contains("youtube") || rawUrl.contains("youtu.be") || 
+                    rawUrl.contains("vimeo") || rawUrl.contains("archive.org/embed")
+            
+            val isAudioUrl = effectiveMediaType == "audio" ||
                     idExtension.endsWith(".mp3") || idExtension.endsWith(".wav") ||
                     idExtension.endsWith(".m4a") || idExtension.endsWith(".aac") ||
                     idExtension.endsWith(".ogg") || idExtension.endsWith(".flac")
-            val isImageUrl = post.mediaType == "image" ||
+            
+            val isImageUrl = effectiveMediaType == "image" ||
                     idExtension.endsWith(".jpg") || idExtension.endsWith(".jpeg") ||
                     idExtension.endsWith(".png") || idExtension.endsWith(".webp") ||
-                    idExtension.endsWith(".gif")
+                    idExtension.endsWith(".gif") || rawUrl.startsWith("noslop-gif://")
 
             when {
                 isVideoUrl -> {
@@ -83,9 +90,9 @@ fun FullScreenMeshCard(
                 else -> {
                     SegmentedArticleReader(
                         content = post.content,
-                        title = post.clearnetTitle ?: "Mesh Post",
+                        title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
                         author = post.authorHandle,
-                        sourceLabel = "MESH",
+                        sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
                         thumbnailUrl = post.clearnetThumbnailUrl ?: resolvedUrl,
                         articleUrl = post.clearnetUrl
                     )
@@ -94,17 +101,18 @@ fun FullScreenMeshCard(
         } else {
             SegmentedArticleReader(
                 content = post.content,
-                title = "Mesh Post",
+                title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
                 author = post.authorHandle,
-                sourceLabel = "MESH",
-                thumbnailUrl = null,
-                articleUrl = null
+                sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
+                thumbnailUrl = post.clearnetThumbnailUrl,
+                articleUrl = post.clearnetUrl
             )
         }
 
-        // 2. Overlaid author details and timestamp (Hidden for articles)
-        val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetUrl == null
-        if (!isArticle) {
+        // 2. Overlaid author details and timestamp
+        // Always rendered now so native text mesh posts still display the beautiful Avatar/Tripcode overlay!
+        val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetMediaType.isNullOrEmpty() && post.clearnetUrl == null
+        if (true) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -125,6 +133,7 @@ fun FullScreenMeshCard(
                                 .background(Color(0xFF6C3BF5).copy(alpha = 0.2f))
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
+                            // Rebranding: Mesh -> MESH
                             Text("MESH", color = Color(0xFFB388FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
@@ -191,7 +200,7 @@ fun FullScreenMeshCard(
         val votes by (viewModel?.getVotesForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
         val comments by (viewModel?.getCommentsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
 
-        // Content Health Logic
+        // Content Health Logic (Community moderation based on net feedback)
         val upvotes = votes.count { it.voteType == "upvote" }
         val downvotes = votes.count { it.voteType == "downvote" }
         val angryReactions = reactions.count { it.reactionType == "angry" }
@@ -263,18 +272,30 @@ fun FullScreenMeshCard(
     }
 }
 
+/**
+ * Resolves a media URL, handling clearnet, protocol-relative, and decentralized 
+ * noslop:// schemes correctly for consumption by the local proxy or system player.
+ */
 internal fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context): String? {
     if (mediaUrl == null) return null
     if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) return mediaUrl
-    // Protocol-relative URLs (e.g. "//player.vimeo.com/video/123?title=0&byline=0&portrait=0")
-    // come straight from some feeds' <media:content url="..."> elements. They're full
-    // clearnet URLs, just missing the scheme — treat them the same as an http(s) URL.
-    // Without this check they fell through to the mesh-proxy branch below, which wrapped
-    // them as "http://127.0.0.1:8080/stream?id=//player.vimeo.com/...". The proxy's naive
-    // query-string parser then split on the "=" and "&" *inside* the embedded Vimeo URL,
-    // never found a valid "id" param, and returned HTTP 400 — this was the cause of the
-    // intermittent Vimeo playback failures.
+    
+    // Legacy support: Old GIFs are stored as noslop-gif:// URI strings.
+    // Return these directly so the renderer can decode the Base64 content.
+    if (mediaUrl.startsWith("noslop-gif://")) return mediaUrl
+
+    // Protocol-relative URLs (e.g. "//vimeo.com/...")
     if (mediaUrl.startsWith("//")) return "https:$mediaUrl"
-    // Assuming mesh proxy
-    return "http://127.0.0.1:8080/stream?id=$mediaUrl"
+
+    // noslop:// URI resolution: Extract onion and ID
+    if (mediaUrl.startsWith("noslop://")) {
+        val path = mediaUrl.removePrefix("noslop://")
+        val onion = path.substringBefore("/")
+        val id = path.substringAfter("/")
+        return com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, id)
+    }
+
+    // Default fallback: Assuming mesh proxy for raw IDs or malformed URIs.
+    // We pass an empty onion if it's just a raw ID.
+    return com.noslop.app.mesh.MediaProxyService.buildProxyUrl("", mediaUrl)
 }

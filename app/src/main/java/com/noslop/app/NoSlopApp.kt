@@ -37,6 +37,13 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
             .okHttpClient { HttpClientProvider.clearnetClient }
+            .components {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
+            }
             .build()
     }
 
@@ -62,6 +69,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         repositoryScope.launch { updateChecker.loadCachedState() }
 
         com.noslop.app.util.NotificationHelper.createNotificationChannel(this)
+
+        // FIX: Ensure MediaManager is initialized immediately for existing sessions
+        // so that file copies and auto-downloads don't fail with "not initialized" errors.
+        com.noslop.app.mesh.MediaManager.initialize(repository)
 
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()

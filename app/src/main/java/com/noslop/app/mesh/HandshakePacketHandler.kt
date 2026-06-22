@@ -213,8 +213,16 @@ class HandshakePacketHandler(
         
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer != null) {
+            val wasOffline = !peer.isOnline
             peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
             Logger.debug(TAG, "ANNOUNCE_PEER received: ${peer.handle} is online")
+
+            // Catch-up sync: when a trusted peer transitions from offline → online,
+            // request their inventory so we receive any posts/comments/reactions we missed.
+            if (wasOffline && peer.isTrusted) {
+                Logger.info(TAG, "Trusted peer ${peer.handle} came online — requesting inventory sync")
+                repo.requestInventorySync(peer)
+            }
         }
         return true
     }

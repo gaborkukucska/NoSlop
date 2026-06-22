@@ -76,6 +76,7 @@ data class MeshPost(
     val clearnetUrl: String? = null,
     val clearnetTitle: String? = null,
     val clearnetThumbnailUrl: String? = null,
+    val clearnetMediaType: String? = null, // "video", "audio", "image", or null for article
     val isOrphaned: Boolean = false
 )
 
@@ -92,7 +93,8 @@ data class ChatMessage(
     val timestamp: Long = System.currentTimeMillis(),
     val isRead: Boolean = false,
     val mediaId: String? = null,
-    val mediaType: String? = null
+    val mediaType: String? = null,
+    val replyToMessageId: String? = null
 )
 
 @Entity(
@@ -108,7 +110,9 @@ data class MeshComment(
     val content: String,
     val timestamp: Long,
     val signature: String,
-    val parentCommentId: String? = null
+    val parentCommentId: String? = null,
+    val mediaId: String? = null,
+    val mediaType: String? = null
 )
 
 @Entity(tableName = "mesh_reactions")

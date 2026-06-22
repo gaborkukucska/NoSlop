@@ -307,9 +307,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         clearnetUrl: String? = null,
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
+        clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = meshSocialRepository.composeAndBroadcastPost(
-        content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, postIdOverride
+        content, mediaMetadata, privacy, clearnetUrl, clearnetTitle, clearnetThumbnailUrl, clearnetMediaType, postIdOverride
     )
 
     suspend fun handleIncomingPacket(packet: com.noslop.app.mesh.NetworkPacket): Boolean = 
@@ -338,6 +339,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun deletePeer(publicKeyB64: String) = meshSocialRepository.deletePeer(publicKeyB64)
 
+    suspend fun requestInventorySync(peer: Peer) = meshSocialRepository.requestInventorySync(peer)
+
     suspend fun markNotificationAsRead(id: String) = withContext(Dispatchers.IO) {
         db.notificationDao().markAsRead(id)
     }
@@ -357,16 +360,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
-        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
-    ): Boolean = meshSocialRepository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata)
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        replyToMessageId: String? = null
+    ): Boolean = meshSocialRepository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId)
 
     suspend fun markMessagesAsRead(peerPub: String) = meshSocialRepository.markMessagesAsRead(peerPub)
 
     suspend fun composeAndBroadcastComment(
         postId: String,
         content: String,
-        parentCommentId: String? = null
-    ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId)
+        parentCommentId: String? = null,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+    ): Boolean = meshSocialRepository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata)
 
     suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToMeshPost(postId, reactionType)

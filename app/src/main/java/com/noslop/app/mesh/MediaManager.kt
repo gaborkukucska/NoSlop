@@ -1,7 +1,9 @@
+// app/src/main/java/com/noslop/app/mesh/MediaManager.kt
 package com.noslop.app.mesh
 
 import android.content.Context
 import android.os.Environment
+import android.os.PowerManager
 import android.util.Base64
 import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.debug.Logger
@@ -23,6 +25,7 @@ object MediaManager {
     private var repository: NoSlopRepository? = null
 
     private val activeDownloads = ConcurrentHashMap<String, ActiveDownload>()
+    private var wakeLock: PowerManager.WakeLock? = null
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val downloadProgress = _downloadProgress.asStateFlow()
 
@@ -44,20 +47,86 @@ object MediaManager {
     }
 
     fun initialize(repo: NoSlopRepository) {
+        if (this.repository != null) return // Already initialized
         this.repository = repo
+        
+        val powerManager = repo.context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NoSlop::MediaTransfer")
+        
         // Start maintenance loop
         scope.launch {
             while (isActive) {
                 maintainDownloads()
+                updateWakeLock()
+                enforceStorageLimits()
                 delay(5000)
             }
+        }
+        Logger.info(TAG, "MediaManager initialized successfully")
+    }
+
+    private var lastStorageCheck = 0L
+
+    private fun enforceStorageLimits() {
+        val now = System.currentTimeMillis()
+        if (now - lastStorageCheck < 3600_000L) return // Run once per hour
+        lastStorageCheck = now
+        
+        val repo = repository ?: return
+        val maxBytes = 2L * 1024 * 1024 * 1024 // 2 GB limit
+        val maxAgeMs = 5L * 24 * 60 * 60 * 1000 // 5 days retention
+        
+        try {
+            val possibleDirs = listOf(
+                Environment.DIRECTORY_PICTURES,
+                Environment.DIRECTORY_MOVIES,
+                Environment.DIRECTORY_MUSIC,
+                Environment.DIRECTORY_DOWNLOADS
+            ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(repo.context.filesDir, "NoSlop")
+            
+            val allFiles = possibleDirs.filter { it.exists() }.flatMap { it.listFiles()?.toList() ?: emptyList() }
+            var currentSize = 0L
+            val sortedFiles = allFiles.sortedBy { it.lastModified() }
+            
+            for (file in sortedFiles) {
+                if (now - file.lastModified() > maxAgeMs) {
+                    Logger.info(TAG, "LRU Cache: Purging old media > 5 days: ${file.name}")
+                    file.delete()
+                    continue
+                }
+                currentSize += file.length()
+            }
+            
+            // If still over 2GB, delete oldest
+            val remainingFiles = possibleDirs.filter { it.exists() }.flatMap { it.listFiles()?.toList() ?: emptyList() }.sortedBy { it.lastModified() }
+            for (file in remainingFiles) {
+                if (currentSize <= maxBytes) break
+                val len = file.length()
+                if (file.delete()) {
+                    Logger.info(TAG, "LRU Cache: Purging media to stay under 2GB limit: ${file.name}")
+                    currentSize -= len
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to enforce storage limits: ${e.message}")
+        }
+    }
+
+    private fun updateWakeLock() {
+        val hasActive = activeDownloads.values.any { it.status == ActiveDownload.Status.ACTIVE }
+        if (hasActive && wakeLock?.isHeld == false) {
+            Logger.info(TAG, "Acquiring WakeLock for active media transfers")
+            wakeLock?.acquire(10 * 60 * 1000L) // 10 minutes max
+        } else if (!hasActive && wakeLock?.isHeld == true) {
+            Logger.info(TAG, "Releasing WakeLock")
+            wakeLock?.release()
         }
     }
 
     private fun getMediaDirectory(type: String?): File {
         val repo = repository ?: throw IllegalStateException("MediaManager not initialized")
         val subDir = when {
-            type?.startsWith("image") == true -> Environment.DIRECTORY_PICTURES
+            type?.startsWith("image") == true || type == "gif" -> Environment.DIRECTORY_PICTURES
             type?.startsWith("video") == true -> Environment.DIRECTORY_MOVIES
             type?.startsWith("audio") == true -> Environment.DIRECTORY_MUSIC
             else -> Environment.DIRECTORY_DOWNLOADS
@@ -68,13 +137,29 @@ object MediaManager {
         return noSlopDir
     }
 
-    fun isMediaDownloaded(id: String, type: String?): Boolean {
-        return try {
-            val file = File(getMediaDirectory(type), id)
-            file.exists()
-        } catch (e: Exception) {
-            false
+    fun copyFileToMediaDirectory(source: File, type: String?, id: String): File? {
+        if (repository == null) {
+            Logger.error(TAG, "Cannot copy file: MediaManager not initialized")
+            return null
         }
+        return try {
+            val destDir = getMediaDirectory(type)
+            val destFile = File(destDir, id)
+            source.copyTo(destFile, overwrite = true)
+            destFile
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to copy local file to media directory", e.message)
+            null
+        }
+    }
+
+    /**
+     * Checks if a media item is already downloaded and available locally.
+     * Robust: Scans all potential media directories if not found in the primary one.
+     */
+    fun isMediaDownloaded(id: String, type: String?): Boolean {
+        if (repository == null) return false
+        return getLocalFile(id, type) != null
     }
 
     /**
@@ -137,14 +222,16 @@ object MediaManager {
 
         val chunks = arrayOfNulls<ByteArray>(totalChunks)
         val inflight = ConcurrentHashMap<Int, Long>() // index -> sentAt
+        val pendingRetries = ConcurrentHashMap<Int, Long>() // index -> retryAfterMs
         var receivedCount = 0
         var lastAttemptAt = 0L
+        var consecutiveTimeouts = 0
 
-        // AIMD State
+        // AIMD State (gChat Conservative Limits)
         var windowSize = 4.0
         var ssthresh = 128.0
-        var rttEma = 5000L
-        var currentTimeoutMs = 5000L
+        var rttEma = 30000L
+        var currentTimeoutMs = 30000L // 30s initial timeout for Tor (faster retry/recovery)
     }
 
     private fun maintainDownloads() {
@@ -152,14 +239,33 @@ object MediaManager {
         activeDownloads.forEach { (id, dl) ->
             if (dl.status == ActiveDownload.Status.ACTIVE) {
                 // Check for timeouts
+                var anyTimeout = false
                 dl.inflight.forEach { (index, sentAt) ->
                     if (now - sentAt > dl.currentTimeoutMs) {
-                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying. (Window shrank)")
+                        Logger.warn(TAG, "Chunk $index for $id timed out. Retrying in 5s. (Window shrank)")
                         dl.inflight.remove(index)
+                        
+                        // Penalty Box: Retry after 5 seconds
+                        dl.pendingRetries[index] = now + 5000L
                         
                         // AIMD Multiplicative Decrease
                         dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
                         dl.windowSize = 1.0
+                        anyTimeout = true
+                    }
+                }
+                
+                if (anyTimeout) {
+                    dl.consecutiveTimeouts++
+                    if (dl.consecutiveTimeouts >= 3) {
+                        Logger.warn(TAG, "Media $id: 3 consecutive timeouts. Falling back to mesh recovery.")
+                        dl.peerOnion = null
+                        dl.status = ActiveDownload.Status.RECOVERING
+                        dl.inflight.clear()
+                        dl.consecutiveTimeouts = 0
+                        dl.lastAttemptAt = now
+                        scope.launch { attemptMeshRecovery(dl) }
+                        return@forEach // Skip requestNextChunks
                     }
                 }
                 
@@ -172,6 +278,20 @@ object MediaManager {
                     dl.lastAttemptAt = now
                     scope.launch { attemptMeshRecovery(dl) }
                 }
+                
+                // SURGICAL FIX: Drop chunk memory for abandoned partial downloads over 10 minutes old
+                if (now - dl.lastAttemptAt > 600_000L) {
+                    var cleared = false
+                    for (i in dl.chunks.indices) {
+                        if (dl.chunks[i] != null) {
+                            dl.chunks[i] = null
+                            cleared = true
+                        }
+                    }
+                    if (cleared) {
+                        Logger.warn(TAG, "Media ${dl.metadata.id} abandoned in recovery. Freed chunk memory to prevent OOM.")
+                    }
+                }
             }
         }
     }
@@ -179,10 +299,19 @@ object MediaManager {
     private fun requestNextChunks(dl: ActiveDownload) {
         val repo = repository ?: return
         val peer = dl.peerOnion ?: return
+        val now = System.currentTimeMillis()
         
         for (i in 0 until dl.totalChunks) {
+            val penaltyExpiry = dl.pendingRetries[i]
+            if (penaltyExpiry != null && now < penaltyExpiry) {
+                continue // Still in penalty box
+            }
+            if (penaltyExpiry != null && now >= penaltyExpiry) {
+                dl.pendingRetries.remove(i)
+            }
+            
             if (dl.chunks[i] == null && !dl.inflight.containsKey(i)) {
-                dl.inflight[i] = System.currentTimeMillis()
+                dl.inflight[i] = now
                 
                 val payload = MediaRequestPayload(
                     mediaId = dl.metadata.id,
@@ -200,7 +329,27 @@ object MediaManager {
                         type = "MEDIA_REQUEST",
                         payload = com.google.gson.Gson().toJsonTree(payload)
                     )
-                    repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                    val success = repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                    if (!success) {
+                        val sentAt = dl.inflight.remove(i)
+                        if (sentAt != null) {
+                            Logger.warn(TAG, "Chunk $i for ${dl.metadata.id} failed to send. Forcing timeout.")
+                            dl.pendingRetries[i] = System.currentTimeMillis() + 5000L
+                            dl.ssthresh = Math.max(2.0, dl.windowSize * 0.5)
+                            dl.windowSize = 1.0
+                            
+                            dl.consecutiveTimeouts++
+                            if (dl.consecutiveTimeouts >= 3 && dl.status == ActiveDownload.Status.ACTIVE) {
+                                Logger.warn(TAG, "Media ${dl.metadata.id}: 3 consecutive send failures to $peer. Falling back to mesh recovery.")
+                                dl.peerOnion = null
+                                dl.status = ActiveDownload.Status.RECOVERING
+                                dl.inflight.clear()
+                                dl.consecutiveTimeouts = 0
+                                dl.lastAttemptAt = System.currentTimeMillis()
+                                attemptMeshRecovery(dl)
+                            }
+                        }
+                    }
                 }
                 
                 if (dl.inflight.size >= dl.windowSize.toInt()) break
@@ -233,6 +382,7 @@ object MediaManager {
         
         activeDownloads[metadata.id] = dl
         updateProgress(metadata.id, 0)
+        updateWakeLock()
         
         if (dl.status == ActiveDownload.Status.ACTIVE) {
             requestNextChunks(dl)
@@ -246,18 +396,19 @@ object MediaManager {
         if (dl.chunks[payload.chunkIndex] == null) {
             dl.chunks[payload.chunkIndex] = chunkData
             dl.receivedCount++
+            dl.consecutiveTimeouts = 0 // Reset on success!
             val sentAt = dl.inflight.remove(payload.chunkIndex)
             
             if (sentAt != null) {
                 val rtt = System.currentTimeMillis() - sentAt
                 dl.rttEma = (dl.rttEma * 7 + rtt) / 8
-                dl.currentTimeoutMs = Math.max(2000L, dl.rttEma * 2) // Timeout is 2x RTT EMA, min 2s
+                dl.currentTimeoutMs = Math.max(30000L, dl.rttEma * 3) // Timeout is 3x RTT EMA, min 30s
 
                 // AIMD Additive Increase
                 if (dl.windowSize < dl.ssthresh) {
-                    dl.windowSize += 1.0 // Slow start
+                    dl.windowSize += 1.0
                 } else {
-                    dl.windowSize += 1.0 / dl.windowSize // Congestion avoidance
+                    dl.windowSize += 1.0 / dl.windowSize
                 }
                 if (dl.windowSize > 128.0) dl.windowSize = 128.0
             }
@@ -291,19 +442,34 @@ object MediaManager {
             dl.status = ActiveDownload.Status.COMPLETED
             updateProgress(dl.metadata.id, 100)
             Logger.info(TAG, "Download completed for ${dl.metadata.id}")
+            updateWakeLock()
+            
+            // SURGICAL FIX: Free the massive memory arrays immediately!
+            // This stops the permanent memory leak that causes OOMs!
+            for (i in dl.chunks.indices) {
+                dl.chunks[i] = null
+            }
+            
+            // SURGICAL FIX: Free the massive memory arrays immediately!
+            // This stops the permanent memory leak that causes OOMs!
+            for (i in dl.chunks.indices) {
+                dl.chunks[i] = null
+            }
             
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)
-            val packet = NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 1,
-                senderId = "", // Placeholder
-                type = "MEDIA_TRANSFER_ACK",
-                payload = com.google.gson.Gson().toJsonTree(ack)
-            )
             val peer = dl.peerOnion
             if (peer != null) {
-                scope.launch { repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet) }
+                scope.launch {
+                    val packet = NetworkPacket(
+                        id = UUID.randomUUID().toString(),
+                        hops = 1,
+                        senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        type = "MEDIA_TRANSFER_ACK",
+                        payload = com.google.gson.Gson().toJsonTree(ack)
+                    )
+                    repo.meshTransport.sendPacket(peer, Constants.MESH_PORT, packet)
+                }
             }
             
         } catch (e: Exception) {
@@ -342,13 +508,25 @@ object MediaManager {
             Logger.info(TAG, "Media $mediaId found at $senderId")
             dl.peerOnion = senderId
             dl.status = ActiveDownload.Status.ACTIVE
+            dl.consecutiveTimeouts = 0 // Reset
             requestNextChunks(dl)
         }
+    }
+    
+    fun isMediaDownloadingOrRecovering(mediaId: String): Boolean {
+        val dl = activeDownloads[mediaId]
+        return dl != null && (dl.status == ActiveDownload.Status.ACTIVE || dl.status == ActiveDownload.Status.RECOVERING)
     }
 
     suspend fun handleMediaRequest(senderId: String, payload: MediaRequestPayload) {
         val repo = repository ?: return
         
+        val targetOnion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
+        if (targetOnion.isNullOrBlank()) {
+            Logger.warn(TAG, "Cannot send media to $senderId: no onion address found")
+            return
+        }
+
         // 0. If it's a metadata request (chunkSize == 0)
         if (payload.chunkSize == 0) {
             val file = findLocalFile(repo, payload.mediaId)
@@ -365,10 +543,10 @@ object MediaManager {
                     id = UUID.randomUUID().toString(),
                     hops = 1,
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
-                    type = "MEDIA_METADATA_RESPONSE", // Add new type
+                    type = "MEDIA_METADATA_RESPONSE", 
                     payload = com.google.gson.Gson().toJsonTree(metadata)
                 )
-                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
+                repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)
                 return
             }
         }
@@ -400,17 +578,17 @@ object MediaManager {
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 1,
-                    senderId = "", // Placeholder
+                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                     type = "MEDIA_CHUNK",
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)
                 )
                 
-                repo.meshTransport.sendPacket(senderId, Constants.MESH_PORT, packet)
+                repo.meshTransport.sendPacket(targetOnion, Constants.MESH_PORT, packet)
             }
         } else {
             // 2. We don't have it, are we relaying it?
-            // Relay logic would go here (GossipService will also handle relay requests)
-            Logger.warn(TAG, "Received MEDIA_REQUEST for unknown media ${payload.mediaId} from $senderId")
+            Logger.warn(TAG, "Received MEDIA_REQUEST for unknown media ${payload.mediaId} from $senderId. Delegating to GossipService.")
+            GossipService.delegateUnknownMediaRequest(senderId, payload.mediaId)
         }
     }
 
@@ -420,6 +598,9 @@ object MediaManager {
         _downloadProgress.value = current
     }
 
+    /**
+     * Finds a file by ID across all known media directories.
+     */
     private fun findLocalFile(repo: NoSlopRepository, mediaId: String): File? {
         val possibleDirs = listOf(
             Environment.DIRECTORY_PICTURES,
@@ -462,8 +643,18 @@ object MediaManager {
         )
     }
 
-    fun getLocalFile(mediaId: String): File? {
-        return findLocalFile(repository ?: return null, mediaId)
+    /**
+     * Gets a local file handle for a media ID. 
+     * If [type] is provided, it checks the primary directory first; 
+     * otherwise (or if not found), it scans all directories.
+     */
+    fun getLocalFile(mediaId: String, type: String? = null): File? {
+        val repo = repository ?: return null
+        if (type != null) {
+            val primary = File(getMediaDirectory(type), mediaId)
+            if (primary.exists()) return primary
+        }
+        return findLocalFile(repo, mediaId)
     }
 
     /**

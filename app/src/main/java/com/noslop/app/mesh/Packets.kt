@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/mesh/Packets.kt
 package com.noslop.app.mesh
 
 import com.google.gson.Gson
@@ -28,7 +29,8 @@ data class PostPayload(
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
     @SerializedName("clearnet_url") val clearnetUrl: String? = null,
     @SerializedName("clearnet_title") val clearnetTitle: String? = null,
-    @SerializedName("clearnet_thumbnail_url") val clearnetThumbnailUrl: String? = null
+    @SerializedName("clearnet_thumbnail_url") val clearnetThumbnailUrl: String? = null,
+    @SerializedName("clearnet_media_type") val clearnetMediaType: String? = null // "video", "audio", "image", or null for article
 )
 
 data class CommentPayload(
@@ -44,7 +46,10 @@ data class CommentData(
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
 data class MediaMetadata(
@@ -194,9 +199,6 @@ data class DeletePostPayload(
     val signature: String
 )
 
-
-
-
 data class SyncRequestPayload(
     val since: Long
 )
@@ -219,7 +221,10 @@ data class CommentSyncData(
     val content: String,
     val timestamp: Long,
     val signature: String,
-    @SerializedName("parent_comment_id") val parentCommentId: String? = null
+    @SerializedName("parent_comment_id") val parentCommentId: String? = null,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null
 )
 
 data class ReactionSyncData(

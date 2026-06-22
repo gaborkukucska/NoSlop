@@ -5,6 +5,7 @@ import com.noslop.app.data.*
 import android.util.Base64
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.delay
 import java.util.*
 
 /**
@@ -28,23 +29,30 @@ class SyncPacketHandler(
         val syncPay = packet.getSyncRequestPayload() ?: return false
         val recentPosts = postDao.getPostsSince(syncPay.since)
         val postPayloads = recentPosts.map { post ->
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
                 id = post.id,
                 authorId = post.authorPublicKeyB64,
                 authorName = post.authorHandle,
                 authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
                 originNode = null,
                 content = post.content,
                 timestamp = post.timestamp,
                 signature = post.signature,
-                mediaId = post.mediaUrl,
-                mediaMetadata = if (post.mediaUrl != null) MediaMetadata(
-                    id = post.mediaUrl,
+                mediaId = rawMediaId,
+                mediaMetadata = if (rawMediaId != null) MediaMetadata(
+                    id = rawMediaId,
                     type = post.mediaType ?: "image",
                     mimeType = "application/octet-stream",
                     size = 0,
-                    chunkCount = 0
-                ) else null
+                    chunkCount = 0,
+                    thumbnailB64 = post.thumbnailB64
+                ) else null,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
             )
         }
 
@@ -75,22 +83,54 @@ class SyncPacketHandler(
             )
         }
 
-        val syncResp = SyncResponsePayload(
-            posts = postPayloads,
-            comments = commentSyncList,
-            reactions = reactionSyncList
-        )
-        val respPacket = NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 1,
-            senderId = localKeys.publicKeyB64,
-            targetUserId = packet.senderId,
-            type = "SYNC_RESPONSE",
-            payload = com.google.gson.Gson().toJsonTree(syncResp)
-        )
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+            val maxBatchSize = 5
+            
+            // Send posts in batches
+            for (postBatch in postPayloads.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
+            
+            // Send comments in batches
+            for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
+            
+            // Send reactions in batches
+            for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, port = com.noslop.app.util.Constants.MESH_PORT, packet = respPacket)
+                delay(500)
+            }
         }
         Logger.info(TAG, "SYNC_REQUEST handled — sent ${recentPosts.size} posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
@@ -114,6 +154,7 @@ class SyncPacketHandler(
         }
 
         val postPayloads = missingOrUpdatedPosts.map { post ->
+            val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
                 id = post.id,
                 authorId = post.authorPublicKeyB64,
@@ -124,14 +165,19 @@ class SyncPacketHandler(
                 content = post.content,
                 timestamp = post.timestamp,
                 signature = post.signature,
-                mediaId = post.mediaUrl,
-                mediaMetadata = if (post.mediaUrl != null) MediaMetadata(
-                    id = post.mediaUrl,
+                mediaId = rawMediaId,
+                mediaMetadata = if (rawMediaId != null) MediaMetadata(
+                    id = rawMediaId,
                     type = post.mediaType ?: "image",
                     mimeType = "application/octet-stream",
                     size = 0,
-                    chunkCount = 0
-                ) else null
+                    chunkCount = 0,
+                    thumbnailB64 = post.thumbnailB64
+                ) else null,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
             )
         }
 
@@ -162,22 +208,54 @@ class SyncPacketHandler(
             )
         }
 
-        val syncResp = SyncResponsePayload(
-            posts = postPayloads,
-            comments = commentSyncList,
-            reactions = reactionSyncList
-        )
-        val respPacket = NetworkPacket(
-            id = UUID.randomUUID().toString(),
-            hops = 1,
-            senderId = localKeys.publicKeyB64,
-            targetUserId = packet.senderId,
-            type = "SYNC_RESPONSE",
-            payload = com.google.gson.Gson().toJsonTree(syncResp)
-        )
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+            val maxBatchSize = 5
+
+            // Send posts in batches
+            for (postBatch in postPayloads.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
+
+            // Send comments in batches
+            for (commentBatch in commentSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
+
+            // Send reactions in batches
+            for (reactionBatch in reactionSyncList.chunked(maxBatchSize)) {
+                val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
+                val respPacket = NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 1,
+                    senderId = localKeys.publicKeyB64,
+                    targetUserId = packet.senderId,
+                    type = "SYNC_RESPONSE",
+                    payload = com.google.gson.Gson().toJsonTree(syncResp)
+                )
+                repo.meshTransport.sendPacket(requestingPeer.onionAddress, com.noslop.app.util.Constants.MESH_PORT, respPacket)
+                delay(500)
+            }
         }
         Logger.info(TAG, "INVENTORY_SYNC_REQUEST handled — sent ${missingOrUpdatedPosts.size} missing posts, ${commentSyncList.size} comments, ${reactionSyncList.size} reactions to ${packet.senderId.take(12)}")
         return true
@@ -198,6 +276,7 @@ class SyncPacketHandler(
             }
             val pubBytes = Base64.decode(postPay.authorPublicKey, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
+            val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
             val post = MeshPost(
                 id = postPay.id,
                 authorPublicKeyB64 = postPay.authorPublicKey,
@@ -207,7 +286,7 @@ class SyncPacketHandler(
                 content = postPay.content,
                 timestamp = postPay.timestamp,
                 signature = postPay.signature ?: "",
-                mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
+                mediaUrl = postPay.mediaId?.let { "noslop://${peerOnion}/$it" },
                 mediaType = postPay.mediaMetadata?.type,
                 thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
                 clearnetUrl = postPay.clearnetUrl,

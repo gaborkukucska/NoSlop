@@ -42,10 +42,32 @@ class CommentPacketHandler(
             content = commPay.comment.content,
             timestamp = commPay.comment.timestamp,
             signature = commPay.comment.signature,
-            parentCommentId = commPay.parentCommentId
+            parentCommentId = commPay.parentCommentId,
+            mediaId = commPay.comment.mediaId,
+            mediaType = commPay.comment.mediaType
         )
         commentDao.insertComment(meshComment)
         
+        if (commPay.comment.mediaId != null) {
+            val authorPeer = repo.peerDao.getPeerByPublicKey(commPay.comment.authorId)
+            val peerOnion = authorPeer?.onionAddress ?: packet.senderId
+            val fakeMeta = com.noslop.app.mesh.MediaMetadata(
+                id = commPay.comment.mediaId,
+                type = commPay.comment.mediaType ?: "image",
+                mimeType = "application/octet-stream",
+                size = 0,
+                chunkCount = 0,
+                originNode = peerOnion,
+                ownerId = commPay.comment.authorId
+            )
+            com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
+                fakeMeta,
+                "friends",
+                commPay.comment.authorId,
+                peerOnion
+            )
+        }
+
         // Notify if it's on our post (unless it's from ourselves)
         val post = postDao.getPostById(commPay.postId)
         val localKeys = repo.getLocalIdentity()

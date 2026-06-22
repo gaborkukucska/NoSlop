@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt
 // FILE: app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt
 package com.noslop.app.data
 
@@ -44,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 23,
+    version = 3,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -68,15 +69,30 @@ abstract class NoSlopDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: NoSlopDatabase? = null
 
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Add clearnetMediaType to carry original clearnet item type through mesh
+                database.execSQL("ALTER TABLE meshPost ADD COLUMN clearnetMediaType TEXT")
+            }
+        }
+
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE mesh_comments ADD COLUMN mediaId TEXT")
+                database.execSQL("ALTER TABLE mesh_comments ADD COLUMN mediaType TEXT")
+                database.execSQL("DELETE FROM mesh_comments WHERE content LIKE '%noslop-gif://data:image%'")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     NoSlopDatabase::class.java,
-                    "noslop_app_database"
+                    "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .fallbackToDestructiveMigration() // Facilitate updates during prototyping
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 INSTANCE = instance
                 instance

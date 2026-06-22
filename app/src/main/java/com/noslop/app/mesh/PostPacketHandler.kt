@@ -38,6 +38,17 @@ class PostPacketHandler(
         val peer = peerDao.getPeerByPublicKey(postPay.authorPublicKey)
         val handle = peer?.handle ?: postPay.authorName
 
+        // Robustness: Sniff media type from URL if it's missing in the packet
+        var effectiveClearnetType = postPay.clearnetMediaType
+        if (effectiveClearnetType == null && postPay.clearnetUrl != null) {
+            val url = postPay.clearnetUrl.lowercase()
+            if (url.contains("youtube.com") || url.contains("youtu.be") || 
+                url.contains("vimeo.com") || url.contains("archive.org/embed")) {
+                effectiveClearnetType = "video"
+            }
+        }
+
+        val resolvedOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
         val meshPost = MeshPost(
             id = postPay.id,
             authorPublicKeyB64 = postPay.authorPublicKey,
@@ -47,23 +58,26 @@ class PostPacketHandler(
             content = postPay.content,
             timestamp = postPay.timestamp,
             signature = postPay.signature ?: "",
-            mediaUrl = postPay.mediaId?.let { "noslop://${postPay.originNode ?: packet.senderId}/$it" },
+            mediaUrl = postPay.mediaId?.let { "noslop://$resolvedOnion/$it" },
             mediaType = postPay.mediaMetadata?.type,
             gossipCount = 1,
             privacy = postPay.privacy,
             thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
             clearnetUrl = postPay.clearnetUrl,
             clearnetTitle = postPay.clearnetTitle,
-            clearnetThumbnailUrl = postPay.clearnetThumbnailUrl
+            clearnetThumbnailUrl = postPay.clearnetThumbnailUrl,
+            clearnetMediaType = effectiveClearnetType,
+            isOrphaned = false
         )
         postDao.insertPost(meshPost)
         
         if (postPay.mediaMetadata != null) {
+            val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress
             MediaManager.checkAndAutoDownload(
                 postPay.mediaMetadata,
                 "friends",
                 postPay.authorId,
-                packet.senderId
+                peerOnion
             )
         }
 

@@ -1,1 +1,0 @@
-sed -i 's/private const val KEY_PRIV = "ed25519_priv_pkcs8_b64"/private const val KEY_PRIV = "ed25519_priv_pkcs8_b64"\n    private const val KEY_ENC_PUB = "x25519_pub_x509_b64"\n    private const val KEY_ENC_PRIV = "x25519_priv_pkcs8_b64"/' mvp/composeApp/src/androidMain/kotlin/com/noslop/mvp/Platform.android.kt

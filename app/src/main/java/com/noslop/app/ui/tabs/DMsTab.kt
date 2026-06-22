@@ -41,7 +41,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 messages = activeChatMessages,
                 localKeys = localKeys,
                 viewModel = viewModel,
-                onSendMessage = { txt, media -> viewModel.sendDirectMessage(recipientPeer.publicKeyB64, txt, media) },
+                onSendMessage = { txt, media, replyTo -> viewModel.sendDirectMessage(recipientPeer.publicKeyB64, txt, media, replyTo) },
                 onBack = { viewModel.selectChatPeer(null) }
             )
         } else {

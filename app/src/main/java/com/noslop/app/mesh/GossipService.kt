@@ -129,15 +129,19 @@ object GossipService {
         }
 
         // 3. Rate limit: 20 packets per sender per 10-second window
-        val now = System.currentTimeMillis()
-        val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
-        synchronized(limitList) {
-            limitList.removeAll { now - it > 10000 }
-            if (limitList.size >= 20) {
-                Logger.warn("FIREWALL", "Rate limit exceeded for $senderId. Dropping packet $packetId.")
-                return false
+        // Whitelist media streams to prevent chunk blocking during heavy transfers
+        val isMediaPacket = packet.type.startsWith("MEDIA_")
+        if (!isMediaPacket) {
+            val now = System.currentTimeMillis()
+            val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
+            synchronized(limitList) {
+                limitList.removeAll { now - it > 10000 }
+                if (limitList.size >= 20) {
+                    Logger.warn("FIREWALL", "Rate limit exceeded for $senderId. Dropping packet $packetId.")
+                    return false
+                }
+                limitList.add(now)
             }
-            limitList.add(now)
         }
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
@@ -204,6 +208,32 @@ object GossipService {
         val state = relayStates.getOrPut(mediaId) { RelayState(mediaId, metadata = payload.metadata) }
         state.listeners.add(senderId)
         Logger.info(TAG, "Relay: Registered $senderId as listener for $mediaId")
+    }
+
+    fun delegateUnknownMediaRequest(senderId: String, mediaId: String) {
+        val state = relayStates.getOrPut(mediaId) { RelayState(mediaId) }
+        if (!state.listeners.contains(senderId)) {
+            state.listeners.add(senderId)
+            Logger.info(TAG, "Relay: Registered $senderId as listener for unknown media $mediaId (delegated)")
+        }
+
+        scope.launch {
+            val payload = MediaRelayRequestPayload(
+                mediaId = mediaId,
+                originNode = null,
+                ownerId = null,
+                accessKey = null,
+                metadata = state.metadata
+            )
+            val packet = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = localPublicKeyB64,
+                type = "MEDIA_RELAY_REQUEST",
+                payload = com.google.gson.Gson().toJsonTree(payload)
+            )
+            broadcast(packet)
+        }
     }
 
     private fun handleRecoveryFound(senderId: String, packet: NetworkPacket) {

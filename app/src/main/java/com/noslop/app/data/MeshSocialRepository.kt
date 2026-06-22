@@ -46,6 +46,10 @@ class MeshSocialRepository(
     private val messageDao = db.messageDao()
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
+    private val chatReactionDao = db.chatReactionDao()
+    private val commentReactionDao = db.commentReactionDao()
+    private val voteDao = db.voteDao()
+    private val commentVoteDao = db.commentVoteDao()
 
     private var presenceJob: kotlinx.coroutines.Job? = null
 
@@ -117,6 +121,7 @@ class MeshSocialRepository(
         clearnetUrl: String? = null,
         clearnetTitle: String? = null,
         clearnetThumbnailUrl: String? = null,
+        clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext null
@@ -147,7 +152,8 @@ class MeshSocialRepository(
             mediaMetadata = mediaMetadata,
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
-            clearnetThumbnailUrl = clearnetThumbnailUrl
+            clearnetThumbnailUrl = clearnetThumbnailUrl,
+            clearnetMediaType = clearnetMediaType
         )
 
         val gson = com.google.gson.Gson()
@@ -177,7 +183,8 @@ class MeshSocialRepository(
             thumbnailB64 = mediaMetadata?.thumbnailB64,
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
-            clearnetThumbnailUrl = clearnetThumbnailUrl
+            clearnetThumbnailUrl = clearnetThumbnailUrl,
+            clearnetMediaType = clearnetMediaType
         )
 
         postDao.insertPost(localPost)
@@ -293,32 +300,38 @@ class MeshSocialRepository(
             }
 
             // Also send INVENTORY_SYNC_REQUEST
-            val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-            val recentPosts = postDao.getPostsSince(sevenDaysAgo)
-            val inventory = recentPosts.map { post ->
-                val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
-                val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-                val hashBytes = ByteArray(digest.digestSize)
-                digest.update(hashInput, 0, hashInput.size)
-                digest.doFinal(hashBytes, 0)
-                val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
-                com.noslop.app.mesh.InventoryItem(post.id, hashHex)
-            }
-            
-            val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
-            val syncPacket = com.noslop.app.mesh.NetworkPacket(
-                id = UUID.randomUUID().toString(),
-                hops = 1,
-                senderId = myKeys.publicKeyB64,
-                targetUserId = peer.publicKeyB64,
-                type = "INVENTORY_SYNC_REQUEST",
-                payload = gson.toJsonTree(syncReqPay)
-            )
-            repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
-            }
+            requestInventorySync(peer)
         }
         true
+    }
+
+    suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+        val recentPosts = postDao.getPostsSince(sevenDaysAgo)
+        val inventory = recentPosts.map { post ->
+            val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
+            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+            val hashBytes = ByteArray(digest.digestSize)
+            digest.update(hashInput, 0, hashInput.size)
+            digest.doFinal(hashBytes, 0)
+            val hashHex = hashBytes.joinToString("") { "%02x".format(it) }
+            com.noslop.app.mesh.InventoryItem(post.id, hashHex)
+        }
+        
+        val syncReqPay = com.noslop.app.mesh.InventorySyncRequestPayload(inventory = inventory)
+        val gson = com.google.gson.Gson()
+        val syncPacket = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = peer.publicKeyB64,
+            type = "INVENTORY_SYNC_REQUEST",
+            payload = gson.toJsonTree(syncReqPay)
+        )
+        repositoryScope.launch {
+            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
+        }
     }
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
@@ -373,22 +386,22 @@ class MeshSocialRepository(
     suspend fun sendDirectMessage(
         recipientPubB64: String,
         messageText: String,
-        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        replyToMessageId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
-        // Wrap content with media metadata if present
-        val contentToSend = if (mediaMetadata != null) {
-            val map = mapOf(
-                "content" to messageText,
-                "media" to mediaMetadata
-            )
-            com.google.gson.Gson().toJson(map)
-        } else {
-            messageText
+        // Always wrap content with JSON to securely pass metadata over X25519 channel
+        val map = mutableMapOf<String, Any>("content" to messageText)
+        if (mediaMetadata != null) {
+            map["media"] = mediaMetadata
         }
+        if (replyToMessageId != null) {
+            map["replyTo"] = replyToMessageId
+        }
+        val contentToSend = com.google.gson.Gson().toJson(map)
 
         val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, recipientEncPub, myKeys.encPrivateKeyB64)
 
@@ -406,7 +419,8 @@ class MeshSocialRepository(
             nonce = nonce,
             timestamp = System.currentTimeMillis(),
             mediaId = mediaMetadata?.id,
-            mediaType = mediaMetadata?.type
+            mediaType = mediaMetadata?.type,
+            replyToMessageId = replyToMessageId
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
@@ -443,7 +457,8 @@ class MeshSocialRepository(
     suspend fun composeAndBroadcastComment(
         postId: String,
         content: String,
-        parentCommentId: String? = null
+        parentCommentId: String? = null,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
@@ -465,7 +480,10 @@ class MeshSocialRepository(
             authorAvatarB64 = avatarB64,
             content = content,
             timestamp = timestamp,
-            signature = signature
+            signature = signature,
+            mediaId = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type,
+            mediaMetadata = mediaMetadata
         )
 
         val commentPay = com.noslop.app.mesh.CommentPayload(
@@ -492,7 +510,9 @@ class MeshSocialRepository(
             content = content,
             timestamp = timestamp,
             signature = signature,
-            parentCommentId = parentCommentId
+            parentCommentId = parentCommentId,
+            mediaId = mediaMetadata?.id,
+            mediaType = mediaMetadata?.type
         )
 
         commentDao.insertComment(localComment)
@@ -549,7 +569,6 @@ class MeshSocialRepository(
 
     suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val voteDao = db.voteDao()
         
         val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
         val existingVote = voteDao.getVoteById(voteId)
@@ -609,14 +628,22 @@ class MeshSocialRepository(
         digest.doFinal(hash, 0)
         val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
 
+        val isNegative = reactionType in listOf("downvote", "angry", "sad")
+
         // Ensure anchor post exists locally and on mesh
         val existingCount = postDao.hasPost(anchorId)
         if (existingCount == 0) {
+            if (isNegative) {
+                Logger.info(TAG, "Negative reaction to clearnet item. Skipping mesh broadcast to prevent spam.")
+                return@withContext false
+            }
+            
             composeAndBroadcastPost(
                 content = "🔥 Shared Clearnet Post: ${item.title}",
                 clearnetUrl = clearnetUrl,
                 clearnetTitle = item.title,
                 clearnetThumbnailUrl = item.thumbnailUrl,
+                clearnetMediaType = item.mediaType,
                 postIdOverride = anchorId
             )
         }
@@ -626,7 +653,6 @@ class MeshSocialRepository(
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val chatReactionDao = db.chatReactionDao()
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -680,7 +706,6 @@ class MeshSocialRepository(
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
-        val commentReactionDao = db.commentReactionDao()
         val reactionId = "${commentId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = commentReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -729,7 +754,6 @@ class MeshSocialRepository(
 
     suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
-        val commentVoteDao = db.commentVoteDao()
         
         val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"
         val existingVote = commentVoteDao.getVoteById(voteId)

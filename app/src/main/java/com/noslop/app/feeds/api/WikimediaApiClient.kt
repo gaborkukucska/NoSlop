@@ -36,12 +36,13 @@ object WikimediaApiClient {
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Logger.warn(TAG, "Wikimedia returned ${response.code}")
-                return emptyList()
-            }
-
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Wikimedia returned ${res.code}")
+                    return emptyList()
+                }
+                res.body?.string()
+            } ?: return emptyList()
             val root = gson.fromJson(body, JsonObject::class.java)
             
             // Save continue token for next variety

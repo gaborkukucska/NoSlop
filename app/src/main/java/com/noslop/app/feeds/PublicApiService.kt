@@ -97,6 +97,22 @@ object PublicApiService {
                 "Social Clearnet" -> {
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
+                "Search Videos" -> {
+                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query $language") }
+                }
+                "Search Audio" -> {
+                    items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
+                    items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                    items += safeCall("api-archive-audio", activeApiSourceIds) { InternetArchiveClient.searchAudio(query) }
+                }
+                "Search Images" -> {
+                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
+                }
+                "Search Articles" -> {
+                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
+                }
                 else -> {
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query $language") }

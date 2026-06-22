@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/components/CommentsBottomSheet.kt
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
@@ -10,7 +11,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Gif
+import androidx.compose.material.icons.filled.AddReaction
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,8 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.app.data.MeshComment
+import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
+import com.noslop.app.ui.resolveMediaUrl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,6 +44,11 @@ fun CommentsBottomSheet(
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
     val localKeys by viewModel.localKeys.collectAsState()
     var commentText by remember { mutableStateOf("") }
+    var replyToCommentId by remember { mutableStateOf<String?>(null) }
+    
+    // Store the File instead of a Base64 string
+    var attachedGifFile by remember { mutableStateOf<java.io.File?>(null) }
+    
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
@@ -62,6 +75,7 @@ fun CommentsBottomSheet(
             
             LazyColumn(
                 modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (comments.isEmpty()) {
@@ -72,40 +86,100 @@ fun CommentsBottomSheet(
                     }
                 }
                 items(comments) { comment ->
-                    CommentItem(comment, viewModel, localKeys)
+                    CommentItem(comment, viewModel, localKeys, onReply = { replyToCommentId = it })
                 }
             }
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            if (replyToCommentId != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Replying to comment...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().navigationBarsPadding().imePadding(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                OutlinedTextField(
+                AndroidGifTextField(
                     value = commentText,
                     onValueChange = { commentText = it },
-                    placeholder = { Text("Add a comment...") },
-                    modifier = Modifier.weight(1f),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen,
-                        unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight,
-                        unfocusedTextColor = TextLight
-                    )
+                    hint = "Write a comment...",
+                    onMediaAttached = { file ->
+                        // Inclusive: Accept any rich content attached via keyboard
+                        attachedGifFile = file
+                    },
+                    modifier = Modifier.weight(1f)
                 )
                 
                 Spacer(modifier = Modifier.width(8.dp))
                 
                 IconButton(
                     onClick = {
-                        viewModel.composeAndBroadcastComment(postId, commentText)
+                        val mediaMetadata = attachedGifFile?.let { file ->
+                            val isGif = file.name.endsWith(".gif", ignoreCase = true)
+                            val type = if (isGif) "image" else "image" // Both map to image for storage
+                            val id = "comment_attach_${System.currentTimeMillis()}${if (isGif) ".gif" else ".jpg"}"
+                            
+                            // Save to local mesh media storage
+                            com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
+                            com.noslop.app.mesh.MediaMetadata(
+                                id = id,
+                                type = type,
+                                mimeType = if (isGif) "image/gif" else "image/jpeg",
+                                size = file.length(),
+                                chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
+                                originNode = localKeys?.onionAddress,
+                                ownerId = localKeys?.publicKeyB64
+                            )
+                        }
+
+                        viewModel.composeAndBroadcastComment(
+                            postId = postId, 
+                            content = commentText, 
+                            parentCommentId = replyToCommentId,
+                            mediaMetadata = mediaMetadata
+                        )
+                        
                         commentText = ""
+                        attachedGifFile = null
+                        replyToCommentId = null
                     },
-                    enabled = commentText.isNotBlank(),
+                    enabled = commentText.isNotBlank() || attachedGifFile != null,
                     modifier = Modifier.background(AccentGreen, CircleShape)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
+                }
+            }
+
+            if (attachedGifFile != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Attachment Ready",
+                        color = TextLight,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove attachment",
+                        tint = TextMuted,
+                        modifier = Modifier.size(16.dp).clickable { attachedGifFile = null }
+                    )
                 }
             }
         }
@@ -113,10 +187,25 @@ fun CommentsBottomSheet(
 }
 
 @Composable
-fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?) {
+fun CommentItem(
+    comment: MeshComment, 
+    viewModel: NoSlopViewModel, 
+    localKeys: com.noslop.app.crypto.CryptoService.IdentityKeys?,
+    onReply: (String) -> Unit
+) {
     val reactions by viewModel.getReactionsForComment(comment.id).collectAsState(initial = emptyList())
     val votes by viewModel.getVotesForComment(comment.id).collectAsState(initial = emptyList())
+    val peers by viewModel.peers.collectAsState()
     var showReactionPicker by remember { mutableStateOf(false) }
+
+    // Resolve author onion for media rendering
+    val authorOnion = remember(comment.authorPublicKeyB64, peers) {
+        if (comment.authorPublicKeyB64 == localKeys?.publicKeyB64) {
+            localKeys?.onionAddress
+        } else {
+            peers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }?.onionAddress
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -158,11 +247,70 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            comment.content,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextLight
-        )
+        if (comment.parentCommentId != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 4.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(PrimaryBlack.copy(alpha = 0.2f))
+                    .padding(4.dp)
+            ) {
+                Text(
+                    text = "Replying to previous comment...",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+            }
+        }
+        
+        // ─── Content Rendering ───
+        if (comment.content.isNotBlank()) {
+            Text(
+                comment.content,
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextLight
+            )
+        }
+
+        // ─── Structured Media Rendering (GIFs / Images) ───
+        if (comment.mediaId != null && authorOnion != null) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val resolvedMediaUrl = remember(comment.mediaId, authorOnion) {
+                resolveMediaUrl("noslop://$authorOnion/${comment.mediaId}", context)
+            }
+            
+            coil.compose.AsyncImage(
+                model = resolvedMediaUrl,
+                contentDescription = "Comment Media",
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .fillMaxWidth()
+                    .heightIn(max = 250.dp)
+                    .clip(RoundedCornerShape(8.dp))
+            )
+        }
+
+        // Explicit Actions (Always visible)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Default.AddReaction,
+                contentDescription = "React",
+                tint = TextMuted,
+                modifier = Modifier.size(16.dp).clickable { showReactionPicker = true }
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.Reply,
+                contentDescription = "Reply",
+                tint = TextMuted,
+                modifier = Modifier.size(16.dp).clickable { onReply(comment.id) }
+            )
+        }
 
         if (reactions.isNotEmpty() || votes.isNotEmpty()) {
             val allReactions = reactions.map { it.reactionType to it.authorPublicKeyB64 } + 
@@ -227,6 +375,15 @@ fun CommentItem(comment: MeshComment, viewModel: NoSlopViewModel, localKeys: com
                     contentDescription = "Close", 
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
+                )
+                Icon(
+                    Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = "Reply",
+                    tint = TextMuted,
+                    modifier = Modifier.size(20.dp).clickable { 
+                        onReply(comment.id)
+                        showReactionPicker = false 
+                    }
                 )
             }
         }

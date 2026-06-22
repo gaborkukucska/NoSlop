@@ -296,11 +296,11 @@ class FeedRepository(
             val langPref = if (langPrefList.isNotEmpty()) langPrefList.random() else "en"
 
             val searchCategory = when (filterMode) {
-                "Videos" -> "Video Platforms"
-                "Audio" -> "Music"
-                "Images" -> "Photography"
-                "Articles" -> "Technology" // Technology is heavily article-based
-                else -> "Search" // Triggers the general 'else' block
+                "Videos" -> "Search Videos"
+                "Audio" -> "Search Audio"
+                "Images" -> "Search Images"
+                "Articles" -> "Search Articles"
+                else -> "Search" 
             }
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
