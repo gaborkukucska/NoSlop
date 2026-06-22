@@ -163,6 +163,7 @@ struct iOSApp: App {
         IosTorBridge.shared.tor = tor
         tor.start() // warm Tor up at launch so it's (nearly) bootstrapped by the time the user connects
         IosQrScannerBridge.shared.scanner = QrScanner()
+        IosSharerBridge.shared.sharer = SharerBridge()                     // identity share sheet (QR + message)
         IosVideoPlayerBridge.shared.factory = SwiftVideoPlayerFactory()   // inline component player (upstream)
         IosFullscreenVideoBridge.shared.player = VideoPlayerBridge()       // full-screen quick-play (Feed button)
     }

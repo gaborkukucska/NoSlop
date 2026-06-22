@@ -843,6 +843,15 @@ private fun DmContactList(state: MeshUiState) {
                 Text("Direct messages", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.weight(1f))
                 Button(onClick = { showMyQr = !showMyQr }) { Text(if (showMyQr) "Hide ID" else "My ID") }
                 if (QrScanner.isAvailable) Button(onClick = { QrScanner.scan { s -> state.onScan(s) } }) { Text("＋ Add") }
+                Button(onClick = {
+                    val raw = clipboard.getText()?.text
+                    if (raw.isNullOrBlank()) state.status = "Clipboard empty"
+                    else {
+                        // A shared message wraps the code in friendly text; pull out the {…} contact blob if present.
+                        val i = raw.indexOf('{'); val j = raw.lastIndexOf('}')
+                        state.onScan(if (i in 0 until j) raw.substring(i, j + 1) else raw.trim())
+                    }
+                }) { Text("Paste") }
             }
             Text(
                 if (state.connected) "🔒 Linked — DMs are end-to-end encrypted; the hub only relays ciphertext."
@@ -859,8 +868,14 @@ private fun DmContactList(state: MeshUiState) {
                         Image(io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()), "My contact QR", modifier = Modifier.size(220.dp))
                     }
                     Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = TextMuted)
+                    val shareMsg = "Add me on NoSlop — ${state.myHandle()}.\nScan the QR, or paste this code into DMs → ＋ Add → Paste:\n\n${state.myContactQr()}"
+                    if (Sharer.isAvailable) {
+                        Button(onClick = { Sharer.share(shareMsg, state.myContactQr()) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("📤  Share my contact")
+                        }
+                    }
                     Button(onClick = { clipboard.setText(AnnotatedString(state.myContactQr())) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("📋  Copy my ID (to paste/share)")
+                        Text("📋  Copy code")
                     }
                 }
             }
