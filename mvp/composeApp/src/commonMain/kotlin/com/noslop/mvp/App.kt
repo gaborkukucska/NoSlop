@@ -868,7 +868,8 @@ private fun DmContactList(state: MeshUiState) {
                         Image(io.github.alexzhirkevich.qrose.rememberQrCodePainter(state.myContactQr()), "My contact QR", modifier = Modifier.size(220.dp))
                     }
                     Text("Have someone scan this to add you as a DM contact.", fontSize = 11.sp, color = TextMuted)
-                    val shareMsg = "Add me on NoSlop — ${state.myHandle()}.\nScan the QR, or paste this code into DMs → ＋ Add → Paste:\n\n${state.myContactQr()}"
+                    // Clean human message; the data rides in the attached QR image (no raw JSON in the text).
+                    val shareMsg = "Add me on NoSlop — ${state.myHandle()} 👋\nScan the attached QR code to connect."
                     if (Sharer.isAvailable) {
                         Button(onClick = { Sharer.share(shareMsg, state.myContactQr()) }, modifier = Modifier.fillMaxWidth()) {
                             Text("📤  Share my contact")
