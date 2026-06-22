@@ -604,7 +604,7 @@ fun UnifiedFeedTab(
                             bottomSlideOffset = bottomSlideOffset,
                             rightSlideOffset = rightSlideOffset
                         )
-                        is UnifiedItem.Mesh -> FullScreenMeshCard(
+                        is UnifiedItem.Mesh -> FullScreenMeshCardV2(
                             post = item.post,
                             isVisible = isVisible,
                             onShareToMesh = { sharedItem = item },
