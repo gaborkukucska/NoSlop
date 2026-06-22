@@ -106,13 +106,14 @@ object FeedParser {
     private fun getMediaType(url: String, mimeType: String?): String? {
         val type = mimeType?.lowercase(Locale.US) ?: ""
         val lowerUrl = url.lowercase(Locale.US)
+        val urlNoQuery = lowerUrl.substringBefore("?")
         
         return when {
             // 1. Explicit Video MIME or known extension
             type.contains("video") || 
-            lowerUrl.endsWith(".mp4") || lowerUrl.endsWith(".mkv") || 
-            lowerUrl.endsWith(".webm") || lowerUrl.endsWith(".mov") || 
-            lowerUrl.endsWith(".m3u8") -> "video"
+            urlNoQuery.endsWith(".mp4") || urlNoQuery.endsWith(".mkv") || 
+            urlNoQuery.endsWith(".webm") || urlNoQuery.endsWith(".mov") || 
+            urlNoQuery.endsWith(".m3u8") -> "video"
 
             // 2. Video platform patterns (for feeds that omit MIME types)
             lowerUrl.contains("youtube.com/embed") || lowerUrl.contains("youtu.be/") ||
@@ -120,15 +121,15 @@ object FeedParser {
 
             // 3. Audio patterns
             type.contains("audio") || 
-            lowerUrl.endsWith(".mp3") || lowerUrl.endsWith(".wav") || 
-            lowerUrl.endsWith(".m4a") || lowerUrl.endsWith(".aac") || 
-            lowerUrl.endsWith(".ogg") || lowerUrl.endsWith(".flac") -> "audio"
+            urlNoQuery.endsWith(".mp3") || urlNoQuery.endsWith(".wav") || 
+            urlNoQuery.endsWith(".m4a") || urlNoQuery.endsWith(".aac") || 
+            urlNoQuery.endsWith(".ogg") || urlNoQuery.endsWith(".flac") -> "audio"
 
             // 4. Image patterns
             type.contains("image") || 
-            lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") || 
-            lowerUrl.endsWith(".png") || lowerUrl.endsWith(".webp") || 
-            lowerUrl.endsWith(".gif") -> "image"
+            urlNoQuery.endsWith(".jpg") || urlNoQuery.endsWith(".jpeg") || 
+            urlNoQuery.endsWith(".png") || urlNoQuery.endsWith(".webp") || 
+            urlNoQuery.endsWith(".gif") -> "image"
 
             else -> null
         }
@@ -205,7 +206,7 @@ object FeedParser {
         }
         val id = guid.ifBlank { link.ifBlank { title + pubDateStr } }
 
-        if (mediaUrl == null) {
+        if (mediaUrl == null && thumbnailUrl == null) {
             // Extract embedded images for thumbnail display only.
             // Do NOT promote to mediaType="image" — RSS articles with images are still articles.
             val embeddedImage = extractFirstImage(description)
@@ -317,7 +318,7 @@ object FeedParser {
         }
         val id = idStr.ifBlank { link.ifBlank { title + updatedStr } }
 
-        if (mediaUrl == null) {
+        if (mediaUrl == null && thumbnailUrl == null) {
             // Extract embedded images for thumbnail display only.
             // Do NOT promote to mediaType="image" — RSS articles with images are still articles.
             val embeddedImage = extractFirstImage(summary)
@@ -414,17 +415,24 @@ object FeedParser {
 
     private fun extractFirstImage(html: String): String? {
         // Broad search for images in typical RSS/Atom content
-        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+(?:\\.(jpg|jpeg|png|webp|gif|svg)|/image|/photo|attachment|proxy|file)[^'\"]*)['\"]", RegexOption.IGNORE_CASE)
-        val match = pattern.find(html)
-        var url = match?.groupValues?.get(1)
-        
-        // Also look for og:image or twitter:image in meta tags if the input is a full page (rare in parseStream but possible)
-        if (url == null) {
-            val metaPattern = Regex("<meta[^>]+(?:property|name)=['\"](?:og|twitter):image['\"][^>]+content=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
-            url = metaPattern.find(html)?.groupValues?.get(1)
+        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+        val matches = pattern.findAll(html)
+        for (match in matches) {
+            val url = match.groupValues[1]
+            val lowerUrl = url.lowercase(Locale.US)
+            if (lowerUrl.contains("pixel") || lowerUrl.contains("tracker") || lowerUrl.contains("1x1") || lowerUrl.contains("gravatar") || lowerUrl.contains("feedsportal")) {
+                continue
+            }
+            if (lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerUrl.contains(".png") || lowerUrl.contains(".webp") || lowerUrl.contains("/image") || lowerUrl.contains("/photo")) {
+                return url
+            }
         }
+        
+        val metaPattern = Regex("<meta[^>]+(?:property|name)=['\"](?:og|twitter):image['\"][^>]+content=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+        val metaUrl = metaPattern.find(html)?.groupValues?.get(1)
+        if (metaUrl != null) return metaUrl
 
-        return url
+        return null
     }
 
     /**

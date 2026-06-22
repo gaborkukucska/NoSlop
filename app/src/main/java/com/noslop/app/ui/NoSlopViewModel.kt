@@ -100,20 +100,23 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     
     private var cachedDefaultFeed = listOf<UnifiedItem>()
     private var isSearchModeActive = false
-    private var savedFeedPosition = 0
+    private var savedFeedItemId: String? = null
     private val sessionLoadedIds = mutableSetOf<String>()
 
-    fun saveFeedPosition(index: Int) {
+    fun saveFeedPosition(itemId: String) {
         if (!isSearchModeActive) {
             val feedList = _unifiedFeed.value
-            val keepStartIndex = maxOf(0, index - 3)
-            cachedDefaultFeed = feedList.drop(keepStartIndex)
-            savedFeedPosition = index - keepStartIndex
+            val actualIndex = feedList.indexOfFirst { it.id == itemId }
+            if (actualIndex >= 0) {
+                val keepStartIndex = maxOf(0, actualIndex - 3)
+                cachedDefaultFeed = feedList.drop(keepStartIndex)
+                savedFeedItemId = itemId
+            }
         }
     }
 
-    private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<Int>()
-    val restoreScrollPositionEvent: kotlinx.coroutines.flow.SharedFlow<Int> = _restoreScrollPositionEvent.asSharedFlow()
+    private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+    val restoreScrollPositionEvent: kotlinx.coroutines.flow.SharedFlow<String> = _restoreScrollPositionEvent.asSharedFlow()
 
     val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
         .map { items -> items.map { it.itemId }.toSet() }
@@ -258,9 +261,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
         viewModelScope.launch {
-            combine(feedItems, meshPosts) { feeds, meshes ->
-                Pair(feeds, meshes)
-            }.collect { (feeds, meshes) ->
+            combine(feedItems, meshPosts, localKeys) { feeds, meshes, keys ->
+                Triple(feeds, meshes, keys)
+            }.collect { (feeds, meshes, keys) ->
+                if (_isOnboardingComplete.value && keys == null) return@collect
+
                 allFeeds = feeds
                 allMeshes = meshes
                 
@@ -362,15 +367,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 sessionLoadedIds.addAll(newItems.map { it.id })
                 
                 val result = mutableListOf<UnifiedItem>()
-                val activeIndex = savedFeedPosition
+                val activeIndex = cachedDefaultFeed.indexOfFirst { it.id == savedFeedItemId }
+                val validActiveIndex = if (activeIndex >= 0) activeIndex else 0
                 
-                for (i in 0..activeIndex) {
+                for (i in 0..validActiveIndex) {
                     if (i < cachedDefaultFeed.size) {
                         result.add(cachedDefaultFeed[i])
                     }
                 }
                 
-                var oldIdx = activeIndex + 1
+                // Add new items BELOW the saved item
+                var oldIdx = validActiveIndex + 1
                 var newIdx = 0
                 while (oldIdx < cachedDefaultFeed.size || newIdx < newItems.size) {
                     if (newIdx < newItems.size) {
@@ -390,7 +397,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 sessionLoadedIds.addAll(result.map { it.id })
                 
                 kotlinx.coroutines.delay(150)
-                _restoreScrollPositionEvent.emit(savedFeedPosition)
+                if (savedFeedItemId != null) {
+                    _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                }
             } catch (e: Exception) {
                 Logger.error("VM", "Clear search exception: ${e.message}")
             } finally {
@@ -400,6 +409,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun loadMoreFeedItems(filterMode: String? = null) {
+        if (_isOnboardingComplete.value && localKeys.value == null) return
         val actualFilter = filterMode ?: currentFilterMode
         if (currentFilterMode != actualFilter) {
             _unifiedFeed.value = emptyList()
@@ -511,7 +521,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             else items.take(1).forEach { textImages.add(UnifiedItem.Feed(it)) }
         }
         
-        unseenMeshes.take(3).forEach { textImages.add(UnifiedItem.Mesh(it)) }
+        // Take more mesh posts to ensure they aren't drowned out by RSS
+        unseenMeshes.take(10).forEach { textImages.add(UnifiedItem.Mesh(it)) }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
         
@@ -521,17 +532,27 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         textImages.shuffle()
 
         val batch = mutableListOf<UnifiedItem>()
-        val needed = if (isInitialLoad) 2 else 5
+        val needed = if (isInitialLoad) 3 else 6
         
+        // Ensure at least one mesh post is included if available in the textImages pool
+        val meshInPool = textImages.filterIsInstance<UnifiedItem.Mesh>().take(1)
         val v = videos.take(2)
         val a = audios.take(1)
-        val t = textImages.take(maxOf(0, needed - v.size - a.size))
-        val extra = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size)).take(maxOf(0, needed - v.size - a.size - t.size))
+        
+        // Fill remaining slots with text/images (which includes the rest of the meshes)
+        val remainingNeeded = maxOf(0, needed - v.size - a.size - meshInPool.size)
+        val t = (textImages - meshInPool.toSet()).take(remainingNeeded)
         
         batch.addAll(v)
         batch.addAll(a)
+        batch.addAll(meshInPool)
         batch.addAll(t)
-        batch.addAll(extra)
+        
+        // Fill up if we are still short
+        if (batch.size < needed) {
+            val leftover = (videos.drop(v.size) + audios.drop(a.size) + textImages.drop(t.size + meshInPool.size))
+            batch.addAll(leftover.take(needed - batch.size))
+        }
 
         batch.shuffle() // Shuffle the final batch
         
@@ -824,7 +845,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 currentFeed.add(0, UnifiedItem.Mesh(post))
                 _unifiedFeed.value = currentFeed
                 // Prevent jarring jump to top if we are just sharing an item from the middle of the feed
-                if (clearnetUrl == null) {
+                if (clearnetUrl == null && currentFilterMode == "My Content") {
                     _scrollToTopEvent.emit(Unit)
                 }
             }
