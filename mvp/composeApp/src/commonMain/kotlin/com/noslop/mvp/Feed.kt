@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Platform seam: Ktor needs a platform HTTP engine (OkHttp on Android, Darwin on iOS). */
 expect fun httpClientEngineFactory(): HttpClient
@@ -35,23 +36,28 @@ class FeedRepository(
     private val prefs: PreferencesRepository = PreferencesRepository(),
 ) {
     suspend fun loadFeed(perSource: Int = 8): List<FeedItem> = withContext(Dispatchers.Default) {
-        val selected = (prefs.getUserSelectedCategories() + SourceLibrary.alwaysIncludedCategories).distinct()
+        val chosen = runCatching { prefs.getUserSelectedCategories() }.getOrDefault(emptyList())
+        val selected = (chosen + SourceLibrary.alwaysIncludedCategories).distinct()
+            .ifEmpty { SourceLibrary.categories }   // nothing resolved → load everything rather than an empty feed
         val language = runCatching { prefs.getLanguagePreference() }.getOrDefault("en")
         val negatives = runCatching { prefs.getUserNegativeKeywords() }.getOrDefault(emptyList())
             .map { it.lowercase() }.filter { it.isNotBlank() }
 
-        // RSS/Atom sources for the selected categories.
+        // RSS/Atom sources for the selected categories. Each fetch is time-boxed so a single hung host can't
+        // freeze the whole feed (awaitAll would otherwise wait forever — the "feed not loading" hang).
         val rssJobs = SourceLibrary.sources
             .filter { it.category in selected && it.feedType != "api" }
-            .map { src -> async { runCatching { fetchRss(src, perSource) }.getOrDefault(emptyList()) } }
+            .map { src -> async { withTimeoutOrNull(RSS_TIMEOUT_MS) { runCatching { fetchRss(src, perSource) }.getOrDefault(emptyList()) } ?: emptyList() } }
 
-        // API sources (the video/audio/image variety), one fan-out per selected category.
+        // API sources (the video/audio/image variety), one fan-out per selected category — also time-boxed.
         val apiJobs = selected.map { cat ->
             async {
                 val keywords = runCatching { prefs.getUserKeywordsForCategory(cat) }.getOrDefault(emptyList())
-                runCatching {
-                    PublicApiService.fetchItemsForCategory(cat, keywords, apiKeyResolver, language, client)
-                }.getOrDefault(emptyList())
+                withTimeoutOrNull(API_TIMEOUT_MS) {
+                    runCatching {
+                        PublicApiService.fetchItemsForCategory(cat, keywords, apiKeyResolver, language, client)
+                    }.getOrDefault(emptyList())
+                } ?: emptyList()
             }
         }
 
@@ -79,5 +85,10 @@ class FeedRepository(
             i++
         }
         return out
+    }
+
+    private companion object {
+        const val RSS_TIMEOUT_MS = 12_000L   // per RSS host
+        const val API_TIMEOUT_MS = 18_000L   // per category's API fan-out
     }
 }
