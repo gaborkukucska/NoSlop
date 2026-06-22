@@ -1,5 +1,13 @@
 # Project Status - NoSlop
 
+
+## Completed Changes (2026-06-23)
+
+### 1. Android Auto Backup & Keystore Corruption Fix
+*   **EncryptedSharedPreferences Crash**: Fixed a critical bug where installing the release version over the debug version (or reinstalling the app) caused a permanent crash loop. `android:allowBackup="true"` was improperly restoring encrypted preference files without their corresponding hardware-backed `MasterKey`.
+*   Disabled Android Auto Backup in the KMP manifest to match the legacy app's security model.
+*   Added a recovery fallback in `Platform.android.kt` that detects Keystore failures and actively wipes the corrupted preferences to regenerate a clean identity rather than throwing a fatal `GeneralSecurityException`.
+
 ## Completed Changes (2026-06-20)
 
 ### Kotlin Multiplatform (KMP) Migration - Phase A (Feeds)

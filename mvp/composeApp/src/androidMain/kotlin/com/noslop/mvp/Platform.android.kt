@@ -33,12 +33,28 @@ actual object IdentityKeyStore {
     private fun prefs(): SharedPreferences? {
         if (!AndroidAppContext.isSet) return null
         val ctx = AndroidAppContext.context
-        val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
-        return EncryptedSharedPreferences.create(
-            ctx, PREFS, masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
+        return try {
+            val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            EncryptedSharedPreferences.create(
+                ctx, PREFS, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        } catch (e: Exception) {
+            // Keystore key was lost or Auto-Backup restored the prefs without the hardware key.
+            // Clear the corrupted file to prevent a permanent crash loop.
+            try {
+                ctx.deleteSharedPreferences(PREFS)
+            } catch (ignored: Exception) {
+                ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+            }
+            val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
+            EncryptedSharedPreferences.create(
+                ctx, PREFS, masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }
     }
 
     actual fun loadOrCreatePublicKey(): ByteArray {
