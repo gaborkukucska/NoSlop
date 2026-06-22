@@ -605,7 +605,16 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private fun reloadContacts() { contacts.clear(); contacts.addAll(SavedContacts.list()) }
 
     /** My shareable contact card as a QR string — Android-compatible shape so both iOS *and* Android can scan it. */
-    fun myContactQr(): String = client.contactCard().toAndroidQrJson()
+    /**
+     * My shareable card. An iOS leaf has no onion, so advertise the BRIDGE onion as my reachable address —
+     * then a peer (e.g. Gabby) who scans this dials the bridge, which relays to my phone (inbound path).
+     * Falls back to the saved Tor hub if not currently connected.
+     */
+    fun myContactQr(): String {
+        val bridgeOnion = activeInvite?.takeIf { it.tor }?.host ?: savedNodes.firstOrNull { it.tor }?.host
+        val card = client.contactCard()
+        return (if (bridgeOnion != null) card.copy(onionAddress = bridgeOnion) else card).toAndroidQrJson()
+    }
     fun myHandle(): String = client.contactCard().handle
 
     fun addContact(contact: MeshContact) {

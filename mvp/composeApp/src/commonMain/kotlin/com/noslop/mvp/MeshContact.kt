@@ -36,7 +36,7 @@ data class MeshContact(
      * `onionAddress` (empty: an iOS leaf hosts no onion — they reach us via the bridge, not directly).
      */
     fun toAndroidQrJson(): String =
-        """{"handle":"$handle","publicKey":"${NodeId.hexToAndroid(nodeId)}","encPublicKey":"$encPublicKeyX509B64","onionAddress":""}"""
+        """{"handle":"$handle","publicKey":"${NodeId.hexToAndroid(nodeId)}","encPublicKey":"$encPublicKeyX509B64","onionAddress":"${onionAddress ?: ""}"}"""
 
     companion object {
         /**

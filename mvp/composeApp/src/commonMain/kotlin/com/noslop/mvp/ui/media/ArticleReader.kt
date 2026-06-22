@@ -43,7 +43,6 @@ fun SegmentedArticleReader(
     val segments: List<String> = remember(rawContent) { splitIntoSegments(rawContent, 800) }
     val effectiveSegments = if (segments.isEmpty()) listOf("") else segments
     val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
-    val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -55,11 +54,14 @@ fun SegmentedArticleReader(
             if (page == 0) {
                 // Page 0: Hero Layout (Magazine Style)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    imageContent(
-                        thumbnailUrl ?: fallbackImage,
-                        ContentScale.Crop,
-                        Modifier.fillMaxSize()
-                    )
+                    // Only show a hero image when the item actually has one — otherwise a clean dark hero, so
+                    // image-less articles don't all repeat the same stock fallback.
+                    val hero = thumbnailUrl?.takeIf { it.isNotBlank() }
+                    if (hero != null) {
+                        imageContent(hero, ContentScale.Crop, Modifier.fillMaxSize())
+                    } else {
+                        Box(Modifier.fillMaxSize().background(SurfaceDark))
+                    }
 
                     // Gradient Scrim
                     Box(

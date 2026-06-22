@@ -87,6 +87,7 @@ object FeedParser {
                             url = item.link,
                             author = item.creator,
                             excerpt = excerpt.ifBlank { null },
+                            thumbnailUrl = rawDesc.firstImageUrl(),
                             publishedAt = parseDate(item.pubDate),
                             fullContent = rawDesc
                         )
@@ -116,6 +117,7 @@ object FeedParser {
                             url = linkUrl,
                             author = entry.author?.name,
                             excerpt = excerpt.ifBlank { null },
+                            thumbnailUrl = rawDesc.firstImageUrl(),
                             publishedAt = parseDate(entry.updated ?: entry.published),
                             fullContent = rawDesc
                         )
@@ -136,6 +138,12 @@ object FeedParser {
             0L // Fallback for RFC 1123 or unparseable
         }
     }
+
+    // First embedded <img src="…"> in an item's description/content — gives articles real per-item images
+    // (instead of every article falling back to one stock photo). http(s) only.
+    private val IMG_SRC = Regex("""<img[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+    private fun String.firstImageUrl(): String? =
+        IMG_SRC.find(this)?.groupValues?.getOrNull(1)?.takeIf { it.startsWith("http") }
 
     private fun String.unwrapCdata() = replace("<![CDATA[", "").replace("]]>", "")
     private fun String.stripHtml() = unwrapCdata().replace(Regex("<[^>]*>"), "").decodeEntities().trim()
