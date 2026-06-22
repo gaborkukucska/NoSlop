@@ -46,20 +46,57 @@ class MainActivity : ComponentActivity() {
 
                     LaunchedEffect(Unit) {
                         if (showSplash) {
-                            // 1. Artificial minimum delay for the sleek pulsing animation to be enjoyed
-                            kotlinx.coroutines.delay(1800)
+                            val startTime = System.currentTimeMillis()
+                            var firstPreloadUrl: String? = null
                             
-                            // 2. Wait up to an additional 3.5 seconds for the feed to populate from local cache/network
+                            // 1. Wait up to 4 seconds for the feed to populate
                             try {
-                                kotlinx.coroutines.withTimeout(3500) {
+                                kotlinx.coroutines.withTimeout(4000) {
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
+                                            val firstItem = items.first()
+                                            val rawUrl = when(firstItem) {
+                                                is com.noslop.app.ui.UnifiedItem.Feed -> {
+                                                    val type = firstItem.item.mediaType
+                                                    if (type == "video" || type == "audio") firstItem.item.mediaUrl else null
+                                                }
+                                                is com.noslop.app.ui.UnifiedItem.Mesh -> {
+                                                    val type = firstItem.post.mediaType ?: firstItem.post.clearnetMediaType
+                                                    if (type == "video" || type == "audio") firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl else null
+                                                }
+                                            }
+                                            
+                                            // Safely resolve local mesh media proxies natively to avoid import issues
+                                            firstPreloadUrl = if (rawUrl?.startsWith("noslop://") == true) {
+                                                val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
+                                                val id = rawUrl.substringAfterLast("/")
+                                                "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
+                                            } else {
+                                                rawUrl
+                                            }
                                             throw java.util.concurrent.CancellationException("Feed Loaded")
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
                                 // Caught timeout or our deliberate success cancellation
+                            }
+                            
+                            // 2. If the first item is media, aggressively pre-warm it before dropping the splash screen! (up to 4s)
+                            if (firstPreloadUrl != null) {
+                                try {
+                                    kotlinx.coroutines.withTimeout(4000) {
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
+                                    }
+                                } catch (e: Exception) {
+                                    // Timeout on preload
+                                }
+                            }
+                            
+                            // 3. Ensure we've shown the splash for at least 1.8s for the aesthetic
+                            val elapsed = System.currentTimeMillis() - startTime
+                            if (elapsed < 1800) {
+                                kotlinx.coroutines.delay(1800 - elapsed)
                             }
                             
                             showSplash = false

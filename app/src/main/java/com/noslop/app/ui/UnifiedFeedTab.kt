@@ -479,10 +479,15 @@ fun UnifiedFeedTab(
                 val q = searchQuery.lowercase()
                 when (item) {
                     is UnifiedItem.Feed -> {
-                        if (item.item.apiSource != null && !item.item.isSaved) true
-                        else item.item.title.lowercase().contains(q) || item.item.excerpt?.lowercase()?.contains(q) == true
+                        item.item.title.lowercase().contains(q) || 
+                        item.item.excerpt?.lowercase()?.contains(q) == true || 
+                        item.item.author?.lowercase()?.contains(q) == true
                     }
-                    is UnifiedItem.Mesh -> item.post.content.lowercase().contains(q) || item.post.clearnetTitle?.lowercase()?.contains(q) == true
+                    is UnifiedItem.Mesh -> {
+                        item.post.content.lowercase().contains(q) || 
+                        item.post.clearnetTitle?.lowercase()?.contains(q) == true || 
+                        item.post.authorHandle.lowercase().contains(q)
+                    }
                 }
             } else true
 
@@ -501,6 +506,9 @@ fun UnifiedFeedTab(
                 pagerState.scrollToPage(0)
             }
         }
+        
+        viewModel.syncFilterMode(filterMode)
+        
         if (unifiedItems.size < 5) {
             viewModel.loadMoreFeedItems(filterMode)
         }

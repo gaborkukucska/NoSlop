@@ -73,14 +73,15 @@ fun SplashScreen() {
             Spacer(modifier = Modifier.height(32.dp))
             
             // Sleek pulsing indicator
-            val infiniteTransition = rememberInfiniteTransition()
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
             val pulseAlpha by infiniteTransition.animateFloat(
                 initialValue = 0.2f,
                 targetValue = 1f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(800, easing = LinearEasing),
                     repeatMode = RepeatMode.Reverse
-                )
+                ),
+                label = "pulseAlpha"
             )
             
             Box(
@@ -88,6 +89,17 @@ fun SplashScreen() {
                     .size(8.dp)
                     .alpha(pulseAlpha)
                     .background(AccentGreen, shape = androidx.compose.foundation.shape.CircleShape)
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = "Pre-loading Media...",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = AccentGreen.copy(alpha = pulseAlpha),
+                    letterSpacing = 1.sp,
+                    fontWeight = FontWeight.Bold
+                )
             )
         }
     }

@@ -269,10 +269,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         loadMoreFeedItems()
                     }
                 } else {
-                    val currentIds = _unifiedFeed.value.map { it.id }.toSet()
-                    val topTimestamp = _unifiedFeed.value.firstOrNull()?.timestamp ?: 0L
-                    
-                    val localPubKey = localKeys.value?.publicKeyB64
                     val updatedFeed = _unifiedFeed.value.mapNotNull { currentItem ->
                         when (currentItem) {
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
@@ -280,7 +276,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }.toList()
                     
-                    if (!isSearchModeActive) {
+                    // ONLY update the cache if we are actually viewing the Live Feed!
+                    if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         cachedDefaultFeed = updatedFeed
                     }
                     
@@ -310,12 +307,29 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun syncFilterMode(mode: String) {
+        if (currentFilterMode != mode) {
+            if (mode == "Live Feed") {
+                clearSearchAndRestoreFeed()
+            } else {
+                if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                    cachedDefaultFeed = _unifiedFeed.value.toList()
+                }
+                currentFilterMode = mode
+                _unifiedFeed.value = emptyList()
+                sessionLoadedIds.clear()
+                loadMoreFeedItems(mode)
+            }
+        }
+    }
+
     fun clearSearchAndRestoreFeed() {
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
                 activeSearchQuery = ""
                 isSearchModeActive = false
+                currentFilterMode = "Live Feed"
                 
                 val localPubKey = localKeys.value?.publicKeyB64
                 val exclusionIds = cachedDefaultFeed.map { it.id }.toSet() + sessionLoadedIds + cachedViewedIds + cachedExcludedIds
@@ -448,14 +462,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val specificFeeds = unseenFeeds.filter {
                 if (isSearchActive && !isSpecificFilter) true
                 else when (filterMode) {
-                    "Videos" -> it.mediaType == "video"
-                    "Audio" -> it.mediaType == "audio"
-                    "Images" -> it.mediaType == "image"
+                    "Videos" -> it.mediaType?.contains("video") == true
+                    "Audio" -> it.mediaType?.contains("audio") == true
+                    "Images" -> it.mediaType?.contains("image") == true
                     "Articles" -> it.mediaType.isNullOrEmpty()
                     else -> false
                 }
             }
-            val specificMeshes = if (!isSpecificFilter || filterMode == "Mesh" || filterMode == "My Content") unseenMeshes else emptyList()
+            val specificMeshes = unseenMeshes.filter {
+                if (isSearchActive && !isSpecificFilter) true
+                else when (filterMode) {
+                    "Mesh" -> true
+                    "My Content" -> it.authorPublicKeyB64 == localPubKey
+                    "Videos" -> (it.mediaType == "video" || it.clearnetMediaType == "video")
+                    "Audio" -> (it.mediaType == "audio" || it.clearnetMediaType == "audio")
+                    "Images" -> (it.mediaType == "image" || it.clearnetMediaType == "image")
+                    "Articles" -> (it.mediaType.isNullOrEmpty() && it.clearnetMediaType.isNullOrEmpty())
+                    else -> !isSpecificFilter
+                }
+            }
             
             val batch = mutableListOf<UnifiedItem>()
             val needed = if (_unifiedFeed.value.isEmpty()) (if(isSearchActive) 5 else 2) else 5
@@ -489,11 +514,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         unseenMeshes.take(3).forEach { textImages.add(UnifiedItem.Mesh(it)) }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        if (isInitialLoad) {
-            videos.shuffle()
-            audios.shuffle()
-            textImages.shuffle()
-        }
+        
+        // Always shuffle the source pools to guarantee maximum diversity!
+        videos.shuffle()
+        audios.shuffle()
+        textImages.shuffle()
 
         val batch = mutableListOf<UnifiedItem>()
         val needed = if (isInitialLoad) 2 else 5
@@ -508,7 +533,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         batch.addAll(t)
         batch.addAll(extra)
 
-        if (isInitialLoad) batch.shuffle()
+        batch.shuffle() // Shuffle the final batch
+        
+        // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload!
+        if (isInitialLoad) {
+            val firstVideoIdx = batch.indexOfFirst { 
+                (it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true) || 
+                (it is UnifiedItem.Mesh && (it.post.mediaType == "video" || it.post.clearnetMediaType == "video")) 
+            }
+            if (firstVideoIdx > 0) {
+                val videoItem = batch.removeAt(firstVideoIdx)
+                batch.add(0, videoItem)
+            }
+        }
         
         // Strictly Append at the bottom
         sessionLoadedIds.addAll(batch.map { it.id })
@@ -612,6 +649,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             sessionLoadedIds.clear()
             allFeeds = emptyList()
             allMeshes = emptyList()
+            currentFilterMode = "Live Feed"
             repository.clearFeedData()
             refreshFeeds()
         }
@@ -673,6 +711,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 cachedDefaultFeed = emptyList()
                 sessionLoadedIds.clear()
                 isSearchModeActive = false
+                currentFilterMode = "Live Feed"
                 repository.clearFeedData()
                 repository.refreshFeeds()
             } catch (e: Exception) {
@@ -784,7 +823,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.add(0, UnifiedItem.Mesh(post))
                 _unifiedFeed.value = currentFeed
-                _scrollToTopEvent.emit(Unit)
+                // Prevent jarring jump to top if we are just sharing an item from the middle of the feed
+                if (clearnetUrl == null) {
+                    _scrollToTopEvent.emit(Unit)
+                }
             }
         }
     }
