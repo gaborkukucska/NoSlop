@@ -367,7 +367,8 @@ fun FullScreenMeshCardV2(
     rightSlideOffset: Float = 0f
 ) {
     val context = LocalContext.current
-    val resolvedUrl = resolveMediaUrl(post.mediaUrl, context)
+    val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
+    val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
 
     Box(
         modifier = Modifier
@@ -376,7 +377,7 @@ fun FullScreenMeshCardV2(
     ) {
         if (resolvedUrl != null) {
             when {
-                post.mediaType == "video" || 
+                effectiveMediaType == "video" || 
                 resolvedUrl.contains(".mp4") || 
                 resolvedUrl.contains(".mkv") || 
                 resolvedUrl.contains(".m3u8") ||
@@ -386,7 +387,7 @@ fun FullScreenMeshCardV2(
                     val rawMediaId = post.mediaUrl?.substringAfterLast("/")
                     
                     var newlyDownloaded by remember { mutableStateOf(false) }
-                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType ?: "video"))
+                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, effectiveMediaType ?: "video"))
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
 
                     if (canPlay) {
@@ -435,7 +436,7 @@ fun FullScreenMeshCardV2(
                         }
                     }
                 }
-                post.mediaType == "audio" || 
+                effectiveMediaType == "audio" || 
                 resolvedUrl.contains(".mp3") || 
                 resolvedUrl.contains(".wav") ||
                 resolvedUrl.contains(".m4a") ||
@@ -444,7 +445,7 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".flac") -> {
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible)
                 }
-                post.mediaType == "image" || 
+                effectiveMediaType == "image" || 
                 resolvedUrl.contains(".jpg") || 
                 resolvedUrl.contains(".jpeg") || 
                 resolvedUrl.contains(".png") || 

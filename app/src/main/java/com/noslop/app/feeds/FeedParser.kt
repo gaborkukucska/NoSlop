@@ -163,8 +163,13 @@ object FeedParser {
                         val encUrl = parser.getAttributeValue(null, "url")
                         val encType = parser.getAttributeValue(null, "type")
                         if (!encUrl.isNullOrBlank()) {
-                            mediaUrl = encUrl
-                            mediaType = getMediaType(encUrl, encType)
+                            val derivedType = getMediaType(encUrl, encType)
+                            if (derivedType == "image") {
+                                if (thumbnailUrl == null) thumbnailUrl = encUrl
+                            } else {
+                                mediaUrl = encUrl
+                                mediaType = derivedType
+                            }
                         }
                         skip(parser)
                     }
@@ -246,8 +251,13 @@ object FeedParser {
                         val href = parser.getAttributeValue(null, "href")
                         val type = parser.getAttributeValue(null, "type")
                         if (rel == "enclosure" && !href.isNullOrBlank()) {
-                            mediaUrl = href
-                            mediaType = getMediaType(href, type)
+                            val derivedType = getMediaType(href, type)
+                            if (derivedType == "image") {
+                                if (thumbnailUrl == null) thumbnailUrl = href
+                            } else {
+                                mediaUrl = href
+                                mediaType = derivedType
+                            }
                         } else if (rel == null || rel == "alternate") {
                             link = href ?: ""
                         }
@@ -267,8 +277,13 @@ object FeedParser {
                         val encUrl = parser.getAttributeValue(null, "url")
                         val encType = parser.getAttributeValue(null, "type")
                         if (!encUrl.isNullOrBlank()) {
-                            mediaUrl = encUrl
-                            mediaType = getMediaType(encUrl, encType)
+                            val derivedType = getMediaType(encUrl, encType)
+                            if (derivedType == "image") {
+                                if (thumbnailUrl == null) thumbnailUrl = encUrl
+                            } else {
+                                mediaUrl = encUrl
+                                mediaType = derivedType
+                            }
                         }
                         skip(parser)
                     }

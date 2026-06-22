@@ -421,6 +421,7 @@ fun UnifiedFeedTab(
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     val viewedHistoryIds by viewModel.viewedHistoryIds.collectAsState()
+    val localKeys by viewModel.localKeys.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
     var searchQuery by remember { mutableStateOf("") }
@@ -454,7 +455,7 @@ fun UnifiedFeedTab(
 
     val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
         unifiedFeed.filter { item ->
-            val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == viewModel.localKeys.value?.publicKeyB64
+            val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
             if (filterMode == "My Content") {
                 if (!isOwnPost) return@filter false
             } else if (isOwnPost) {
@@ -495,8 +496,10 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
-        if (unifiedItems.isNotEmpty()) {
-            pagerState.scrollToPage(0)
+        if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
+            if (unifiedItems.isNotEmpty()) {
+                pagerState.scrollToPage(0)
+            }
         }
         if (unifiedItems.size < 5) {
             viewModel.loadMoreFeedItems(filterMode)
@@ -979,7 +982,8 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
             if (item.item.mediaType == "video" || item.item.mediaType == "audio") mediaUrl else null
         }
         is UnifiedItem.Mesh -> {
-            if (item.post.mediaType == "video" || item.post.mediaType == "audio") resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl else null
+            val type = item.post.mediaType ?: item.post.clearnetMediaType
+            if (type == "video" || type == "audio") resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl else null
         }
     }
 }
