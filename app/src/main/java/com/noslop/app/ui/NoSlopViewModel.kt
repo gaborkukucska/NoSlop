@@ -281,8 +281,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     
                     if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         val idList = savedIdsStr.split(",")
+                        val hidden = viewedHistoryIds.value + cachedExcludedIds
                         val restoredFeed = idList.mapNotNull { id ->
-                            val feed = feeds.find { it.id == id }
+                            if (id != savedActiveId && hidden.contains(id)) return@mapNotNull null
+                            val feed = feeds.find { it.id == id && !it.isRead }
                             if (feed != null) UnifiedItem.Feed(feed)
                             else {
                                 val mesh = meshes.find { it.id == id }
@@ -358,6 +360,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 loadMoreFeedItems(mode)
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(100)
+                    _scrollToTopEvent.emit(Unit)
+                }
             }
         }
     }
@@ -470,8 +476,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         val anchorTime = _unifiedFeed.value.firstOrNull()?.timestamp
         
-        val exclusionIds = currentIds + sessionLoadedIds
-        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.publishedAt <= anchorTime) }
+        val hiddenIds = viewedHistoryIds.value + cachedExcludedIds
+        val exclusionIds = currentIds + sessionLoadedIds + hiddenIds
+        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds && !it.isRead && (isSearchActive || anchorTime == null || it.publishedAt <= anchorTime) }
         var unseenMeshes = allMeshes.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.timestamp <= anchorTime) }
 
         if (isSearchActive) {
@@ -657,7 +664,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         
         sessionLoadedIds.addAll(finalBatch.map { it.id })
-        _unifiedFeed.value = _unifiedFeed.value + finalBatch
+        if (actualFilter == "Mesh" || actualFilter == "My Content" || actualFilter == "History" || actualFilter == "Liked") {
+            _unifiedFeed.value = (_unifiedFeed.value + finalBatch).sortedByDescending { it.timestamp }
+        } else {
+            _unifiedFeed.value = _unifiedFeed.value + finalBatch
+        }
         
         // Force the Pager to snap to the top (Index 0) on fresh filter loads
         if (isInitialLoad) {

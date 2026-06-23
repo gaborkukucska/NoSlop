@@ -396,7 +396,7 @@ object MediaManager {
     fun handleMediaChunk(senderId: String, payload: MediaChunkPayload) {
         val dl = activeDownloads[payload.mediaId] ?: return
         
-        val chunkData = if (payload.data.isEmpty()) ByteArray(0) else Base64.decode(payload.data, Base64.NO_WRAP)
+        val chunkData = if (payload.data.isEmpty()) ByteArray(0) else Base64.decode(payload.data, Base64.DEFAULT)
         if (dl.chunks[payload.chunkIndex] == null) {
             dl.chunks[payload.chunkIndex] = chunkData
             dl.receivedCount++
@@ -676,7 +676,7 @@ object MediaManager {
      */
     fun generateTinyThumbnail(file: File, type: String?): String? {
         return try {
-            val bitmap = if (type?.startsWith("video") == true) {
+            var bitmap = if (type?.startsWith("video") == true) {
                 val retriever = android.media.MediaMetadataRetriever()
                 retriever.setDataSource(file.absolutePath)
                 val frame = retriever.getFrameAtTime(1000000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
@@ -688,12 +688,31 @@ object MediaManager {
                 null
             }
 
+            if (bitmap != null && type?.startsWith("image") == true) {
+                try {
+                    val exif = android.media.ExifInterface(file.absolutePath)
+                    val orientation = exif.getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, android.media.ExifInterface.ORIENTATION_NORMAL)
+                    val matrix = android.graphics.Matrix()
+                    when (orientation) {
+                        android.media.ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                        android.media.ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                        android.media.ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                    }
+                    if (!matrix.isIdentity) {
+                        bitmap = android.graphics.Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+                    }
+                } catch (e: Exception) { Logger.warn(TAG, "Exif rotation failed") }
+            }
+
             if (bitmap != null) {
-                // Scale down to a tiny size (e.g., 90x90) for inline transmission
-                val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, 90, (90 * bitmap.height / bitmap.width), true)
+                val maxDim = 320f
+                val scale = Math.min(maxDim / bitmap.width, maxDim / bitmap.height)
+                val w = Math.round(bitmap.width * scale)
+                val h = Math.round(bitmap.height * scale)
+                val scaled = android.graphics.Bitmap.createScaledBitmap(bitmap, w, h, true)
                 val out = java.io.ByteArrayOutputStream()
-                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 60, out)
-                Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP)
             } else {
                 null
             }
