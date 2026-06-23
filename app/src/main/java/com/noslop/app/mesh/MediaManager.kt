@@ -396,7 +396,7 @@ object MediaManager {
     fun handleMediaChunk(senderId: String, payload: MediaChunkPayload) {
         val dl = activeDownloads[payload.mediaId] ?: return
         
-        val chunkData = Base64.decode(payload.data, Base64.DEFAULT)
+        val chunkData = if (payload.data.isEmpty()) ByteArray(0) else Base64.decode(payload.data, Base64.NO_WRAP)
         if (dl.chunks[payload.chunkIndex] == null) {
             dl.chunks[payload.chunkIndex] = chunkData
             dl.receivedCount++
@@ -447,12 +447,6 @@ object MediaManager {
             updateProgress(dl.metadata.id, 100)
             Logger.info(TAG, "Download completed for ${dl.metadata.id}")
             updateWakeLock()
-            
-            // SURGICAL FIX: Free the massive memory arrays immediately!
-            // This stops the permanent memory leak that causes OOMs!
-            for (i in dl.chunks.indices) {
-                dl.chunks[i] = null
-            }
             
             // SURGICAL FIX: Free the massive memory arrays immediately!
             // This stops the permanent memory leak that causes OOMs!
@@ -560,29 +554,40 @@ object MediaManager {
         
         if (file != null && file.exists()) {
             val totalSize = file.length()
-            val totalChunks = Math.ceil(totalSize.toDouble() / CHUNK_SIZE).toInt()
+            val totalChunks = (totalSize / CHUNK_SIZE).toInt() + 1
             
             if (payload.chunkIndex < totalChunks) {
                 val start = payload.chunkIndex.toLong() * CHUNK_SIZE
-                val length = Math.min(CHUNK_SIZE.toLong(), totalSize - start)
-                val buffer = ByteArray(length.toInt())
-                
-                file.inputStream().use { input ->
-                    input.skip(start)
-                    var bytesRead = 0
-                    while (bytesRead < buffer.size) {
-                        val result = input.read(buffer, bytesRead, buffer.size - bytesRead)
-                        if (result == -1) break
-                        bytesRead += result
+                val chunkPay = if (start >= totalSize) {
+                    MediaChunkPayload(
+                        mediaId = payload.mediaId,
+                        chunkIndex = payload.chunkIndex,
+                        totalChunks = totalChunks,
+                        data = ""
+                    )
+                } else {
+                    val length = Math.min(CHUNK_SIZE.toLong(), totalSize - start).toInt()
+                    val buffer = ByteArray(length)
+                    var actualBytesRead = 0
+                    
+                    java.io.RandomAccessFile(file, "r").use { raf ->
+                        raf.seek(start)
+                        while (actualBytesRead < buffer.size) {
+                            val result = raf.read(buffer, actualBytesRead, buffer.size - actualBytesRead)
+                            if (result == -1) break
+                            actualBytesRead += result
+                        }
                     }
+                    
+                    val actualData = if (actualBytesRead == buffer.size) buffer else buffer.copyOf(actualBytesRead)
+                    
+                    MediaChunkPayload(
+                        mediaId = payload.mediaId,
+                        chunkIndex = payload.chunkIndex,
+                        totalChunks = totalChunks,
+                        data = Base64.encodeToString(actualData, Base64.NO_WRAP)
+                    )
                 }
-                
-                val chunkPay = MediaChunkPayload(
-                    mediaId = payload.mediaId,
-                    chunkIndex = payload.chunkIndex,
-                    totalChunks = totalChunks,
-                    data = Base64.encodeToString(buffer, Base64.DEFAULT)
-                )
                 
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),

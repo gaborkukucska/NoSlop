@@ -3,6 +3,11 @@
 
 ## Completed Changes (2026-06-23)
 
+### 9. Mesh Media Transport & UI Navigation Fixes
+*   **Mesh Media Integrity**: Fixed a dual-sided bug where `.mp4` and other media chunks were arriving padded with empty zero-bytes, corrupting their structure. The chunking algorithm now correctly dynamically scopes the byte buffer to the remaining file size and utilizes `RandomAccessFile.seek` instead of the unreliable `skip()`. Math mismatch in `chunkCount` evaluation between sender and receiver was also aligned to strict integer floor division.
+*   **Feed State Memory on Scroll**: Bound the positional memory logic strictly to the `pagerState.settledPage` event. The Live Feed now dynamically saves your scroll position into the encrypted database seamlessly as you scroll down, rather than only saving when interacting with buttons.
+*   **Search Online UI**: Shifted the "Search Online" button in the filter modal to appear directly underneath the text input field for immediate context. It now natively echoes the active search string in its label.
+
 ### 1. Android Auto Backup & Keystore Corruption Fix
 *   **EncryptedSharedPreferences Crash**: Fixed a critical bug where installing the release version over the debug version (or reinstalling the app) caused a permanent crash loop. `android:allowBackup="true"` was improperly restoring encrypted preference files without their corresponding hardware-backed `MasterKey`.
 *   Disabled Android Auto Backup in the KMP manifest to match the legacy app's security model.

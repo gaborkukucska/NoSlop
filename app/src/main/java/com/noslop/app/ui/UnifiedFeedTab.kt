@@ -528,11 +528,14 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(Unit) {
         viewModel.restoreScrollPositionEvent.collect { itemId ->
-            if (unifiedItems.isNotEmpty()) {
-                val index = unifiedItems.indexOfFirst { it.id == itemId }
+            for (i in 0..10) {
+                val currentItems = viewModel.unifiedFeed.value
+                val index = currentItems.indexOfFirst { it.id == itemId }
                 if (index >= 0) {
                     pagerState.scrollToPage(index)
+                    break
                 }
+                kotlinx.coroutines.delay(100)
             }
         }
     }
@@ -573,6 +576,10 @@ fun UnifiedFeedTab(
                 LaunchedEffect(pagerState.settledPage, filterMode) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
+                        if (filterMode == "Live Feed" && !searchResultsActive) {
+                            viewModel.saveFeedPosition(currentItem.id)
+                        }
+
                         if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                             viewModel.markItemReadState(currentItem.item.id, true)
                         }
@@ -757,6 +764,26 @@ fun UnifiedFeedTab(
                         )
                     )
 
+                    if (localSearchQuery.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                                searchQuery = localSearchQuery
+                                filterMode = localFilterMode
+                                searchResultsActive = true
+                                viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
+                                showSearchModal = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                            modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Search Online for \"$localSearchQuery\"", fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     val myContentSelected = localFilterMode == "My Content"
                     Box(
@@ -823,25 +850,6 @@ fun UnifiedFeedTab(
                                     Text(mode, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                 }
                             }
-                        }
-                    }
-
-                    if (localSearchQuery.isNotBlank()) {
-                        Button(
-                            onClick = {
-                                if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
-                                searchQuery = localSearchQuery
-                                filterMode = localFilterMode
-                                searchResultsActive = true
-                                viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
-                                showSearchModal = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Search Online", fontWeight = FontWeight.Bold)
                         }
                     }
 
