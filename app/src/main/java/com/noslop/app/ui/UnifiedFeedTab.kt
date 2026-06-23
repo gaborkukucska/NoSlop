@@ -784,7 +784,7 @@ fun UnifiedFeedTab(
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         contentTypes.chunked(2).forEach { row ->

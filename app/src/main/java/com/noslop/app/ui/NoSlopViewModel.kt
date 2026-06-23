@@ -111,6 +111,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val keepStartIndex = maxOf(0, actualIndex - 3)
                 cachedDefaultFeed = feedList.drop(keepStartIndex)
                 savedFeedItemId = itemId
+                
+                viewModelScope.launch {
+                    val ids = cachedDefaultFeed.map { it.id }.joinToString(",")
+                    repository.putAppSetting("saved_feed_list", ids)
+                    repository.putAppSetting("saved_feed_active_id", itemId)
+                }
             }
         }
     }
@@ -270,7 +276,35 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 allMeshes = meshes
                 
                 if (_unifiedFeed.value.isEmpty()) {
-                    if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
+                    val savedIdsStr = repository.getAppSetting("saved_feed_list")
+                    val savedActiveId = repository.getAppSetting("saved_feed_active_id")
+                    
+                    if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                        val idList = savedIdsStr.split(",")
+                        val restoredFeed = idList.mapNotNull { id ->
+                            val feed = feeds.find { it.id == id }
+                            if (feed != null) UnifiedItem.Feed(feed)
+                            else {
+                                val mesh = meshes.find { it.id == id }
+                                if (mesh != null) UnifiedItem.Mesh(mesh) else null
+                            }
+                        }
+                        if (restoredFeed.isNotEmpty()) {
+                            cachedDefaultFeed = restoredFeed
+                            _unifiedFeed.value = restoredFeed
+                            savedFeedItemId = savedActiveId
+                            sessionLoadedIds.addAll(restoredFeed.map { it.id })
+                            
+                            viewModelScope.launch {
+                                kotlinx.coroutines.delay(150)
+                                if (savedActiveId != null) {
+                                    _restoreScrollPositionEvent.emit(savedActiveId)
+                                }
+                            }
+                        } else {
+                            loadMoreFeedItems()
+                        }
+                    } else if (feeds.isNotEmpty() || meshes.isNotEmpty()) {
                         loadMoreFeedItems()
                     }
                 } else {
@@ -390,33 +424,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 newItems.addAll(i)
                 newItems.addAll(t)
                 newItems.addAll(m)
-                newItems.shuffle()
-                
-                sessionLoadedIds.addAll(newItems.map { it.id })
                 
                 val result = mutableListOf<UnifiedItem>()
-                val activeIndex = cachedDefaultFeed.indexOfFirst { it.id == savedFeedItemId }
-                val validActiveIndex = if (activeIndex >= 0) activeIndex else 0
+                result.addAll(cachedDefaultFeed)
                 
-                for (idx in 0..validActiveIndex) {
-                    if (idx < cachedDefaultFeed.size) {
-                        result.add(cachedDefaultFeed[idx])
-                    }
-                }
+                // Prioritize new creator items first, then others (at the bottom of the feed)
+                val creatorBatch = newItems.filter { it is UnifiedItem.Feed && isCreatorMatch(it.item) }
+                val meshBatch = newItems.filterIsInstance<UnifiedItem.Mesh>()
+                val otherBatch = newItems.filter { it !in creatorBatch && it !in meshBatch }
                 
-                var oldIdx = validActiveIndex + 1
-                var newIdx = 0
-                while (oldIdx < cachedDefaultFeed.size || newIdx < newItems.size) {
-                    if (newIdx < newItems.size) {
-                        result.add(newItems[newIdx])
-                        newIdx++
-                    }
-                    if (oldIdx < cachedDefaultFeed.size) {
-                        result.add(cachedDefaultFeed[oldIdx])
-                        oldIdx++
-                    }
-                }
-                
+                result.addAll(creatorBatch)
+                result.addAll(meshBatch)
+                result.addAll(otherBatch)
+
                 _unifiedFeed.value = result
                 cachedDefaultFeed = result
                 

@@ -150,77 +150,50 @@ fun ChatThreadScreen(
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
             val previewView = remember { androidx.camera.view.PreviewView(context) }
             val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
-
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-
-            LaunchedEffect(Unit) {
-                captureManager.startCamera(lifecycleOwner, previewView) {}
-            }
+            LaunchedEffect(Unit) { captureManager.startCamera(lifecycleOwner, previewView) {} }
             DisposableEffect(Unit) {
                 onDispose { captureManager.stopCamera() }
             }
 
+            var countdown by remember { mutableStateOf(0) }
+
+            LaunchedEffect(countdown) {
+                if (countdown > 0) {
+                    kotlinx.coroutines.delay(1000L)
+                    countdown -= 1
+                    if (countdown == 0) {
+                        captureManager.startVideoRecording { file -> attachedFile = file; showCamera = false }
+                        isRecordingVideo = true
+                    }
+                }
+            }
+
+            if (countdown > 0) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                    Text(countdown.toString(), color = Color.White, fontSize = 96.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
             Row(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
             ) {
-                // Take Photo
+                if (!isRecordingVideo && countdown == 0) {
+                    IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                }
+                
                 IconButton(
                     onClick = {
-                        captureManager.takePhoto { file ->
-                            attachedFile = file
-                            showCamera = false
-                        }
+                        if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
+                        else if (countdown == 0) { countdown = 3 }
                     },
-                    modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))
-                ) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack)
-                }
-
-                // Record / Stop Video
-                IconButton(
-                    onClick = {
-                        if (isRecordingVideo) {
-                            captureManager.stopVideoRecording()
-                            isRecordingVideo = false
-                            showCamera = false
-                        } else {
-                            captureManager.startVideoRecording { file ->
-                                attachedFile = file
-                            }
-                            isRecordingVideo = true
-                        }
-                    },
-                    modifier = Modifier.size(70.dp).background(
-                        if (isRecordingVideo) DestructiveRed else SurfaceDark, RoundedCornerShape(50)
-                    )
-                ) {
-                    Icon(
-                        if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam,
-                        contentDescription = "Record Video",
-                        tint = if (isRecordingVideo) PrimaryBlack else TextLight
-                    )
-                }
-
-                // Flip Camera
-                if (!isRecordingVideo) {
-                    IconButton(
-                        onClick = {
-                            val lo = lifecycleOwner
-                            captureManager.flipCamera(lo, previewView) {}
-                        },
-                        modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
-                    ) {
-                        Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight)
-                    }
-
-                    IconButton(
-                        onClick = { showCamera = false },
-                        modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close Camera", tint = TextLight)
-                    }
+                    modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
+                ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) DestructiveRed else Color.White) }
+                
+                if (!isRecordingVideo && countdown == 0) {
+                    IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
+                    IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
                 }
             }
         }
@@ -639,10 +612,7 @@ fun ChatThreadScreen(
                 }) {
                     Icon(Icons.Default.CameraAlt, contentDescription = "Camera", tint = TextMuted)
                 }
-                // GIF prompt
-                IconButton(onClick = { showGifPrompt = true }) {
-                    Icon(Icons.Default.Gif, contentDescription = "GIF", tint = TextMuted)
-                }
+                
             }
 
             val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
@@ -688,46 +658,6 @@ fun ChatThreadScreen(
                     }
                 }
             }
-        }
-
-        // ── GIF URL prompt dialog ──
-        if (showGifPrompt) {
-            var gifUrl by remember { mutableStateOf("") }
-            AlertDialog(
-                onDismissRequest = { showGifPrompt = false },
-                title = { Text("Insert GIF URL", color = TextLight) },
-                containerColor = SurfaceDark,
-                text = {
-                    OutlinedTextField(
-                        value = gifUrl,
-                        onValueChange = { gifUrl = it },
-                        placeholder = { Text("https://example.com/anim.gif") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight
-                        )
-                    )
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        if (gifUrl.isNotBlank()) {
-                            val meta = MediaMetadata(
-                                id = "noslop-gif://$gifUrl",
-                                type = "gif",
-                                mimeType = "image/gif",
-                                size = 0,
-                                chunkCount = 0
-                            )
-                            onSendMessage("", meta, replyingToMessageId)
-                            replyingToMessageId = null
-                        }
-                        showGifPrompt = false
-                    }) { Text("Send", color = AccentGreen) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showGifPrompt = false }) { Text("Cancel", color = TextMuted) }
-                }
-            )
         }
     }
 }

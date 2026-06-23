@@ -569,7 +569,12 @@ object MediaManager {
                 
                 file.inputStream().use { input ->
                     input.skip(start)
-                    input.read(buffer)
+                    var bytesRead = 0
+                    while (bytesRead < buffer.size) {
+                        val result = input.read(buffer, bytesRead, buffer.size - bytesRead)
+                        if (result == -1) break
+                        bytesRead += result
+                    }
                 }
                 
                 val chunkPay = MediaChunkPayload(

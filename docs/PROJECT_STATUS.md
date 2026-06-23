@@ -15,6 +15,13 @@
 
 
 
+
+### 8. Feed State Persistence, DM Camera Alignment & Media Fixes
+*   **Live Feed Memory**: The app now reliably saves your exact `Live Feed` array and scroll index to the database (`app_settings`) when closed. Restarting the app instantly restores your exact position instead of dropping you into a generic 3-video startup shuffle.
+*   **Bottom-Loaded Refresh**: When clearing searches or filters, you are instantly returned to your preserved `Live Feed` position. All newly aggregated chronological content is silently appended to the absolute *bottom* of your list to prevent jarring vertical jumps.
+*   **DM Video Playback Fixed**: Found and resolved a critical bug in `MediaManager.kt` where `input.read(buffer)` was randomly returning partial byte arrays. Forced a strict `while` loop to guarantee exactly 256KB are read per chunk, perfectly preventing the `.mp4` structural corruption that triggered ExoPlayer's `s31: Source Error`.
+*   **DM Camera UI Upgraded**: Removed the redundant GIF button from direct messages. Unified the DM camera experience with the Broadcast camera, including the `DestructiveRed` immediate-action buttons and the 3-second recording countdown safety.
+
 ### 7. UX Polish: Feed Memory, Modal Layout & Camera Countdown
 *   **Strict Live Feed Memory**: The app's positional memory (saving your spot in the vertical feed) is now strictly restricted to the main "Live Feed". Browsing specific filters like "History" or "Random" will dynamically start from the top, keeping your core progression intact when returning.
 *   **Camera Polish**: Implemented a 3-second countdown sequence for video recording within the Broadcast UI to give users time to prepare. Re-themed all immediate-action camera buttons (Take Photo, Record, Close) to `DestructiveRed` for better visual signaling.
