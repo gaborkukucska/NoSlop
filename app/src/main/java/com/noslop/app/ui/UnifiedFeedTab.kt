@@ -89,13 +89,6 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
                         val request = chain.request
                         val url = request.data.toString()
                         if (url.startsWith("noslop://")) {
-                            val rawMediaId = url.substringAfterLast("/")
-                            val isImg = url.contains(".jpg") || url.contains(".jpeg") || url.contains(".png") || url.contains(".webp") || url.contains(".gif")
-                            val type = if (isImg) "image" else "video"
-                            val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(rawMediaId, type)
-                            if (localFile != null && localFile.exists()) {
-                                return chain.proceed(request.newBuilder().data(localFile).build())
-                            }
                             val resolved = resolveMediaUrl(url, context)
                             if (resolved != null) {
                                 return chain.proceed(request.newBuilder().data(resolved).build())
