@@ -25,8 +25,19 @@ data class RssItem(
     @XmlElement(true) val link: String? = null,
     @XmlElement(true) val description: String? = null,
     @XmlElement(true) val pubDate: String? = null,
-    @XmlElement(true) @XmlSerialName("creator", namespace = "http://purl.org/dc/elements/1.1/", prefix = "dc") val creator: String? = null
+    @XmlElement(true) @XmlSerialName("creator", namespace = "http://purl.org/dc/elements/1.1/", prefix = "dc") val creator: String? = null,
+    // Image sources (siblings of <description>): standard <enclosure> + Media RSS thumbnail/content.
+    val enclosure: RssEnclosure? = null,
+    @XmlSerialName("thumbnail", namespace = "http://search.yahoo.com/mrss/", prefix = "media") val mediaThumbnail: RssMediaRef? = null,
+    @XmlSerialName("content", namespace = "http://search.yahoo.com/mrss/", prefix = "media") val mediaContent: RssMediaRef? = null,
 )
+
+@Serializable
+@XmlSerialName("enclosure", namespace = "", prefix = "")
+data class RssEnclosure(val url: String? = null, val type: String? = null)
+
+@Serializable
+data class RssMediaRef(val url: String? = null)
 
 // --- Atom Models ---
 @Serializable
@@ -87,7 +98,7 @@ object FeedParser {
                             url = item.link,
                             author = item.creator,
                             excerpt = excerpt.ifBlank { null },
-                            thumbnailUrl = rawDesc.firstImageUrl(),
+                            thumbnailUrl = pickThumbnail(item, rawDesc),
                             publishedAt = parseDate(item.pubDate),
                             fullContent = rawDesc
                         )
@@ -144,6 +155,18 @@ object FeedParser {
     private val IMG_SRC = Regex("""<img[^>]+src=["']([^"']+)["']""", RegexOption.IGNORE_CASE)
     private fun String.firstImageUrl(): String? =
         IMG_SRC.find(this)?.groupValues?.getOrNull(1)?.takeIf { it.startsWith("http") }
+
+    private val IMG_EXT = Regex("""\.(jpg|jpeg|png|webp|gif)""", RegexOption.IGNORE_CASE)
+    private fun String?.looksLikeImage() = this != null && IMG_EXT.containsMatchIn(this)
+
+    /** Best per-item image: media:thumbnail → image enclosure → image media:content → embedded <img>. http(s) only. */
+    private fun pickThumbnail(item: RssItem, rawDesc: String): String? {
+        item.mediaThumbnail?.url?.takeIf { it.startsWith("http") }?.let { return it }
+        item.enclosure?.takeIf { it.type?.startsWith("image") == true || it.url.looksLikeImage() }
+            ?.url?.takeIf { it.startsWith("http") }?.let { return it }
+        item.mediaContent?.url?.takeIf { it.looksLikeImage() && it.startsWith("http") }?.let { return it }
+        return rawDesc.firstImageUrl()
+    }
 
     private fun String.unwrapCdata() = replace("<![CDATA[", "").replace("]]>", "")
     private fun String.stripHtml() = unwrapCdata().replace(Regex("<[^>]*>"), "").decodeEntities().trim()

@@ -149,20 +149,20 @@ fun SegmentedArticleReader(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }
+                    }
 
-                        // "Read Full Article" Button on the last segment
-                        if (segmentIndex == effectiveSegments.size - 1 && articleUrl != null && onOpenArticle != null) {
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Button(
-                                onClick = { onOpenArticle(articleUrl) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.align(Alignment.CenterHorizontally)
-                            ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold)
-                            }
+                    // "Read Full Article" button — anchored to the bottom of the page (not inside the centered
+                    // text column) so it never gets clipped by long article text.
+                    if (segmentIndex == effectiveSegments.size - 1 && articleUrl != null && onOpenArticle != null) {
+                        Button(
+                            onClick = { onOpenArticle(articleUrl) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.align(Alignment.BottomCenter)
+                        ) {
+                            Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }

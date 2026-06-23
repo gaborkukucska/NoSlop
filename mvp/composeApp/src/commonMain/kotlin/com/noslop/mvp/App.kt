@@ -117,7 +117,7 @@ fun App() {
                 Column(Modifier.fillMaxSize().padding(padding)) {
                     Box(modifier = Modifier.weight(1f)) {
                         when (tab) {
-                            0 -> FeedScreen()
+                            0 -> FeedScreen(mesh)
                             1 -> MeshScreen(mesh)
                             2 -> DmScreen(mesh)          // our working E2E leaf-to-leaf DMs (not the ChatScreen stub)
                             3 -> IdentityScreen()
@@ -237,7 +237,7 @@ private fun Field(label: String, value: String) {
 }
 
 @Composable
-private fun FeedScreen() {
+private fun FeedScreen(mesh: MeshUiState) {
     val scope = rememberCoroutineScope()
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val repo = remember { FeedRepository() }
@@ -264,7 +264,9 @@ private fun FeedScreen() {
     LaunchedEffect(Unit) { load() } // auto-load on first open
 
     val filters = FeedFilters.from(mutedText, requiredText)
-    val shown = filters.apply(stories)
+    // Mesh posts (mine + received from the network) lead the feed, then the curated clearnet items.
+    val meshItems = mesh.received.map { it.toFeedItem() }
+    val shown = meshItems + filters.apply(stories)
 
     // Full-screen vertical pager (one item per screen, swipe up) — the Android NoSlop feed feel. Each page
     // renders its media inline (video/audio/image/article) with a metadata overlay; curation filters apply live.
@@ -384,6 +386,21 @@ private fun feedKind(item: FeedItem, url: String): FeedKind {
 }
 
 private fun sourceLabel(item: FeedItem): String = (item.apiSource ?: item.sourceId).replace('_', ' ')
+
+/** Render a mesh social post as a feed item: a shared link becomes media, a plain post an article-style card. */
+private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
+    id = id,
+    sourceId = "mesh",
+    title = (clearnetTitle ?: content).trim().lineSequence().firstOrNull()?.take(100).orEmpty().ifBlank { content.take(100) },
+    url = clearnetUrl,
+    author = authorName,
+    excerpt = content,
+    thumbnailUrl = clearnetThumbnailUrl,
+    publishedAt = timestamp,
+    fullContent = content,
+    mediaUrl = clearnetUrl,
+    apiSource = "mesh",
+)
 
 /** Strip HTML tags + decode common entities for display (FeedParser keeps fullContent raw; Android strips at
  *  render too — FeedCard.kt). Collapses whitespace so the article reader shows clean text, not markup. */
@@ -692,7 +709,11 @@ private class MeshUiState(private val scope: CoroutineScope) {
     }
 
     fun publish() {
-        scope.launch { client.publish(draft); status = "Posted ✓ — ${client.linkCount} link(s)" }
+        scope.launch {
+            val post = client.publish(draft)
+            if (received.none { it.id == post.id }) received.add(0, post)   // show my own post too
+            status = "Posted ✓ — ${client.linkCount} link(s)"
+        }
     }
 
     /** Fold one reaction (ours or a peer's) into the aggregated counts, deduped by (post, emoji, author). */
