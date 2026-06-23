@@ -156,6 +156,9 @@ fun ChatThreadScreen(
             LaunchedEffect(Unit) {
                 captureManager.startCamera(lifecycleOwner, previewView) {}
             }
+            DisposableEffect(Unit) {
+                onDispose { captureManager.stopCamera() }
+            }
 
             Row(
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),

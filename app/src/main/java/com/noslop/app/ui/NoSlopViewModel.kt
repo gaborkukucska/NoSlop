@@ -104,7 +104,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val sessionLoadedIds = mutableSetOf<String>()
 
     fun saveFeedPosition(itemId: String) {
-        if (!isSearchModeActive) {
+        if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
             val feedList = _unifiedFeed.value
             val actualIndex = feedList.indexOfFirst { it.id == itemId }
             if (actualIndex >= 0) {
@@ -610,11 +610,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val meshBatch = batch.filterIsInstance<UnifiedItem.Mesh>().toMutableList()
         val otherBatch = batch.filter { it !in creatorBatch && it !in meshBatch }.toMutableList()
 
-        if (actualFilter != "Mesh" && actualFilter != "My Content" && actualFilter != "History" && actualFilter != "Liked") {
-            creatorBatch.shuffle()
-            meshBatch.shuffle()
-            otherBatch.shuffle()
-        }
+        // No internal shuffling to guarantee absolute chronological primacy!
+        // The arrays are already sorted descending.
 
         val finalBatch = mutableListOf<UnifiedItem>()
         finalBatch.addAll(creatorBatch)
@@ -635,6 +632,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         sessionLoadedIds.addAll(finalBatch.map { it.id })
         _unifiedFeed.value = _unifiedFeed.value + finalBatch
+        
+        // Force the Pager to snap to the top (Index 0) on fresh filter loads
+        if (isInitialLoad) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(150)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
     }
 fun toggleAggregator() {
         viewModelScope.launch {

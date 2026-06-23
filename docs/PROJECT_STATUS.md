@@ -14,6 +14,12 @@
 
 
 
+
+### 7. UX Polish: Feed Memory, Modal Layout & Camera Countdown
+*   **Strict Live Feed Memory**: The app's positional memory (saving your spot in the vertical feed) is now strictly restricted to the main "Live Feed". Browsing specific filters like "History" or "Random" will dynamically start from the top, keeping your core progression intact when returning.
+*   **Camera Polish**: Implemented a 3-second countdown sequence for video recording within the Broadcast UI to give users time to prepare. Re-themed all immediate-action camera buttons (Take Photo, Record, Close) to `DestructiveRed` for better visual signaling.
+*   **Search & Filter Modal Clean Up**: "Mesh" is now prominently separated from the generic content types and placed immediately below the user's "My Content" toggle. Removed ghost borders around the Random Discover button.
+
 ### 6. Background Resource Hoarding & Camera Leaks Fixed
 *   **MediaCodec Exhaustion**: Fixed a major hardware resource leak where `ExoPlayer` instances were not being released when the user navigated away from the "Feed" tab. Added an `isActiveTab` state parameter to `UnifiedFeedTab` to explicitly unmount active videos when the tab loses focus, resolving the `MediaCodec error -32` crashes.
 *   **Camera Lifecycle Leak**: Fixed a persistent 9-minute hardware camera leak occurring after closing the Broadcast Compose modal. CameraX streams are now strictly unbound from the `ProcessCameraProvider` via `DisposableEffect` the moment the camera view leaves the Compose tree.

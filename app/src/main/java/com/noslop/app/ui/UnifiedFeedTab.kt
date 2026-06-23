@@ -501,13 +501,7 @@ fun UnifiedFeedTab(
     val preWarmedUrls = remember { mutableSetOf<String>() }
     val preloadScope = rememberCoroutineScope()
 
-    var currentFilterForScroll by remember { mutableStateOf(filterMode) }
-    LaunchedEffect(unifiedItems.size, filterMode) {
-        if (unifiedItems.isNotEmpty() && currentFilterForScroll != filterMode) {
-            pagerState.scrollToPage(0)
-            currentFilterForScroll = filterMode
-        }
-    }
+    // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
 
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
@@ -776,9 +770,22 @@ fun UnifiedFeedTab(
                             Text("My Content", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val meshSelected = localFilterMode == "Mesh"
+                    Box(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (meshSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "Mesh" }
+                            .then(if (meshSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Hub, contentDescription = null, tint = if (meshSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mesh Network", color = if (meshSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (meshSelected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
+                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -838,7 +845,7 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    OutlinedButton(
+                    Button(
                         onClick = { 
                             if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                             searchQuery = ""
@@ -847,11 +854,13 @@ fun UnifiedFeedTab(
                             viewModel.syncFilterMode("Random")
                             showSearchModal = false 
                         },
-                        modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, AccentGreen)
+                        modifier = Modifier.fillMaxWidth().height(44.dp), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen)
                     ) {
-                        Icon(Icons.Default.Shuffle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Random Discover", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Random Discover", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             },
@@ -899,22 +908,44 @@ fun UnifiedFeedTab(
                     onDispose { captureManager.stopCamera() }
                 }
 
+                var countdown by remember { mutableStateOf(0) }
+
+                LaunchedEffect(countdown) {
+                    if (countdown > 0) {
+                        kotlinx.coroutines.delay(1000L)
+                        countdown -= 1
+                        if (countdown == 0) {
+                            captureManager.startVideoRecording { file -> attachedFile = file; showCamera = false }
+                            isRecordingVideo = true
+                        }
+                    }
+                }
+
+                if (countdown > 0) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                        Text(countdown.toString(), color = Color.White, fontSize = 96.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack) }
+                    if (!isRecordingVideo && countdown == 0) {
+                        IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                    }
+                    
                     IconButton(
                         onClick = {
                             if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
-                            else { captureManager.startVideoRecording { file -> attachedFile = file }; isRecordingVideo = true }
+                            else if (countdown == 0) { countdown = 3 }
                         },
-                        modifier = Modifier.size(70.dp).background(if (isRecordingVideo) DestructiveRed else SurfaceDark, RoundedCornerShape(50))
-                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) PrimaryBlack else TextLight) }
+                        modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
+                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) DestructiveRed else Color.White) }
                     
-                    if (!isRecordingVideo) {
+                    if (!isRecordingVideo && countdown == 0) {
                         IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
-                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight) }
+                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
                     }
                 }
             }

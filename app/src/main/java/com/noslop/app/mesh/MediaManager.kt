@@ -145,6 +145,10 @@ object MediaManager {
         return try {
             val destDir = getMediaDirectory(type)
             val destFile = File(destDir, id)
+            if (source.canonicalPath == destFile.canonicalPath) {
+                Logger.info(TAG, "Source and destination are the same file. Skipping copy.")
+                return destFile
+            }
             source.copyTo(destFile, overwrite = true)
             destFile
         } catch (e: Exception) {
