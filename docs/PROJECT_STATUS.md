@@ -10,6 +10,34 @@
 
 ## Completed Changes (2026-06-20)
 
+
+
+
+
+### 6. Background Resource Hoarding & Camera Leaks Fixed
+*   **MediaCodec Exhaustion**: Fixed a major hardware resource leak where `ExoPlayer` instances were not being released when the user navigated away from the "Feed" tab. Added an `isActiveTab` state parameter to `UnifiedFeedTab` to explicitly unmount active videos when the tab loses focus, resolving the `MediaCodec error -32` crashes.
+*   **Camera Lifecycle Leak**: Fixed a persistent 9-minute hardware camera leak occurring after closing the Broadcast Compose modal. CameraX streams are now strictly unbound from the `ProcessCameraProvider` via `DisposableEffect` the moment the camera view leaves the Compose tree.
+### 5. Compose State Fixes & True Creator Priority
+*   **True Creator Priority**: Followed creators now completely bypass the diverse interleaving limitations. Any new items from your followed creators are batched and stacked at the absolute top of the feed ahead of mesh posts and general discovery content.
+*   **"Shining Through" Shimmer Bug Fixed**: Removed an underlying rogue `LoadingShimmer` from the base layer of `UnifiedFeedTab`. The UI no longer flashes the loading gradient over active videos when database updates (like marking an item read or viewed) trigger micro-recompositions of the player's SurfaceView.
+*   **Pager Filter Desync Fixed**: Hard-bound the `VerticalPager` scroll state to the `filterMode`. Switching from Live Feed to "My Content" or "Mesh" now strictly snaps the pager index back to `0`, fixing the "swiping down to go up" bug caused by retained scroll state.
+*   **Loading UX Polish**: The Feed screen now displays a proper `CircularProgressIndicator` during the initial launch or when the feed is actively curating, resolving the "waaaay too long" perceived delay where it used to prematurely state "Your feed is empty".
+### 4. Feed Performance & Layout Fixes
+*   **Staggered Loading Restored**: Initial load times have been slashed. The feed now strictly requests only 3 items on a cold start or filter switch to immediately dismiss the splash curtain, instantly firing a silent background request for the next 10 items.
+*   **Strict Creator Priority**: Heavily optimized the chronological feed pull to ensure the user's selected creators override diversity limits, bringing preferred content straight to the top of the feed instead of irrelevant fallback filler.
+*   **Non-Destructive Preferences**: Changing content preferences in Settings no longer wipes the active feed history or clears the screen. It seamlessly pulls down updated content in the background.
+*   **Mesh & My Content Ordering Bug**: Fixed a jarring layout bug where the Compose Pager incorrectly retained its old index when switching to "My Content", forcing the user to swipe down to find their own items. The feed now actively forces a `scrollToTop` event on filter changes.
+*   **Random Discover Button Polish**: Softened the UI of the Random Discover button in the Search modal to match the primary button aesthetics.
+### 3. Creator Prioritization, Random Discover, and Mesh Filter Sort Fix
+*   **Followed Creators Up Front**: Overhauled the feed algorithm so that content matching the user's selected creators (from onboarding or settings) is strongly prioritized and pushed to the very front of the chronological list across "Live Feed", "Videos", "Images", and "Articles" modes.
+*   **Mesh Sort Order Fix**: Fixed the "Mesh" filter where posts were loading backwards. Specific lists like "Mesh" and "History" are now strictly chronologically ordered and skip the random shuffling that is applied to mixed feeds on initial load.
+*   **Random Discover Mode**: Repurposed the "Refresh Feed" button into a new "Random Discover" mode. This mode bypasses chronological and creator sorting, fetching an entirely random shuffle of unseen content to help break filter bubbles.
+### 2. Smart Feed Interleaving & Strict Deduplication
+*   **Feed Repetition Bug**: Fixed an issue where the Live Feed would routinely serve old, repeated, or randomly shuffled content instead of the most recent synced items.
+*   **Stale Card Banishing**: The feed now aggressively filters out `isRead = true` items from the Live Feed. Once a user dwells on a card, it is permanently banished from their main feed across app restarts, preventing stale clogging.
+*   **Smart Media Ratios**: Rebuilt the feed algorithm to chronologically sort and seamlessly interleave ~5 videos, 1 image, 1 audio, 1 article, and 2 mesh posts per scrolling batch. 
+*   **Source Limits**: Integrated a `takeDiverse` function to mathematically prevent any single RSS source from dominating a batch (max 2 items per source per page).
+
 ### Kotlin Multiplatform (KMP) Migration - Phase A (Feeds)
 *   **Architecture Shift**: The NoSlop canonical codebase is moving from the legacy Android `app/` module to the new Kotlin Multiplatform `mvp/` module. The `app/` module is now read-only reference until it is retired.
 *   **Networking Layer**: Unified the networking layer using Ktor `HttpClient` (with OkHttp on Android, Darwin on iOS) across all feed integrations.

@@ -211,7 +211,18 @@ class MediaCaptureManager(private val context: Context) {
         }
     }
 
+    fun stopCamera() {
+        try {
+            val cameraProvider = ProcessCameraProvider.getInstance(context).get()
+            cameraProvider.unbindAll()
+            Logger.info(TAG, "Camera stopped and unbound")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to stop camera: ${e.message}")
+        }
+    }
+
     fun release() {
+        stopCamera()
         cameraExecutor.shutdown()
     }
 }

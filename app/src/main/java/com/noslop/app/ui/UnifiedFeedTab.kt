@@ -350,7 +350,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         { selectedTab = it },
                         topSlideOffset = topSlide,
                         bottomSlideOffset = bottomSlide,
-                        rightSlideOffset = rightSlide
+                        rightSlideOffset = rightSlide,
+                        isActiveTab = selectedTab == 0
                     )
                 }
                 if (selectedTab == 1) DMsTab(viewModel)
@@ -414,7 +415,8 @@ fun UnifiedFeedTab(
     onTabChange: (Int) -> Unit,
     topSlideOffset: Float = 0f,
     bottomSlideOffset: Float = 0f,
-    rightSlideOffset: Float = 0f
+    rightSlideOffset: Float = 0f,
+    isActiveTab: Boolean = true
 ) {
     val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
@@ -499,6 +501,14 @@ fun UnifiedFeedTab(
     val preWarmedUrls = remember { mutableSetOf<String>() }
     val preloadScope = rememberCoroutineScope()
 
+    var currentFilterForScroll by remember { mutableStateOf(filterMode) }
+    LaunchedEffect(unifiedItems.size, filterMode) {
+        if (unifiedItems.isNotEmpty() && currentFilterForScroll != filterMode) {
+            pagerState.scrollToPage(0)
+            currentFilterForScroll = filterMode
+        }
+    }
+
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
         if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
@@ -536,11 +546,19 @@ fun UnifiedFeedTab(
     Box(modifier = Modifier.fillMaxSize()) {
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
-                    Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                if (isRefreshing) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = AccentGreen)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Curating your feed...", color = TextMuted, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         } else {
@@ -601,14 +619,13 @@ fun UnifiedFeedTab(
                 }
 
                 val item = unifiedItems[index]
-                val isVisible = pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index
+                val isVisible = isActiveTab && (pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(PrimaryBlack),
                     contentAlignment = Alignment.Center
                 ) {
-                    LoadingShimmer()
                     when (item) {
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
@@ -761,7 +778,7 @@ fun UnifiedFeedTab(
                     }
                     Spacer(modifier = Modifier.height(16.dp))
                     Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
+                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -822,12 +839,19 @@ fun UnifiedFeedTab(
                     }
 
                     OutlinedButton(
-                        onClick = { viewModel.forceResetFeed(); showSearchModal = false },
+                        onClick = { 
+                            if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                            searchQuery = ""
+                            filterMode = "Random"
+                            searchResultsActive = false
+                            viewModel.syncFilterMode("Random")
+                            showSearchModal = false 
+                        },
                         modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, AccentGreen)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shuffle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Refresh Feed", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Random Discover", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             },
@@ -871,6 +895,9 @@ fun UnifiedFeedTab(
                 val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
                 LaunchedEffect(Unit) { captureManager.startCamera(lifecycleOwner, previewView) {} }
+                DisposableEffect(Unit) {
+                    onDispose { captureManager.stopCamera() }
+                }
 
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
