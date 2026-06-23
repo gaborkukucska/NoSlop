@@ -232,10 +232,10 @@ object MediaManager {
         var consecutiveTimeouts = 0
 
         // AIMD State (gChat Conservative Limits)
-        var windowSize = 4.0
-        var ssthresh = 128.0
-        var rttEma = 30000L
-        var currentTimeoutMs = 30000L // 30s initial timeout for Tor (faster retry/recovery)
+        var windowSize = 1.0
+        var ssthresh = 16.0
+        var rttEma = 15000L
+        var currentTimeoutMs = 45000L // 30s initial timeout for Tor (faster retry/recovery)
     }
 
     private fun maintainDownloads() {
@@ -406,7 +406,7 @@ object MediaManager {
             if (sentAt != null) {
                 val rtt = System.currentTimeMillis() - sentAt
                 dl.rttEma = (dl.rttEma * 7 + rtt) / 8
-                dl.currentTimeoutMs = Math.max(30000L, dl.rttEma * 3) // Timeout is 3x RTT EMA, min 30s
+                dl.currentTimeoutMs = Math.max(20000L, dl.rttEma * 3) // Timeout is 3x RTT EMA, min 30s
 
                 // AIMD Additive Increase
                 if (dl.windowSize < dl.ssthresh) {
@@ -414,7 +414,7 @@ object MediaManager {
                 } else {
                     dl.windowSize += 1.0 / dl.windowSize
                 }
-                if (dl.windowSize > 128.0) dl.windowSize = 128.0
+                if (dl.windowSize > 32.0) dl.windowSize = 32.0
             }
             
             Logger.debug(TAG, "Media ${payload.mediaId}: Received chunk ${payload.chunkIndex} (${dl.receivedCount}/${dl.totalChunks}) [Win: ${dl.windowSize.toInt()}, RTT: ${dl.rttEma}ms]")

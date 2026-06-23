@@ -91,7 +91,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
 
-    private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>()
+    private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
     // --- Viewed History & Swipe Exclusion Caches ---
@@ -121,7 +121,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<String>()
+    private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val restoreScrollPositionEvent: kotlinx.coroutines.flow.SharedFlow<String> = _restoreScrollPositionEvent.asSharedFlow()
 
     val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
@@ -577,6 +577,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             
             sessionLoadedIds.addAll(batch.map { it.id })
             _unifiedFeed.value = _unifiedFeed.value + batch
+            if (isInitialLoad) {
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(150)
+                    _scrollToTopEvent.emit(Unit)
+                }
+            }
             return
         }
 
@@ -639,7 +645,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         finalBatch.addAll(otherBatch)
 
         // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload
-        if (isInitialLoad) {
+        if (isInitialLoad && (actualFilter == "Live Feed" || actualFilter == "Random")) {
             val firstVideoIdx = finalBatch.indexOfFirst { 
                 (it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true) || 
                 (it is UnifiedItem.Mesh && (it.post.mediaType == "video" || it.post.clearnetMediaType == "video")) 

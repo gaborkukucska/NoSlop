@@ -455,7 +455,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery) {
         unifiedFeed.filter { item ->
             val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
             if (filterMode == "My Content") {
@@ -620,7 +620,7 @@ fun UnifiedFeedTab(
                 }
 
                 val item = unifiedItems[index]
-                val isVisible = isActiveTab && (pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index)
+                val isVisible = isActiveTab && pagerState.currentPage == index
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -764,24 +764,23 @@ fun UnifiedFeedTab(
                         )
                     )
 
-                    if (localSearchQuery.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
-                                searchQuery = localSearchQuery
-                                filterMode = localFilterMode
-                                searchResultsActive = true
-                                viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
-                                showSearchModal = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Search Online for \"$localSearchQuery\"", fontWeight = FontWeight.Bold)
-                        }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val q = if (localSearchQuery.isNotBlank()) localSearchQuery else "Trending"
+                            if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                            searchQuery = q
+                            filterMode = localFilterMode
+                            searchResultsActive = true
+                            viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                            showSearchModal = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                        modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold)
                     }
 
                     Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
