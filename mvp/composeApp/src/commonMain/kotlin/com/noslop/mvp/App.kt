@@ -387,7 +387,13 @@ private fun feedKind(item: FeedItem, url: String): FeedKind {
 
 private fun sourceLabel(item: FeedItem): String = (item.apiSource ?: item.sourceId).replace('_', ' ')
 
-/** Render a mesh social post as a feed item: a shared link becomes media, a plain post an article-style card. */
+/**
+ * Render a mesh social post as a feed item. SECURITY: a post comes from an untrusted peer, so we must NOT
+ * auto-fetch any URL it carries over the clearnet HTTP client — that would leak the viewer's real IP to an
+ * attacker-chosen server on scroll (Tor deanonymization). So `mediaUrl`/`thumbnailUrl` (which render
+ * eagerly via NetworkImage/VideoPlayer) are left null; the post renders as text. `url` is kept only for the
+ * user-initiated "open link" tap (their explicit choice, like tapping any link), never auto-loaded.
+ */
 private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
     id = id,
     sourceId = "mesh",
@@ -395,10 +401,10 @@ private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
     url = clearnetUrl,
     author = authorName,
     excerpt = content,
-    thumbnailUrl = clearnetThumbnailUrl,
+    thumbnailUrl = null,   // do NOT eagerly fetch a post-supplied image over clearnet (deanon vector)
     publishedAt = timestamp,
     fullContent = content,
-    mediaUrl = clearnetUrl,
+    mediaUrl = null,       // ditto for media — no auto clearnet fetch from an untrusted post
     apiSource = "mesh",
 )
 

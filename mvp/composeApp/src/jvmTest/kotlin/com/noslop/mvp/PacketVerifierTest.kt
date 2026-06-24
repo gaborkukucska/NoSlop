@@ -1,0 +1,56 @@
+package com.noslop.mvp
+
+import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * Proves the receive-path trust boundary ([verifyPacket], wired into [MeshNode] via [MeshClient]): valid
+ * signed handshakes/reactions pass; tampered or unsigned ones are rejected; unsigned posts and DMs still
+ * pass (lenient by design). Uses the Ed25519 self-test keypair so signing is real.
+ */
+class PacketVerifierTest {
+    private val pub = Ed25519SelfTest.PUB_X509_B64       // base64 X.509 — the Android id form
+    private val priv = Ed25519SelfTest.PRIV_PKCS8_B64
+
+    private fun handshake(ts: Long, sig: String?) = PeerHandshakePayload(
+        id = "h1", fromUserId = pub, fromUsername = "alice", fromDisplayName = "alice.x1",
+        fromHomeNode = "bridge.onion", fromEncryptionPublicKey = "encpub", timestamp = ts, signature = sig,
+    )
+
+    @Test
+    fun valid_handshake_passes_tampered_and_unsigned_are_rejected() {
+        val ts = 1718900000000L
+        val sig = sign("$pub|alice|bridge.onion|$ts", priv)
+        val ok = handshakePacket(pub, "target", handshake(ts, sig), "CONNECTION_REQUEST")
+        assertTrue(verifyPacket(ok), "a correctly signed handshake must verify")
+
+        // Tamper the signed content (username) — signature no longer matches.
+        val tampered = ok.copy(payload = NetworkPacket.payloadOf(handshake(ts, sig).copy(fromUsername = "mallory"), PeerHandshakePayload.serializer()))
+        assertFalse(verifyPacket(tampered), "tampered handshake must be rejected")
+
+        // Unsigned handshake — rejected outright (handshakes are required-signed).
+        val unsigned = ok.copy(payload = NetworkPacket.payloadOf(handshake(ts, null), PeerHandshakePayload.serializer()))
+        assertFalse(verifyPacket(unsigned), "unsigned handshake must be rejected")
+    }
+
+    @Test
+    fun valid_reaction_passes_forged_fails() {
+        val ts = 1718900001000L
+        val r = ReactionPayload(postId = "post1", reactionType = "👍", authorId = pub, timestamp = ts,
+            signature = sign("post1|👍|$pub|$ts", priv))
+        assertTrue(verifyPacket(reactionPacket("sender", r)), "a correctly signed reaction must verify")
+
+        val forged = reactionPacket("sender", r).copy(
+            payload = NetworkPacket.payloadOf(r.copy(reactionType = "❤️"), ReactionPayload.serializer()))
+        assertFalse(verifyPacket(forged), "reaction with a mismatched type vs its signature must be rejected")
+    }
+
+    @Test
+    fun unsigned_post_and_dm_are_allowed() {
+        val post = PostPayload(id = "p1", authorId = "a", authorName = "A", authorPublicKey = "apub", content = "hi", timestamp = 1L)
+        assertTrue(verifyPacket(postPacket("a", post)), "unsigned iOS post is allowed (lenient for now)")
+        val dm = EncryptedPayload(id = "m1", nonce = "n", ciphertext = "c")
+        assertTrue(verifyPacket(messagePacket("s", "t", dm)), "E2E DM has no packet signature — allowed")
+    }
+}

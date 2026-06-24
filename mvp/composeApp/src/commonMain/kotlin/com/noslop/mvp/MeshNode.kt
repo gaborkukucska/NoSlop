@@ -53,7 +53,7 @@ class MeshNode(
 
     private suspend fun receive(fromLink: String, packet: NetworkPacket) {
         if (!firewall.admit(packet)) return                      // TTL / dedup / rate-limit
-        if (packet.signature != null && !verify(packet)) return  // reject forged/tampered packets
+        if (!verify(packet)) return                              // reject forged/tampered/unsigned (per-type, see verify)
         deliverLocal(packet)
         forward(fromLink, packet)                                // gossip onward (edges have nowhere to send)
     }

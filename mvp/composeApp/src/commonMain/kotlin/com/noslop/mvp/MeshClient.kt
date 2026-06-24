@@ -44,6 +44,7 @@ class MeshClient(
             }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
+        verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
     )
 
     /** Called for every post received from the mesh (set by the UI). */
