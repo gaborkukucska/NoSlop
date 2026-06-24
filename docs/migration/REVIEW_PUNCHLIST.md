@@ -15,16 +15,16 @@ themselves (fresh 12-byte nonces, correct AEAD tag handling, consistent key enco
 
 ## 🔴 CRITICAL — security (do first)
 
-- [ ] **C1 ★ Signature verification is never wired.** `MeshNode.verify` defaults to `{ true }`; no
+- [x] **C1 ★ Signature verification is never wired.** `MeshNode.verify` defaults to `{ true }`; no
   caller passes a real verifier, and the check is skipped when `signature == null`. Forged/unsigned
   POST/REACTION/handshake packets are accepted. *(ours)* — `MeshNode.kt:41,56`, `MeshClient.kt:20`,
   `jvmMain/HubMain.kt:41`. Fix: supply a real Ed25519 verifier and reject unsigned packets for
   signed types.
-- [ ] **C2 Unauthenticated handshake → contact injection / MITM.** `onHandshake` adds a contact from
+- [x] **C2 Unauthenticated handshake → contact injection / MITM.** `onHandshake` adds a contact from
   attacker-supplied id + DM public key and auto-accepts, no signature check — key-substitution
   against the blind hub. Depends on C1. *(ours)* — `App.kt:475–495`. Also bind `fromUserId` ↔
   `fromEncryptionPublicKey`.
-- [ ] **C3 Clearnet fetch of mesh-supplied URLs = Tor deanonymization.** A malicious post's
+- [x] **C3 Clearnet fetch of mesh-supplied URLs = Tor deanonymization.** A malicious post's
   `clearnet_thumbnail_url`/`clearnet_url` makes the device hit an attacker server directly over
   clearnet (real IP leak) on scroll. HTTP clients aren't proxied through Tor. *(ours)* —
   `Platform.ios.kt:317` (`HttpClient(Darwin)` no proxy), `NetworkImage.kt:41`, `App.kt:391–398`.
@@ -32,7 +32,7 @@ themselves (fresh 12-byte nonces, correct AEAD tag handling, consistent key enco
 
 ## 🟠 HIGH
 
-- [ ] **H1 ★ `MeshFirewall` thread-safety.** Unsynchronized `seen`/`rates` mutated by N concurrent
+- [x] **H1 ★ `MeshFirewall` thread-safety.** Unsynchronized `seen`/`rates` mutated by N concurrent
   per-link read-loop coroutines on the hub/bridge (not the iOS single-leaf). Corrupted dedup →
   dropped/duplicated packets or a hung hub under fan-out. *(ours)* — `MeshFirewall.kt:21–47`,
   `SocketTransport.kt:179`, `BridgeMain.kt:50,106`. Fix: guard with a Mutex/lock.
