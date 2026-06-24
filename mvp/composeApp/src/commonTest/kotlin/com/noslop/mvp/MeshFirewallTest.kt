@@ -1,5 +1,6 @@
 package com.noslop.mvp
 
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -8,7 +9,7 @@ import kotlin.test.assertTrue
  * Behavior-locking tests for [MeshFirewall], ported from the Phase-0 Android `GossipServiceTest` and
  * running on every target (JVM + Kotlin/Native). Same thresholds: DEFAULT_MAX_HOPS=6, dedup cap 1000 /
  * evict 100, 20 packets / 10s / sender. Adds the rate-limit window-expiry case the Android suite couldn't
- * test (the clock is now injectable).
+ * test (the clock is now injectable). `admit`/`remember` are `suspend` (Mutex-guarded), so tests use runTest.
  */
 class MeshFirewallTest {
 
@@ -18,25 +19,25 @@ class MeshFirewallTest {
         NetworkPacket(id = id, hops = hops, senderId = sender, type = "POST")
 
     // --- TTL ---
-    @Test fun ttl_dropsZeroHops() = assertFalse(firewall().admit(post("a", "s", hops = 0)))
-    @Test fun ttl_dropsNegativeHops() = assertFalse(firewall().admit(post("a", "s", hops = -3)))
-    @Test fun ttl_allowsRemainingHops() = assertTrue(firewall().admit(post("a", "s", hops = 1)))
-    @Test fun ttl_nullHopsDefaultsToMaxAndSurvives() = assertTrue(firewall().admit(post("a", "s", hops = null)))
+    @Test fun ttl_dropsZeroHops() = runTest { assertFalse(firewall().admit(post("a", "s", hops = 0))) }
+    @Test fun ttl_dropsNegativeHops() = runTest { assertFalse(firewall().admit(post("a", "s", hops = -3))) }
+    @Test fun ttl_allowsRemainingHops() = runTest { assertTrue(firewall().admit(post("a", "s", hops = 1))) }
+    @Test fun ttl_nullHopsDefaultsToMaxAndSurvives() = runTest { assertTrue(firewall().admit(post("a", "s", hops = null))) }
 
     // --- Dedup ---
-    @Test fun dedup_dropsSecondDelivery() {
+    @Test fun dedup_dropsSecondDelivery() = runTest {
         val fw = firewall()
         assertTrue(fw.admit(post("dup", "s")))
         assertFalse(fw.admit(post("dup", "s")), "duplicate id dropped")
     }
 
-    @Test fun dedup_distinctIdsNotSuppressed() {
+    @Test fun dedup_distinctIdsNotSuppressed() = runTest {
         val fw = firewall()
         assertTrue(fw.admit(post("u1", "s")))
         assertTrue(fw.admit(post("u2", "s")))
     }
 
-    @Test fun dedup_evictsOldestWhenFull() {
+    @Test fun dedup_evictsOldestWhenFull() = runTest {
         val fw = firewall()
         for (i in 0 until 1000) assertTrue(fw.admit(post("p$i", "sender-$i"))) // unique senders → no rate limit
         assertTrue(fw.admit(post("trigger", "sender-t"))) // trips the 1000 cap → evicts p0..p99
@@ -45,20 +46,20 @@ class MeshFirewallTest {
     }
 
     // --- Rate limit ---
-    @Test fun rateLimit_blocks21stFromSameSenderInWindow() {
+    @Test fun rateLimit_blocks21stFromSameSenderInWindow() = runTest {
         val fw = firewall()
         for (i in 0 until 20) assertTrue(fw.admit(post("rl-$i", "flooder")))
         assertFalse(fw.admit(post("rl-20", "flooder")), "21st in-window packet is rate-limited")
     }
 
-    @Test fun rateLimit_isPerSenderNotGlobal() {
+    @Test fun rateLimit_isPerSenderNotGlobal() = runTest {
         val fw = firewall()
         for (i in 0 until 20) fw.admit(post("n-$i", "noisy"))
         assertFalse(fw.admit(post("n-20", "noisy")))
         assertTrue(fw.admit(post("q-0", "quiet")), "a different sender is unaffected")
     }
 
-    @Test fun rateLimit_windowExpiresAndAllowsAgain() {
+    @Test fun rateLimit_windowExpiresAndAllowsAgain() = runTest {
         val fw = firewall()
         for (i in 0 until 20) assertTrue(fw.admit(post("w-$i", "sender")))
         assertFalse(fw.admit(post("w-20", "sender")), "blocked while window is full")
