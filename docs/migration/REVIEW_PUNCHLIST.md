@@ -19,7 +19,9 @@ themselves (fresh 12-byte nonces, correct AEAD tag handling, consistent key enco
   caller passes a real verifier, and the check is skipped when `signature == null`. Forged/unsigned
   POST/REACTION/handshake packets are accepted. *(ours)* — `MeshNode.kt:41,56`, `MeshClient.kt:20`,
   `jvmMain/HubMain.kt:41`. Fix: supply a real Ed25519 verifier and reject unsigned packets for
-  signed types.
+  signed types. *(Closed fully 2026-06-26: POST was the last lenient type — iOS now signs posts
+  (`MeshClient.publish`, `"$id|$authorId|$content|$ts"`) and the verifier requires it, matching Android,
+  which already rejected our unsigned posts via `verify(sig ?: "")`.)*
 - [x] **C2 Unauthenticated handshake → contact injection / MITM.** `onHandshake` adds a contact from
   attacker-supplied id + DM public key and auto-accepts, no signature check — key-substitution
   against the blind hub. Depends on C1. *(ours)* — `App.kt:475–495`. Also bind `fromUserId` ↔

@@ -113,18 +113,29 @@ class MeshClient(
      */
     suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null) = transport.connect(host, port, proxy)
 
-    /** Publish a text post to the mesh (and persist our own copy). */
+    /**
+     * Publish a text post to the mesh (and persist our own copy). Signed exactly the way Android verifies —
+     * `"$id|$authorId|$content|$timestamp"` with our identity key, authorId = our Android base64 id (which
+     * Android also uses as authorPublicKey) — so existing Android nodes accept it. Android already verifies
+     * posts with `signature ?: ""`, so an unsigned iOS post is rejected there; this is what makes our posts
+     * land. The bridge relays both ways; the signature is over payload fields, so id re-encoding is safe.
+     */
     suspend fun publish(text: String): PostPayload {
+        val authorId = androidId                 // base64 X.509 — the id Android signs/verifies posts against
+        val id = randomId()
+        val ts = nowMillis()
+        val signature = signWithIdentity("$id|$authorId|$text|$ts")   // no avatar segment — we don't attach one
         val post = PostPayload(
-            id = randomId(),
-            authorId = nodeId,
+            id = id,
+            authorId = authorId,
             authorName = identity.handle,
-            authorPublicKey = nodeId,
+            authorPublicKey = authorId,
             content = text,
-            timestamp = nowMillis(),
+            timestamp = ts,
+            signature = signature,
         )
         store?.savePost(post.toMeshPost())
-        node.broadcast(postPacket(nodeId, post))
+        node.broadcast(postPacket(nodeId, post, signature = signature))
         return post
     }
 

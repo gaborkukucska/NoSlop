@@ -14,9 +14,9 @@ package com.noslop.mvp
  *  - CHAT_REACTION: `"$messageId|$reactionType|$authorId|$timestamp"` against `authorId`. **Required**.
  *  - COMMENT_REACTION: `"$commentId|$reactionType|$authorId|$timestamp"` against `authorId`. **Required**.
  *  - COMMENT_VOTE: `"$commentId|$voteType|$authorId|$timestamp"` against `authorId`. **Required**.
- *  - POST: `"$id|$authorId|$content|$timestamp"` (+`"|$avatar"`) against `authorPublicKey`. Verified
- *    **only if signed** — iOS posts are currently unsigned, so unsigned posts are still allowed (TODO:
- *    sign iOS posts, then make this required too).
+ *  - POST: `"$id|$authorId|$content|$timestamp"` (+`"|$avatar"`) against `authorId` (== `authorPublicKey`).
+ *    **Required** — iOS now signs posts ([MeshClient.publish]) and Android verifies with `signature ?: ""`
+ *    (so it already rejects unsigned posts); rejecting unsigned here closes the C1 lenient-POST gap.
  *  - MESSAGE (E2E DM — authenticated by its AEAD, not a packet signature), DIAL_PEER (bridge control),
  *    and anything else: allowed.
  *
@@ -56,12 +56,12 @@ fun verifyPacket(packet: NetworkPacket): Boolean {
         return verify(msg, cd.signature, cd.authorId)   // signer = comment author
     }
     packet.getPostPayload()?.let { p ->
-        val sig = p.signature ?: return true     // unsigned iOS post — allowed for now (see TODO above)
+        val sig = p.signature ?: return false     // posts are required-signed now (iOS signs; Android always has)
         val msg = buildString {
             append(p.id).append('|').append(p.authorId).append('|').append(p.content).append('|').append(p.timestamp)
             p.authorAvatarB64?.let { append('|').append(it) }
         }
-        return verify(msg, sig, p.authorPublicKey)
+        return verify(msg, sig, p.authorId)       // signer = authorId (== authorPublicKey), exactly as Android
     }
     return true   // MESSAGE / DIAL_PEER / unknown types
 }

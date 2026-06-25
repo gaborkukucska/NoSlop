@@ -104,9 +104,22 @@ class PacketVerifierTest {
     }
 
     @Test
-    fun unsigned_post_and_dm_are_allowed() {
-        val post = PostPayload(id = "p1", authorId = "a", authorName = "A", authorPublicKey = "apub", content = "hi", timestamp = 1L)
-        assertTrue(verifyPacket(postPacket("a", post)), "unsigned iOS post is allowed (lenient for now)")
+    fun signed_post_passes_unsigned_and_tampered_rejected() {
+        val ts = 1718900007000L
+        val signed = sign("p1|$pub|hello mesh|$ts", priv)
+        val post = PostPayload(id = "p1", authorId = pub, authorName = "A", authorPublicKey = pub, content = "hello mesh", timestamp = ts, signature = signed)
+        assertTrue(verifyPacket(postPacket(pub, post, signature = signed)), "a correctly signed post must verify")
+
+        val unsigned = post.copy(signature = null)
+        assertFalse(verifyPacket(postPacket(pub, unsigned)), "unsigned post must be rejected (required-signed now)")
+
+        val tampered = postPacket(pub, post, signature = signed).copy(
+            payload = NetworkPacket.payloadOf(post.copy(content = "evil"), PostPayload.serializer()))
+        assertFalse(verifyPacket(tampered), "post with tampered content vs its signature must be rejected")
+    }
+
+    @Test
+    fun unsigned_dm_is_allowed() {
         val dm = EncryptedPayload(id = "m1", nonce = "n", ciphertext = "c")
         assertTrue(verifyPacket(messagePacket("s", "t", dm)), "E2E DM has no packet signature — allowed")
     }
