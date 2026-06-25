@@ -24,7 +24,7 @@ class MeshTransport(
     private var isRunning = false
 
     @Volatile private var listening = false
-    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(8) // Limit concurrent Tor circuits
+    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(24) // Limit concurrent Tor circuits (increased for highly parallel media transfers)
     fun isListening(): Boolean = listening
 
     fun startListening() {

@@ -78,11 +78,23 @@ fun ChatThreadScreen(
             try {
                 val contentResolver = context.contentResolver
                 val mimeType = contentResolver.getType(uri)
+                var resolvedMimeType = mimeType
+                if (resolvedMimeType == null) {
+                    val path = uri.path?.lowercase() ?: ""
+                    resolvedMimeType = when {
+                        path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".webm") -> "video/mp4"
+                        path.endsWith(".gif") -> "image/gif"
+                        path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") -> "image/jpeg"
+                        path.endsWith(".m4a") || path.endsWith(".mp3") -> "audio/mp4"
+                        else -> "application/octet-stream"
+                    }
+                }
+
                 val ext = when {
-                    mimeType?.startsWith("video") == true -> ".mp4"
-                    mimeType?.startsWith("audio") == true -> ".m4a"
-                    mimeType?.startsWith("image/gif") == true -> ".gif"
-                    mimeType?.startsWith("image") == true -> ".jpg"
+                    resolvedMimeType.startsWith("video") -> ".mp4"
+                    resolvedMimeType.startsWith("audio") -> ".m4a"
+                    resolvedMimeType.startsWith("image/gif") -> ".gif"
+                    resolvedMimeType.startsWith("image") -> ".jpg"
                     else -> ".bin"
                 }
                 val tempFile = java.io.File(context.cacheDir, "dm_attach_${System.currentTimeMillis()}$ext")
@@ -357,9 +369,16 @@ fun ChatThreadScreen(
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
-                                            if (isVideo) {
-                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video", modifier = Modifier.size(48.dp), tint = Color.White)
-                                            } else {
+                                            val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                            if (meta?.thumbnailB64 != null) {
+                                                val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
+                                                coil.compose.AsyncImage(
+                                                    model = decoded,
+                                                    contentDescription = "Video Thumbnail",
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else if (!isVideo) {
                                                 val model = if (mid.startsWith("noslop-gif://")) {
                                                     val url = mid.removePrefix("noslop-gif://")
                                                     if (url.startsWith("data:image/gif;base64,")) {
@@ -375,6 +394,9 @@ fun ChatThreadScreen(
                                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                                     modifier = Modifier.fillMaxSize()
                                                 )
+                                            }
+                                            if (isVideo) {
+                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video", modifier = Modifier.size(48.dp), tint = Color.White)
                                             }
                                         }
                                     } else {

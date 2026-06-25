@@ -42,19 +42,19 @@ class DmPacketHandler(
                 val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
                 if (obj.has("content")) {
                     finalContent = obj.get("content").asString
-                    if (obj.has("media")) {
-                        mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
-                        mediaId = mediaMetadata.id
-                        mediaType = mediaMetadata.type
-                        
-                        // Robustness: If the ID looks like a GIF but type is generic, fix it for the renderer
-                        if (mediaId?.endsWith(".gif", ignoreCase = true) == true && mediaType == "image") {
-                            mediaType = "gif"
-                        }
+                }
+                if (obj.has("media")) {
+                    mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
+                    mediaId = mediaMetadata.id
+                    mediaType = mediaMetadata.type
+                    
+                    // Robustness: If the ID looks like a GIF but type is generic, fix it for the renderer
+                    if (mediaId?.endsWith(".gif", ignoreCase = true) == true && mediaType == "image") {
+                        mediaType = "gif"
                     }
-                    if (obj.has("replyTo")) {
-                        replyToMessageId = obj.get("replyTo").asString
-                    }
+                }
+                if (obj.has("replyTo")) {
+                    replyToMessageId = obj.get("replyTo").asString
                 }
             } catch (e: Exception) {
                 // Not JSON, use raw plaintext
