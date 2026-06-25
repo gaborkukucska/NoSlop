@@ -6,6 +6,10 @@
 
 ### 2. Tor Identity Unification & Semaphore Gridlock Fix
 
+### 4. Reverted Tor Identity Bug & Mitigated Semaphore Gridlock
+*   **Tor Identity Reverted**: The previous "fix" for Tor ED25519-V3 math was fundamentally incorrect. Tor Control Port (`ADD_ONION ED25519-V3`) explicitly expects the 64-byte expanded secret key (clamped secret scalar + PRF secret), not the 64-byte libsodium format (seed + public key). By passing the seed, Tor recomputed a completely different public key and onion address, breaking all peer connectivity. Reverted `CryptoService.kt` to the correct SHA-512 clamped expansion.
+*   **Semaphore Queue Prioritization**: The `Semaphore(8)` in `MeshTransport` was causing infinite queuing gridlocks because background `ANNOUNCE_PEER` heartbeats to offline peers consumed all 8 permits and took up to 60s to timeout, completely starving user-initiated actions (like `CONNECTION_REQUEST`). Background packets now use `tryAcquire()` and are aggressively dropped if Tor circuits are saturated, keeping the queue free for essential actions.
+
 ### 3. Mesh Transport Fast-Fail for Unreachable Peers
 *   **Dead Peer SOCKS Rejection**: Added a fast-fail check in `MeshTransport.kt`. If the Tor proxy explicitly rejects a connection with `SOCKS: Host unreachable`, `TTL expired`, or a general failure, the transport layer now instantly aborts the send instead of stubbornly executing the remaining retries and holding up the `torSemaphore`. This keeps the mesh pipeline fluid when a trusted peer is genuinely offline or has changed their onion address.
 *   **Tor ED25519-V3 Math Fixed**: Corrected a severe mathematical split where the Kotlin `CryptoService` was deriving a completely different onion address than the internal Tor C-daemon. Tor expects the `libsodium` secret key format (32-byte seed + 32-byte public key), but we were passing it a clamped SHA-512 expansion which Tor then re-hashed, resulting in a misaligned identity.

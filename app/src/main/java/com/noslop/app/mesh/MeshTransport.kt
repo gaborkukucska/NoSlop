@@ -100,7 +100,16 @@ class MeshTransport(
             return@withContext false
         }
 
-        torSemaphore.acquire()
+        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST"
+        if (isBackground) {
+            if (!torSemaphore.tryAcquire()) {
+                Logger.warn(TAG, "Dropping background packet ${packet.type} to $onionAddress: Tor circuits busy")
+                return@withContext false
+            }
+        } else {
+            torSemaphore.acquire()
+        }
+        
         try {
             val connectTimeout = if (packet.type.startsWith("MEDIA_")) 45000 else 20000
             for (attempt in 1..3) { // Reduced retries to avoid blocking the semaphore

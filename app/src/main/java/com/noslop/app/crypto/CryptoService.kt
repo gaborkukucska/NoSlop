@@ -300,14 +300,17 @@ object CryptoService {
                 return null
             }
             
-            // 3. Derive the public key from the seed using BouncyCastle
-            val privKeyParams = org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(seed, 0)
-            val pubKeyParams = privKeyParams.generatePublicKey()
-            val rawPubKey = pubKeyParams.encoded // 32 bytes
+            // 3. Expand seed to 64 bytes using SHA-512
+            val sha512 = java.security.MessageDigest.getInstance("SHA-512")
+            val expanded = sha512.digest(seed)  // 64 bytes
             
-            // 4. Tor expects the 64-byte libsodium format: 32 bytes seed + 32 bytes public key
-            val blob = seed + rawPubKey
-            Base64.encodeToString(blob, Base64.NO_WRAP)
+            // 4. Clamp the first 32 bytes (secret scalar) per Ed25519 spec
+            expanded[0] = (expanded[0].toInt() and 248).toByte()
+            expanded[31] = (expanded[31].toInt() and 127).toByte()
+            expanded[31] = (expanded[31].toInt() or 64).toByte()
+            
+            // 5. The full 64 bytes is what Tor wants
+            Base64.encodeToString(expanded, Base64.NO_WRAP)
         } catch (e: Exception) {
             Logger.error(TAG, "ED25519-V3 key expansion failed: ${e.message}")
             null
