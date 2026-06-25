@@ -35,6 +35,14 @@ fun verifyPacket(packet: NetworkPacket): Boolean {
     packet.getVotePayload()?.let { v ->
         return verify("${v.postId}|${v.voteType}|${v.authorId}|${v.timestamp}", v.signature, v.authorId)
     }
+    packet.getCommentPayload()?.let { c ->
+        val cd = c.comment
+        val msg = buildString {
+            append(c.postId).append('|').append(cd.id).append('|').append(cd.content).append('|').append(cd.timestamp)
+            cd.authorAvatarB64?.let { append('|').append(it) }
+        }
+        return verify(msg, cd.signature, cd.authorId)   // signer = comment author
+    }
     packet.getPostPayload()?.let { p ->
         val sig = p.signature ?: return true     // unsigned iOS post — allowed for now (see TODO above)
         val msg = buildString {

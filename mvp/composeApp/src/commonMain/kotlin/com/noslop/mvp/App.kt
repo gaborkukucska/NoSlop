@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -250,6 +251,7 @@ private fun FeedScreen(mesh: MeshUiState) {
     var requiredText by remember { mutableStateOf(saved.second) }
     var showFilters by remember { mutableStateOf(false) }
     var backgroundSyncEnabled by remember { mutableStateOf(false) }
+    var commentsForPost by remember { mutableStateOf<String?>(null) }   // mesh post whose comments are open
     val scheduler = remember { BackgroundScheduler() }
 
     fun load() {
@@ -281,7 +283,13 @@ private fun FeedScreen(mesh: MeshUiState) {
             else -> {
                 val pager = rememberPagerState { shown.size }
                 VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
-                    FeedMediaCard(shown[page], isVisible = page == pager.currentPage)
+                    val item = shown[page]
+                    val isMesh = item.sourceId == "mesh"
+                    FeedMediaCard(
+                        item, isVisible = page == pager.currentPage,
+                        commentCount = if (isMesh) mesh.commentsFor(item.id).size else 0,
+                        onOpenComments = if (isMesh) ({ commentsForPost = item.id }) else null,
+                    )
                 }
             }
         }
@@ -321,11 +329,17 @@ private fun FeedScreen(mesh: MeshUiState) {
             }
         }
     }
+
+    // Comments sheet for the mesh post whose 💬 was tapped.
+    commentsForPost?.let { pid ->
+        CommentsSheet(mesh, pid, onDismiss = { commentsForPost = null })
+    }
 }
 
-/** One full-screen feed page: media routed by type, with a bottom gradient metadata overlay (Android parity). */
+/** One full-screen feed page: media routed by type, with a bottom gradient metadata overlay (Android parity).
+ *  Mesh posts also get a comments affordance ([onOpenComments]). */
 @Composable
-private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
+private fun FeedMediaCard(item: FeedItem, isVisible: Boolean, commentCount: Int = 0, onOpenComments: (() -> Unit)? = null) {
     val url = item.mediaUrl
     val kind = if (url == null) FeedKind.ARTICLE else feedKind(item, url)
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -350,6 +364,84 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean) {
                 Text(stripFeedHtml(item.title), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3)
             }
         }
+        // Comments — mesh posts only, any render kind. Anchored bottom-end so it clears the metadata overlay.
+        if (onOpenComments != null) {
+            androidx.compose.material3.Surface(
+                onClick = onOpenComments,
+                color = Color.Black.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            ) {
+                Text(
+                    if (commentCount > 0) "💬 $commentCount" else "💬",
+                    color = Color.White, fontSize = 14.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                )
+            }
+        }
+    }
+}
+
+/** A modal comments thread for a mesh post — top-level comments + one level of replies, with a composer.
+ *  Wire-compatible with Android: comments are signed CommentPayloads relayed over the mesh (the bridge both ways). */
+@Composable
+private fun CommentsSheet(mesh: MeshUiState, postId: String, onDismiss: () -> Unit) {
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    var draft by remember { mutableStateOf("") }
+    var replyingTo by remember { mutableStateOf<CommentPayload?>(null) }   // set ⇒ composer posts a reply
+    val all = mesh.commentsFor(postId)
+    val topLevel = all.filter { it.parentCommentId == null }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(Modifier.fillMaxWidth().fillMaxHeight(0.85f), shape = RoundedCornerShape(16.dp)) {
+            Column(Modifier.fillMaxSize().background(PrimaryBlack).padding(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Comments (${all.size})", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.weight(1f))
+                    Text("✕", color = TextMuted, modifier = Modifier.clickable { onDismiss() }.padding(8.dp))
+                }
+                if (!mesh.connected) Text("Connect on HaiNet to post.", fontSize = 11.sp, color = TextMuted)
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (topLevel.isEmpty()) item {
+                        Text("No comments yet — be the first.", fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(vertical = 12.dp))
+                    }
+                    items(topLevel) { c ->
+                        CommentRow(c, indent = 0, onReply = { replyingTo = c })
+                        all.filter { it.parentCommentId == c.comment.id }.forEach { reply ->
+                            CommentRow(reply, indent = 1, onReply = { replyingTo = c })   // replies thread under the top-level parent
+                        }
+                    }
+                }
+                replyingTo?.let {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Replying to ${it.comment.authorName}", fontSize = 11.sp, color = AccentGreen, modifier = Modifier.weight(1f))
+                        Text("cancel", fontSize = 11.sp, color = TextMuted, modifier = Modifier.clickable { replyingTo = null }.padding(4.dp))
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        draft, { draft = it }, placeholder = { Text(if (replyingTo != null) "Reply…" else "Add a comment…") },
+                        singleLine = true, modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = { mesh.sendComment(postId, draft, replyingTo?.comment?.id); draft = ""; replyingTo = null; focus.clearFocus() },
+                        enabled = mesh.connected && draft.isNotBlank(),
+                    ) { Text("Post") }
+                }
+            }
+        }
+    }
+}
+
+/** One comment (or reply, indented). */
+@Composable
+private fun CommentRow(c: CommentPayload, indent: Int, onReply: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(start = (indent * 20).dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(c.comment.authorName.ifBlank { c.comment.authorId.take(8) }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
+            Text(hhmm(c.comment.timestamp), fontSize = 10.sp, color = TextMuted)
+        }
+        Text(c.comment.content, fontSize = 14.sp, color = TextLight)
+        if (indent == 0) Text("Reply", fontSize = 11.sp, color = TextMuted, modifier = Modifier.clickable { onReply() }.padding(top = 2.dp))
     }
 }
 
@@ -444,6 +536,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     val myReactions = mutableStateMapOf<String, Boolean>()
     private val reactionSeen = mutableSetOf<String>()      // "postId|emoji|authorId" — dedup across gossip echoes
     val reactionEmojis = listOf("👍", "❤️", "😂", "🔥")
+    val comments = mutableStateListOf<CommentPayload>()    // comments received/sent this session (all posts)
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -477,6 +570,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
         // For Android DMs (which omit the sender's enc-key in the payload), resolve it from a stored contact.
         client.resolveEncPub = { id -> SavedContacts.list().firstOrNull { it.nodeId == id }?.encPublicKeyX509B64 }
         client.onReaction = { r -> scope.launch { applyReaction(r.postId, r.reactionType, r.authorId, r.action != "remove") } }
+        client.onComment = { c -> scope.launch { if (comments.none { it.comment.id == c.comment.id }) comments.add(c) } }
         // Incoming handshake: add/learn the peer as a contact; for a request, auto-accept (reply USER_HANDSHAKE).
         client.onHandshake = { type, hs ->
             scope.launch {
@@ -740,6 +834,21 @@ private class MeshUiState(private val scope: CoroutineScope) {
             val on = !(myReactions["${post.id}|$type"] ?: false)
             if (client.sendReaction(post.id, type, add = on)) applyReaction(post.id, type, client.androidId, on)
             else status = "Reaction failed (identity key)"
+        }
+    }
+
+    /** Comments on [postId], oldest first. */
+    fun commentsFor(postId: String): List<CommentPayload> =
+        comments.filter { it.postId == postId }.sortedBy { it.comment.timestamp }
+
+    /** Post a comment (or threaded reply) on [postId]; broadcast signed + echo locally. */
+    fun sendComment(postId: String, text: String, parentCommentId: String? = null) {
+        val content = text.trim()
+        if (content.isEmpty()) return
+        scope.launch {
+            val c = client.sendComment(postId, content, parentCommentId)
+            if (c == null) status = "Comment failed (identity key)"
+            else if (comments.none { it.comment.id == c.comment.id }) comments.add(c)
         }
     }
 }

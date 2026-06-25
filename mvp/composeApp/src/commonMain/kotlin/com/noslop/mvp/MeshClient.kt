@@ -42,6 +42,9 @@ class MeshClient(
             override suspend fun onReaction(packet: NetworkPacket, r: ReactionPayload) {
                 onReaction?.invoke(r)
             }
+            override suspend fun onComment(packet: NetworkPacket, c: CommentPayload) {
+                onComment?.invoke(c)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
@@ -61,6 +64,9 @@ class MeshClient(
 
     /** Called for every incoming REACTION (emoji on a post) — add or remove, see [ReactionPayload.action]. */
     var onReaction: ((r: ReactionPayload) -> Unit)? = null
+
+    /** Called for every incoming COMMENT (a reply on a post; threaded if [CommentPayload.parentCommentId] set). */
+    var onComment: ((c: CommentPayload) -> Unit)? = null
 
     /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
     val androidId: String get() = NodeId.toAndroid(nodeId)
@@ -127,6 +133,26 @@ class MeshClient(
         )
         node.broadcast(reactionPacket(nodeId, payload))
         return true
+    }
+
+    /**
+     * Post a COMMENT (or threaded reply, with [parentCommentId]) on [postId]. Signed the way Android verifies
+     * — `"$postId|$id|$content|$timestamp"` with our identity key, authorId = our Android base64 id — so
+     * existing Android nodes accept it. Broadcast to the mesh; the bridge relays both ways. Returns the
+     * payload (to echo locally) or null if we can't sign.
+     */
+    suspend fun sendComment(postId: String, content: String, parentCommentId: String? = null): CommentPayload? {
+        val authorId = androidId
+        val id = randomId()
+        val ts = nowMillis()
+        val signature = signWithIdentity("$postId|$id|$content|$ts") ?: return null
+        val comment = CommentData(
+            id = id, authorId = authorId, authorName = identity.handle,
+            content = content, timestamp = ts, signature = signature,
+        )
+        val payload = CommentPayload(postId = postId, comment = comment, parentCommentId = parentCommentId)
+        node.broadcast(commentPacket(nodeId, payload))
+        return payload
     }
 
     /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */

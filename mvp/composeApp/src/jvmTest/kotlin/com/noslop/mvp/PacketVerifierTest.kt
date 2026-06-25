@@ -47,6 +47,19 @@ class PacketVerifierTest {
     }
 
     @Test
+    fun valid_comment_passes_tampered_fails() {
+        val ts = 1718900002000L
+        val cd = CommentData(id = "c1", authorId = pub, authorName = "alice", content = "nice post", timestamp = ts,
+            signature = sign("post1|c1|nice post|$ts", priv))
+        val c = CommentPayload(postId = "post1", comment = cd, parentCommentId = null)
+        assertTrue(verifyPacket(commentPacket("sender", c)), "a correctly signed comment must verify")
+
+        val forged = commentPacket("sender", c).copy(
+            payload = NetworkPacket.payloadOf(c.copy(comment = cd.copy(content = "hacked")), CommentPayload.serializer()))
+        assertFalse(verifyPacket(forged), "comment with tampered content vs its signature must be rejected")
+    }
+
+    @Test
     fun unsigned_post_and_dm_are_allowed() {
         val post = PostPayload(id = "p1", authorId = "a", authorName = "A", authorPublicKey = "apub", content = "hi", timestamp = 1L)
         assertTrue(verifyPacket(postPacket("a", post)), "unsigned iOS post is allowed (lenient for now)")

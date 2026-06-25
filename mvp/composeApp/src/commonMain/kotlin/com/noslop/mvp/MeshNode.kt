@@ -12,6 +12,8 @@ interface MeshSink {
     suspend fun onHandshake(packet: NetworkPacket, hs: PeerHandshakePayload) {}
     /** A REACTION arrived (an emoji on a post). [r.action] is "add" or "remove". */
     suspend fun onReaction(packet: NetworkPacket, r: ReactionPayload) {}
+    /** A COMMENT arrived (a reply on a post; [c.parentCommentId] set ⇒ a threaded reply to a comment). */
+    suspend fun onComment(packet: NetworkPacket, c: CommentPayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -63,6 +65,7 @@ class MeshNode(
         packet.getMessagePayload()?.let { sink.onMessage(packet, it) }
         (packet.getConnectionRequestPayload() ?: packet.getUserHandshakePayload())?.let { sink.onHandshake(packet, it) }
         packet.getReactionPayload()?.let { sink.onReaction(packet, it) }
+        packet.getCommentPayload()?.let { sink.onComment(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {
@@ -100,6 +103,14 @@ fun reactionPacket(senderId: String, r: ReactionPayload, hops: Int = 6): Network
     NetworkPacket(
         id = randomId(), hops = hops, senderId = senderId, type = "REACTION",
         payload = NetworkPacket.payloadOf(r, ReactionPayload.serializer()), signature = r.signature,
+    )
+
+/** Build a COMMENT packet (a reply on a post). The comment carries its own author signature (Android-verified);
+ *  stamped at packet level too for parity. [senderId] is this node's id (hex on our side). */
+fun commentPacket(senderId: String, c: CommentPayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "COMMENT",
+        payload = NetworkPacket.payloadOf(c, CommentPayload.serializer()), signature = c.comment.signature,
     )
 
 /** Build a signed handshake packet — [type] is "CONNECTION_REQUEST" (request) or "USER_HANDSHAKE" (accept).
