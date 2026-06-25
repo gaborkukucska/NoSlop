@@ -23,7 +23,7 @@ fun main(args: Array<String>) = runBlocking {
     val identity = loadIdentity(HandleStore.load().let { if (it == "hub") "creator" else it })
     val client = MeshClient(identity, null, scope)
 
-    client.onDm = { fromNodeId, fromEncPub, text, _ ->
+    client.onDm = { fromNodeId, fromEncPub, text, _, _ ->
         println("\n[leaf] 📩 DM from ${fromNodeId.take(16)}…: \"$text\"")
         scope.launch {
             val ok = client.sendDm(MeshContact("them", fromNodeId, fromEncPub), "ack from the creator: \"$text\" ✓") != null

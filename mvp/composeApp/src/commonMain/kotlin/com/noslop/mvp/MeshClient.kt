@@ -31,11 +31,12 @@ class MeshClient(
                 // Our DMs carry the sender's enc-key in the payload; Android's don't, so fall back to the
                 // sender's stored contact (resolved by the UI). packet.senderId is already hex on our side.
                 val senderPub = dm.senderEncPublicKey ?: resolveEncPub?.invoke(packet.senderId) ?: return
-                val text = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
+                val plain = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
+                val content = unwrapDmContent(plain)   // Android wraps as {"content":…,"replyTo":…}; unwrap (raw fallback)
                 // Reply must go to the ORIGINAL sender (our DMs carry senderNodeId; Android's use senderId,
                 // which the bridge does NOT re-stamp — only re-encodes — so it's the true sender).
                 // dm.id is the wire message id (Android keys its ChatMessage on it) — pass it so chat reactions correlate.
-                onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, text, dm.id)
+                onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, content.text, dm.id, content.replyTo)
             }
             override suspend fun onHandshake(packet: NetworkPacket, hs: PeerHandshakePayload) {
                 onHandshake?.invoke(packet.type, hs)
@@ -66,9 +67,10 @@ class MeshClient(
     /** Called for every post received from the mesh (set by the UI). */
     var onPost: ((PostPayload) -> Unit)? = null
 
-    /** Called for every decrypted DM addressed to us: (fromNodeId, theirEncPubX509B64, plaintext, messageId).
-     *  [messageId] is the wire [EncryptedPayload.id] — the id a CHAT_REACTION references. */
-    var onDm: ((fromNodeId: String, fromEncPub: String, text: String, messageId: String) -> Unit)? = null
+    /** Called for every decrypted DM addressed to us: (fromNodeId, theirEncPubX509B64, text, messageId, replyTo).
+     *  [messageId] is the wire [EncryptedPayload.id] — the id a CHAT_REACTION references. [replyTo] is the id of
+     *  the message this one replies to (Android's `replyTo` envelope field), or null. */
+    var onDm: ((fromNodeId: String, fromEncPub: String, text: String, messageId: String, replyTo: String?) -> Unit)? = null
 
     /** Resolve a sender's X25519 enc-pubkey from a stored contact (for Android DMs lacking it in-payload). */
     var resolveEncPub: ((nodeId: String) -> String?)? = null
@@ -129,12 +131,14 @@ class MeshClient(
     /**
      * Send an end-to-end-encrypted DM to [contact]. Sealed with the contact's X25519 public key + our DM
      * private key; the hub relays the ciphertext by [MeshContact.nodeId] without being able to read it.
+     * [replyToMessageId] (optional) threads this as a reply to an earlier message (Android-interop envelope).
      * Returns the wire message id (so the UI keys its local entry on it — that id is what a CHAT_REACTION
      * references), or null if DM crypto is unavailable or the contact's key is malformed.
      */
-    suspend fun sendDm(contact: MeshContact, text: String): String? {
+    suspend fun sendDm(contact: MeshContact, text: String, replyToMessageId: String? = null): String? {
         val theirPub = DmKeys.normalizePeerPublicX509B64(contact.encPublicKeyX509B64) ?: return null
-        val (ct, nonce) = encryptDM(text, theirPub, DmKeys.privateKeyPkcs8B64()) ?: return null
+        // Wrap in Android's {"content":…,"replyTo":…} envelope so replies (and later media) interoperate.
+        val (ct, nonce) = encryptDM(wrapDmContent(text, replyToMessageId), theirPub, DmKeys.privateKeyPkcs8B64()) ?: return null
         val msgId = randomId()
         val payload = EncryptedPayload(
             id = msgId, nonce = nonce, ciphertext = ct,

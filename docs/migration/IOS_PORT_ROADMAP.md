@@ -26,7 +26,9 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
   peer catches up. **[M]**
 
 ### Messaging
-- **Message replies** (`replyToMessageId`) + reply-quote UI. **[S–M]**
+- ✅ **Message replies** (`replyToMessageId`) + reply-quote UI — DONE. DMs now use Android's
+  `{"content":…,"replyTo":…}` envelope (`DmEnvelope.kt`); long-press → ↩︎ Reply, quoted snippet on reply
+  bubbles, composer reply banner. Also fixed the latent bug where Android's JSON-wrapped DMs showed raw braces.
 - **Chat media attachments** (image/video/GIF in a DM) — depends on media-over-mesh. **[M, blocked]**
 
 ### Media over mesh — the big one
@@ -50,8 +52,8 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 |---|------|--------|----------|
 | ✅ 1 | **Comments + threaded replies** | M | DONE — `sendComment`/`onComment` + threaded `CommentsSheet`. High social value, wire format stable, no media dependency. |
 | ✅ 2 | **Votes + comment/chat reactions** | M | DONE — post votes (`sendVote`/`vote`), comment votes (`sendCommentVote`/`voteComment`), comment reactions (`sendCommentReaction`), and DM chat reactions (`sendChatReaction`, real CHAT_REACTION replacing the local-only `dmReactions`). All signed Android-byte-compatible; verifier + tests added. |
-| ⏭️ 3 | **Message replies** (text only) | S–M | NEXT — Android already carries `replyTo` inside the encrypted DM JSON; small, high-frequency DM polish; no media needed. |
-| 4 | **Sign iOS posts** (punch-list follow-up) | S | Makes POST required-verified (closes the C1 lenient gap) AND is needed for Android to accept our posts — natural to do alongside social work. |
+| ✅ 3 | **Message replies** (text only) | S–M | DONE — adopted Android's `{"content":…,"replyTo":…}` DM envelope (`DmEnvelope.kt`) + reply UI; fixed the latent JSON-braces display bug. |
+| ⏭️ 4 | **Sign iOS posts** (punch-list follow-up) | S | NEXT — makes POST required-verified (closes the C1 lenient gap) AND is needed for Android to accept our posts — natural to do alongside social work. |
 | 5 | **Media over mesh — download pipeline** | L | The biggest unlock; gated on the bridge relay design. Do after the cheap social wins. |
 | 6 | **Media over mesh — upload/broadcast + chat media** | M | Builds on #5; enables sharing images/video/GIFs in posts + DMs. |
 | 7 | **Feed memory + viewed-history** | S | Independent UX win; can slot in anytime. |

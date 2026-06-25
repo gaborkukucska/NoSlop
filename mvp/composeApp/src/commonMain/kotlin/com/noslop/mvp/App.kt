@@ -615,6 +615,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     var connected by mutableStateOf(false)
     var draft by mutableStateOf("Hello from my iPhone 👋")
     var dmDraft by mutableStateOf("")
+    var dmReplyingTo by mutableStateOf<DmEntry?>(null)   // the message the composer is replying to (null = normal send)
     var selectedContact by mutableStateOf<MeshContact?>(null)
     private var autoTried = false
     var connecting by mutableStateOf(false)        // observable: a connect attempt is in flight
@@ -626,7 +627,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     init {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
-        client.onDm = { fromNodeId, fromEncPub, text, messageId ->
+        client.onDm = { fromNodeId, fromEncPub, text, messageId, replyTo ->
             scope.launch {
                 // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.
                 if (contacts.none { it.nodeId == fromNodeId }) {
@@ -637,7 +638,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
                 val name = contacts.firstOrNull { it.nodeId == fromNodeId }?.handle ?: fromNodeId.take(8)
                 // Key the entry on the wire message id so a CHAT_REACTION (which references it) lines up.
                 if (dmLog.none { it.id == messageId }) {
-                    dmLog.add(0, DmEntry(id = messageId, peerNodeId = fromNodeId, from = name, text = text, mine = false, timestamp = nowMillis()))
+                    dmLog.add(0, DmEntry(id = messageId, peerNodeId = fromNodeId, from = name, text = text, mine = false, timestamp = nowMillis(), replyToId = replyTo))
                 }
             }
         }
@@ -873,12 +874,18 @@ private class MeshUiState(private val scope: CoroutineScope) {
         val to = selectedContact ?: return
         val text = dmDraft.trim()
         if (text.isEmpty()) return
+        val replyTo = dmReplyingTo?.takeIf { it.peerNodeId == to.nodeId }?.id   // only thread within the open chat
         scope.launch {
-            val msgId = client.sendDm(to, text)   // wire message id — key the local entry on it for chat reactions
-            if (msgId != null) { dmLog.add(0, DmEntry(id = msgId, peerNodeId = to.nodeId, from = to.handle, text = text, mine = true, timestamp = nowMillis())); dmDraft = "" }
-            else status = "DM failed (no link or bad key)"
+            val msgId = client.sendDm(to, text, replyTo)   // wire message id — key the local entry on it for chat reactions
+            if (msgId != null) {
+                dmLog.add(0, DmEntry(id = msgId, peerNodeId = to.nodeId, from = to.handle, text = text, mine = true, timestamp = nowMillis(), replyToId = replyTo))
+                dmDraft = ""; dmReplyingTo = null
+            } else status = "DM failed (no link or bad key)"
         }
     }
+
+    /** Look up a DM by its wire id (for rendering a reply's quoted message). */
+    fun dmById(id: String?): DmEntry? = id?.let { mid -> dmLog.firstOrNull { it.id == mid } }
 
     /** Fold one chat reaction (ours or a peer's) into the aggregated counts, deduped by (message, emoji, author). */
     private fun applyChatReaction(messageId: String, emoji: String, authorId: String, add: Boolean) {
@@ -1033,6 +1040,7 @@ data class DmEntry(
     val text: String,
     val mine: Boolean,
     val timestamp: Long,
+    val replyToId: String? = null,   // id of the message this one replies to (Android `replyTo`), or null
 )
 
 /**
@@ -1242,7 +1250,7 @@ private fun DmThread(state: MeshUiState, peer: MeshContact) {
     Column(Modifier.fillMaxSize().background(PrimaryBlack)) {
         // Header: back + lock + peer + E2EE status.
         Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.ArrowBack, "Back", tint = AccentGreen, modifier = Modifier.clickable { state.selectedContact = null }.padding(4.dp))
+            Icon(Icons.Filled.ArrowBack, "Back", tint = AccentGreen, modifier = Modifier.clickable { state.dmReplyingTo = null; state.selectedContact = null }.padding(4.dp))
             Spacer(Modifier.width(6.dp))
             Icon(Icons.Filled.Lock, null, tint = AccentGreen, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
@@ -1264,10 +1272,23 @@ private fun DmThread(state: MeshUiState, peer: MeshContact) {
             items(thread) { e -> MessageBubble(e, state) }
         }
 
+        // Reply banner: shown when composing a reply to a message in THIS chat; cancel clears it.
+        state.dmReplyingTo?.takeIf { it.peerNodeId == peer.nodeId }?.let { target ->
+            Row(Modifier.fillMaxWidth().background(SurfaceDark.copy(alpha = 0.7f)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(2.dp).height(28.dp).background(AccentGreen))
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Replying to ${if (target.mine) "yourself" else peer.handle}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
+                    Text(target.text, fontSize = 12.sp, color = TextMuted, maxLines = 1)
+                }
+                Text("✕", color = TextMuted, modifier = Modifier.clickable { state.dmReplyingTo = null }.padding(6.dp))
+            }
+        }
+
         // Input.
         Row(Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
-                state.dmDraft, { state.dmDraft = it }, placeholder = { Text("Message ${peer.handle}…") }, singleLine = true, modifier = Modifier.weight(1f),
+                state.dmDraft, { state.dmDraft = it }, placeholder = { Text(if (state.dmReplyingTo?.peerNodeId == peer.nodeId) "Reply…" else "Message ${peer.handle}…") }, singleLine = true, modifier = Modifier.weight(1f),
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { state.sendDm(); focus.clearFocus() }),
             )
@@ -1276,13 +1297,27 @@ private fun DmThread(state: MeshUiState, peer: MeshContact) {
     }
 }
 
-/** A single message bubble: mine = right/green, theirs = left/dark; long-press for the emoji reaction picker. */
+/** A single message bubble: mine = right/green, theirs = left/dark; long-press for reactions + reply. A reply
+ *  shows a quoted snippet of the message it answers (Android `replyTo`). */
 @Composable
 private fun MessageBubble(e: DmEntry, state: MeshUiState) {
     var showPicker by remember { mutableStateOf(false) }
     val mine = e.mine
+    val quoted = state.dmById(e.replyToId)
     Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
         Column(horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
+            // Reply quote: a trimmed preview of the answered message, attributed to who sent it.
+            if (e.replyToId != null) {
+                Row(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(8.dp)).background(SurfaceDark.copy(alpha = 0.6f)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    Box(Modifier.width(2.dp).height(28.dp).background(AccentGreen))
+                    Spacer(Modifier.width(6.dp))
+                    Column {
+                        Text(if (quoted?.mine == true) "You" else (quoted?.from ?: "message"), fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
+                        Text(quoted?.text ?: "(message unavailable)", fontSize = 11.sp, color = TextMuted, maxLines = 1)
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
+            }
             Column(
                 Modifier.clip(RoundedCornerShape(12.dp)).background(if (mine) AccentGreen else SurfaceDark)
                     .pointerInput(e.id) { detectTapGestures(onLongPress = { showPicker = true }) }
@@ -1308,6 +1343,7 @@ private fun MessageBubble(e: DmEntry, state: MeshUiState) {
                     listOf("👍", "❤️", "😂", "😮", "😢", "😡").forEach { emoji ->
                         Text(emoji, fontSize = 20.sp, modifier = Modifier.clickable { state.reactToDm(e.id, emoji); showPicker = false })
                     }
+                    Text("↩︎", fontSize = 18.sp, color = AccentGreen, modifier = Modifier.clickable { state.dmReplyingTo = e; showPicker = false })
                     Icon(Icons.Filled.Close, "Close", tint = TextMuted, modifier = Modifier.size(20.dp).clickable { showPicker = false })
                 }
             }
