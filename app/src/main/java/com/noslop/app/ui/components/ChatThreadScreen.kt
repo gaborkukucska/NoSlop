@@ -176,7 +176,10 @@ fun ChatThreadScreen(
                     kotlinx.coroutines.delay(1000L)
                     countdown -= 1
                     if (countdown == 0) {
-                        captureManager.startVideoRecording { file -> attachedFile = file; showCamera = false }
+                        captureManager.startVideoRecording { file -> 
+                        if (file != null) attachedFile = file
+                        showCamera = false 
+                    }
                         isRecordingVideo = true
                     }
                 }
@@ -193,12 +196,18 @@ fun ChatThreadScreen(
                 horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
             ) {
                 if (!isRecordingVideo && countdown == 0) {
-                    IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                    IconButton(onClick = { captureManager.takePhoto { file -> 
+                    if (file != null) attachedFile = file
+                    showCamera = false 
+                } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
                 }
                 
                 IconButton(
                     onClick = {
-                        if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
+                        if (isRecordingVideo) { 
+                        captureManager.stopVideoRecording()
+                        isRecordingVideo = false 
+                    } 
                         else if (countdown == 0) { countdown = 3 }
                     },
                     modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))

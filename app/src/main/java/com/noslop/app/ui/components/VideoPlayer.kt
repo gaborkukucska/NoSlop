@@ -341,15 +341,19 @@ fun VideoPlayer(
         }
 
         val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady
-        if (showThumbnail && (thumbnailUrl != null || thumbnailB64 != null)) {
-            val model = thumbnailUrl ?: thumbnailB64?.let {
+        
+        val decodedB64 = remember(thumbnailB64) {
+            thumbnailB64?.let {
                 try {
                     val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
                     android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                 } catch (e: Exception) { null }
             }
+        }
+        
+        if (showThumbnail && (thumbnailUrl != null || decodedB64 != null)) {
             AsyncImage(
-                model = model,
+                model = thumbnailUrl ?: decodedB64,
                 contentDescription = "Video Thumbnail",
                 modifier = Modifier.fillMaxSize().zIndex(1f),
                 contentScale = ContentScale.Crop

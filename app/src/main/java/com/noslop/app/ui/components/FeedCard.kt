@@ -392,7 +392,7 @@ fun FullScreenMeshCardV2(
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.thumbnailB64 ?: post.clearnetThumbnailUrl)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = post.thumbnailB64)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -405,7 +405,7 @@ fun FullScreenMeshCardV2(
 
                         if (isVisible) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                BlurredImageBackground(url = post.thumbnailB64 ?: post.clearnetThumbnailUrl ?: "")
+                                BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -433,7 +433,7 @@ fun FullScreenMeshCardV2(
                                 }
                             }
                         } else {
-                            BlurredImageBackground(url = post.thumbnailB64 ?: post.clearnetThumbnailUrl ?: "")
+                            BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
                         }
                     }
                 }

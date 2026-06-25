@@ -613,6 +613,7 @@ fun UnifiedFeedTab(
                     val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
                     for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
                         val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
+                        if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
                         if (preWarmedUrls.add(preloadUrl)) {
                             // Launch in the broader scope so fast scrolling doesn't cancel the preload!
                             preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
@@ -921,7 +922,25 @@ fun UnifiedFeedTab(
                 try {
                     val contentResolver = contextWrapper.contentResolver
                     val mimeType = contentResolver.getType(uri)
-                    val ext = if (mimeType?.contains("video") == true) ".mp4" else ".jpg"
+                    var resolvedMimeType = mimeType
+                    if (resolvedMimeType == null) {
+                        val path = uri.path?.lowercase() ?: ""
+                        resolvedMimeType = when {
+                            path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".webm") -> "video/mp4"
+                            path.endsWith(".gif") -> "image/gif"
+                            path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") -> "image/jpeg"
+                            path.endsWith(".m4a") || path.endsWith(".mp3") -> "audio/mp4"
+                            else -> "application/octet-stream"
+                        }
+                    }
+
+                    val ext = when {
+                        resolvedMimeType.startsWith("video") -> ".mp4"
+                        resolvedMimeType.startsWith("audio") -> ".m4a"
+                        resolvedMimeType.startsWith("image/gif") -> ".gif"
+                        resolvedMimeType.startsWith("image") -> ".jpg"
+                        else -> ".bin"
+                    }
                     val tempFile = java.io.File(contextWrapper.cacheDir, "mesh_attach_${System.currentTimeMillis()}$ext")
                     contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                     attachedFile = tempFile
@@ -946,7 +965,10 @@ fun UnifiedFeedTab(
                         kotlinx.coroutines.delay(1000L)
                         countdown -= 1
                         if (countdown == 0) {
-                            captureManager.startVideoRecording { file -> attachedFile = file; showCamera = false }
+                            captureManager.startVideoRecording { file -> 
+                                if (file != null) attachedFile = file
+                                showCamera = false 
+                            }
                             isRecordingVideo = true
                         }
                     }
@@ -963,12 +985,18 @@ fun UnifiedFeedTab(
                     horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
                     if (!isRecordingVideo && countdown == 0) {
-                        IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                        IconButton(onClick = { captureManager.takePhoto { file -> 
+                            if (file != null) attachedFile = file
+                            showCamera = false 
+                        } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
                     }
                     
                     IconButton(
                         onClick = {
-                            if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
+                            if (isRecordingVideo) { 
+                                captureManager.stopVideoRecording()
+                                isRecordingVideo = false
+                            } 
                             else if (countdown == 0) { countdown = 3 }
                         },
                         modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
@@ -1042,10 +1070,33 @@ fun UnifiedFeedTab(
                     Button(
                         onClick = {
                             val mediaMetadata = attachedFile?.let { file ->
-                                val type = if (file.name.endsWith(".jpg")) "image" else "video"
-                                val id = file.name
+                                val mimeType = when {
+                                    file.name.endsWith(".jpg") || file.name.endsWith(".jpeg") -> "image/jpeg"
+                                    file.name.endsWith(".png") -> "image/png"
+                                    file.name.endsWith(".gif") -> "image/gif"
+                                    file.name.endsWith(".mp4") -> "video/mp4"
+                                    file.name.endsWith(".m4a") -> "audio/mp4"
+                                    file.name.endsWith(".webm") -> "video/webm"
+                                    else -> "application/octet-stream"
+                                }
+                                val type = when {
+                                    mimeType.startsWith("image") -> "image"
+                                    mimeType.startsWith("video") -> "video"
+                                    mimeType.startsWith("audio") -> "audio"
+                                    else -> "file"
+                                }
+                                val id = "post_${file.name}"
                                 com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
-                                com.noslop.app.mesh.MediaMetadata(id = id, type = type, mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4", size = file.length(), chunkCount = (file.length() / (256 * 1024)).toInt() + 1, originNode = viewModel.localKeys.value?.onionAddress, ownerId = viewModel.localKeys.value?.publicKeyB64, thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type))
+                                com.noslop.app.mesh.MediaMetadata(
+                                    id = id, 
+                                    type = type, 
+                                    mimeType = mimeType, 
+                                    size = file.length(), 
+                                    chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
+                                    originNode = viewModel.localKeys.value?.onionAddress, 
+                                    ownerId = viewModel.localKeys.value?.publicKeyB64, 
+                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
+                                )
                             }
                             
                             val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }

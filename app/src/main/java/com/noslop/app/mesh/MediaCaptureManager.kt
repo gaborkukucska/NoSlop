@@ -53,7 +53,7 @@ class MediaCaptureManager(private val context: Context) {
             imageCapture = ImageCapture.Builder().build()
             
             val recorder = Recorder.Builder()
-                .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
+                .setQualitySelector(QualitySelector.from(Quality.HD))
                 .build()
             videoCapture = VideoCapture.withOutput(recorder)
 
@@ -89,7 +89,7 @@ class MediaCaptureManager(private val context: Context) {
     /**
      * Capture a real photo.
      */
-    fun takePhoto(onPhotoCaptured: (File) -> Unit) {
+    fun takePhoto(onPhotoCaptured: (File?) -> Unit) {
         val imageCapture = imageCapture ?: return
 
         val photoFile = File(
@@ -105,6 +105,7 @@ class MediaCaptureManager(private val context: Context) {
             object : ImageCapture.OnImageSavedCallback {
                 override fun onError(exc: ImageCaptureException) {
                     Logger.error(TAG, "Photo capture failed: ${exc.message}")
+                    onPhotoCaptured(null)
                 }
 
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
@@ -119,7 +120,7 @@ class MediaCaptureManager(private val context: Context) {
      * Start recording a real video.
      */
     @SuppressLint("MissingPermission")
-    fun startVideoRecording(onVideoCaptured: (File) -> Unit) {
+    fun startVideoRecording(onVideoCaptured: (File?) -> Unit) {
         val videoCapture = videoCapture ?: return
 
         val videoFile = File(
@@ -150,6 +151,7 @@ class MediaCaptureManager(private val context: Context) {
                             recording?.close()
                             recording = null
                             Logger.error(TAG, "Video recording error: ${recordEvent.error}")
+                            onVideoCaptured(null)
                         }
                     }
                 }
