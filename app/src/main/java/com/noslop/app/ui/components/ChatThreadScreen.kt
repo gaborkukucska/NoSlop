@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -258,19 +259,23 @@ fun ChatThreadScreen(
         ) {
             items(messages) { msg ->
                 val isSelf = msg.senderPub != peer.publicKeyB64
-                val decryptedText = remember(msg.ciphertext, localKeys) {
+                val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys) {
+                    var text = msg.ciphertext
+                    var meta: MediaMetadata? = null
                     if (localKeys != null) {
                         val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
                         val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
                         try {
                             val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
-                            if (obj.has("content")) obj.get("content").asString else plaintext
+                            if (obj.has("media")) {
+                                meta = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
+                            }
+                            text = if (obj.has("content")) obj.get("content").asString else plaintext
                         } catch (e: Exception) {
-                            plaintext
+                            text = plaintext
                         }
-                    } else {
-                        msg.ciphertext
                     }
+                    Pair(text, meta)
                 }
 
                 val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
@@ -331,121 +336,71 @@ fun ChatThreadScreen(
                                 // Media display (GIF or chunked download)
                                 msg.mediaId?.let { mid ->
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    
-                                    // Robust check for legacy GIF format or structured media
-                                    if (mid.startsWith("noslop-gif://")) {
-                                        val url = mid.removePrefix("noslop-gif://")
-                                        var model: Any? = url
-                                        if (url.startsWith("data:image/gif;base64,")) {
-                                            val b64 = url.substringAfter("base64,")
-                                            model = android.util.Base64.decode(b64, android.util.Base64.DEFAULT)
-                                        }
-                                        coil.compose.AsyncImage(
-                                            model = model,
-                                            contentDescription = "GIF",
+                                    val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(mid, msg.mediaType)
+                                    val canRender = isDownloaded || msg.senderPub == localKeys?.publicKeyB64
+                                    val resolvedUrl = "noslop://${peer.onionAddress}/${mid}"
+
+                                    if (canRender) {
+                                        val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
+                                        val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
+                                        
+                                        Box(
                                             modifier = Modifier
+                                                .padding(top = 8.dp)
                                                 .fillMaxWidth()
-                                                .heightIn(max = 200.dp)
+                                                .heightIn(min = 100.dp, max = 200.dp)
                                                 .clip(RoundedCornerShape(8.dp))
-                                        )
-                                    } else {
-                                        val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(mid, msg.mediaType)
-                                        if (isDownloaded) {
-                                            val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
-                                            if (localFile != null) {
-                                                if (msg.mediaType?.startsWith("image") == true || msg.mediaType == "gif") {
-                                                    coil.compose.AsyncImage(
-                                                        model = localFile,
-                                                        contentDescription = "Image",
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .heightIn(max = 200.dp)
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .clickable { fullscreenImage = localFile.absolutePath }
-                                                    )
-                                                } else if (msg.mediaType?.startsWith("video") == true) {
-                                                    var isPlaying by remember { mutableStateOf(false) }
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .heightIn(min = 150.dp, max = 200.dp)
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(PrimaryBlack)
-                                                    ) {
-                                                        if (isPlaying) {
-                                                            VideoPlayer(url = "file://${localFile.absolutePath}")
-                                                        } else {
-                                                            Box(
-                                                                modifier = Modifier
-                                                                    .fillMaxSize()
-                                                                    .clickable { fullscreenVideo = localFile.absolutePath },
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                coil.compose.AsyncImage(
-                                                                    model = localFile,
-                                                                    contentDescription = "Video Thumbnail",
-                                                                    modifier = Modifier.fillMaxSize(),
-                                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                                                )
-                                                                Box(
-                                                                    modifier = Modifier
-                                                                        .size(48.dp)
-                                                                        .background(PrimaryBlack.copy(alpha = 0.6f), androidx.compose.foundation.shape.CircleShape),
-                                                                    contentAlignment = Alignment.Center
-                                                                ) {
-                                                                    Icon(Icons.Default.PlayArrow, contentDescription = "Play", tint = AccentGreen, modifier = Modifier.size(32.dp))
-                                                                }
-                                                            }
-                                                        }
-                                                    }
+                                                .background(PrimaryBlack.copy(alpha = 0.5f))
+                                                .clickable { 
+                                                    if (isVideo) fullscreenVideo = localFile?.absolutePath 
+                                                    else fullscreenImage = localFile?.absolutePath 
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            if (isVideo) {
+                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video", modifier = Modifier.size(48.dp), tint = Color.White)
+                                            } else {
+                                                val model = if (mid.startsWith("noslop-gif://")) {
+                                                    val url = mid.removePrefix("noslop-gif://")
+                                                    if (url.startsWith("data:image/gif;base64,")) {
+                                                        android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                                                    } else url
                                                 } else {
-                                                    // Audio or other file, just show a placeholder for now
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .height(60.dp)
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(PrimaryBlack.copy(alpha = 0.3f)),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text("File Downloaded: ${msg.mediaType}", color = TextLight, fontSize = 12.sp)
-                                                    }
+                                                    val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
+                                                    if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
                                                 }
+                                                coil.compose.AsyncImage(
+                                                    model = model,
+                                                    contentDescription = "Media",
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
                                             }
-                                        } else {
-                                            val progress = downloadProgress[mid] ?: 0
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(60.dp)
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(PrimaryBlack.copy(alpha = 0.3f))
-                                                    .clickable {
-                                                        val metadata = com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                        if (metadata != null) {
-                                                            viewModel.startMediaDownload(metadata, peer.onionAddress)
-                                                        }
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                    Icon(
-                                                        if (progress == 100) Icons.Default.CheckCircle else Icons.Default.PlayArrow,
-                                                        contentDescription = null,
-                                                        tint = if (isSelf) PrimaryBlack else AccentGreen
-                                                    )
-                                                    if (progress in 1..99) {
-                                                        LinearProgressIndicator(
-                                                            progress = { progress / 100f },
-                                                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                                                            color = if (isSelf) PrimaryBlack else AccentGreen,
-                                                        )
-                                                    }
-                                                    Text(
-                                                        if (progress == 100) "Media Ready" else if (progress > 0) "Downloading $progress%" else "Tap to Download",
-                                                        fontSize = 10.sp,
-                                                        color = if (isSelf) PrimaryBlack else TextMuted
-                                                    )
+                                        }
+                                    } else {
+                                        val progress = downloadProgress[mid] ?: 0
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 8.dp)
+                                                .fillMaxWidth()
+                                                .height(120.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                                                .background(PrimaryBlack.copy(alpha = 0.5f))
+                                                .clickable {
+                                                    val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                    if (meta != null) viewModel.startMediaDownload(meta, peer.onionAddress)
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(Icons.Default.Download, contentDescription = "Download", tint = AccentGreen, modifier = Modifier.size(36.dp))
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                if (progress > 0) {
+                                                    LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
+                                                    Text("Downloading $progress%", color = TextLight, fontSize = 10.sp)
+                                                } else {
+                                                    Text("Tap to Download", color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }

@@ -2,6 +2,7 @@
 package com.noslop.app.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -280,15 +281,67 @@ fun CommentItem(
                 resolveMediaUrl("noslop://$authorOnion/${comment.mediaId}", context)
             }
             
-            coil.compose.AsyncImage(
-                model = resolvedMediaUrl,
-                contentDescription = "Comment Media",
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .fillMaxWidth()
-                    .heightIn(max = 250.dp)
-                    .clip(RoundedCornerShape(8.dp))
-            )
+            val mediaType = comment.mediaType ?: "image"
+            var newlyDownloaded by remember { mutableStateOf(false) }
+            val isDownloaded = newlyDownloaded || com.noslop.app.mesh.MediaManager.isMediaDownloaded(comment.mediaId, mediaType)
+            val canRender = isDownloaded || comment.authorPublicKeyB64 == localKeys?.publicKeyB64
+            
+            LaunchedEffect(comment.mediaId, authorOnion) {
+                if (comment.mediaId != null && authorOnion != null && !isDownloaded) {
+                    val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(comment.mediaId)
+                    if (meta != null) {
+                        com.noslop.app.mesh.MediaManager.checkAndAutoDownload(meta, "friends", comment.authorPublicKeyB64, authorOnion)
+                    }
+                }
+            }
+
+            if (canRender) {
+                coil.compose.AsyncImage(
+                    model = resolvedMediaUrl,
+                    contentDescription = "Comment Media",
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .fillMaxWidth()
+                        .heightIn(max = 250.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                )
+            } else {
+                val downloadProgress by viewModel.downloadProgress.collectAsState()
+                val progress = downloadProgress[comment.mediaId] ?: 0
+
+                LaunchedEffect(progress) {
+                    if (progress == 100) newlyDownloaded = true
+                }
+
+                Box(
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .fillMaxWidth()
+                        .height(150.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                        .background(PrimaryBlack.copy(alpha = 0.5f))
+                        .clickable {
+                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(comment.mediaId)
+                            if (meta != null) {
+                                viewModel.startMediaDownload(meta, authorOnion)
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Gif, contentDescription = "Download GIF", tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (progress > 0) {
+                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(100.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
+                        } else {
+                            Text("Tap to Download GIF", color = TextLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         }
 
         // Explicit Actions (Always visible)

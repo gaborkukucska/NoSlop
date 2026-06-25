@@ -303,6 +303,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         feedRepository.setContentTransparencyEnabled(enabled)
 
     // --- Social Mesh & Direct Messages Routing ---
+    suspend fun deleteMeshPost(postId: String): Boolean = meshSocialRepository.deleteMeshPost(postId)
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,

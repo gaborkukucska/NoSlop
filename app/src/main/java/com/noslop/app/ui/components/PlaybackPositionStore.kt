@@ -38,16 +38,8 @@ internal object PlaybackPositionStore {
      *  not on a tight timer, to keep writes cheap. */
     fun save(url: String, positionMs: Long, durationMs: Long) {
         if (url.isBlank() || positionMs <= 0L) return
-        if (positionMs < MIN_RESUMABLE_MS) {
-            // Effectively never started — don't bother remembering it.
-            positions.remove(url)
-            return
-        }
-        if (durationMs > 0L && (durationMs - positionMs) < MIN_REMAINING_MS) {
-            // Finished (or near enough) — clear so it restarts from 0 next time.
-            positions.remove(url)
-            return
-        }
+        if (positionMs < 1000L) return // Ignore noisy saves at the very beginning
+        // Removed aggressive cache wiping so position is ALWAYS restored
         positions[url] = positionMs
         Logger.debug("PLAYBACK_POSITION", "Saved position for $url -> ${positionMs}ms")
     }

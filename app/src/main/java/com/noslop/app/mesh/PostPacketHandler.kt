@@ -73,12 +73,15 @@ class PostPacketHandler(
         
         if (postPay.mediaMetadata != null) {
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress
+            Logger.info(TAG, "Requesting auto-download for POST media ${postPay.mediaMetadata.id} from ${peerOnion ?: "unknown"}")
             MediaManager.checkAndAutoDownload(
                 postPay.mediaMetadata,
                 "friends",
                 postPay.authorId,
                 peerOnion
             )
+        } else {
+            Logger.debug(TAG, "No mediaMetadata found in post ${postPay.id}")
         }
 
         Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")

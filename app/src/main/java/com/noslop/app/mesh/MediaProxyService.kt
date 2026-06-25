@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/mesh/MediaProxyService.kt
 package com.noslop.app.mesh
 
 import com.noslop.app.debug.Logger
@@ -7,9 +8,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.TreeMap
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 
 object MediaProxyService {
     private const val TAG = "MEDIA_PROXY"
@@ -77,13 +75,13 @@ object MediaProxyService {
 
             // Parse query params
             val queryParams = path.substringAfter("?").split("&")
-            var targetOnion = ""
+            var targetOnion: String? = null
             var mediaId = ""
             for (param in queryParams) {
                 val kv = param.split("=")
                 if (kv.size == 2) {
                     when (kv[0]) {
-                        "onion" -> targetOnion = kv[1]
+                        "onion" -> if (kv[1].isNotEmpty() && kv[1] != "null") targetOnion = kv[1]
                         "id" -> mediaId = kv[1]
                     }
                 }
@@ -94,10 +92,13 @@ object MediaProxyService {
                 return@withContext
             }
 
-            Logger.info(TAG, "Proxying request for media $mediaId from $targetOnion")
+            Logger.info(TAG, "Proxying request for media $mediaId from ${targetOnion ?: "unknown"}")
 
-            // 1. Check if file is already on disk (using robust multi-directory scan)
-            val localFile = MediaManager.getLocalFile(mediaId)
+            val metadata = MediaManager.getMetadataSync(mediaId)
+            val mediaType = metadata?.type
+
+            // 1. Check if file is already fully downloaded on disk
+            val localFile = MediaManager.getLocalFile(mediaId, mediaType)
             if (localFile != null && localFile.exists()) {
                 Logger.info(TAG, "Serving $mediaId from disk cache at ${localFile.absolutePath}")
                 val metadata = MediaManager.getMetadataSync(mediaId)
@@ -105,69 +106,41 @@ object MediaProxyService {
                 return@withContext
             }
 
-            // 2. Not on disk, stream from MediaManager sequentially via Mesh
-            if (targetOnion.isEmpty()) {
-                Logger.warn(TAG, "Media $mediaId not on disk and no target onion provided. Aborting.")
-                sendHttpError(output, 404, "Media not found and no source node known")
-                return@withContext
-            }
-
-            val metadata = MediaManager.getMetadataSync(mediaId)
+            // 2. Not fully on disk, stream dynamically by tailing the file via Mesh
             val contentType = metadata?.mimeType ?: "application/octet-stream"
             Logger.info(TAG, "Streaming $mediaId from mesh. Content-Type: $contentType")
 
             // Start/Check download in MediaManager if needed
-            if (!MediaManager.isMediaDownloaded(mediaId, null)) {
+            if (!MediaManager.isMediaDownloaded(mediaId, mediaType)) {
                 val placeholderMetadata = metadata ?: MediaMetadata(
                     id = mediaId,
                     type = if (mediaId.lowercase().let { it.endsWith(".jpg") || it.endsWith(".png") || it.endsWith(".jpeg") || it.endsWith(".gif") }) "image" else "video",
                     mimeType = contentType,
-                    size = 0,
-                    chunkCount = 999, // Sentinel for unknown size
+                    size = 0, // 0 size will trigger MediaManager to auto-discover EOF
+                    chunkCount = 999,
                     originNode = targetOnion
                 )
-                Logger.info(TAG, "Initiating download for $mediaId from $targetOnion")
+                Logger.info(TAG, "Initiating download for $mediaId from ${targetOnion ?: "mesh recovery"}")
                 MediaManager.startDownload(placeholderMetadata, targetOnion)
             }
 
-            // Buffer for sequential ordering
-            val pendingChunks = TreeMap<Int, ByteArray>()
-            var nextIndexToSend = 0
-            val queue = LinkedBlockingQueue<Pair<Int, ByteArray>>()
-            
-            val listener: (Int, ByteArray) -> Unit = { index, data ->
-                queue.offer(Pair(index, data))
-            }
-            
-            // Add listener and get current snapshot
-            val existingChunks = MediaManager.subscribeToChunks(mediaId, listener)
-            Logger.info(TAG, "Subscribed to $mediaId. Existing snapshot size: ${existingChunks.size}")
-            
-            // Seed the buffer with existing chunks
-            for (i in existingChunks.indices) {
-                val chunk = existingChunks[i]
-                if (chunk != null) {
-                    pendingChunks[i] = chunk
-                }
-            }
-
             try {
-                // Wait for chunk 0 before sending headers (ensures correct sniffing)
-                Logger.info(TAG, "Waiting for chunk 0 of $mediaId...")
-                while (isActive && !pendingChunks.containsKey(0)) {
-                    val next = queue.poll(5, TimeUnit.SECONDS)
-                    if (next != null) {
-                        pendingChunks[next.first] = next.second
-                    } else if (!MediaManager.isMediaDownloadingOrRecovering(mediaId) && !MediaManager.isMediaDownloaded(mediaId, null)) {
+                // Wait until at least 1 byte is written to the part file before sending headers
+                Logger.info(TAG, "Waiting for initial bytes of $mediaId...")
+                var waitAttempts = 0
+                while (isActive && MediaManager.getContiguousBytesWritten(mediaId) == 0L) {
+                    if (!MediaManager.isMediaDownloadingOrRecovering(mediaId) && !MediaManager.isMediaDownloaded(mediaId, mediaType)) {
                         Logger.error(TAG, "Download failed or aborted for $mediaId. Aborting stream.")
-                        break
+                        sendHttpError(output, 504, "Gateway Timeout - Missing start of stream")
+                        return@withContext
                     }
-                }
-
-                if (!pendingChunks.containsKey(0)) {
-                    Logger.error(TAG, "Failed to receive chunk 0 for $mediaId. Aborting stream.")
-                    sendHttpError(output, 504, "Gateway Timeout - Missing start of stream")
-                    return@withContext
+                    delay(100)
+                    waitAttempts++
+                    if (waitAttempts > 600) { // 60s timeout for first byte
+                        Logger.error(TAG, "Timeout waiting for initial bytes of $mediaId. Aborting stream.")
+                        sendHttpError(output, 504, "Gateway Timeout")
+                        return@withContext
+                    }
                 }
 
                 // Send headers now that we have data
@@ -183,40 +156,66 @@ object MediaProxyService {
                 output.write(headers.toByteArray(Charsets.UTF_8))
                 output.flush()
 
-                // Sequential streaming loop
-                var totalBytesSent = 0L
+                // Dynamic File Tailing Loop
+                var streamedBytes = 0L
+                val buffer = ByteArray(32 * 1024) // 32KB read buffer
+                var consecutiveErrors = 0
+                
                 while (isActive) {
-                    // 1. Send all available sequential chunks from buffer
-                    while (pendingChunks.containsKey(nextIndexToSend)) {
-                        val chunk = pendingChunks.remove(nextIndexToSend)!!
-                        output.write(chunk)
-                        output.flush()
-                        totalBytesSent += chunk.size
-                        Logger.debug(TAG, "Sent chunk $nextIndexToSend for $mediaId (${chunk.size} bytes)")
-                        nextIndexToSend++
-                    }
-
-                    // 2. Check if finished
-                    if (MediaManager.isMediaDownloaded(mediaId, null) && pendingChunks.isEmpty()) {
-                        Logger.info(TAG, "All chunks sent for $mediaId. Total bytes: $totalBytesSent")
-                        break
-                    }
-
-                    // 3. Wait for more chunks
-                    val next = queue.poll(5, TimeUnit.SECONDS)
-                    if (next != null) {
-                        pendingChunks[next.first] = next.second
+                    val contiguous = MediaManager.getContiguousBytesWritten(mediaId)
+                    if (contiguous > streamedBytes) {
+                        val toRead = Math.min(buffer.size.toLong(), contiguous - streamedBytes).toInt()
+                        
+                        // Optimize file lookup to prevent object allocation storm
+                        val partFile = MediaManager.getPartFile(mediaId)
+                        val fileToRead = if (partFile != null && partFile.exists()) partFile else MediaManager.getLocalFile(mediaId, mediaType)
+                        
+                        if (fileToRead != null && fileToRead.exists()) {
+                            try {
+                                java.io.RandomAccessFile(fileToRead, "r").use { raf ->
+                                    raf.seek(streamedBytes)
+                                    raf.readFully(buffer, 0, toRead)
+                                }
+                                output.write(buffer, 0, toRead)
+                                output.flush()
+                                streamedBytes += toRead
+                                consecutiveErrors = 0
+                            } catch (e: Exception) {
+                                val msg = e.message ?: ""
+                                val lowerMsg = msg.lowercase()
+                                if (lowerMsg.contains("broken pipe") || lowerMsg.contains("connection reset") || 
+                                    lowerMsg.contains("socket closed") || lowerMsg.contains("abort") || lowerMsg.contains("closed")) {
+                                    Logger.warn(TAG, "Client disconnected during stream for $mediaId: $msg")
+                                    break // Exit the loop, the player dropped the connection!
+                                } else {
+                                    consecutiveErrors++
+                                    if (consecutiveErrors > 50) {
+                                        Logger.error(TAG, "Too many read/write errors for $mediaId. Aborting proxy stream.")
+                                        break
+                                    }
+                                    Logger.warn(TAG, "Read/write interrupted for $mediaId: $msg. Retrying...")
+                                    delay(200)
+                                }
+                            }
+                        } else {
+                            delay(50)
+                        }
                     } else {
-                        if (!MediaManager.isMediaDownloadingOrRecovering(mediaId) && !MediaManager.isMediaDownloaded(mediaId, null)) {
-                            Logger.warn(TAG, "Download failed or aborted for $mediaId. Terminating proxy stream.")
+                        // We caught up to the writer. Check if we are done.
+                        if (MediaManager.isMediaDownloaded(mediaId, mediaType)) {
+                            Logger.info(TAG, "All bytes sent for $mediaId. Total: $streamedBytes")
                             break
                         }
+                        // Check if download failed
+                        if (!MediaManager.isMediaDownloadingOrRecovering(mediaId)) {
+                            Logger.warn(TAG, "Download aborted for $mediaId. Terminating proxy stream.")
+                            break
+                        }
+                        delay(100) // Wait for MediaManager to write more bytes
                     }
                 }
             } catch (e: Exception) {
                 Logger.error(TAG, "Error during sequential streaming $mediaId: ${e.message}")
-            } finally {
-                MediaManager.unsubscribeFromChunks(mediaId, listener)
             }
 
             Logger.info(TAG, "Streaming completed for $mediaId")
@@ -242,7 +241,7 @@ object MediaProxyService {
             output.flush()
 
             file.inputStream().use { input ->
-                val buffer = ByteArray(8192)
+                val buffer = ByteArray(32 * 1024)
                 var bytesRead: Int
                 while (input.read(buffer).also { bytesRead = it } != -1) {
                     output.write(buffer, 0, bytesRead)

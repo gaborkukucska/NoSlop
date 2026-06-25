@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-06-25)
+
+### 1. Video Thumbnail & Preload State Fixes
+
+### 2. Tor Identity Unification & Semaphore Gridlock Fix
+
+### 3. Mesh Transport Fast-Fail for Unreachable Peers
+*   **Dead Peer SOCKS Rejection**: Added a fast-fail check in `MeshTransport.kt`. If the Tor proxy explicitly rejects a connection with `SOCKS: Host unreachable`, `TTL expired`, or a general failure, the transport layer now instantly aborts the send instead of stubbornly executing the remaining retries and holding up the `torSemaphore`. This keeps the mesh pipeline fluid when a trusted peer is genuinely offline or has changed their onion address.
+*   **Tor ED25519-V3 Math Fixed**: Corrected a severe mathematical split where the Kotlin `CryptoService` was deriving a completely different onion address than the internal Tor C-daemon. Tor expects the `libsodium` secret key format (32-byte seed + 32-byte public key), but we were passing it a clamped SHA-512 expansion which Tor then re-hashed, resulting in a misaligned identity.
+*   **Semaphore Gridlock Resolved**: Drastically reduced `MeshTransport` SOCKS5 connect timeouts from `45s` (with 5 retries) down to `20s` (with 3 retries). This prevents offline peers from hoarding the `torSemaphore` limits and gridlocking the entire gossip network for 4+ minutes per offline node.
+*   **Thumbnail Visibility Bug**: Fixed an issue where video thumbnails would permanently stay on screen (blocking the playing video) when returning to the feed. Added the missing `onReady()` state callbacks to the fallback (non-preloaded) `ExoPlayer` initialization block.
+*   **Lifecycle Thumbnail Reset**: Bound the `isVideoReady` state to the `activeVisible` lifecycle. When a user tabs away and the `VideoPlayer` unmounts, the readiness state is properly reset to `false`. This prevents the thumbnail from disappearing prematurely when tabbing back before the video has actually buffered its first frame.
+
+
 
 ## Completed Changes (2026-06-23)
 

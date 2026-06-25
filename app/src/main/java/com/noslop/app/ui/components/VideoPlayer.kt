@@ -9,6 +9,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -255,6 +256,7 @@ fun VideoPlayer(
 
     var retryTrigger by remember { mutableStateOf(0) }
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
+    var isVideoReady by remember(url) { mutableStateOf(false) }
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     var activeVisible by remember { mutableStateOf(isVisible) }
@@ -264,6 +266,7 @@ fun VideoPlayer(
         } else {
             kotlinx.coroutines.delay(500)
             activeVisible = false
+            isVideoReady = false
         }
     }
 
@@ -275,38 +278,21 @@ fun VideoPlayer(
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-
-        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible
-        if (showThumbnail && (thumbnailUrl != null || thumbnailB64 != null)) {
-            val model = thumbnailUrl ?: thumbnailB64?.let {
-                try {
-                    val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
-                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                } catch (e: Exception) { null }
-            }
-            AsyncImage(
-                model = model,
-                contentDescription = "Video Thumbnail",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-
         when (val resolved = source) {
             null -> {
-                if (thumbnailUrl == null && thumbnailB64 == null) {
-                    com.noslop.app.ui.LoadingShimmer()
-                }
+                // Shimmer now handled at the end of the Box stack
             }
 
             is VideoSource.Direct -> {
                 if (activeVisible) {
                     ExoVideoPlayer(
                         url = resolved.url,
+                        rawUrl = url,
                         isLandscape = isLandscape,
                         thumbnailUrl = thumbnailUrl,
                         thumbnailB64 = thumbnailB64,
-                        onRetry = { retryTrigger++ } 
+                        onRetry = { retryTrigger++ },
+                        onReady = { isVideoReady = true }
                     )
                 }
             }
@@ -315,7 +301,8 @@ fun VideoPlayer(
                 if (activeVisible) {
                     EmbedWebViewPlayer(
                         url = resolved.url,
-                        onRetry = { retryTrigger++ } 
+                        onRetry = { retryTrigger++ },
+                        onReady = { isVideoReady = true }
                     )
                 }
             }
@@ -352,6 +339,26 @@ fun VideoPlayer(
                 }
             }
         }
+
+        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady
+        if (showThumbnail && (thumbnailUrl != null || thumbnailB64 != null)) {
+            val model = thumbnailUrl ?: thumbnailB64?.let {
+                try {
+                    val bytes = android.util.Base64.decode(it, android.util.Base64.DEFAULT)
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } catch (e: Exception) { null }
+            }
+            AsyncImage(
+                model = model,
+                contentDescription = "Video Thumbnail",
+                modifier = Modifier.fillMaxSize().zIndex(1f),
+                contentScale = ContentScale.Crop
+            )
+        } else if (source == null && thumbnailUrl == null && thumbnailB64 == null && !isVideoReady) {
+            Box(modifier = Modifier.fillMaxSize().zIndex(1f)) {
+                com.noslop.app.ui.LoadingShimmer()
+            }
+        }
     }
 }
 
@@ -359,10 +366,12 @@ fun VideoPlayer(
 @Composable
 private fun ExoVideoPlayer(
     url: String,
+    rawUrl: String,
     isLandscape: Boolean,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onReady: () -> Unit
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
@@ -379,14 +388,23 @@ private fun ExoVideoPlayer(
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = true
-                val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 if (resumeMs > 0L) {
-                    Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $url")
+                    Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $rawUrl")
                     seekTo(resumeMs)
                 }
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                            onReady()
+                        }
+                    }
+                    override fun onIsPlayingChanged(isPlaying: Boolean) {
+                        if (isPlaying) onReady()
+                    }
+                    override fun onRenderedFirstFrame() {
+                        onReady()
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         hasError = true
@@ -395,6 +413,9 @@ private fun ExoVideoPlayer(
                     }
                 })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                    onReady()
+                }
             }
         } else {
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
@@ -414,18 +435,25 @@ private fun ExoVideoPlayer(
                         .setMimeType(mimeType)
                         .build()
                     setMediaItem(mediaItem)
-                    val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                    val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                     if (resumeMs > 0L) {
-                        Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $url")
+                        Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $rawUrl")
                         seekTo(resumeMs)
                     }
-                    prepare()
-                    playWhenReady = true
                     repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
 
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                            if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                                onReady()
+                            }
+                        }
+                        override fun onIsPlayingChanged(isPlaying: Boolean) {
+                            if (isPlaying) onReady()
+                        }
+                        override fun onRenderedFirstFrame() {
+                            onReady()
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             val cause = error.cause
@@ -439,13 +467,15 @@ private fun ExoVideoPlayer(
                             }
                         }
                     })
+                    prepare()
+                    playWhenReady = true
                 }
         }
         exoPlayer = player
 
         onDispose {
             try {
-                PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
             } catch (e: Exception) {}
             player.release()
             exoPlayer = null
@@ -455,9 +485,9 @@ private fun ExoVideoPlayer(
     LaunchedEffect(exoPlayer) {
         val player = exoPlayer ?: return@LaunchedEffect
         while (true) {
-            kotlinx.coroutines.delay(5000L)
+            kotlinx.coroutines.delay(1000L)
             try {
-                PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
             } catch (e: Exception) {
                 break
             }
@@ -521,7 +551,7 @@ private fun ExoVideoPlayer(
 }
 
 @Composable
-private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit) {
+private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> Unit) {
     Logger.info("VIDEO", "Loading embed in WebView: $url")
     var webError by remember { mutableStateOf<String?>(null) }
 
@@ -629,6 +659,7 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit) {
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
+                            view?.postDelayed({ onReady() }, 800)
                         }
 
                         override fun onReceivedError(

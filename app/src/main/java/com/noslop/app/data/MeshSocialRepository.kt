@@ -99,11 +99,42 @@ class MeshSocialRepository(
                     }
 
                     val timeout = System.currentTimeMillis() - 3 * 60 * 1000
+                    val archiveTimeout = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000L
                     val peers = peerDao.getAllPeersList()
                     for (peer in peers) {
                         if (peer.isOnline && peer.lastSeenAt < timeout) {
                             peerDao.insertPeer(peer.copy(isOnline = false))
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
+                        }
+                        if (peer.lastSeenAt < archiveTimeout) {
+                            deletePeer(peer.publicKeyB64) // Wipes the peer AND their messages
+                            Logger.info(TAG, "Archived peer due to 30-day inactivity: ${peer.handle}")
+                        }
+                    }
+
+                    // Periodic Deletion Sync
+                    if (myKeys != null) {
+                        val currentTimestamp = System.currentTimeMillis()
+                        val orphanedPosts = postDao.getOrphanedPostsByAuthor(myKeys.publicKeyB64)
+                        for (post in orphanedPosts) {
+                            val payloadToSign = "${post.id}|${myKeys.publicKeyB64}|$currentTimestamp"
+                            val delSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                            val deletePay = com.noslop.app.mesh.DeletePostPayload(
+                                postId = post.id,
+                                authorId = myKeys.publicKeyB64,
+                                timestamp = currentTimestamp,
+                                signature = delSig
+                            )
+                            val delPacket = com.noslop.app.mesh.NetworkPacket(
+                                id = java.util.UUID.randomUUID().toString(),
+                                hops = 6,
+                                senderId = myKeys.publicKeyB64,
+                                type = "DELETE_POST",
+                                payload = com.google.gson.Gson().toJsonTree(deletePay),
+                                signature = delSig
+                            )
+                            com.noslop.app.mesh.GossipService.broadcast(delPacket)
+                            kotlinx.coroutines.delay(2000L) // Pace the broadcasts to avoid Tor overload
                         }
                     }
                 } catch (e: Exception) {
@@ -112,6 +143,37 @@ class MeshSocialRepository(
                 kotlinx.coroutines.delay(60_000)
             }
         }
+    }
+
+    suspend fun deleteMeshPost(postId: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingPost = postDao.getPostById(postId) ?: return@withContext false
+        
+        if (existingPost.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+        
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$postId|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        
+        val deletePay = com.noslop.app.mesh.DeletePostPayload(
+            postId = postId,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature
+        )
+        
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "DELETE_POST",
+            payload = com.google.gson.Gson().toJsonTree(deletePay),
+            signature = signature
+        )
+        
+        postDao.markPostOrphaned(postId)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
     }
 
     suspend fun composeAndBroadcastPost(

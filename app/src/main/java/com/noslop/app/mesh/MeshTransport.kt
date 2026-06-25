@@ -24,6 +24,7 @@ class MeshTransport(
     private var isRunning = false
 
     @Volatile private var listening = false
+    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(8) // Limit concurrent Tor circuits
     fun isListening(): Boolean = listening
 
     fun startListening() {
@@ -99,26 +100,38 @@ class MeshTransport(
             return@withContext false
         }
 
-        for (attempt in 1..5) { // Increased retries
-            var socket: Socket? = null
-            try {
-                val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
-                socket = Socket(proxy)
-                // Onion connections can take time to establish (v3 circuits)
-                Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress")
-                socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000) 
-                val writer = PrintWriter(socket.getOutputStream(), true)
-                writer.println(packet.toJson())
-                Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
-                return@withContext true
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Send attempt $attempt/5 to $onionAddress failed: ${e.message}")
-                if (attempt < 5) delay(attempt * 3000L) // Exponential-ish backoff
-            } finally {
-                try { socket?.close() } catch (_: Exception) {}
+        torSemaphore.acquire()
+        try {
+            val connectTimeout = if (packet.type.startsWith("MEDIA_")) 45000 else 20000
+            for (attempt in 1..3) { // Reduced retries to avoid blocking the semaphore
+                var socket: Socket? = null
+                try {
+                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
+                    socket = Socket(proxy)
+                    // Onion connections can take time to establish (v3 circuits)
+                    Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms")
+                    socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
+                    val writer = PrintWriter(socket.getOutputStream(), true)
+                    writer.println(packet.toJson())
+                    Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
+                    return@withContext true
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Send attempt $attempt/3 to $onionAddress failed: ${e.message}")
+                    val msg = e.message ?: ""
+                    // Fast-fail if Tor explicitly tells us the peer is dead/unreachable
+                    if (msg.contains("Host unreachable") || msg.contains("TTL expired") || msg.contains("general SOCKS server failure")) {
+                        Logger.warn(TAG, "Tor explicitly rejected routing to $onionAddress. Fast-failing to free circuit.")
+                        return@withContext false
+                    }
+                    if (attempt < 3) delay(attempt * 2000L) // Reduced backoff
+                } finally {
+                    try { socket?.close() } catch (_: Exception) {}
+                }
             }
+            Logger.error(TAG, "All send attempts failed for $onionAddress")
+            return@withContext false
+        } finally {
+            torSemaphore.release()
         }
-        Logger.error(TAG, "All send attempts failed for $onionAddress")
-        return@withContext false
     }
 }

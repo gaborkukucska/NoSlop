@@ -73,13 +73,20 @@ class EngagementRepository(
                 lastSwipedAt = System.currentTimeMillis()
             )
         )
-        if (newCount >= 2) {
+        if (newCount >= 1) {
             Logger.info(TAG, "Item $itemId swiped away $newCount times — excluded from future feeds")
         }
     }
 
     /** Get item IDs that have been swiped away >= 2 times. */
     suspend fun getSwipeExcludedIds(): Set<String> = withContext(Dispatchers.IO) {
+        pruneOldEngagementData()
         swipeTrackerDao.getExcludedIds().toSet()
+    }
+
+    private suspend fun pruneOldEngagementData() {
+        val ninetyDaysAgo = System.currentTimeMillis() - 90L * 24 * 60 * 60 * 1000L
+        viewedHistoryDao.deleteOlderThan(ninetyDaysAgo)
+        swipeTrackerDao.deleteOldSwipes(ninetyDaysAgo)
     }
 }

@@ -104,19 +104,23 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val sessionLoadedIds = mutableSetOf<String>()
 
     fun saveFeedPosition(itemId: String) {
+        if (_isRefreshingFeeds.value) return
         if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
-            val feedList = _unifiedFeed.value
-            val actualIndex = feedList.indexOfFirst { it.id == itemId }
-            if (actualIndex >= 0) {
-                val keepStartIndex = maxOf(0, actualIndex - 3)
-                cachedDefaultFeed = feedList.drop(keepStartIndex)
-                savedFeedItemId = itemId
-                
-                viewModelScope.launch {
-                    val ids = cachedDefaultFeed.map { it.id }.joinToString(",")
-                    repository.putAppSetting("saved_feed_list", ids)
-                    repository.putAppSetting("saved_feed_active_id", itemId)
-                }
+            savedFeedItemId = itemId
+            
+            val currentIndex = _unifiedFeed.value.indexOfFirst { it.id == itemId }
+            if (currentIndex >= 0) {
+                val startIndex = maxOf(0, currentIndex - 3)
+                cachedDefaultFeed = _unifiedFeed.value.subList(startIndex, currentIndex + 1)
+            } else {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
+            
+            viewModelScope.launch {
+                val itemsToSave = cachedDefaultFeed.takeLast(100)
+                val ids = itemsToSave.map { it.id }.joinToString(",")
+                repository.putAppSetting("saved_feed_list", ids)
+                repository.putAppSetting("saved_feed_active_id", itemId)
             }
         }
     }
@@ -273,7 +277,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 if (_isOnboardingComplete.value && keys == null) return@collect
 
                 allFeeds = feeds
-                allMeshes = meshes
+                allMeshes = meshes.filter { !it.isOrphaned }
                 
                 if (_unifiedFeed.value.isEmpty()) {
                     val savedIdsStr = repository.getAppSetting("saved_feed_list")
@@ -315,11 +319,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }.toList()
                     
-                    // ONLY update the cache if we are actually viewing the Live Feed!
-                    if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
-                        cachedDefaultFeed = updatedFeed
-                    }
-                    
                     _unifiedFeed.value = updatedFeed
                 }
             }
@@ -332,7 +331,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                if (!isSearchModeActive) cachedDefaultFeed = _unifiedFeed.value.toList()
+                
                 isSearchModeActive = true
                 activeSearchQuery = query
                 _unifiedFeed.value = emptyList()
@@ -351,9 +350,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (mode == "Live Feed") {
                 clearSearchAndRestoreFeed()
             } else {
-                if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
-                    cachedDefaultFeed = _unifiedFeed.value.toList()
-                }
+
                 currentFilterMode = mode
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
@@ -379,6 +376,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearSearchAndRestoreFeed() {
+        if (_isRefreshingFeeds.value) return
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
@@ -386,64 +384,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
                 
-                val localPubKey = localKeys.value?.publicKeyB64
-                val exclusionIds = cachedDefaultFeed.map { it.id }.toSet() + sessionLoadedIds + cachedViewedIds + cachedExcludedIds
-                
-                val unseenFeeds = allFeeds.filter { it.id !in exclusionIds && !it.isSaved && !it.isRead }
-                val unseenMeshes = allMeshes.filter { it.id !in exclusionIds && it.authorPublicKeyB64 != localPubKey }.sortedByDescending { it.timestamp }
-                
-                val creators = _creatorKeywords.value.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
-                val isCreatorMatch = { item: FeedItem ->
-                    if (creators.isEmpty()) false
-                    else {
-                        val title = item.title.lowercase()
-                        val author = item.author?.lowercase() ?: ""
-                        val excerpt = item.excerpt?.lowercase() ?: ""
-                        creators.any { title.contains(it) || author.contains(it) || excerpt.contains(it) }
-                    }
-                }
-                
-                val prioritizedFeeds = unseenFeeds.partition(isCreatorMatch).let { (c, o) ->
-                    c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
-                }
-
-                val rawVideos = prioritizedFeeds.filter { it.mediaType?.contains("video") == true }
-                val rawAudios = prioritizedFeeds.filter { it.mediaType?.contains("audio") == true }
-                val rawImages = prioritizedFeeds.filter { it.mediaType?.contains("image") == true }
-                val rawArticles = prioritizedFeeds.filter { it.mediaType.isNullOrEmpty() }
-
-                val v = rawVideos.takeDiverse(3, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-                val a = rawAudios.takeDiverse(1, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-                val i = rawImages.takeDiverse(1, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-                val t = rawArticles.takeDiverse(1, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-                val m = unseenMeshes.take(2).map { UnifiedItem.Mesh(it) }
-
-                val newItems = mutableListOf<UnifiedItem>()
-                newItems.addAll(v)
-                newItems.addAll(a)
-                newItems.addAll(i)
-                newItems.addAll(t)
-                newItems.addAll(m)
-                
-                val result = mutableListOf<UnifiedItem>()
-                result.addAll(cachedDefaultFeed)
-                
-                // Prioritize new creator items first, then others (at the bottom of the feed)
-                val creatorBatch = newItems.filter { it is UnifiedItem.Feed && isCreatorMatch(it.item) }
-                val meshBatch = newItems.filterIsInstance<UnifiedItem.Mesh>()
-                val otherBatch = newItems.filter { it !in creatorBatch && it !in meshBatch }
-                
-                result.addAll(creatorBatch)
-                result.addAll(meshBatch)
-                result.addAll(otherBatch)
-
-                _unifiedFeed.value = result
-                cachedDefaultFeed = result
+                _unifiedFeed.value = cachedDefaultFeed.toList()
                 
                 sessionLoadedIds.clear()
-                sessionLoadedIds.addAll(result.map { it.id })
+                sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
                 
-                kotlinx.coroutines.delay(150)
+                kotlinx.coroutines.delay(50)
                 if (savedFeedItemId != null) {
                     _restoreScrollPositionEvent.emit(savedFeedItemId!!)
                 } else {
@@ -924,6 +870,17 @@ fun toggleAggregator() {
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
         viewModelScope.launch { repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId) }
+    }
+
+    fun deleteMeshPost(postId: String) {
+        viewModelScope.launch {
+            val success = repository.deleteMeshPost(postId)
+            if (success) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                currentFeed.removeAll { it.id == postId }
+                _unifiedFeed.value = currentFeed
+            }
+        }
     }
 
     fun composeAndBroadcastPost(content: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, privacy: String = "public", clearnetUrl: String? = null, clearnetTitle: String? = null, clearnetThumbnailUrl: String? = null, clearnetMediaType: String? = null) {

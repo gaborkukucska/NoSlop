@@ -1,3 +1,4 @@
+// app/src/main/java/com/noslop/app/ui/tabs/SettingsTab.kt
 package com.noslop.app.ui.tabs
 
 import androidx.compose.foundation.BorderStroke
@@ -249,8 +250,45 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 )
                             }
                             
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Background Playback", color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Keep audio/video playing while browsing other tabs.", color = TextMuted, fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = mediaSettings.backgroundPlayEnabled,
+                                    onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayEnabled = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            if (mediaSettings.backgroundPlayEnabled) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Play Outside App", color = TextLight, fontSize = 14.sp)
+                                        Text("Continue playing when NoSlop is minimized.", color = TextMuted, fontSize = 12.sp)
+                                    }
+                                    Switch(
+                                        checked = mediaSettings.backgroundPlayOutsideApp,
+                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayOutsideApp = it)) },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                    )
+                                }
+                            }
+                            
                             if (mediaSettings.enabled) {
-                                Spacer(modifier = Modifier.height(16.dp))
+                                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+                                
                                 Text(
                                     "Max File Size: ${mediaSettings.maxFileSizeMB} MB",
                                     color = TextLight,

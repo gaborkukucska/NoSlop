@@ -91,7 +91,8 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
                         if (url.startsWith("noslop://")) {
                             val resolved = resolveMediaUrl(url, context)
                             if (resolved != null) {
-                                return chain.proceed(request.newBuilder().data(resolved).build())
+                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
+                                return chain.proceed(request.newBuilder().data(newData).build())
                             }
                         }
                         return chain.proceed(request)
@@ -526,21 +527,38 @@ fun UnifiedFeedTab(
         }
     }
 
+    var restoreItemId by remember { mutableStateOf<String?>(null) }
+    
     LaunchedEffect(Unit) {
         viewModel.restoreScrollPositionEvent.collect { itemId ->
-            for (i in 0..10) {
-                val currentItems = viewModel.unifiedFeed.value
-                val index = currentItems.indexOfFirst { it.id == itemId }
-                if (index >= 0) {
-                    pagerState.scrollToPage(index)
-                    break
-                }
-                kotlinx.coroutines.delay(100)
+            restoreItemId = itemId
+        }
+    }
+    
+    // Explicitly wait for unifiedItems state to populate before scrolling
+    LaunchedEffect(restoreItemId, unifiedItems) {
+        if (restoreItemId != null && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == restoreItemId }
+            if (index >= 0) {
+                pagerState.scrollToPage(index)
+                restoreItemId = null // Consume event
             }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        var appInForeground by remember { mutableStateOf(true) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_START) appInForeground = true
+                else if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) appInForeground = false
+            }
+            appInForeground = lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (isRefreshing) {
@@ -573,10 +591,10 @@ fun UnifiedFeedTab(
                     }
                 }
 
-                LaunchedEffect(pagerState.settledPage, filterMode) {
+                LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
-                        if (filterMode == "Live Feed" && !searchResultsActive) {
+                        if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
                             viewModel.saveFeedPosition(currentItem.id)
                         }
 
@@ -620,7 +638,13 @@ fun UnifiedFeedTab(
                 }
 
                 val item = unifiedItems[index]
-                val isVisible = isActiveTab && pagerState.currentPage == index
+                val isCurrentSlide = pagerState.currentPage == index
+                val mediaSettings by viewModel.mediaSettings.collectAsState()
+                
+                val isVisibleForPlayback = isCurrentSlide && 
+                    (isActiveTab || mediaSettings.backgroundPlayEnabled) && 
+                    (appInForeground || mediaSettings.backgroundPlayOutsideApp)
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -630,7 +654,7 @@ fun UnifiedFeedTab(
                     when (item) {
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
-                            isVisible = isVisible,
+                            isVisible = isVisibleForPlayback,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
@@ -638,7 +662,7 @@ fun UnifiedFeedTab(
                         )
                         is UnifiedItem.Mesh -> FullScreenMeshCardV2(
                             post = item.post,
-                            isVisible = isVisible,
+                            isVisible = isVisibleForPlayback,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
