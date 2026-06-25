@@ -50,6 +50,10 @@ class MeshPacketHandler(
             "MEDIA_REQUEST" -> media.handleMediaRequest(packet)
             "MEDIA_CHUNK" -> media.handleMediaChunk(packet)
             "MEDIA_RECOVERY_FOUND" -> media.handleMediaRecoveryFound(packet)
+            "MEDIA_TRANSFER_ACK" -> {
+                Logger.debug(TAG, "Received MEDIA_TRANSFER_ACK")
+                true
+            }
             "MESSAGE" -> dm.handleDirectMessage(packet, localKeys)
             "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)

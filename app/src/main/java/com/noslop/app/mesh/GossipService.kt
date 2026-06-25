@@ -129,9 +129,10 @@ object GossipService {
         }
 
         // 3. Rate limit: 20 packets per sender per 10-second window
-        // Whitelist media streams to prevent chunk blocking during heavy transfers
+        // Whitelist media streams and syncs to prevent chunk blocking during heavy transfers
         val isMediaPacket = packet.type.startsWith("MEDIA_")
-        if (!isMediaPacket) {
+        val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
+        if (!isMediaPacket && !isSyncPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
             synchronized(limitList) {

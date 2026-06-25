@@ -68,9 +68,15 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
+        val isProxy = url.toString().contains("127.0.0.1") || url.toString().contains("localhost")
+        
+        // If url is a File object, pass it directly. If proxy, pass null to force the placeholder.
+        val actualModel = if (isProxy) null else if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
+        
         val request = coil.request.ImageRequest.Builder(context)
-            .data(url)
+            .data(actualModel)
             .crossfade(true)
+            .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
             .build()
             
         // Background blurred layer
@@ -134,8 +140,9 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                 )
             }
 
+            val actualModel = if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
             AsyncImage(
-                model = url,
+                model = actualModel,
                 contentDescription = "Zoomable View",
                 modifier = Modifier
                     .fillMaxSize()
@@ -456,6 +463,7 @@ fun OverlayInteractions(
     onReaction: (String) -> Unit = {},
     onShare: () -> Unit,
     onComment: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     reactionSummary: Map<String, Int> = emptyMap(),
     commentCount: Int = 0,
     netScore: Int? = null,
@@ -547,6 +555,15 @@ fun OverlayInteractions(
                     icon = Icons.Default.Chat,
                     label = if (commentCount > 0) commentCount.toString() else "Chat",
                     onClick = onComment
+                )
+            }
+
+            if (onDelete != null) {
+                InteractionButton(
+                    icon = Icons.Default.Delete,
+                    label = "Delete",
+                    onClick = onDelete,
+                    tint = DestructiveRed
                 )
             }
         }
@@ -699,7 +716,8 @@ private fun ReactionPickerItem(emoji: String, count: Int, onClick: () -> Unit) {
 private fun InteractionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     label: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    tint: androidx.compose.ui.graphics.Color = AccentGreen
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
@@ -713,7 +731,7 @@ private fun InteractionButton(
             Icon(
                 imageVector = icon,
                 contentDescription = label,
-                tint = AccentGreen,
+                tint = tint,
                 modifier = Modifier.size(26.dp)
             )
         }

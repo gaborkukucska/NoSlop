@@ -1,4 +1,4 @@
-// app/src/main/java/com/noslop/app/mesh/Packets.kt
+// FILE: app/src/main/java/com/noslop/app/mesh/Packets.kt
 package com.noslop.app.mesh
 
 import com.google.gson.Gson
@@ -69,6 +69,8 @@ data class MediaRequestPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
     @SerializedName("chunk_size") val chunkSize: Int,
+    @SerializedName("byte_offset") val byteOffset: Long? = null,
+    @SerializedName("byte_length") val byteLength: Int? = null,
     @SerializedName("access_key") val accessKey: String? = null,
     @SerializedName("hls_file") val hlsFile: String? = null
 )
@@ -77,6 +79,7 @@ data class MediaChunkPayload(
     @SerializedName("media_id") val mediaId: String,
     @SerializedName("chunk_index") val chunkIndex: Int,
     @SerializedName("total_chunks") val totalChunks: Int,
+    @SerializedName("byte_offset") val byteOffset: Long? = null,
     val data: String // Base64 encoded
 )
 
@@ -248,7 +251,7 @@ data class NetworkPacket(
     @SerializedName("sender_id") val senderId: String,
     @SerializedName("target_user_id") val targetUserId: String? = null,
     var signature: String? = null,
-    val type: String, // "POST", "MESSAGE", "CONNECTION_REQUEST", "USER_HANDSHAKE", "CONNECTION_REJECTED", "SYNC_REQUEST", "SYNC_RESPONSE", "INVENTORY_SYNC_REQUEST", "COMMENT", "REACTION", "CHAT_REACTION", "COMMENT_REACTION", "VOTE", "COMMENT_VOTE", "ANNOUNCE_PEER", "IDENTITY_UPDATE", "USER_EXIT", "EDIT_POST", "DELETE_POST"
+    val type: String,
     val payload: JsonElement? = null
 ) {
     fun toJson(): String = Gson().toJson(this)

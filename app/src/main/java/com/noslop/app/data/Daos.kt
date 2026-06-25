@@ -90,6 +90,9 @@ interface PostDao {
     @Query("SELECT * FROM mesh_posts WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getPostsSince(since: Long): List<MeshPost>
 
+    @Query("SELECT * FROM mesh_posts WHERE isOrphaned = 1 AND authorPublicKeyB64 = :authorId")
+    suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost>
+
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
@@ -281,12 +284,18 @@ interface ViewedHistoryDao {
 
     @Query("DELETE FROM viewed_history WHERE itemId IN (SELECT itemId FROM viewed_history ORDER BY viewedAt ASC LIMIT :count)")
     suspend fun pruneOldest(count: Int)
+
+    @Query("DELETE FROM viewed_history WHERE viewedAt < :timestamp")
+    suspend fun deleteOlderThan(timestamp: Long)
 }
 
 @Dao
 interface SwipeTrackerDao {
-    @Query("SELECT itemId FROM swipe_tracker WHERE swipeCount >= 2")
+    @Query("SELECT itemId FROM swipe_tracker WHERE swipeCount >= 1")
     suspend fun getExcludedIds(): List<String>
+
+    @Query("DELETE FROM swipe_tracker WHERE lastSwipedAt < :timestamp")
+    suspend fun deleteOldSwipes(timestamp: Long)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSwipe(tracker: SwipeTracker)

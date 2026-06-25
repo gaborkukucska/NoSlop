@@ -45,6 +45,7 @@ fun FullScreenMeshCard(
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
     var showComments by remember { mutableStateOf(false) }
+        var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -219,6 +220,7 @@ fun FullScreenMeshCard(
         val isContentTransparencyEnabled by (viewModel?.isContentTransparencyEnabled ?: kotlinx.coroutines.flow.flowOf(false)).collectAsState(initial = false)
         val showSoftBlockOverlay = isSoftBlocked && !revealOverride && !isContentTransparencyEnabled
         val showTransparencyBadge = isSoftBlocked && isContentTransparencyEnabled
+        val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
 
         Box(modifier = Modifier.fillMaxSize()) {
             OverlayInteractions(
@@ -237,6 +239,7 @@ fun FullScreenMeshCard(
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
+                onDelete = if (post.authorPublicKeyB64 == myPubKey) { { showDeleteConfirm = true } } else null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .graphicsLayer { translationX = rightSlideOffset }
@@ -263,8 +266,29 @@ fun FullScreenMeshCard(
         }
     }
 
-    if (showComments && viewModel != null) {
-        CommentsBottomSheet(
+    if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Delete Broadcast", color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.", color = TextMuted) },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            viewModel?.deleteMeshPost(post.id)
+                            showDeleteConfirm = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                    ) { Text("Delete", color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
+        }
+
+        if (showComments && viewModel != null) {
+            CommentsBottomSheet(
             postId = post.id,
             viewModel = viewModel,
             onDismiss = { showComments = false }
@@ -280,22 +304,24 @@ internal fun resolveMediaUrl(mediaUrl: String?, context: android.content.Context
     if (mediaUrl == null) return null
     if (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://")) return mediaUrl
     
-    // Legacy support: Old GIFs are stored as noslop-gif:// URI strings.
-    // Return these directly so the renderer can decode the Base64 content.
     if (mediaUrl.startsWith("noslop-gif://")) return mediaUrl
-
-    // Protocol-relative URLs (e.g. "//vimeo.com/...")
     if (mediaUrl.startsWith("//")) return "https:$mediaUrl"
 
-    // noslop:// URI resolution: Extract onion and ID
     if (mediaUrl.startsWith("noslop://")) {
         val path = mediaUrl.removePrefix("noslop://")
         val onion = path.substringBefore("/")
         val id = path.substringAfter("/")
+        
+        val type = if (id.endsWith(".jpg") || id.endsWith(".png") || id.endsWith(".gif") || id.contains("image") || id.contains("thumb")) "image" else null
+        val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(id, type)
+        
+        // Wait until it is COMPLETELY downloaded before handing the file path to Coil
+        if (localFile != null && localFile.exists() && localFile.length() > 0 && !com.noslop.app.mesh.MediaManager.isMediaDownloadingOrRecovering(id)) {
+            return "file://${localFile.absolutePath}"
+        }
+        
         return com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, id)
     }
 
-    // Default fallback: Assuming mesh proxy for raw IDs or malformed URIs.
-    // We pass an empty onion if it's just a raw ID.
     return com.noslop.app.mesh.MediaProxyService.buildProxyUrl("", mediaUrl)
 }

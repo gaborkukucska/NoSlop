@@ -27,15 +27,15 @@ class PostPacketHandler(
         if (postPay.authorAvatarB64 != null) {
             payloadToVerify += "|${postPay.authorAvatarB64}"
         }
-        val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
+        val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
             return false
         }
 
-        val pubBytes = Base64.decode(postPay.authorPublicKey, Base64.DEFAULT)
+        val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
-        val peer = peerDao.getPeerByPublicKey(postPay.authorPublicKey)
+        val peer = peerDao.getPeerByPublicKey(postPay.authorId)
         val handle = peer?.handle ?: postPay.authorName
 
         // Robustness: Sniff media type from URL if it's missing in the packet
@@ -51,7 +51,7 @@ class PostPacketHandler(
         val resolvedOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
         val meshPost = MeshPost(
             id = postPay.id,
-            authorPublicKeyB64 = postPay.authorPublicKey,
+            authorPublicKeyB64 = postPay.authorId,
             authorHandle = handle,
             authorTripcode = tripcode,
             authorAvatarB64 = postPay.authorAvatarB64,
@@ -73,12 +73,15 @@ class PostPacketHandler(
         
         if (postPay.mediaMetadata != null) {
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress
+            Logger.info(TAG, "Requesting auto-download for POST media ${postPay.mediaMetadata.id} from ${peerOnion ?: "unknown"}")
             MediaManager.checkAndAutoDownload(
                 postPay.mediaMetadata,
                 "friends",
                 postPay.authorId,
                 peerOnion
             )
+        } else {
+            Logger.debug(TAG, "No mediaMetadata found in post ${postPay.id}")
         }
 
         Logger.info(TAG, "Valid signed post accepted and stored: handle=${handle}.${tripcode}")

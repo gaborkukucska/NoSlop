@@ -1,5 +1,6 @@
 package com.noslop.app.ui
 
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -73,14 +74,15 @@ fun SplashScreen() {
             Spacer(modifier = Modifier.height(32.dp))
             
             // Sleek pulsing indicator
-            val infiniteTransition = rememberInfiniteTransition()
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
             val pulseAlpha by infiniteTransition.animateFloat(
                 initialValue = 0.2f,
                 targetValue = 1f,
                 animationSpec = infiniteRepeatable(
                     animation = tween(800, easing = LinearEasing),
                     repeatMode = RepeatMode.Reverse
-                )
+                ),
+                label = "pulseAlpha"
             )
             
             Box(
@@ -89,6 +91,39 @@ fun SplashScreen() {
                     .alpha(pulseAlpha)
                     .background(AccentGreen, shape = androidx.compose.foundation.shape.CircleShape)
             )
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            val loadingMessages = listOf(
+                "Waking up Tor...",
+                "Building Tor circuits...",
+                "Finding mesh peers...",
+                "Pre-loading media...",
+                "Almost there..."
+            )
+            var currentMessageIndex by remember { mutableStateOf(0) }
+            
+            LaunchedEffect(Unit) {
+                while(true) {
+                    kotlinx.coroutines.delay(2500)
+                    currentMessageIndex = (currentMessageIndex + 1) % loadingMessages.size
+                }
+            }
+
+            Crossfade(
+                targetState = currentMessageIndex,
+                animationSpec = tween(500),
+                label = "loadingText"
+            ) { targetIndex ->
+                Text(
+                    text = loadingMessages[targetIndex],
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        color = AccentGreen.copy(alpha = pulseAlpha),
+                        letterSpacing = 1.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+            }
         }
     }
 }

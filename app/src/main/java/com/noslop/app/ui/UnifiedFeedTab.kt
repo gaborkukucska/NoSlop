@@ -91,7 +91,8 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
                         if (url.startsWith("noslop://")) {
                             val resolved = resolveMediaUrl(url, context)
                             if (resolved != null) {
-                                return chain.proceed(request.newBuilder().data(resolved).build())
+                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
+                                return chain.proceed(request.newBuilder().data(newData).build())
                             }
                         }
                         return chain.proceed(request)
@@ -350,7 +351,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         { selectedTab = it },
                         topSlideOffset = topSlide,
                         bottomSlideOffset = bottomSlide,
-                        rightSlideOffset = rightSlide
+                        rightSlideOffset = rightSlide,
+                        isActiveTab = selectedTab == 0
                     )
                 }
                 if (selectedTab == 1) DMsTab(viewModel)
@@ -414,7 +416,8 @@ fun UnifiedFeedTab(
     onTabChange: (Int) -> Unit,
     topSlideOffset: Float = 0f,
     bottomSlideOffset: Float = 0f,
-    rightSlideOffset: Float = 0f
+    rightSlideOffset: Float = 0f,
+    isActiveTab: Boolean = true
 ) {
     val context = LocalContext.current
     val unifiedFeed by viewModel.unifiedFeed.collectAsState()
@@ -453,7 +456,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, viewedHistoryIds) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery) {
         unifiedFeed.filter { item ->
             val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
             if (filterMode == "My Content") {
@@ -479,10 +482,15 @@ fun UnifiedFeedTab(
                 val q = searchQuery.lowercase()
                 when (item) {
                     is UnifiedItem.Feed -> {
-                        if (item.item.apiSource != null && !item.item.isSaved) true
-                        else item.item.title.lowercase().contains(q) || item.item.excerpt?.lowercase()?.contains(q) == true
+                        item.item.title.lowercase().contains(q) || 
+                        item.item.excerpt?.lowercase()?.contains(q) == true || 
+                        item.item.author?.lowercase()?.contains(q) == true
                     }
-                    is UnifiedItem.Mesh -> item.post.content.lowercase().contains(q) || item.post.clearnetTitle?.lowercase()?.contains(q) == true
+                    is UnifiedItem.Mesh -> {
+                        item.post.content.lowercase().contains(q) || 
+                        item.post.clearnetTitle?.lowercase()?.contains(q) == true || 
+                        item.post.authorHandle.lowercase().contains(q)
+                    }
                 }
             } else true
 
@@ -494,6 +502,8 @@ fun UnifiedFeedTab(
     val preWarmedUrls = remember { mutableSetOf<String>() }
     val preloadScope = rememberCoroutineScope()
 
+    // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
+
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
         if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
@@ -501,6 +511,9 @@ fun UnifiedFeedTab(
                 pagerState.scrollToPage(0)
             }
         }
+        
+        viewModel.syncFilterMode(filterMode)
+        
         if (unifiedItems.size < 5) {
             viewModel.loadMoreFeedItems(filterMode)
         }
@@ -514,22 +527,53 @@ fun UnifiedFeedTab(
         }
     }
 
+    var restoreItemId by remember { mutableStateOf<String?>(null) }
+    
     LaunchedEffect(Unit) {
-        viewModel.restoreScrollPositionEvent.collect { index ->
-            if (unifiedItems.isNotEmpty() && index < unifiedItems.size) {
+        viewModel.restoreScrollPositionEvent.collect { itemId ->
+            restoreItemId = itemId
+        }
+    }
+    
+    // Explicitly wait for unifiedItems state to populate before scrolling
+    LaunchedEffect(restoreItemId, unifiedItems) {
+        if (restoreItemId != null && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == restoreItemId }
+            if (index >= 0) {
                 pagerState.scrollToPage(index)
+                restoreItemId = null // Consume event
             }
         }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        var appInForeground by remember { mutableStateOf(true) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                if (event == androidx.lifecycle.Lifecycle.Event.ON_START) appInForeground = true
+                else if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) appInForeground = false
+            }
+            appInForeground = lifecycleOwner.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
+
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
-                    Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                if (isRefreshing) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = AccentGreen)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Curating your feed...", color = TextMuted, fontWeight = FontWeight.Bold)
+                    }
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
             }
         } else {
@@ -547,9 +591,13 @@ fun UnifiedFeedTab(
                     }
                 }
 
-                LaunchedEffect(pagerState.settledPage, filterMode) {
+                LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
                     if (pagerState.settledPage in unifiedItems.indices) {
                         val currentItem = unifiedItems[pagerState.settledPage]
+                        if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                            viewModel.saveFeedPosition(currentItem.id)
+                        }
+
                         if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                             viewModel.markItemReadState(currentItem.item.id, true)
                         }
@@ -565,6 +613,7 @@ fun UnifiedFeedTab(
                     val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
                     for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
                         val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
+                        if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
                         if (preWarmedUrls.add(preloadUrl)) {
                             // Launch in the broader scope so fast scrolling doesn't cancel the preload!
                             preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
@@ -590,18 +639,23 @@ fun UnifiedFeedTab(
                 }
 
                 val item = unifiedItems[index]
-                val isVisible = pagerState.currentPage == index || pagerState.targetPage == index || pagerState.settledPage == index
+                val isCurrentSlide = pagerState.currentPage == index
+                val mediaSettings by viewModel.mediaSettings.collectAsState()
+                
+                val isVisibleForPlayback = isCurrentSlide && 
+                    (isActiveTab || mediaSettings.backgroundPlayEnabled) && 
+                    (appInForeground || mediaSettings.backgroundPlayOutsideApp)
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(PrimaryBlack),
                     contentAlignment = Alignment.Center
                 ) {
-                    LoadingShimmer()
                     when (item) {
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
-                            isVisible = isVisible,
+                            isVisible = isVisibleForPlayback,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
@@ -609,7 +663,7 @@ fun UnifiedFeedTab(
                         )
                         is UnifiedItem.Mesh -> FullScreenMeshCardV2(
                             post = item.post,
-                            isVisible = isVisible,
+                            isVisible = isVisibleForPlayback,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
@@ -724,7 +778,7 @@ fun UnifiedFeedTab(
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                             onSearch = {
                                 if (localSearchQuery.isNotBlank()) {
-                                    viewModel.saveFeedPosition(pagerState.currentPage)
+                                    if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                     searchQuery = localSearchQuery
                                     filterMode = localFilterMode
                                     searchResultsActive = true
@@ -734,6 +788,25 @@ fun UnifiedFeedTab(
                             }
                         )
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val q = if (localSearchQuery.isNotBlank()) localSearchQuery else "Trending"
+                            if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                            searchQuery = q
+                            filterMode = localFilterMode
+                            searchResultsActive = true
+                            viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                            showSearchModal = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                        modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold)
+                    }
 
                     Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     val myContentSelected = localFilterMode == "My Content"
@@ -748,9 +821,22 @@ fun UnifiedFeedTab(
                             Text("My Content", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    val meshSelected = localFilterMode == "Mesh"
+                    Box(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (meshSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "Mesh" }
+                            .then(if (meshSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Hub, contentDescription = null, tint = if (meshSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Mesh Network", color = if (meshSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (meshSelected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Content Type", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article, "Mesh" to Icons.Default.Hub)
+                    Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -791,32 +877,22 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    if (localSearchQuery.isNotBlank()) {
-                        Button(
-                            onClick = {
-                                viewModel.saveFeedPosition(pagerState.currentPage)
-                                searchQuery = localSearchQuery
-                                filterMode = localFilterMode
-                                searchResultsActive = true
-                                viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
-                                showSearchModal = false
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Search Online", fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = { viewModel.forceResetFeed(); showSearchModal = false },
-                        modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, AccentGreen)
+                    Button(
+                        onClick = { 
+                            if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                            searchQuery = ""
+                            filterMode = "Random"
+                            searchResultsActive = false
+                            viewModel.syncFilterMode("Random")
+                            showSearchModal = false 
+                        },
+                        modifier = Modifier.fillMaxWidth().height(44.dp), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen)
                     ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Refresh Feed", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Random Discover", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             },
@@ -846,7 +922,25 @@ fun UnifiedFeedTab(
                 try {
                     val contentResolver = contextWrapper.contentResolver
                     val mimeType = contentResolver.getType(uri)
-                    val ext = if (mimeType?.contains("video") == true) ".mp4" else ".jpg"
+                    var resolvedMimeType = mimeType
+                    if (resolvedMimeType == null) {
+                        val path = uri.path?.lowercase() ?: ""
+                        resolvedMimeType = when {
+                            path.endsWith(".mp4") || path.endsWith(".mkv") || path.endsWith(".webm") -> "video/mp4"
+                            path.endsWith(".gif") -> "image/gif"
+                            path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") -> "image/jpeg"
+                            path.endsWith(".m4a") || path.endsWith(".mp3") -> "audio/mp4"
+                            else -> "application/octet-stream"
+                        }
+                    }
+
+                    val ext = when {
+                        resolvedMimeType.startsWith("video") -> ".mp4"
+                        resolvedMimeType.startsWith("audio") -> ".m4a"
+                        resolvedMimeType.startsWith("image/gif") -> ".gif"
+                        resolvedMimeType.startsWith("image") -> ".jpg"
+                        else -> ".bin"
+                    }
                     val tempFile = java.io.File(contextWrapper.cacheDir, "mesh_attach_${System.currentTimeMillis()}$ext")
                     contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                     attachedFile = tempFile
@@ -860,23 +954,57 @@ fun UnifiedFeedTab(
                 val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
                 AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
                 LaunchedEffect(Unit) { captureManager.startCamera(lifecycleOwner, previewView) {} }
+                DisposableEffect(Unit) {
+                    onDispose { captureManager.stopCamera() }
+                }
+
+                var countdown by remember { mutableStateOf(0) }
+
+                LaunchedEffect(countdown) {
+                    if (countdown > 0) {
+                        kotlinx.coroutines.delay(1000L)
+                        countdown -= 1
+                        if (countdown == 0) {
+                            captureManager.startVideoRecording { file -> 
+                                if (file != null) attachedFile = file
+                                showCamera = false 
+                            }
+                            isRecordingVideo = true
+                        }
+                    }
+                }
+
+                if (countdown > 0) {
+                    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
+                        Text(countdown.toString(), color = Color.White, fontSize = 96.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
 
                 Row(
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp),
                     horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = { captureManager.takePhoto { file -> attachedFile = file; showCamera = false } }, modifier = Modifier.size(70.dp).background(AccentGreen, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = PrimaryBlack) }
+                    if (!isRecordingVideo && countdown == 0) {
+                        IconButton(onClick = { captureManager.takePhoto { file -> 
+                            if (file != null) attachedFile = file
+                            showCamera = false 
+                        } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                    }
+                    
                     IconButton(
                         onClick = {
-                            if (isRecordingVideo) { captureManager.stopVideoRecording(); isRecordingVideo = false; showCamera = false } 
-                            else { captureManager.startVideoRecording { file -> attachedFile = file }; isRecordingVideo = true }
+                            if (isRecordingVideo) { 
+                                captureManager.stopVideoRecording()
+                                isRecordingVideo = false
+                            } 
+                            else if (countdown == 0) { countdown = 3 }
                         },
-                        modifier = Modifier.size(70.dp).background(if (isRecordingVideo) DestructiveRed else SurfaceDark, RoundedCornerShape(50))
-                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) PrimaryBlack else TextLight) }
+                        modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
+                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) DestructiveRed else Color.White) }
                     
-                    if (!isRecordingVideo) {
+                    if (!isRecordingVideo && countdown == 0) {
                         IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
-                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight) }
+                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
                     }
                 }
             }
@@ -942,10 +1070,33 @@ fun UnifiedFeedTab(
                     Button(
                         onClick = {
                             val mediaMetadata = attachedFile?.let { file ->
-                                val type = if (file.name.endsWith(".jpg")) "image" else "video"
-                                val id = file.name
+                                val mimeType = when {
+                                    file.name.endsWith(".jpg") || file.name.endsWith(".jpeg") -> "image/jpeg"
+                                    file.name.endsWith(".png") -> "image/png"
+                                    file.name.endsWith(".gif") -> "image/gif"
+                                    file.name.endsWith(".mp4") -> "video/mp4"
+                                    file.name.endsWith(".m4a") -> "audio/mp4"
+                                    file.name.endsWith(".webm") -> "video/webm"
+                                    else -> "application/octet-stream"
+                                }
+                                val type = when {
+                                    mimeType.startsWith("image") -> "image"
+                                    mimeType.startsWith("video") -> "video"
+                                    mimeType.startsWith("audio") -> "audio"
+                                    else -> "file"
+                                }
+                                val id = "post_${file.name}"
                                 com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
-                                com.noslop.app.mesh.MediaMetadata(id = id, type = type, mimeType = if (file.name.endsWith(".jpg")) "image/jpeg" else "video/mp4", size = file.length(), chunkCount = (file.length() / (256 * 1024)).toInt() + 1, originNode = viewModel.localKeys.value?.onionAddress, ownerId = viewModel.localKeys.value?.publicKeyB64, thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type))
+                                com.noslop.app.mesh.MediaMetadata(
+                                    id = id, 
+                                    type = type, 
+                                    mimeType = mimeType, 
+                                    size = file.length(), 
+                                    chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
+                                    originNode = viewModel.localKeys.value?.onionAddress, 
+                                    ownerId = viewModel.localKeys.value?.publicKeyB64, 
+                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
+                                )
                             }
                             
                             val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }

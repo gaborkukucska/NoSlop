@@ -104,6 +104,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         com.noslop.app.mesh.MediaManager.downloadProgress
 
     // --- Identity Delegation ---
+    suspend fun putAppSetting(key: String, value: String) { appSettingDao.insertSetting(AppSetting(key, value)) }
+    suspend fun getAppSetting(key: String): String? { return appSettingDao.getSetting(key) }
+    
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)
@@ -300,6 +303,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         feedRepository.setContentTransparencyEnabled(enabled)
 
     // --- Social Mesh & Direct Messages Routing ---
+    suspend fun deleteMeshPost(postId: String): Boolean = meshSocialRepository.deleteMeshPost(postId)
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,

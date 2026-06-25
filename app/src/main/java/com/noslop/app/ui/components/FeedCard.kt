@@ -369,6 +369,7 @@ fun FullScreenMeshCardV2(
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
     val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -391,7 +392,7 @@ fun FullScreenMeshCardV2(
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.thumbnailB64 ?: post.clearnetThumbnailUrl)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = post.thumbnailB64)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -404,7 +405,7 @@ fun FullScreenMeshCardV2(
 
                         if (isVisible) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                BlurredImageBackground(url = post.thumbnailB64 ?: post.clearnetThumbnailUrl ?: "")
+                                BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
@@ -432,7 +433,7 @@ fun FullScreenMeshCardV2(
                                 }
                             }
                         } else {
-                            BlurredImageBackground(url = post.thumbnailB64 ?: post.clearnetThumbnailUrl ?: "")
+                            BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
                         }
                     }
                 }
@@ -549,6 +550,7 @@ fun FullScreenMeshCardV2(
         val isContentTransparencyEnabled by (viewModel?.isContentTransparencyEnabled ?: kotlinx.coroutines.flow.flowOf(false)).collectAsState(initial = false)
         val showSoftBlockOverlay = isSoftBlocked && !revealOverride && !isContentTransparencyEnabled
         val showTransparencyBadge = isSoftBlocked && isContentTransparencyEnabled
+        val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
 
         Box(modifier = Modifier.fillMaxSize()) {
             OverlayInteractions(
@@ -565,6 +567,7 @@ fun FullScreenMeshCardV2(
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
+                onDelete = if (post.authorPublicKeyB64 == myPubKey) { { showDeleteConfirm = true } } else null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .graphicsLayer { translationX = rightSlideOffset }
@@ -588,6 +591,27 @@ fun FullScreenMeshCardV2(
                     }
                 }
             }
+        }
+
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title = { Text("Delete Broadcast", color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.", color = TextMuted) },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            viewModel?.deleteMeshPost(post.id)
+                            showDeleteConfirm = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                    ) { Text("Delete", color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
         }
 
         if (showComments && viewModel != null) {

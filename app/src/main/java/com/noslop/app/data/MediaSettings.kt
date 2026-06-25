@@ -7,7 +7,9 @@ data class MediaSettings(
     val maxFileSizeMB: Int = 10,
     val autoDownloadFriends: Boolean = true,
     val autoDownloadPrivate: Boolean = true,
-    val cacheRelayedMedia: Boolean = false
+    val cacheRelayedMedia: Boolean = false,
+    val backgroundPlayEnabled: Boolean = false,
+    val backgroundPlayOutsideApp: Boolean = false
 ) {
     fun toJson(): String = Gson().toJson(this)
 

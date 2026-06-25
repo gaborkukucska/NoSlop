@@ -269,17 +269,17 @@ class SyncPacketHandler(
             if (postPay.authorAvatarB64 != null) {
                 payloadToVerify += "|${postPay.authorAvatarB64}"
             }
-            val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorPublicKey)
+            val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
                 continue
             }
-            val pubBytes = Base64.decode(postPay.authorPublicKey, Base64.DEFAULT)
+            val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
             val post = MeshPost(
                 id = postPay.id,
-                authorPublicKeyB64 = postPay.authorPublicKey,
+                authorPublicKeyB64 = postPay.authorId,
                 authorHandle = postPay.authorName,
                 authorTripcode = tripcode,
                 authorAvatarB64 = postPay.authorAvatarB64,
@@ -294,6 +294,16 @@ class SyncPacketHandler(
                 clearnetThumbnailUrl = postPay.clearnetThumbnailUrl
             )
             postDao.insertPost(post)
+            
+            if (postPay.mediaMetadata != null) {
+                com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
+                    postPay.mediaMetadata,
+                    "friends",
+                    postPay.authorId,
+                    peerOnion
+                )
+            }
+            
             stored++
         }
         Logger.info(TAG, "SYNC_RESPONSE: stored $stored/${syncPay.posts.size} verified posts")
