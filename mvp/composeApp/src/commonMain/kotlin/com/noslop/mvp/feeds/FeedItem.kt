@@ -14,6 +14,9 @@ data class FeedItem(
     val fullContent: String? = null,
     val mediaUrl: String? = null,
     val mediaType: String? = null,
+    // Base64 JPEG carried in-band (an Android mesh post's MediaMetadata.thumbnail_b64) — rendered with no
+    // network fetch (no Tor deanon). Null for clearnet items, which use thumbnailUrl instead.
+    val thumbnailB64: String? = null,
     val apiSource: String? = null,
     val createdAt: Long = 0L // We can just use 0 or current time, let's omit if not needed
 )

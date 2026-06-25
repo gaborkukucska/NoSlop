@@ -54,7 +54,7 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 | ✅ 2 | **Votes + comment/chat reactions** | M | DONE — post votes (`sendVote`/`vote`), comment votes (`sendCommentVote`/`voteComment`), comment reactions (`sendCommentReaction`), and DM chat reactions (`sendChatReaction`, real CHAT_REACTION replacing the local-only `dmReactions`). All signed Android-byte-compatible; verifier + tests added. |
 | ✅ 3 | **Message replies** (text only) | S–M | DONE — adopted Android's `{"content":…,"replyTo":…}` DM envelope (`DmEnvelope.kt`) + reply UI; fixed the latent JSON-braces display bug. |
 | ✅ 4 | **Sign iOS posts** (punch-list follow-up) | S | DONE — `publish()` signs `"$id|$authorId|$content|$ts"` (authorId = our Android b64 id); verifier now requires POST signatures (closes the C1 lenient gap). Android already rejected our unsigned posts, so this is what makes them land. |
-| ⏭️ 5 | **Media over mesh — download pipeline** | L | NEXT (the big one) — the biggest unlock; gated on the bridge relay design. iOS can't host inbound, so peer media must relay+cache through the JVM bridge. |
+| 🔄 5 | **Media over mesh — download pipeline** | L | IN PROGRESS. **5a DONE** — inline thumbnails: `Base64Image` renders an Android post's in-band `thumbnail_b64` with zero fetch (no deanon); media posts now show their preview. **5b NEXT** (downloader, pending sign-off on auto-download policy + chunk size — see `MEDIA_OVER_MESH_DESIGN.md`). |
 | 6 | **Media over mesh — upload/broadcast + chat media** | M | Builds on #5; enables sharing images/video/GIFs in posts + DMs. |
 | 7 | **Feed memory + viewed-history** | S | Independent UX win; can slot in anytime. |
 | 8 | **Search routing / media typing** | S–M | Independent feed polish. |

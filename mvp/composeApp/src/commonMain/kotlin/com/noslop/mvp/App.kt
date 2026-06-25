@@ -30,6 +30,8 @@ import com.noslop.mvp.ui.theme.TextMuted
 import com.noslop.mvp.feeds.FeedItem
 import com.noslop.mvp.feeds.BackgroundScheduler
 import com.noslop.mvp.ui.media.AudioPlayer
+import androidx.compose.ui.layout.ContentScale
+import com.noslop.mvp.ui.media.Base64Image
 import com.noslop.mvp.ui.media.BlurredImageBackground
 import com.noslop.mvp.ui.media.NetworkImage
 import com.noslop.mvp.ui.media.SegmentedArticleReader
@@ -348,7 +350,14 @@ private fun FeedMediaCard(
     onVote: ((String) -> Unit)? = null, onOpenComments: (() -> Unit)? = null,
 ) {
     val url = item.mediaUrl
-    val kind = if (url == null) FeedKind.ARTICLE else feedKind(item, url)
+    val thumb = item.thumbnailB64
+    // A mesh media post has no playable url yet (download is 5b) but carries an in-band base64 thumbnail —
+    // render it as an image card (no fetch) instead of falling back to the text article view.
+    val kind = when {
+        url != null -> feedKind(item, url)
+        thumb != null -> FeedKind.IMAGE
+        else -> FeedKind.ARTICLE
+    }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when {
             url != null && kind == FeedKind.VIDEO ->
@@ -356,6 +365,8 @@ private fun FeedMediaCard(
             url != null && kind == FeedKind.AUDIO -> AudioPlayer(url = url, isVisible = isVisible)
             url != null && kind == FeedKind.IMAGE ->
                 BlurredImageBackground(url = url, imageContent = { u, cs, m -> NetworkImage(u, cs, m) })
+            url == null && thumb != null ->
+                Base64Image(thumb, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
             else -> ArticleView(item)
         }
         // Video/audio/image fill the screen and get the bottom overlay; the article reader has its own header.
@@ -552,6 +563,9 @@ private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
     publishedAt = timestamp,
     fullContent = content,
     mediaUrl = null,       // ditto for media — no auto clearnet fetch from an untrusted post
+    // The post's own thumbnail travels in-band (base64) — safe to show with no fetch (5a). Full media
+    // download (5b) comes later; for now an Android media post at least renders its preview.
+    thumbnailB64 = mediaMetadata?.thumbnailB64,
     apiSource = "mesh",
 )
 

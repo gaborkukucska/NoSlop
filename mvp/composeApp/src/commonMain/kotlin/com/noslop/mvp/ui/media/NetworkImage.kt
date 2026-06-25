@@ -19,9 +19,27 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 
 /** Decode encoded image bytes (jpg/png/webp/gif) to a Compose bitmap, or null on failure. Platform codec. */
 expect fun decodeImageBitmapOrNull(bytes: ByteArray): ImageBitmap?
+
+/**
+ * Render a base64-encoded image with **no network fetch** — for bytes that already travelled in-band, e.g.
+ * an Android post's `MediaMetadata.thumbnail_b64` (a ~90px JPEG). Safe for untrusted mesh content: nothing
+ * is fetched (no Tor deanon vector), and a bad/oversized string just decodes to null → empty box. Thumbnails
+ * are tiny, so the decode runs in `remember`; fail-safe, never throws.
+ */
+@OptIn(ExperimentalEncodingApi::class)
+@Composable
+fun Base64Image(base64: String, contentScale: ContentScale, modifier: Modifier) {
+    val bmp = remember(base64) {
+        runCatching { decodeImageBitmapOrNull(Base64.decode(base64)) }.getOrNull()
+    }
+    if (bmp != null) Image(bitmap = bmp, contentDescription = null, contentScale = contentScale, modifier = modifier)
+    else Box(modifier.fillMaxSize())
+}
 
 // One shared client for all image fetches — reuses the ktor engine we already ship (NOT Coil, so it can't
 // drag in its own ktor and crash the iOS Darwin engine — see the ktor-3.0.3 pin).
