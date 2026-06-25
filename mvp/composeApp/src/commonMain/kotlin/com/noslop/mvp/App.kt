@@ -428,9 +428,9 @@ private fun CommentsSheet(mesh: MeshUiState, postId: String, onDismiss: () -> Un
                         Text("No comments yet — be the first.", fontSize = 13.sp, color = TextMuted, modifier = Modifier.padding(vertical = 12.dp))
                     }
                     items(topLevel) { c ->
-                        CommentRow(c, indent = 0, onReply = { replyingTo = c })
+                        CommentRow(mesh, c, indent = 0, onReply = { replyingTo = c })
                         all.filter { it.parentCommentId == c.comment.id }.forEach { reply ->
-                            CommentRow(reply, indent = 1, onReply = { replyingTo = c })   // replies thread under the top-level parent
+                            CommentRow(mesh, reply, indent = 1, onReply = { replyingTo = c })   // replies thread under the top-level parent
                         }
                     }
                 }
@@ -455,16 +455,48 @@ private fun CommentsSheet(mesh: MeshUiState, postId: String, onDismiss: () -> Un
     }
 }
 
-/** One comment (or reply, indented). */
+/** One comment (or reply, indented), with up/down votes and emoji reactions (mesh-relayed, Android-interop). */
 @Composable
-private fun CommentRow(c: CommentPayload, indent: Int, onReply: () -> Unit) {
+private fun CommentRow(mesh: MeshUiState, c: CommentPayload, indent: Int, onReply: () -> Unit) {
+    val cid = c.comment.id
+    var showPicker by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(start = (indent * 20).dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(c.comment.authorName.ifBlank { c.comment.authorId.take(8) }, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccentGreen)
             Text(hhmm(c.comment.timestamp), fontSize = 10.sp, color = TextMuted)
         }
         Text(c.comment.content, fontSize = 14.sp, color = TextLight)
-        if (indent == 0) Text("Reply", fontSize = 11.sp, color = TextMuted, modifier = Modifier.clickable { onReply() }.padding(top = 2.dp))
+        // Engagement: ▲ score ▼ vote, react toggle, and (top-level only) reply.
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 3.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("▲", fontSize = 13.sp, color = if (mesh.myCommentVote[cid] == "upvote") AccentGreen else TextMuted,
+                    modifier = Modifier.clickable { mesh.voteComment(cid, "upvote") })
+                Text("${mesh.commentScore[cid] ?: 0}", fontSize = 12.sp, color = TextLight)
+                Text("▼", fontSize = 13.sp, color = if (mesh.myCommentVote[cid] == "downvote") Color(0xFFFF5555) else TextMuted,
+                    modifier = Modifier.clickable { mesh.voteComment(cid, "downvote") })
+            }
+            Text("☺+", fontSize = 12.sp, color = TextMuted, modifier = Modifier.clickable { showPicker = !showPicker })
+            if (indent == 0) Text("Reply", fontSize = 11.sp, color = TextMuted, modifier = Modifier.clickable { onReply() })
+        }
+        val reacts = mesh.commentReactionsFor(cid)
+        if (reacts.isNotEmpty()) {
+            Row(Modifier.padding(top = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                reacts.forEach { (emoji, n) ->
+                    val mine = mesh.myCommentReactions["$cid|$emoji"] == true
+                    Box(Modifier.clip(RoundedCornerShape(10.dp)).background(if (mine) AccentGreen.copy(alpha = 0.25f) else SurfaceDark)
+                        .clickable { mesh.reactToComment(cid, emoji) }.padding(horizontal = 6.dp, vertical = 2.dp)) {
+                        Text("$emoji $n", fontSize = 11.sp, color = TextLight)
+                    }
+                }
+            }
+        }
+        if (showPicker) {
+            Row(Modifier.padding(top = 3.dp).clip(RoundedCornerShape(14.dp)).background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                mesh.reactionEmojis.forEach { emoji ->
+                    Text(emoji, fontSize = 18.sp, modifier = Modifier.clickable { mesh.reactToComment(cid, emoji); showPicker = false })
+                }
+            }
+        }
     }
 }
 
@@ -564,6 +596,18 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private val votesByAuthor = mutableMapOf<String, MutableMap<String, String>>()  // postId -> authorId -> voteType
     val postScore = mutableStateMapOf<String, Int>()
     val myVote = mutableStateMapOf<String, String>()
+    // Comment reactions: aggregated counts keyed "commentId|emoji", plus whether *I* reacted (toggle/highlight).
+    val commentReactionCounts = mutableStateMapOf<String, Int>()
+    val myCommentReactions = mutableStateMapOf<String, Boolean>()
+    private val commentReactionSeen = mutableSetOf<String>()    // "commentId|emoji|authorId" — dedup across echoes
+    // Comment votes: per-comment net score, deduped per author, plus my own vote.
+    private val commentVotesByAuthor = mutableMapOf<String, MutableMap<String, String>>()  // commentId -> authorId -> voteType
+    val commentScore = mutableStateMapOf<String, Int>()
+    val myCommentVote = mutableStateMapOf<String, String>()
+    // Chat (DM) reactions: aggregated counts keyed "messageId|emoji", plus whether *I* reacted.
+    val chatReactionCounts = mutableStateMapOf<String, Int>()
+    val myChatReactions = mutableStateMapOf<String, Boolean>()
+    private val chatReactionSeen = mutableSetOf<String>()       // "messageId|emoji|authorId" — dedup across echoes
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -582,7 +626,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     init {
         client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
-        client.onDm = { fromNodeId, fromEncPub, text ->
+        client.onDm = { fromNodeId, fromEncPub, text, messageId ->
             scope.launch {
                 // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.
                 if (contacts.none { it.nodeId == fromNodeId }) {
@@ -591,7 +635,10 @@ private class MeshUiState(private val scope: CoroutineScope) {
                     if (selectedContact == null) selectedContact = c
                 }
                 val name = contacts.firstOrNull { it.nodeId == fromNodeId }?.handle ?: fromNodeId.take(8)
-                dmLog.add(0, DmEntry(id = randomId(), peerNodeId = fromNodeId, from = name, text = text, mine = false, timestamp = nowMillis()))
+                // Key the entry on the wire message id so a CHAT_REACTION (which references it) lines up.
+                if (dmLog.none { it.id == messageId }) {
+                    dmLog.add(0, DmEntry(id = messageId, peerNodeId = fromNodeId, from = name, text = text, mine = false, timestamp = nowMillis()))
+                }
             }
         }
         // For Android DMs (which omit the sender's enc-key in the payload), resolve it from a stored contact.
@@ -599,6 +646,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
         client.onReaction = { r -> scope.launch { applyReaction(r.postId, r.reactionType, r.authorId, r.action != "remove") } }
         client.onComment = { c -> scope.launch { if (comments.none { it.comment.id == c.comment.id }) comments.add(c) } }
         client.onVote = { v -> scope.launch { applyVote(v.postId, v.authorId, v.voteType, v.action != "remove") } }
+        client.onCommentReaction = { r -> scope.launch { applyCommentReaction(r.commentId, r.reactionType, r.authorId, r.action != "remove") } }
+        client.onCommentVote = { v -> scope.launch { applyCommentVote(v.commentId, v.authorId, v.voteType, v.action != "remove") } }
+        client.onChatReaction = { r -> scope.launch { applyChatReaction(r.messageId, r.reactionType, r.authorId, r.action != "remove") } }
         // Incoming handshake: add/learn the peer as a contact; for a request, auto-accept (reply USER_HANDSHAKE).
         client.onHandshake = { type, hs ->
             scope.launch {
@@ -824,16 +874,38 @@ private class MeshUiState(private val scope: CoroutineScope) {
         val text = dmDraft.trim()
         if (text.isEmpty()) return
         scope.launch {
-            val ok = client.sendDm(to, text)
-            if (ok) { dmLog.add(0, DmEntry(id = randomId(), peerNodeId = to.nodeId, from = to.handle, text = text, mine = true, timestamp = nowMillis())); dmDraft = "" }
+            val msgId = client.sendDm(to, text)   // wire message id — key the local entry on it for chat reactions
+            if (msgId != null) { dmLog.add(0, DmEntry(id = msgId, peerNodeId = to.nodeId, from = to.handle, text = text, mine = true, timestamp = nowMillis())); dmDraft = "" }
             else status = "DM failed (no link or bad key)"
         }
     }
 
-    /** Local reaction on a DM (messageId → my emoji, or absent). Cross-device DM-reaction sync is a follow-up. */
-    val dmReactions = mutableStateMapOf<String, String>()
+    /** Fold one chat reaction (ours or a peer's) into the aggregated counts, deduped by (message, emoji, author). */
+    private fun applyChatReaction(messageId: String, emoji: String, authorId: String, add: Boolean) {
+        val key = "$messageId|$emoji"
+        val dedup = "$key|$authorId"
+        if (add) {
+            if (chatReactionSeen.add(dedup)) chatReactionCounts[key] = (chatReactionCounts[key] ?: 0) + 1
+        } else {
+            if (chatReactionSeen.remove(dedup)) chatReactionCounts[key] = ((chatReactionCounts[key] ?: 1) - 1).coerceAtLeast(0)
+        }
+        if (authorId == client.androidId) myChatReactions[key] = add
+    }
+
+    /** Emojis reacted on a DM message, with counts (>0), for the bubble's reaction row (any emoji a peer sent). */
+    fun chatReactionsFor(messageId: String): List<Pair<String, Int>> {
+        val prefix = "$messageId|"
+        return chatReactionCounts.entries.filter { it.key.startsWith(prefix) && it.value > 0 }
+            .map { it.key.removePrefix(prefix) to it.value }
+    }
+
+    /** Toggle my reaction on a DM message: broadcast a signed CHAT_REACTION add/remove and reflect it locally. */
     fun reactToDm(messageId: String, emoji: String) {
-        if (dmReactions[messageId] == emoji) dmReactions.remove(messageId) else dmReactions[messageId] = emoji
+        scope.launch {
+            val on = !(myChatReactions["$messageId|$emoji"] ?: false)
+            if (client.sendChatReaction(messageId, emoji, add = on)) applyChatReaction(messageId, emoji, client.androidId, on)
+            else status = "Reaction failed (identity key)"
+        }
     }
 
     fun publish() {
@@ -899,6 +971,56 @@ private class MeshUiState(private val scope: CoroutineScope) {
             val c = client.sendComment(postId, content, parentCommentId)
             if (c == null) status = "Comment failed (identity key)"
             else if (comments.none { it.comment.id == c.comment.id }) comments.add(c)
+        }
+    }
+
+    /** Fold one comment reaction (ours or a peer's) into the aggregated counts, deduped by (comment, emoji, author). */
+    private fun applyCommentReaction(commentId: String, emoji: String, authorId: String, add: Boolean) {
+        val key = "$commentId|$emoji"
+        val dedup = "$key|$authorId"
+        if (add) {
+            if (commentReactionSeen.add(dedup)) commentReactionCounts[key] = (commentReactionCounts[key] ?: 0) + 1
+        } else {
+            if (commentReactionSeen.remove(dedup)) commentReactionCounts[key] = ((commentReactionCounts[key] ?: 1) - 1).coerceAtLeast(0)
+        }
+        if (authorId == client.androidId) myCommentReactions[key] = add
+    }
+
+    /** Emojis reacted on a comment, with counts (>0), for the comment row's reaction strip (any emoji a peer sent). */
+    fun commentReactionsFor(commentId: String): List<Pair<String, Int>> {
+        val prefix = "$commentId|"
+        return commentReactionCounts.entries.filter { it.key.startsWith(prefix) && it.value > 0 }
+            .map { it.key.removePrefix(prefix) to it.value }
+    }
+
+    /** Toggle my reaction on a comment: broadcast signed COMMENT_REACTION add/remove + reflect locally. */
+    fun reactToComment(commentId: String, emoji: String) {
+        scope.launch {
+            val on = !(myCommentReactions["$commentId|$emoji"] ?: false)
+            if (client.sendCommentReaction(commentId, emoji, add = on)) applyCommentReaction(commentId, emoji, client.androidId, on)
+            else status = "Reaction failed (identity key)"
+        }
+    }
+
+    /** Fold a comment vote into the per-comment tally, deduped by author (one vote per author; a new one replaces it). */
+    private fun applyCommentVote(commentId: String, authorId: String, voteType: String, add: Boolean) {
+        val authors = commentVotesByAuthor.getOrPut(commentId) { mutableMapOf() }
+        if (add) authors[authorId] = voteType else if (authors[authorId] == voteType) authors.remove(authorId)
+        commentScore[commentId] = authors.values.count { it == "upvote" } - authors.values.count { it == "downvote" }
+        if (authorId == client.androidId) { if (add) myCommentVote[commentId] = voteType else myCommentVote.remove(commentId) }
+    }
+
+    /** Up/down vote a comment; tapping my current vote retracts it, switching replaces it. Broadcast + echo. */
+    fun voteComment(commentId: String, voteType: String) {
+        scope.launch {
+            val prev = myCommentVote[commentId]
+            if (prev == voteType) {
+                if (client.sendCommentVote(commentId, voteType, add = false)) applyCommentVote(commentId, client.androidId, voteType, false)
+            } else {
+                if (prev != null && client.sendCommentVote(commentId, prev, add = false)) applyCommentVote(commentId, client.androidId, prev, false)
+                if (client.sendCommentVote(commentId, voteType, add = true)) applyCommentVote(commentId, client.androidId, voteType, true)
+                else status = "Vote failed (identity key)"
+            }
         }
     }
 }
@@ -1169,9 +1291,16 @@ private fun MessageBubble(e: DmEntry, state: MeshUiState) {
                 Text(e.text, color = if (mine) PrimaryBlack else TextLight, fontSize = 14.sp)
                 Text(hhmm(e.timestamp), color = if (mine) PrimaryBlack.copy(alpha = 0.6f) else TextMuted, fontSize = 9.sp, modifier = Modifier.align(Alignment.End).padding(top = 4.dp))
             }
-            state.dmReactions[e.id]?.let { emoji ->
-                Box(Modifier.padding(top = 4.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceDark).clickable { state.reactToDm(e.id, emoji) }.padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text(emoji, fontSize = 13.sp)
+            val reacts = state.chatReactionsFor(e.id)
+            if (reacts.isNotEmpty()) {
+                Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    reacts.forEach { (emoji, n) ->
+                        val mineR = state.myChatReactions["${e.id}|$emoji"] == true
+                        Box(Modifier.clip(RoundedCornerShape(12.dp)).background(if (mineR) AccentGreen.copy(alpha = 0.25f) else SurfaceDark)
+                            .clickable { state.reactToDm(e.id, emoji) }.padding(horizontal = 6.dp, vertical = 2.dp)) {
+                            Text("$emoji $n", fontSize = 12.sp, color = TextLight)
+                        }
+                    }
                 }
             }
             if (showPicker) {

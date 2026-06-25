@@ -56,6 +56,9 @@ data class NetworkPacket(
     fun getReactionPayload(): ReactionPayload? = decode("REACTION", ReactionPayload.serializer())
     fun getVotePayload(): VotePayload? = decode("VOTE", VotePayload.serializer())
     fun getCommentPayload(): CommentPayload? = decode("COMMENT", CommentPayload.serializer())
+    fun getChatReactionPayload(): ChatReactionPayload? = decode("CHAT_REACTION", ChatReactionPayload.serializer())
+    fun getCommentReactionPayload(): CommentReactionPayload? = decode("COMMENT_REACTION", CommentReactionPayload.serializer())
+    fun getCommentVotePayload(): CommentVotePayload? = decode("COMMENT_VOTE", CommentVotePayload.serializer())
     fun getConnectionRequestPayload(): PeerHandshakePayload? = decode("CONNECTION_REQUEST", PeerHandshakePayload.serializer())
     fun getUserHandshakePayload(): PeerHandshakePayload? = decode("USER_HANDSHAKE", PeerHandshakePayload.serializer())
 }
@@ -134,6 +137,39 @@ data class ReactionPayload(
 @Serializable
 data class VotePayload(
     @SerialName("post_id") val postId: String,
+    @SerialName("vote_type") val voteType: String,
+    @SerialName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add",
+)
+
+/** A reaction (emoji) on a DM/chat message — signed `"$messageId|$reactionType|$authorId|$timestamp"`. */
+@Serializable
+data class ChatReactionPayload(
+    @SerialName("message_id") val messageId: String,
+    @SerialName("reaction_type") val reactionType: String,
+    @SerialName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add",
+)
+
+/** A reaction (emoji) on a comment — signed `"$commentId|$reactionType|$authorId|$timestamp"`. */
+@Serializable
+data class CommentReactionPayload(
+    @SerialName("comment_id") val commentId: String,
+    @SerialName("reaction_type") val reactionType: String,
+    @SerialName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "add",
+)
+
+/** An up/down vote on a comment — signed `"$commentId|$voteType|$authorId|$timestamp"`. */
+@Serializable
+data class CommentVotePayload(
+    @SerialName("comment_id") val commentId: String,
     @SerialName("vote_type") val voteType: String,
     @SerialName("author_id") val authorId: String,
     val timestamp: Long,

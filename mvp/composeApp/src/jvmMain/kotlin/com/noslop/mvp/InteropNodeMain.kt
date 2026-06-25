@@ -31,7 +31,7 @@ fun main() = runBlocking {
     )
     val bridgeOnion = "latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion"
 
-    client.onDm = { from, _, text -> println("\n[desktop] 📩 DM FROM GABOR (${from.take(12)}…): \"$text\"\n") }
+    client.onDm = { from, _, text, _ -> println("\n[desktop] 📩 DM FROM GABOR (${from.take(12)}…): \"$text\"\n") }
 
     client.connect("127.0.0.1", 9876, null)
     println("[desktop] connected to bridge as ${identity.handle} — node ${client.nodeId.take(16)}…")
@@ -51,7 +51,7 @@ fun main() = runBlocking {
     scope.launch {
         delay(45_000)
         repeat(8) {
-            val ok = client.sendDm(gabor, "Hey Gabor — NoSlop desktop test node here 👋 (cross-platform DM test)")
+            val ok = client.sendDm(gabor, "Hey Gabor — NoSlop desktop test node here 👋 (cross-platform DM test)") != null
             println("[desktop] → DM to Gabor (sent=$ok, attempt ${it + 1})")
             delay(30_000)
         }

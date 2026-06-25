@@ -34,7 +34,8 @@ class MeshClient(
                 val text = decryptDM(dm.ciphertext, dm.nonce, senderPub, DmKeys.privateKeyPkcs8B64()) ?: return
                 // Reply must go to the ORIGINAL sender (our DMs carry senderNodeId; Android's use senderId,
                 // which the bridge does NOT re-stamp — only re-encodes — so it's the true sender).
-                onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, text)
+                // dm.id is the wire message id (Android keys its ChatMessage on it) — pass it so chat reactions correlate.
+                onDm?.invoke(dm.senderNodeId ?: packet.senderId, senderPub, text, dm.id)
             }
             override suspend fun onHandshake(packet: NetworkPacket, hs: PeerHandshakePayload) {
                 onHandshake?.invoke(packet.type, hs)
@@ -48,6 +49,15 @@ class MeshClient(
             override suspend fun onVote(packet: NetworkPacket, v: VotePayload) {
                 onVote?.invoke(v)
             }
+            override suspend fun onChatReaction(packet: NetworkPacket, r: ChatReactionPayload) {
+                onChatReaction?.invoke(r)
+            }
+            override suspend fun onCommentReaction(packet: NetworkPacket, r: CommentReactionPayload) {
+                onCommentReaction?.invoke(r)
+            }
+            override suspend fun onCommentVote(packet: NetworkPacket, v: CommentVotePayload) {
+                onCommentVote?.invoke(v)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
@@ -56,8 +66,9 @@ class MeshClient(
     /** Called for every post received from the mesh (set by the UI). */
     var onPost: ((PostPayload) -> Unit)? = null
 
-    /** Called for every decrypted DM addressed to us: (fromNodeId, theirEncPubX509B64, plaintext). */
-    var onDm: ((fromNodeId: String, fromEncPub: String, text: String) -> Unit)? = null
+    /** Called for every decrypted DM addressed to us: (fromNodeId, theirEncPubX509B64, plaintext, messageId).
+     *  [messageId] is the wire [EncryptedPayload.id] — the id a CHAT_REACTION references. */
+    var onDm: ((fromNodeId: String, fromEncPub: String, text: String, messageId: String) -> Unit)? = null
 
     /** Resolve a sender's X25519 enc-pubkey from a stored contact (for Android DMs lacking it in-payload). */
     var resolveEncPub: ((nodeId: String) -> String?)? = null
@@ -73,6 +84,15 @@ class MeshClient(
 
     /** Called for every incoming VOTE (up/down on a post). [VotePayload.action] is "add" or "remove". */
     var onVote: ((v: VotePayload) -> Unit)? = null
+
+    /** Called for every incoming CHAT_REACTION (emoji on a DM message). [ChatReactionPayload.action] add/remove. */
+    var onChatReaction: ((r: ChatReactionPayload) -> Unit)? = null
+
+    /** Called for every incoming COMMENT_REACTION (emoji on a comment). [CommentReactionPayload.action] add/remove. */
+    var onCommentReaction: ((r: CommentReactionPayload) -> Unit)? = null
+
+    /** Called for every incoming COMMENT_VOTE (up/down on a comment). [CommentVotePayload.action] add/remove. */
+    var onCommentVote: ((v: CommentVotePayload) -> Unit)? = null
 
     /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
     val androidId: String get() = NodeId.toAndroid(nodeId)
@@ -109,18 +129,20 @@ class MeshClient(
     /**
      * Send an end-to-end-encrypted DM to [contact]. Sealed with the contact's X25519 public key + our DM
      * private key; the hub relays the ciphertext by [MeshContact.nodeId] without being able to read it.
-     * Returns false if DM crypto is unavailable or the contact's key is malformed.
+     * Returns the wire message id (so the UI keys its local entry on it — that id is what a CHAT_REACTION
+     * references), or null if DM crypto is unavailable or the contact's key is malformed.
      */
-    suspend fun sendDm(contact: MeshContact, text: String): Boolean {
-        val theirPub = DmKeys.normalizePeerPublicX509B64(contact.encPublicKeyX509B64) ?: return false
-        val (ct, nonce) = encryptDM(text, theirPub, DmKeys.privateKeyPkcs8B64()) ?: return false
+    suspend fun sendDm(contact: MeshContact, text: String): String? {
+        val theirPub = DmKeys.normalizePeerPublicX509B64(contact.encPublicKeyX509B64) ?: return null
+        val (ct, nonce) = encryptDM(text, theirPub, DmKeys.privateKeyPkcs8B64()) ?: return null
+        val msgId = randomId()
         val payload = EncryptedPayload(
-            id = randomId(), nonce = nonce, ciphertext = ct,
+            id = msgId, nonce = nonce, ciphertext = ct,
             timestamp = nowMillis(), senderEncPublicKey = DmKeys.publicKeyX509B64(),
             senderNodeId = nodeId, // so the recipient can reply (hub re-stamps packet.senderId on forward)
         )
         node.broadcast(messagePacket(nodeId, contact.nodeId, payload))
-        return true
+        return msgId
     }
 
     /**
@@ -175,6 +197,55 @@ class MeshClient(
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
         )
         node.broadcast(votePacket(nodeId, payload))
+        return true
+    }
+
+    /**
+     * React to a DM [messageId] with an emoji [reactionType]. [add]=false retracts. Signed the way Android
+     * verifies — `"$messageId|$reactionType|$authorId|$timestamp"` — so Android peers accept it. [messageId]
+     * must be the wire [EncryptedPayload.id] (what both sides key the message on). Returns false if we can't sign.
+     */
+    suspend fun sendChatReaction(messageId: String, reactionType: String, add: Boolean): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$messageId|$reactionType|$authorId|$ts") ?: return false
+        val payload = ChatReactionPayload(
+            messageId = messageId, reactionType = reactionType, authorId = authorId,
+            timestamp = ts, signature = signature, action = if (add) "add" else "remove",
+        )
+        node.broadcast(chatReactionPacket(nodeId, payload))
+        return true
+    }
+
+    /**
+     * React to a comment [commentId] with an emoji [reactionType]. [add]=false retracts. Signed
+     * `"$commentId|$reactionType|$authorId|$timestamp"` (Android-verified). Returns false if we can't sign.
+     */
+    suspend fun sendCommentReaction(commentId: String, reactionType: String, add: Boolean): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$commentId|$reactionType|$authorId|$ts") ?: return false
+        val payload = CommentReactionPayload(
+            commentId = commentId, reactionType = reactionType, authorId = authorId,
+            timestamp = ts, signature = signature, action = if (add) "add" else "remove",
+        )
+        node.broadcast(commentReactionPacket(nodeId, payload))
+        return true
+    }
+
+    /**
+     * Up/down vote a comment [commentId] ([voteType] "upvote"/"downvote"; [add]=false retracts). Signed
+     * `"$commentId|$voteType|$authorId|$timestamp"` (Android-verified). Returns false if we can't sign.
+     */
+    suspend fun sendCommentVote(commentId: String, voteType: String, add: Boolean): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$commentId|$voteType|$authorId|$ts") ?: return false
+        val payload = CommentVotePayload(
+            commentId = commentId, voteType = voteType, authorId = authorId,
+            timestamp = ts, signature = signature, action = if (add) "add" else "remove",
+        )
+        node.broadcast(commentVotePacket(nodeId, payload))
         return true
     }
 

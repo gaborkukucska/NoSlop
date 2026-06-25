@@ -16,13 +16,12 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 ## The gap, by theme (what Android has that iOS doesn't)
 
 ### Social / engagement
-- **Comments + threaded replies** — `CommentPayload`/`CommentData` exist in mvp `Packets.kt` but nothing
-  sends/receives/stores/renders them. Android: `CommentsBottomSheet.kt`, `CommentPacketHandler.kt`,
-  `mesh_comments`. **[M]**
-- **Votes (up/down) on posts + comments** — `VotePayload`/`CommentVotePayload` exist in mvp Packets;
-  no send/receive/UI. **[M]**
-- **Comment + chat-message reactions** (post reactions already done). Needs `ChatReactionPayload` +
-  comment-reaction path + retrieval/aggregation. **[M]**
+- ✅ **Comments + threaded replies** — DONE. `sendComment`/`onComment` + threaded `CommentsSheet`/`CommentRow`.
+- ✅ **Votes (up/down) on posts + comments** — DONE. Post votes + comment votes (`sendCommentVote`/`voteComment`),
+  signed `"$id|$voteType|$authorId|$ts"`, deduped per author with toggle/switch/retract semantics.
+- ✅ **Comment + chat-message reactions** — DONE. `ChatReactionPayload`/`CommentReactionPayload` added to mvp
+  Packets; `sendChatReaction`/`sendCommentReaction` + aggregation; CHAT_REACTION now mesh-relayed (DM message
+  ids keyed on the wire `EncryptedPayload.id` so reactions correlate with Android both directions).
 - **Engagement sync in gossip** — comments/reactions/votes carried in the sync response so a joining
   peer catches up. **[M]**
 
@@ -49,9 +48,9 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 
 | # | Item | Effort | Why here |
 |---|------|--------|----------|
-| 1 | **Comments + threaded replies** | M | High social value, wire format stable, no media dependency. Establishes the comment store + handler pattern. |
-| 2 | **Votes + comment/chat reactions** | M | Reuses #1's plumbing; post reactions already done so this completes engagement. |
-| 3 | **Message replies** (text only) | S–M | Small, high-frequency DM polish; no media needed. |
+| ✅ 1 | **Comments + threaded replies** | M | DONE — `sendComment`/`onComment` + threaded `CommentsSheet`. High social value, wire format stable, no media dependency. |
+| ✅ 2 | **Votes + comment/chat reactions** | M | DONE — post votes (`sendVote`/`vote`), comment votes (`sendCommentVote`/`voteComment`), comment reactions (`sendCommentReaction`), and DM chat reactions (`sendChatReaction`, real CHAT_REACTION replacing the local-only `dmReactions`). All signed Android-byte-compatible; verifier + tests added. |
+| ⏭️ 3 | **Message replies** (text only) | S–M | NEXT — Android already carries `replyTo` inside the encrypted DM JSON; small, high-frequency DM polish; no media needed. |
 | 4 | **Sign iOS posts** (punch-list follow-up) | S | Makes POST required-verified (closes the C1 lenient gap) AND is needed for Android to accept our posts — natural to do alongside social work. |
 | 5 | **Media over mesh — download pipeline** | L | The biggest unlock; gated on the bridge relay design. Do after the cheap social wins. |
 | 6 | **Media over mesh — upload/broadcast + chat media** | M | Builds on #5; enables sharing images/video/GIFs in posts + DMs. |

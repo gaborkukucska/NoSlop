@@ -11,6 +11,9 @@ package com.noslop.mvp
  *    handshakes, so reject unsigned/forged. This is what stops contact-injection / key-substitution MITM.
  *  - REACTION: `"$postId|$reactionType|$authorId|$timestamp"` against `authorId`. **Required** (both sign).
  *  - VOTE: `"$postId|$voteType|$authorId|$timestamp"` against `authorId`. **Required** (both sign).
+ *  - CHAT_REACTION: `"$messageId|$reactionType|$authorId|$timestamp"` against `authorId`. **Required**.
+ *  - COMMENT_REACTION: `"$commentId|$reactionType|$authorId|$timestamp"` against `authorId`. **Required**.
+ *  - COMMENT_VOTE: `"$commentId|$voteType|$authorId|$timestamp"` against `authorId`. **Required**.
  *  - POST: `"$id|$authorId|$content|$timestamp"` (+`"|$avatar"`) against `authorPublicKey`. Verified
  *    **only if signed** — iOS posts are currently unsigned, so unsigned posts are still allowed (TODO:
  *    sign iOS posts, then make this required too).
@@ -34,6 +37,15 @@ fun verifyPacket(packet: NetworkPacket): Boolean {
     }
     packet.getVotePayload()?.let { v ->
         return verify("${v.postId}|${v.voteType}|${v.authorId}|${v.timestamp}", v.signature, v.authorId)
+    }
+    packet.getChatReactionPayload()?.let { r ->
+        return verify("${r.messageId}|${r.reactionType}|${r.authorId}|${r.timestamp}", r.signature, r.authorId)
+    }
+    packet.getCommentReactionPayload()?.let { r ->
+        return verify("${r.commentId}|${r.reactionType}|${r.authorId}|${r.timestamp}", r.signature, r.authorId)
+    }
+    packet.getCommentVotePayload()?.let { v ->
+        return verify("${v.commentId}|${v.voteType}|${v.authorId}|${v.timestamp}", v.signature, v.authorId)
     }
     packet.getCommentPayload()?.let { c ->
         val cd = c.comment

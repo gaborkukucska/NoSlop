@@ -71,6 +71,39 @@ class PacketVerifierTest {
     }
 
     @Test
+    fun valid_chat_reaction_passes_forged_fails() {
+        val ts = 1718900004000L
+        val r = ChatReactionPayload(messageId = "msg1", reactionType = "👍", authorId = pub, timestamp = ts,
+            signature = sign("msg1|👍|$pub|$ts", priv))
+        assertTrue(verifyPacket(chatReactionPacket("sender", r)), "a correctly signed chat reaction must verify")
+        val forged = chatReactionPacket("sender", r).copy(
+            payload = NetworkPacket.payloadOf(r.copy(reactionType = "❤️"), ChatReactionPayload.serializer()))
+        assertFalse(verifyPacket(forged), "chat reaction with a mismatched type vs its signature must be rejected")
+    }
+
+    @Test
+    fun valid_comment_reaction_passes_forged_fails() {
+        val ts = 1718900005000L
+        val r = CommentReactionPayload(commentId = "c1", reactionType = "🔥", authorId = pub, timestamp = ts,
+            signature = sign("c1|🔥|$pub|$ts", priv))
+        assertTrue(verifyPacket(commentReactionPacket("sender", r)), "a correctly signed comment reaction must verify")
+        val forged = commentReactionPacket("sender", r).copy(
+            payload = NetworkPacket.payloadOf(r.copy(commentId = "c2"), CommentReactionPayload.serializer()))
+        assertFalse(verifyPacket(forged), "comment reaction with a mismatched comment id vs its signature must be rejected")
+    }
+
+    @Test
+    fun valid_comment_vote_passes_tampered_fails() {
+        val ts = 1718900006000L
+        val v = CommentVotePayload(commentId = "c1", voteType = "upvote", authorId = pub, timestamp = ts,
+            signature = sign("c1|upvote|$pub|$ts", priv))
+        assertTrue(verifyPacket(commentVotePacket("sender", v)), "a correctly signed comment vote must verify")
+        val forged = commentVotePacket("sender", v).copy(
+            payload = NetworkPacket.payloadOf(v.copy(voteType = "downvote"), CommentVotePayload.serializer()))
+        assertFalse(verifyPacket(forged), "comment vote with type flipped vs its signature must be rejected")
+    }
+
+    @Test
     fun unsigned_post_and_dm_are_allowed() {
         val post = PostPayload(id = "p1", authorId = "a", authorName = "A", authorPublicKey = "apub", content = "hi", timestamp = 1L)
         assertTrue(verifyPacket(postPacket("a", post)), "unsigned iOS post is allowed (lenient for now)")

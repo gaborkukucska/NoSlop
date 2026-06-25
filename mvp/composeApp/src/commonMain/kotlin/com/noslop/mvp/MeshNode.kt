@@ -16,6 +16,12 @@ interface MeshSink {
     suspend fun onComment(packet: NetworkPacket, c: CommentPayload) {}
     /** A VOTE arrived (up/down on a post). [v.action] is "add" or "remove". */
     suspend fun onVote(packet: NetworkPacket, v: VotePayload) {}
+    /** A CHAT_REACTION arrived (an emoji on a DM message). [r.action] is "add" or "remove". */
+    suspend fun onChatReaction(packet: NetworkPacket, r: ChatReactionPayload) {}
+    /** A COMMENT_REACTION arrived (an emoji on a comment). [r.action] is "add" or "remove". */
+    suspend fun onCommentReaction(packet: NetworkPacket, r: CommentReactionPayload) {}
+    /** A COMMENT_VOTE arrived (up/down on a comment). [v.action] is "add" or "remove". */
+    suspend fun onCommentVote(packet: NetworkPacket, v: CommentVotePayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -69,6 +75,9 @@ class MeshNode(
         packet.getReactionPayload()?.let { sink.onReaction(packet, it) }
         packet.getCommentPayload()?.let { sink.onComment(packet, it) }
         packet.getVotePayload()?.let { sink.onVote(packet, it) }
+        packet.getChatReactionPayload()?.let { sink.onChatReaction(packet, it) }
+        packet.getCommentReactionPayload()?.let { sink.onCommentReaction(packet, it) }
+        packet.getCommentVotePayload()?.let { sink.onCommentVote(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {
@@ -121,6 +130,27 @@ fun commentPacket(senderId: String, c: CommentPayload, hops: Int = 6): NetworkPa
     NetworkPacket(
         id = randomId(), hops = hops, senderId = senderId, type = "COMMENT",
         payload = NetworkPacket.payloadOf(c, CommentPayload.serializer()), signature = c.comment.signature,
+    )
+
+/** Build a CHAT_REACTION packet (an emoji on a DM message). Carries the author signature; stamped at packet level. */
+fun chatReactionPacket(senderId: String, r: ChatReactionPayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "CHAT_REACTION",
+        payload = NetworkPacket.payloadOf(r, ChatReactionPayload.serializer()), signature = r.signature,
+    )
+
+/** Build a COMMENT_REACTION packet (an emoji on a comment). Carries the author signature; stamped at packet level. */
+fun commentReactionPacket(senderId: String, r: CommentReactionPayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "COMMENT_REACTION",
+        payload = NetworkPacket.payloadOf(r, CommentReactionPayload.serializer()), signature = r.signature,
+    )
+
+/** Build a COMMENT_VOTE packet (up/down on a comment). Carries the author signature; stamped at packet level. */
+fun commentVotePacket(senderId: String, v: CommentVotePayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "COMMENT_VOTE",
+        payload = NetworkPacket.payloadOf(v, CommentVotePayload.serializer()), signature = v.signature,
     )
 
 /** Build a signed handshake packet — [type] is "CONNECTION_REQUEST" (request) or "USER_HANDSHAKE" (accept).
