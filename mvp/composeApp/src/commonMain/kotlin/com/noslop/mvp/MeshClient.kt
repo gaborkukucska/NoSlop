@@ -45,6 +45,9 @@ class MeshClient(
             override suspend fun onComment(packet: NetworkPacket, c: CommentPayload) {
                 onComment?.invoke(c)
             }
+            override suspend fun onVote(packet: NetworkPacket, v: VotePayload) {
+                onVote?.invoke(v)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
@@ -67,6 +70,9 @@ class MeshClient(
 
     /** Called for every incoming COMMENT (a reply on a post; threaded if [CommentPayload.parentCommentId] set). */
     var onComment: ((c: CommentPayload) -> Unit)? = null
+
+    /** Called for every incoming VOTE (up/down on a post). [VotePayload.action] is "add" or "remove". */
+    var onVote: ((v: VotePayload) -> Unit)? = null
 
     /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
     val androidId: String get() = NodeId.toAndroid(nodeId)
@@ -153,6 +159,23 @@ class MeshClient(
         val payload = CommentPayload(postId = postId, comment = comment, parentCommentId = parentCommentId)
         node.broadcast(commentPacket(nodeId, payload))
         return payload
+    }
+
+    /**
+     * Up/down vote a post ([voteType] "upvote"/"downvote"; [add]=false retracts). Signed the way Android
+     * verifies — `"$postId|$voteType|$authorId|$timestamp"` — so existing nodes accept it. Returns false if
+     * we can't sign.
+     */
+    suspend fun sendVote(postId: String, voteType: String, add: Boolean): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$postId|$voteType|$authorId|$ts") ?: return false
+        val payload = VotePayload(
+            postId = postId, voteType = voteType, authorId = authorId,
+            timestamp = ts, signature = signature, action = if (add) "add" else "remove",
+        )
+        node.broadcast(votePacket(nodeId, payload))
+        return true
     }
 
     /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */

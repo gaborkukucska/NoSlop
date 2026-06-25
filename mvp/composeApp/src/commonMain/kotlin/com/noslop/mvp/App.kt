@@ -288,6 +288,9 @@ private fun FeedScreen(mesh: MeshUiState) {
                     FeedMediaCard(
                         item, isVisible = page == pager.currentPage,
                         commentCount = if (isMesh) mesh.commentsFor(item.id).size else 0,
+                        score = if (isMesh) (mesh.postScore[item.id] ?: 0) else 0,
+                        myVote = if (isMesh) mesh.myVote[item.id] else null,
+                        onVote = if (isMesh) ({ vt -> mesh.vote(item.id, vt) }) else null,
                         onOpenComments = if (isMesh) ({ commentsForPost = item.id }) else null,
                     )
                 }
@@ -339,7 +342,11 @@ private fun FeedScreen(mesh: MeshUiState) {
 /** One full-screen feed page: media routed by type, with a bottom gradient metadata overlay (Android parity).
  *  Mesh posts also get a comments affordance ([onOpenComments]). */
 @Composable
-private fun FeedMediaCard(item: FeedItem, isVisible: Boolean, commentCount: Int = 0, onOpenComments: (() -> Unit)? = null) {
+private fun FeedMediaCard(
+    item: FeedItem, isVisible: Boolean,
+    commentCount: Int = 0, score: Int = 0, myVote: String? = null,
+    onVote: ((String) -> Unit)? = null, onOpenComments: (() -> Unit)? = null,
+) {
     val url = item.mediaUrl
     val kind = if (url == null) FeedKind.ARTICLE else feedKind(item, url)
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -364,19 +371,35 @@ private fun FeedMediaCard(item: FeedItem, isVisible: Boolean, commentCount: Int 
                 Text(stripFeedHtml(item.title), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 3)
             }
         }
-        // Comments — mesh posts only, any render kind. Anchored bottom-end so it clears the metadata overlay.
+        // Engagement rail — mesh posts only, any render kind. Anchored bottom-end so it clears the overlay.
         if (onOpenComments != null) {
-            androidx.compose.material3.Surface(
-                onClick = onOpenComments,
-                color = Color.Black.copy(alpha = 0.55f),
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            Column(
+                Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(
-                    if (commentCount > 0) "💬 $commentCount" else "💬",
-                    color = Color.White, fontSize = 14.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                )
+                if (onVote != null) {
+                    androidx.compose.material3.Surface(color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(20.dp)) {
+                        Column(
+                            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text("▲", fontSize = 18.sp, color = if (myVote == "upvote") AccentGreen else Color.White,
+                                modifier = Modifier.clickable { onVote("upvote") })
+                            Text("$score", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("▼", fontSize = 18.sp, color = if (myVote == "downvote") Color(0xFFFF5555) else Color.White,
+                                modifier = Modifier.clickable { onVote("downvote") })
+                        }
+                    }
+                }
+                androidx.compose.material3.Surface(onClick = onOpenComments, color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(20.dp)) {
+                    Text(
+                        if (commentCount > 0) "💬 $commentCount" else "💬",
+                        color = Color.White, fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                    )
+                }
             }
         }
     }
@@ -537,6 +560,10 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private val reactionSeen = mutableSetOf<String>()      // "postId|emoji|authorId" — dedup across gossip echoes
     val reactionEmojis = listOf("👍", "❤️", "😂", "🔥")
     val comments = mutableStateListOf<CommentPayload>()    // comments received/sent this session (all posts)
+    // Votes: per-post net score (up − down), deduped per author, plus my own vote (for toggle/highlight).
+    private val votesByAuthor = mutableMapOf<String, MutableMap<String, String>>()  // postId -> authorId -> voteType
+    val postScore = mutableStateMapOf<String, Int>()
+    val myVote = mutableStateMapOf<String, String>()
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -571,6 +598,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
         client.resolveEncPub = { id -> SavedContacts.list().firstOrNull { it.nodeId == id }?.encPublicKeyX509B64 }
         client.onReaction = { r -> scope.launch { applyReaction(r.postId, r.reactionType, r.authorId, r.action != "remove") } }
         client.onComment = { c -> scope.launch { if (comments.none { it.comment.id == c.comment.id }) comments.add(c) } }
+        client.onVote = { v -> scope.launch { applyVote(v.postId, v.authorId, v.voteType, v.action != "remove") } }
         // Incoming handshake: add/learn the peer as a contact; for a request, auto-accept (reply USER_HANDSHAKE).
         client.onHandshake = { type, hs ->
             scope.launch {
@@ -834,6 +862,28 @@ private class MeshUiState(private val scope: CoroutineScope) {
             val on = !(myReactions["${post.id}|$type"] ?: false)
             if (client.sendReaction(post.id, type, add = on)) applyReaction(post.id, type, client.androidId, on)
             else status = "Reaction failed (identity key)"
+        }
+    }
+
+    /** Fold a vote into the per-post tally, deduped by author (one vote per author; a new one replaces it). */
+    private fun applyVote(postId: String, authorId: String, voteType: String, add: Boolean) {
+        val authors = votesByAuthor.getOrPut(postId) { mutableMapOf() }
+        if (add) authors[authorId] = voteType else if (authors[authorId] == voteType) authors.remove(authorId)
+        postScore[postId] = authors.values.count { it == "upvote" } - authors.values.count { it == "downvote" }
+        if (authorId == client.androidId) { if (add) myVote[postId] = voteType else myVote.remove(postId) }
+    }
+
+    /** Up/down vote a post; tapping my current vote retracts it, switching replaces it. Broadcast + echo. */
+    fun vote(postId: String, voteType: String) {
+        scope.launch {
+            val prev = myVote[postId]
+            if (prev == voteType) {
+                if (client.sendVote(postId, voteType, add = false)) applyVote(postId, client.androidId, voteType, false)
+            } else {
+                if (prev != null && client.sendVote(postId, prev, add = false)) applyVote(postId, client.androidId, prev, false)
+                if (client.sendVote(postId, voteType, add = true)) applyVote(postId, client.androidId, voteType, true)
+                else status = "Vote failed (identity key)"
+            }
         }
     }
 

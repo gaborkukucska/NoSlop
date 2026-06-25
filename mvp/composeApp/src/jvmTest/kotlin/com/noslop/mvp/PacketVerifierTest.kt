@@ -60,6 +60,17 @@ class PacketVerifierTest {
     }
 
     @Test
+    fun valid_vote_passes_tampered_fails() {
+        val ts = 1718900003000L
+        val v = VotePayload(postId = "post1", voteType = "upvote", authorId = pub, timestamp = ts,
+            signature = sign("post1|upvote|$pub|$ts", priv))
+        assertTrue(verifyPacket(votePacket("sender", v)), "a correctly signed vote must verify")
+        val forged = votePacket("sender", v).copy(
+            payload = NetworkPacket.payloadOf(v.copy(voteType = "downvote"), VotePayload.serializer()))
+        assertFalse(verifyPacket(forged), "vote with type flipped vs its signature must be rejected")
+    }
+
+    @Test
     fun unsigned_post_and_dm_are_allowed() {
         val post = PostPayload(id = "p1", authorId = "a", authorName = "A", authorPublicKey = "apub", content = "hi", timestamp = 1L)
         assertTrue(verifyPacket(postPacket("a", post)), "unsigned iOS post is allowed (lenient for now)")
