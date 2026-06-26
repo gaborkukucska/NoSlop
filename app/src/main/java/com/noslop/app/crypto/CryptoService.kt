@@ -4,17 +4,24 @@ package com.noslop.app.crypto
 import android.os.Build
 import android.util.Base64
 import com.noslop.app.debug.Logger
+import com.goterl.lazysodium.LazySodiumAndroid
+import com.goterl.lazysodium.SodiumAndroid
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.bouncycastle.crypto.util.PrivateKeyFactory
+import org.bouncycastle.crypto.util.PublicKeyFactory
 import java.security.*
 import java.security.spec.*
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
-import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
  * Cryptographic identity and messaging for NoSlop / HAI-Net mesh nodes.
  *
- * Signing:   Ed25519 (via Android Keystore API 33+, Bouncy Castle fallback for API 24-32)
+ * Signing:   Ed25519 (Raw BC lightweight API natively supporting 32-byte keys)
  * DM Crypto: X25519 key agreement -> SHA3-256 -> ChaCha20-Poly1305
  */
 object CryptoService {
@@ -22,19 +29,54 @@ object CryptoService {
     private const val TAG = "CRYPTO"
     private val BC_PROVIDER = org.bouncycastle.jce.provider.BouncyCastleProvider()
 
+    // Safely load Lazysodium. If JNA fails on an obscure ABI, this gracefully falls back.
+    private val lazySodium: LazySodiumAndroid? by lazy {
+        try {
+            LazySodiumAndroid(SodiumAndroid())
+        } catch (e: Throwable) {
+            Logger.error(TAG, "Lazysodium initialization failed, falling back to pure BouncyCastle: ${e.message}")
+            null
+        }
+    }
+
+    // Standard ASN.1 headers for 100% legacy mesh compatibility
+    private val ED25519_PKCS8_HEADER = byteArrayOf(
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
+    )
+    private val ED25519_X509_HEADER = byteArrayOf(
+        0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00
+    )
+
     data class IdentityKeys(
-        val publicKeyB64: String,       // Base64 Ed25519 public key
-        val privateKeyB64: String,      // Base64 Ed25519 private key — NEVER log raw
+        val publicKeyB64: String,       // Base64 Ed25519 public key (44-byte X.509)
+        val privateKeyB64: String,      // Base64 Ed25519 private key (48-byte PKCS#8)
         val tripcode: String,           // 6-char Base32 from SHA3-256(pubkey)
         val onionAddress: String,       // 56-char Tor v3 .onion (HAI-Net compatible)
         val displayName: String,        // "handle.tripcode"
         val encPublicKeyB64: String,    // Base64 X25519 public key
-        val encPrivateKeyB64: String    // Base64 X25519 private key - NEVER log raw
+        val encPrivateKeyB64: String    // Base64 X25519 private key
     )
 
     /**
-     * Generate standard X25519 keypair for encryption.
+     * Bulletproof parsing: Uses BC's ASN.1 factories to reliably extract the 32-byte parameters
+     * from any historical PKCS#8 / X.509 structure size.
      */
+    private fun getEd25519PrivateKeyParams(encoded: ByteArray): Ed25519PrivateKeyParameters {
+        return if (encoded.size == 32) {
+            Ed25519PrivateKeyParameters(encoded, 0)
+        } else {
+            PrivateKeyFactory.createKey(encoded) as Ed25519PrivateKeyParameters
+        }
+    }
+
+    private fun getEd25519PublicKeyParams(encoded: ByteArray): Ed25519PublicKeyParameters {
+        return if (encoded.size == 32) {
+            Ed25519PublicKeyParameters(encoded, 0)
+        } else {
+            PublicKeyFactory.createKey(encoded) as Ed25519PublicKeyParameters
+        }
+    }
+
     fun generateX25519Keypair(): Pair<String, String> {
         val kpg = KeyPairGenerator.getInstance("X25519", BC_PROVIDER)
         val kp = kpg.generateKeyPair()
@@ -44,38 +86,38 @@ object CryptoService {
         )
     }
 
-    /**
-     * Generate a new Ed25519 and X25519 keypair for the given handle.
-     * Uses Android Keystore on API 33+, Bouncy Castle on API 24-32 fallback.
-     */
     fun generateIdentity(handle: String): IdentityKeys {
         Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {
-            val kpg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Conscrypt: fixed key size, do NOT call initialize()
-                KeyPairGenerator.getInstance("Ed25519")
+            val ls = lazySodium
+            val rawPub: ByteArray
+            val rawSeed: ByteArray
+
+            if (ls != null) {
+                val lsKp = ls.cryptoSignKeypair()
+                rawPub = lsKp.publicKey.asBytes
+                rawSeed = lsKp.secretKey.asBytes.copyOfRange(0, 32)
             } else {
-                // Bouncy Castle fallback for API 24-32: must specify key size
-                KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
+                val kpg = KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER).also {
                     it.initialize(255, SecureRandom())
                 }
+                val kp = kpg.generateKeyPair()
+                rawPub = getEd25519PublicKeyParams(kp.public.encoded).encoded
+                rawSeed = getEd25519PrivateKeyParams(kp.private.encoded).encoded
             }
-            val kp = kpg.generateKeyPair()
 
-            val pubBytes = kp.public.encoded   // X.509 SubjectPublicKeyInfo format
-            val privBytes = kp.private.encoded // PKCS#8 format
+            // GUARANTEE BACKWARDS COMPATIBILITY: Wrap raw keys in ASN.1 headers before Base64 encoding.
+            val pubB64 = Base64.encodeToString(ED25519_X509_HEADER + rawPub, Base64.NO_WRAP)
+            val privB64 = Base64.encodeToString(ED25519_PKCS8_HEADER + rawSeed, Base64.NO_WRAP)
 
-            val pubB64 = Base64.encodeToString(pubBytes, Base64.NO_WRAP)
-            val privB64 = Base64.encodeToString(privBytes, Base64.NO_WRAP)
-
-            val tripcode = deriveTripcode(pubBytes)
-            val onion = deriveOnionAddress(pubBytes)
+            val tripcode = deriveTripcode(rawPub)
+            val onion = deriveOnionAddress(rawPub)
 
             val encKeys = generateX25519Keypair()
 
             Logger.info(
                 TAG, "Ed25519 and X25519 identity created",
-                "tripcode=$tripcode | onion_prefix=${onion.take(16)}... | pubkey_hash=${pubBytes.sha256Hex().take(12)}"
+                "tripcode=$tripcode | onion_prefix=${onion.take(16)}... | pubkey_hash=${rawPub.sha256Hex().take(12)}"
             )
 
             IdentityKeys(
@@ -93,16 +135,9 @@ object CryptoService {
         }
     }
 
-    /**
-     * Tripcode derivation:
-     *   SHA3-256(ed25519_public_key_raw_bytes) -> Base32 encode -> take first 6 chars -> lowercase
-     */
     fun deriveTripcode(encodedPubKeyBytes: ByteArray): String {
-        val rawKeyBytes = if (encodedPubKeyBytes.size == 44) {
-            encodedPubKeyBytes.copyOfRange(12, 44) // strip standard X.509 header
-        } else {
-            encodedPubKeyBytes
-        }
+        val pubKeyParams = getEd25519PublicKeyParams(encodedPubKeyBytes)
+        val rawKeyBytes = pubKeyParams.encoded
 
         val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
         val hash = ByteArray(digest.digestSize)
@@ -124,17 +159,9 @@ object CryptoService {
         return sb.toString().take(6)
     }
 
-    /**
-     * Tor v3 .onion address derivation from Ed25519 public key.
-     * checksum = SHA3-256(".onion checksum" + pubkey + version)[0:2]
-     * version = 0x03
-     */
     fun deriveOnionAddress(encodedPubKeyBytes: ByteArray): String {
-        val rawKey = if (encodedPubKeyBytes.size == 44) {
-            encodedPubKeyBytes.copyOfRange(12, 44)
-        } else {
-            encodedPubKeyBytes
-        }
+        val pubKeyParams = getEd25519PublicKeyParams(encodedPubKeyBytes)
+        val rawKey = pubKeyParams.encoded
 
         val version = byteArrayOf(0x03)
         val prefix = ".onion checksum".toByteArray(Charsets.UTF_8)
@@ -165,50 +192,46 @@ object CryptoService {
         return "${sb.toString().take(56)}.onion"
     }
 
-    /**
-     * Sign payload string with Ed25519 private key.
-     */
     fun sign(payload: String, privateKeyB64: String): String {
         return try {
-            val privKey = decodePrivateKey(privateKeyB64)
-            val signer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                Signature.getInstance("Ed25519")
-            } else {
-                Signature.getInstance("Ed25519", BC_PROVIDER)
-            }
-            signer.initSign(privKey)
-            signer.update(payload.toByteArray(Charsets.UTF_8))
-            Base64.encodeToString(signer.sign(), Base64.NO_WRAP)
+            val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
+            val privKeyParams = getEd25519PrivateKeyParams(bytes)
+            
+            // Bypass JCA/ASN.1 entirely and use BouncyCastle's lightweight crypto API directly.
+            val signer = Ed25519Signer()
+            signer.init(true, privKeyParams)
+            
+            val msgBytes = payload.toByteArray(Charsets.UTF_8)
+            signer.update(msgBytes, 0, msgBytes.size)
+            val sigBytes = signer.generateSignature()
+            
+            Base64.encodeToString(sigBytes, Base64.NO_WRAP)
         } catch (e: Exception) {
             Logger.error(TAG, "Ed25519 signing failed: ${e.message}")
             ""
         }
     }
 
-    /**
-     * Verify Ed25519 signature.
-     */
     fun verify(payload: String, signatureB64: String, publicKeyB64: String): Boolean {
         return try {
-            val pubKey = decodePublicKey(publicKeyB64)
+            val bytes = Base64.decode(publicKeyB64, Base64.DEFAULT)
+            val pubKeyParams = getEd25519PublicKeyParams(bytes)
+            
+            // Bypass JCA/ASN.1 entirely.
+            val verifier = Ed25519Signer()
+            verifier.init(false, pubKeyParams)
+            
+            val msgBytes = payload.toByteArray(Charsets.UTF_8)
+            verifier.update(msgBytes, 0, msgBytes.size)
+            
             val sigBytes = Base64.decode(signatureB64, Base64.DEFAULT)
-            val verifier = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                Signature.getInstance("Ed25519")
-            } else {
-                Signature.getInstance("Ed25519", BC_PROVIDER)
-            }
-            verifier.initVerify(pubKey)
-            verifier.update(payload.toByteArray(Charsets.UTF_8))
-            verifier.verify(sigBytes)
+            verifier.verifySignature(sigBytes)
         } catch (e: Exception) {
             Logger.warn(TAG, "Ed25519 signature verification failed: ${e.message}")
             false
         }
     }
 
-    /**
-     * Encrypt a direct message using X25519 + ChaCha20-Poly1305.
-     */
     fun encryptDM(plaintext: String, theirEncPubB64: String, myEncPrivB64: String): Pair<String, String> {
         return try {
             val myPriv = decodeX25519PrivateKey(myEncPrivB64)
@@ -219,7 +242,6 @@ object CryptoService {
             ka.doPhase(theirPub, true)
             val sharedSecret = ka.generateSecret()
 
-            // Shared secret: X25519 DH output -> SHA3-256 -> 32-byte ChaCha20 key
             val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
             val chachaKey = ByteArray(digest.digestSize)
             digest.update(sharedSecret, 0, sharedSecret.size)
@@ -228,7 +250,7 @@ object CryptoService {
 
             val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
             val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-            val ivSpec = javax.crypto.spec.IvParameterSpec(iv)
+            val ivSpec = IvParameterSpec(iv)
             cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
             val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
 
@@ -242,9 +264,6 @@ object CryptoService {
         }
     }
 
-    /**
-     * Decrypt a direct message using X25519 + ChaCha20-Poly1305. Returns null on any failure — never throws.
-     */
     fun decryptDM(
         ciphertextB64: String, nonceB64: String,
         theirEncPubB64: String, myEncPrivB64: String
@@ -266,7 +285,7 @@ object CryptoService {
 
             val iv = Base64.decode(nonceB64, Base64.DEFAULT)
             val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-            val ivSpec = javax.crypto.spec.IvParameterSpec(iv)
+            val ivSpec = IvParameterSpec(iv)
             cipher.init(Cipher.DECRYPT_MODE, secureKey, ivSpec)
             val decrypted = cipher.doFinal(Base64.decode(ciphertextB64, Base64.DEFAULT))
             String(decrypted, Charsets.UTF_8)
@@ -276,62 +295,24 @@ object CryptoService {
         }
     }
 
-    /**
-     * Extracts the raw 32-byte Ed25519 seed from a PKCS#8 encoded private key,
-     * then expands it into the 64-byte format required by Tor's ADD_ONION ED25519-V3.
-     *
-     * Tor expects: base64(expanded_secret_scalar[32] + prf_secret[32])
-     * where expanded = SHA-512(seed), first 32 bytes clamped per Ed25519 spec.
-     */
     fun getRawEd25519Seed(privKeyB64: String?): String? {
         if (privKeyB64 == null) return null
         return try {
             val bytes = Base64.decode(privKeyB64, Base64.DEFAULT)
+            val privKeyParams = getEd25519PrivateKeyParams(bytes)
+            val seed = privKeyParams.encoded
             
-            // 1. Parse PrivateKeyInfo (PKCS#8 structure)
-            val pki = org.bouncycastle.asn1.pkcs.PrivateKeyInfo.getInstance(bytes)
+            val sha512 = MessageDigest.getInstance("SHA-512")
+            val expanded = sha512.digest(seed)
             
-            // 2. Extract the 32-byte seed from the inner OCTET STRING
-            val innerOctets = org.bouncycastle.asn1.ASN1OctetString.getInstance(pki.parsePrivateKey())
-            val seed = innerOctets.octets
-            
-            if (seed.size != 32) {
-                Logger.error(TAG, "Extracted seed size is incorrect: ${seed.size}")
-                return null
-            }
-            
-            // 3. Expand seed to 64 bytes using SHA-512
-            val sha512 = java.security.MessageDigest.getInstance("SHA-512")
-            val expanded = sha512.digest(seed)  // 64 bytes
-            
-            // 4. Clamp the first 32 bytes (secret scalar) per Ed25519 spec
             expanded[0] = (expanded[0].toInt() and 248).toByte()
             expanded[31] = (expanded[31].toInt() and 127).toByte()
             expanded[31] = (expanded[31].toInt() or 64).toByte()
             
-            // 5. The full 64 bytes is what Tor wants
             Base64.encodeToString(expanded, Base64.NO_WRAP)
         } catch (e: Exception) {
             Logger.error(TAG, "ED25519-V3 key expansion failed: ${e.message}")
             null
-        }
-    }
-
-    private fun decodePublicKey(b64: String): PublicKey {
-        val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            KeyFactory.getInstance("Ed25519").generatePublic(X509EncodedKeySpec(bytes))
-        } else {
-            KeyFactory.getInstance("Ed25519", BC_PROVIDER).generatePublic(X509EncodedKeySpec(bytes))
-        }
-    }
-
-    private fun decodePrivateKey(b64: String): PrivateKey {
-        val bytes = Base64.decode(b64, Base64.DEFAULT)
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            KeyFactory.getInstance("Ed25519").generatePrivate(PKCS8EncodedKeySpec(bytes))
-        } else {
-            KeyFactory.getInstance("Ed25519", BC_PROVIDER).generatePrivate(PKCS8EncodedKeySpec(bytes))
         }
     }
 

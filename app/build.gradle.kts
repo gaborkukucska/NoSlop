@@ -143,6 +143,10 @@ dependencies {
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")
 
+    // --- Lazysodium ---
+    implementation("net.java.dev.jna:jna:5.13.0")
+    implementation("com.goterl:lazysodium-android:5.1.0@aar")
+
     // --- Tor ---
     implementation("info.guardianproject:tor-android:0.4.8.16")
     implementation("info.guardianproject:jtorctl:0.4.5.7")
