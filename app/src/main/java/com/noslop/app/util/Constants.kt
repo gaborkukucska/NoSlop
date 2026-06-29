@@ -1,10 +1,13 @@
 package com.noslop.app.util
 
+import com.noslop.app.BuildConfig
+
 object Constants {
     /**
      * The default port for the HAI-Net mesh gossip protocol.
+     * Debug builds use 9998 to avoid EADDRINUSE when running side-by-side with a release build.
      */
-    const val MESH_PORT = 9999
+    val MESH_PORT: Int = BuildConfig.MESH_PORT
 
     /**
      * The NoSlop landing page's content.json — same file the website reads to render the

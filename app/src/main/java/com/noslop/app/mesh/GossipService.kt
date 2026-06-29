@@ -164,6 +164,7 @@ object GossipService {
         if (packet.targetUserId != null) {
             if (packet.targetUserId != localPublicKeyB64) {
                 // Directed at someone else, just forward it if hops > 1
+                Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
                 forwardPacket(packet)
                 return false
             }

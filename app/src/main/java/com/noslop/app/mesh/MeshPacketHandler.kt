@@ -30,11 +30,16 @@ class MeshPacketHandler(
     private val media = MediaPacketHandler(repo, db)
 
     suspend fun handleIncomingPacket(packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
-        val localKeys = repo.getLocalIdentity() ?: return@withContext false
+        val localKeys = repo.getLocalIdentity()
+        if (localKeys == null) {
+            Logger.warn(TAG, "Dropping ${packet.type} packet — local identity not loaded (locked or not created yet)")
+            return@withContext false
+        }
 
         // Let GossipService decide if this packet needs handling or forwarding
         val shouldProcessLocally = GossipService.processIncoming(packet)
         if (!shouldProcessLocally) {
+            Logger.debug(TAG, "GossipService rejected local processing for ${packet.type} packet ${packet.id} (forwarded or filtered)")
             return@withContext false
         }
 
