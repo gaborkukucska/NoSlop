@@ -75,7 +75,7 @@ This is how NoSlop unites entertainment, community, and communication in one pla
 
 Your identity is generated locally and never leaves your device unless you export it yourself.
 
-- **Ed25519 + X25519 keypair** — one key for signing, one for encryption. Generated on-device using Android Keystore (API 33+) or Bouncy Castle (API 24–32 fallback).
+- **Ed25519 + X25519 keypair** — one key for signing, one for encryption. Generated on-device using Lazysodium (libsodium) with a Bouncy Castle fallback for maximum compatibility across all Android versions (API 24+).
 - **Tor v3 onion address** — your identity includes a native `.onion` address derived from your Ed25519 key, making you directly reachable over Tor without a relay.
 - **BIP39 Word Cloud** — your identity is backed up by a 12-word mnemonic phrase. Tap to copy, write it down, and you own your digital life permanently.
 - **Tripcode** — a 6-character Base32 shortcode derived from SHA3-256 of your public key. A human-readable fingerprint that others can verify at a glance.
@@ -100,7 +100,7 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 | Media | ExoPlayer (Android), AVPlayer (iOS), WKWebView/WebView, Coil |
 | Content | Ktor, Kotlinx-serialization, xmlutil, RSS/Atom parser |
 | Networking | Embedded Tor SOCKS5 daemon (onion-routed), Ktor + OkHttp/Darwin |
-| Signing | Ed25519 (Android Keystore / Bouncy Castle / Apple CryptoKit) |
+| Signing | Ed25519 (Bouncy Castle lightweight API / Lazysodium key generation) |
 | Key exchange | X25519 |
 | Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
 | Storage | SQLDelight SQLite + native key-value stores |

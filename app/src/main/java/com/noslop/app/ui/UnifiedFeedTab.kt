@@ -116,6 +116,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     val torState by viewModel.torReadyState.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
+    val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
+    val isInActiveChat = selectedTab == 1 && selectedPeerPub != null
 
     // ─── Landscape auto-hide UI ───
     val configuration = LocalConfiguration.current
@@ -182,7 +184,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         modifier = Modifier.fillMaxSize().testTag("main_scaffold"),
         containerColor = PrimaryBlack,
         floatingActionButton = {
-            if (selectedTab == 0) {
+            if (selectedTab == 0 && !isInActiveChat) {
                 FloatingActionButton(
                     onClick = { showComposeDialog = true },
                     containerColor = AccentGreen,
@@ -199,6 +201,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         },
         floatingActionButtonPosition = FabPosition.Center,
         bottomBar = {
+          if (!isInActiveChat) {
             NavigationBar(
                 containerColor = SurfaceDark,
                 tonalElevation = 8.dp,
@@ -296,6 +299,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 )
             }
+          }
         }
     ) { innerPadding ->
         Box(

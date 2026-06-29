@@ -1,5 +1,6 @@
 package com.noslop.app.ui.tabs
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
     var showShareSheet by remember { mutableStateOf(false) }
     var showScanScreen by remember { mutableStateOf(false) }
+
+    // Intercept hardware back button when viewing a chat thread —
+    // return to contacts list instead of minimising the app.
+    BackHandler(enabled = selectedPeerPub != null) {
+        viewModel.selectChatPeer(null)
+    }
 
     if (selectedPeerPub != null) {
         // Individual thread screen

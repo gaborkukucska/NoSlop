@@ -151,14 +151,8 @@ com.noslop.app
 
 ### 3.2 Key Generation (`CryptoService.generateIdentity`)
 
-- **API 33+ (Tiramisu and above)**: `KeyPairGenerator.getInstance("Ed25519")`
-  using the platform Conscrypt provider, **no explicit `initialize()` call**
-  (Conscrypt has a fixed key size).
-- **API 24–32**: `KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)` with
-  `initialize(255, SecureRandom())` — the `255` is a corrected value (see
-  milestone 48: "Key size corrected to 255 for compatibility with Android's
-  Conscrypt cryptographic provider to prevent onboarding page crashes on
-  actual devices").
+- **Lazysodium Primary Path**: By default, `cryptoSignKeypair()` from Lazysodium (libsodium via JNA) is used to generate the Ed25519 keypair. Libsodium produces high-quality keys consistently across all platforms, returning raw 32-byte seed/public keys. These are manually wrapped in standard ASN.1 PKCS#8 / X.509 headers before saving to ensure backwards compatibility with existing mesh peers.
+- **Bouncy Castle Fallback**: If JNA fails to load or Lazysodium throws an error, generation falls back to Bouncy Castle's lightweight `Ed25519KeyPairGenerator`.
 - X25519 keys are always generated via Bouncy Castle
   (`KeyPairGenerator.getInstance("X25519", BC_PROVIDER)`), regardless of API
   level.
@@ -195,10 +189,9 @@ net).
 
 ### 3.4 Signing & Verification
 
-- `sign(payload: String, privateKeyB64)` — `Signature.getInstance("Ed25519")`
-  (Conscrypt on API 33+, BC otherwise), signs the **UTF-8 bytes of the literal
+- `sign(payload: String, privateKeyB64)` — Uses Bouncy Castle's lightweight `Ed25519Signer` directly (bypassing the JCA `Signature` API). Signs the **UTF-8 bytes of the literal
   string** `payload`, returns Base64 (no-wrap).
-- `verify(payload, signatureB64, publicKeyB64)` — mirrors `sign`; returns
+- `verify(payload, signatureB64, publicKeyB64)` — Also uses `Ed25519Signer`; returns
   `false` (never throws) on any exception.
 - **Signed payload formats are pipe-delimited string concatenations**, not
   the JSON object itself. Examples found in `NoSlopRepository`:
@@ -816,7 +809,7 @@ migration path defined).
 - **Tor**: `info.guardianproject:tor-android:0.4.8.16`,
   `info.guardianproject:jtorctl:0.4.5.7`,
   `info.guardianproject.netcipher:netcipher:2.1.0`
-- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`
+- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`, `com.goterl:lazysodium-android:5.1.0`, `net.java.dev.jna:jna:5.13.0`
 - **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
   `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
   a genuine, currently-real minor version mismatch between the two OkHttp

@@ -69,6 +69,12 @@ class FakeViewedHistoryDao : ViewedHistoryDao {
             .forEach { items.remove(it) }
         publish()
     }
+    
+    override suspend fun deleteOlderThan(timestamp: Long) {
+        val toRemove = items.values.filter { it.viewedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { items.remove(it) }
+        publish()
+    }
 }
 
 /** Fake [SwipeTrackerDao] with REPLACE-on-conflict upsert and the >=2 exclusion query. */
@@ -78,6 +84,10 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
         swipes.values.filter { it.swipeCount >= 2 }.map { it.itemId }
     override suspend fun upsertSwipe(tracker: SwipeTracker) { swipes[tracker.itemId] = tracker }
     override suspend fun getSwipeForItem(itemId: String): SwipeTracker? = swipes[itemId]
+    override suspend fun deleteOldSwipes(timestamp: Long) {
+        val toRemove = swipes.values.filter { it.lastSwipedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { swipes.remove(it) }
+    }
 }
 
 /** Fake [ReactionDao] with the get-by-id / insert / delete semantics the toggle logic relies on. */
@@ -127,6 +137,7 @@ class FakePostDao : PostDao {
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
     override suspend fun markPostOrphaned(id: String) {}
     override suspend fun updatePostContent(id: String, newContent: String) {}
+    override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
 }
 
 /** Fake [MessageDao] collecting stored messages. */
