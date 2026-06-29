@@ -37,11 +37,11 @@ internal object PlaybackPositionStore {
     /** Save the current position for [url]. Call this from onDispose / pause,
      *  not on a tight timer, to keep writes cheap. */
     fun save(url: String, positionMs: Long, durationMs: Long) {
-        if (url.isBlank() || positionMs <= 0L) return
-        if (positionMs < 1000L) return // Ignore noisy saves at the very beginning
-        // Removed aggressive cache wiping so position is ALWAYS restored
-        positions[url] = positionMs
-        Logger.debug("PLAYBACK_POSITION", "Saved position for $url -> ${positionMs}ms")
+        if (url.isBlank()) return
+        if (positionMs > 0L) {
+            positions[url] = positionMs
+        }
+        Logger.info("VIDEO", "Saved position for $url -> ${positionMs}ms")
     }
 
     /** Returns the remembered position for [url], or 0L if none / not resumable. */

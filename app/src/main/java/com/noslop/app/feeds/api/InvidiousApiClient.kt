@@ -286,7 +286,13 @@ object InvidiousApiClient {
                         response.close()
                         continue
                     }
-                    val array = gson.fromJson(body, JsonArray::class.java)
+                    val root = com.google.gson.JsonParser.parseString(body)
+                    if (!root.isJsonArray) {
+                        response.close()
+                        Logger.warn(TAG, "Instance $instance returned non-array response for search")
+                        continue
+                    }
+                    val array = root.asJsonArray
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious search successful via $instance. Fetched ${items.size} videos")
                     markInstanceOk(instance)
@@ -322,7 +328,13 @@ object InvidiousApiClient {
                         response.close()
                         continue
                     }
-                    val array = gson.fromJson(body, JsonArray::class.java)
+                    val root = com.google.gson.JsonParser.parseString(body)
+                    if (!root.isJsonArray) {
+                        response.close()
+                        Logger.warn(TAG, "Instance $instance returned non-array response for trending")
+                        continue
+                    }
+                    val array = root.asJsonArray
                     val items = parseVideoArray(array, sourceId)
                     Logger.info(TAG, "Invidious trending successful via $instance. Fetched ${items.size} videos")
                     markInstanceOk(instance)
@@ -358,7 +370,13 @@ object InvidiousApiClient {
                         response.close()
                         continue
                     }
-                    val array = gson.fromJson(body, JsonArray::class.java)
+                    val root = com.google.gson.JsonParser.parseString(body)
+                    if (!root.isJsonArray) {
+                        response.close()
+                        Logger.warn(TAG, "Instance $instance returned non-array response for channel search")
+                        continue
+                    }
+                    val array = root.asJsonArray
                     val channels = mutableListOf<String>()
                     for (element in array) {
                         try {

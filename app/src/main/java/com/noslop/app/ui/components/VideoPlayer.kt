@@ -480,7 +480,9 @@ private fun ExoVideoPlayer(
         onDispose {
             try {
                 PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                Logger.error("VIDEO", "Failed to save playback position during dispose: ${e.message}")
+            }
             player.release()
             exoPlayer = null
         }
