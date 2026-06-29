@@ -14,7 +14,7 @@ import java.net.Socket
 
 class MeshTransport(
     val repository: NoSlopRepository,
-    private val listenPort: Int = Constants.MESH_PORT,
+    private val listenPort: Int = Constants.MESH_LISTEN_PORT,
     private val socksHost: String = "127.0.0.1",
     private val socksPort: Int = 9050
 ) {

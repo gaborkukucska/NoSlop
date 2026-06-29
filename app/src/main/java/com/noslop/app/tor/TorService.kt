@@ -311,8 +311,8 @@ object TorService {
 
                 // Build and send ADD_ONION command as raw text
                 // Syntax: ADD_ONION KeyType:KeyBlob [Flags=Detach] Port=VirtPort[,Target]
-                val cmd = "ADD_ONION $keyParam Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}"
-                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}")
+                val cmd = "ADD_ONION $keyParam Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_LISTEN_PORT}"
+                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_LISTEN_PORT}")
                 writer.print("$cmd\r\n")
                 writer.flush()
 

@@ -40,8 +40,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Mesh port for release builds — must match the Tor hidden service port.
-            buildConfigField("int", "MESH_PORT", "9999")
+            // Local bind port — Tor maps external 9999 → this port.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9999")
             buildConfigField("int", "MEDIA_PROXY_PORT", "8080")
         }
         debug {
@@ -53,8 +53,9 @@ android {
             // Release build instead of overwriting it.
             applicationIdSuffix = ".debug"
             resValue("string", "app_name", "NoSlop Debug")
-            // Different port so debug and release can run side-by-side without EADDRINUSE.
-            buildConfigField("int", "MESH_PORT", "9998")
+            // Different local bind ports so debug and release can run side-by-side.
+            // Tor will map external 9999 → local 9998 for this build.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9998")
             buildConfigField("int", "MEDIA_PROXY_PORT", "8081")
         }
     }
