@@ -41,6 +41,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
         ApiKeysScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 5) {
         ContentPreferencesScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 6) {
+        ReportIssueScreen(onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -548,6 +550,31 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Column {
                                     Text("Structured Debug Logs", fontWeight = FontWeight.Bold, color = TextLight)
                                     Text("Examine packet drops, network, parser info.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                }
+                            }
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
+                        }
+                    }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp)
+                            .clickable { selectedSettingsScreen = 6 },
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.BugReport, contentDescription = null, tint = AccentGreen)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column {
+                                    Text("File a Bug Report", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Report issues or request features via GitHub.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
                                 }
                             }
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
