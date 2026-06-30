@@ -67,7 +67,7 @@ mnemonic, onion address).
 │  api/*Client (10x)     │      │  MediaManager / MediaProxyService        │
 │  -> clearnetClient     │      │  CryptoService (Ed25519/X25519/ChaCha20) │
 │     (no proxy)          │      │  TorService (embedded tor-android)       │
-└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:9050)    │
+└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:TOR_SOCKS_PORT) │
                               └─────────────────────────────────────────┘
 ```
 
@@ -282,13 +282,13 @@ used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 - **Outbound sends** (`sendPacket(onionAddress, port, packet)`):
   1. `TorService.waitForProxy(timeoutSeconds = 5)` — abort if SOCKS5 not
      reachable.
-  2. Up to **5 attempts**. Each attempt opens a fresh
-     `Socket(Proxy(SOCKS, 127.0.0.1:9050))`, calls
-     `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000)`
-     (30s connect timeout — onion circuit builds can be slow), writes one
+  2. Up to **3 attempts**. Each attempt opens a fresh
+     `Socket(Proxy(SOCKS, 127.0.0.1:TOR_SOCKS_PORT))`, calls
+     `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 60000)`
+     (60s connect timeout — new onion circuit builds can take up to 45s), writes one
      line via `PrintWriter(autoFlush=true)`, then closes the socket.
-  3. Backoff between attempts: `delay(attempt * 3000L)` ms (3s, 6s, 9s, 12s).
-  4. Returns `true` on first successful write, `false` if all 5 attempts
+  3. Backoff between attempts: `delay(attempt * 2000L)` ms (2s, 4s).
+  4. Returns `true` on first successful write, `false` if all 3 attempts
      fail.
 
   Note: `docs/PROJECT_STATUS.md` milestone 14 describes "3 retries with 2s/4s
@@ -548,7 +548,7 @@ Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
   `feeds/api/*Client` classes. Configured with `okhttp-dnsoverhttps`
   (Cloudflare `1.1.1.1`) per milestone 51 to avoid DNS resolution failures
   without forcing all traffic through Tor.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:9050`, used exclusively
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used exclusively
   by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)

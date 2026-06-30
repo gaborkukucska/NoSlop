@@ -127,9 +127,11 @@ object TorService {
                         
                         val (isTor, _) = checkTorConnection()
                         if (isTor) {
-                            Logger.info(TAG, "Self-healing bootstrap: Connectivity verified. Moving to READY.")
-                            _torState.value = TorState.READY
-                            triggerRegistration()
+                            if (_torState.value != TorState.READY) {
+                                Logger.info(TAG, "Self-healing bootstrap: Connectivity verified. Moving to READY.")
+                                _torState.value = TorState.READY
+                                triggerRegistration()
+                            }
                             break
                         }
                         delay(5000)

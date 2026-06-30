@@ -1,5 +1,14 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-06-30)
+
+### 1. Tor Daemon Isolation & Port Decoupling
+*   **Embedded Tor Decoupling**: Fixed a critical EADDRINUSE conflict that occurred when running debug and release builds side-by-side on the same device. Both builds were previously attempting to spawn internal Tor daemons bound to hardcoded ports (`9050`/`9051`). Extracted these into build variant configs (`TOR_SOCKS_PORT` and `TOR_CONTROL_PORT`) so the debug and release builds now run completely isolated Tor instances (`9050`/`9051` vs `9052`/`9053`).
+*   **Tor Service Double Registration**: Fixed a race condition where both the Tor daemon status broadcast receiver and the self-healing bootstrap loop concurrently called `triggerRegistration()` when Tor finished bootstrapping. This prevented the daemon from spamming `550 Onion address collision` and throwing `Bad sequence size: 3` exceptions during startup.
+
+### 2. Mesh Transport Circuit Timeouts
+*   **Extended Connection Timeout**: Increased the `CONNECTION_REQUEST` Tor SOCKS5 connect timeout from 20 seconds to 60 seconds. Freshly minted Tor v3 onion services (such as new installs) can take up to 45 seconds to publish their descriptors to the HSDirs. A 20-second timeout was actively interrupting Tor's circuit-building process before completion, dropping the connection and triggering an infinite retry loop that prevented peers from ever successfully shaking hands.
+
 ## Completed Changes (2026-06-29)
 
 ### 1. Bouncy Castle Migration & Lazysodium Key Generation

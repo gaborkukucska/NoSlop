@@ -150,7 +150,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 2. SOCKS5 Proxy SocketException (Tor Connection Failure)
 *   **Symptom**: Diagnostic logs print `Connection refused` or `Socket timeout` during "Test Tor" pings.
-*   **Cause**: The embedded Tor daemon is either still bootstrapping circuits or failed to bind to port 9050.
+*   **Cause**: The embedded Tor daemon is either still bootstrapping circuits or failed to bind to its SOCKS proxy port (`Constants.TOR_SOCKS_PORT`).
 *   **Fix**: Wait an additional 30 seconds for the internal daemon to achieve 100% bootstrap. If it continues to fail, fully force-close the app and reopen it to restart the native Tor process.
 
 ### 3. SQLite Database Migration Crash

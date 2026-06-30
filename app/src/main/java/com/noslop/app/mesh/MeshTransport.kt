@@ -111,7 +111,9 @@ class MeshTransport(
         }
         
         try {
-            val connectTimeout = if (packet.type.startsWith("MEDIA_")) 45000 else 20000
+            // Fresh v3 onion descriptors can take up to 45 seconds to fetch from HSDirs.
+            // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
+            val connectTimeout = if (packet.type.startsWith("MEDIA_")) 60000 else 60000
             for (attempt in 1..3) { // Reduced retries to avoid blocking the semaphore
                 var socket: Socket? = null
                 try {
