@@ -1,9 +1,20 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
 }
+
+// Read GitHub config from local.properties (outside android{} to avoid DSL scope issues)
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.reader().use { localProps.load(it) }
+}
+val githubPat: String = localProps.getProperty("GITHUB_PAT", "")
+val githubAssignee: String = localProps.getProperty("GITHUB_ASSIGNEE", "")
 
 android {
     namespace = "com.noslop.app"
@@ -31,13 +42,6 @@ android {
         }
     }
 
-    val localProperties = java.util.Properties()
-    val localPropertiesFile = rootProject.file("local.properties")
-    if (localPropertiesFile.exists()) {
-        localProperties.load(java.io.FileInputStream(localPropertiesFile))
-    }
-    val githubPat = localProperties.getProperty("GITHUB_PAT", "")
-
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")  // add this
@@ -53,8 +57,9 @@ android {
             // Tor proxy ports
             buildConfigField("int", "TOR_SOCKS_PORT", "9050")
             buildConfigField("int", "TOR_CONTROL_PORT", "9051")
-            
+            // GitHub issue submission
             buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
+            buildConfigField("String", "GITHUB_ASSIGNEE", "\"$githubAssignee\"")
         }
         debug {
             isDebuggable = true
@@ -72,8 +77,9 @@ android {
             // Tor proxy ports for debug build
             buildConfigField("int", "TOR_SOCKS_PORT", "9052")
             buildConfigField("int", "TOR_CONTROL_PORT", "9053")
-
+            // GitHub issue submission
             buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
+            buildConfigField("String", "GITHUB_ASSIGNEE", "\"$githubAssignee\"")
         }
     }
 

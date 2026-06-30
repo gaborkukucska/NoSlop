@@ -125,7 +125,7 @@ com.noslop.app
 │   ├── UnifiedFeedTab.kt             VerticalPager feed (mesh + clearnet unified)
 │   ├── components/                  FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen,
 │   │                                 CommentsBottomSheet, PeerItem
-│   ├── tabs/                        ApiKeysScreen, DMsTab, LogsViewerScreen, SettingsTab
+│   ├── tabs/                        ApiKeysScreen, DMsTab, LogsViewerScreen, ReportIssueScreen, SettingsTab
 │   └── theme/                       Color.kt, Theme.kt, Type.kt (Material3 + custom palette)
 └── util/
     └── Constants.kt                 MESH_PORT = 9999
@@ -803,6 +803,8 @@ migration path defined).
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
+| `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/gaborkukucska/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
+| `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
 ### Key Dependencies
 

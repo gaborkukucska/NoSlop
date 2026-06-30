@@ -139,6 +139,33 @@ This is the new Kotlin Multiplatform application currently under development in 
 
 ---
 
+## 6.1. GitHub Issue Submission (Optional)
+
+The app includes a built-in **File a Report** screen (accessible from Settings) that submits bug reports, feature requests, and questions directly to the GitHub repository via the REST API. This requires two optional keys in `local.properties`:
+
+```properties
+# local.properties (never commit this file!)
+GITHUB_PAT=ghp_your_personal_access_token_here
+GITHUB_ASSIGNEE=gaborkukucska
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `GITHUB_PAT` | **Yes** (for in-app submission) | A GitHub [Personal Access Token](https://github.com/settings/tokens) with **`repo`** scope. Without this, the Submit button is disabled and users see an "unavailable" message. |
+| `GITHUB_ASSIGNEE` | No | The GitHub username to auto-assign as the issue owner. If blank, issues are created without an assignee. |
+
+The app maps the user's "Issue Type" dropdown to standard GitHub labels:
+- **Bug** → `bug`
+- **Feature Request** → `enhancement`
+- **Question** → `question`
+
+> [!IMPORTANT]
+> These labels must already exist in your GitHub repository. If they don't, create them at:
+> `https://github.com/<owner>/<repo>/labels`
+> GitHub repositories created after 2020 include `bug` and `enhancement` by default, but `question` may need to be added manually.
+
+---
+
 ## 7. Common Errors and Fixes
 
 Here are the top 5 common build/runtime issues and how to resolve them:

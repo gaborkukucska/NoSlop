@@ -1,18 +1,14 @@
 package com.noslop.app.ui.tabs
 
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +28,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.net.URLEncoder
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,10 +111,10 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 text = if (hasGithubPat) {
                     "Help us improve NoSlop. Your report will be sent directly to our GitHub repository."
                 } else {
-                    "Help us improve NoSlop. Since no GitHub Token is configured, this will open a pre-filled issue in your browser."
+                    "Issue submission is unavailable. The app was built without a GitHub API token. Please contact the developer to enable this feature."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextMuted,
+                color = if (hasGithubPat) TextMuted else DestructiveRed,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
@@ -291,12 +287,20 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                                     else -> "bug"
                                 }
 
-                                val payload = mapOf(
+                                val assignees = if (BuildConfig.GITHUB_ASSIGNEE.isNotBlank()) {
+                                    listOf(BuildConfig.GITHUB_ASSIGNEE)
+                                } else {
+                                    emptyList()
+                                }
+
+                                val payload = mutableMapOf<String, Any>(
                                     "title" to issueTitle,
                                     "body" to bodyBuilder.toString(),
-                                    "labels" to listOf(label),
-                                    "assignees" to listOf("gaborkukucska")
+                                    "labels" to listOf(label)
                                 )
+                                if (assignees.isNotEmpty()) {
+                                    payload["assignees"] = assignees
+                                }
 
                                 val json = Gson().toJson(payload)
                                 val requestBody = json.toRequestBody("application/json".toMediaType())
@@ -326,18 +330,14 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                                 isSubmitting = false
                             }
                         }
-                    } else {
-                        val encodedTitle = URLEncoder.encode(issueTitle, "UTF-8")
-                        val encodedBody = URLEncoder.encode(bodyBuilder.toString(), "UTF-8")
-                        // When using intent, pass the un-interpolated variables correctly to Uri.parse
-                        val url = "https://github.com/gaborkukucska/NoSlop/issues/new?title=$encodedTitle&body=$encodedBody"
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                enabled = !isSubmitting && (title.isNotBlank() || description.isNotBlank())
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (hasGithubPat) AccentGreen else BorderSubtle,
+                    contentColor = PrimaryBlack
+                ),
+                enabled = hasGithubPat && !isSubmitting && (title.isNotBlank() || description.isNotBlank())
             ) {
                 if (isSubmitting) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), color = PrimaryBlack, strokeWidth = 2.dp)
@@ -346,7 +346,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 } else {
                     Icon(Icons.Default.BugReport, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (hasGithubPat) "Submit via GitHub API" else "Submit via Browser", fontWeight = FontWeight.Bold)
+                    Text(if (hasGithubPat) "Submit Issue" else "Unavailable (No API Token)", fontWeight = FontWeight.Bold)
                 }
             }
         }
