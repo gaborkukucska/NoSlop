@@ -31,12 +31,19 @@ object GossipService {
     private var peerDao: PeerDao? = null
     private var transport: MeshTransport? = null
     private var localPublicKeyB64: String = ""
+    private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun initialize(peerDao: PeerDao, transport: MeshTransport, localPublicKeyB64: String) {
+    fun initialize(
+        peerDao: PeerDao,
+        transport: MeshTransport,
+        localPublicKeyB64: String,
+        getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
+    ) {
         this.peerDao = peerDao
         this.transport = transport
         this.localPublicKeyB64 = localPublicKeyB64
+        this.getMeshFilterSettings = getMeshFilterSettings
         
         cleanupJob?.cancel()
         cleanupJob = scope.launch {
@@ -156,6 +163,45 @@ object GossipService {
                 if (peer == null || !peer.isTrusted) {
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Sender $senderId is not trusted. Dropping ${packet.type} packet $packetId")
                     return false
+                }
+            }
+        }
+
+        // 4.5. Mesh Filters (Incoming)
+        val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()
+        if (packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "CHAT_REACTION" || 
+            packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE") {
+            if (!filterSettings.allowIncomingReactions) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id}")
+                return false
+            }
+        } else if (packet.type == "COMMENT") {
+            if (!filterSettings.allowIncomingComments) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id}")
+                return false
+            }
+        } else if (packet.type == "POST") {
+            val postPay = packet.getPostPayload()
+            if (postPay != null) {
+                if (postPay.clearnetUrl != null) {
+                    if (!filterSettings.allowIncomingClearnetShares) {
+                        Logger.info("FIREWALL", "Mesh Filter: Dropped incoming clearnet share post ${packet.id}")
+                        return false
+                    }
+                } else if (postPay.mediaMetadata != null) {
+                    if (postPay.mediaMetadata.type == "image" && !filterSettings.allowIncomingImagePosts) {
+                        Logger.info("FIREWALL", "Mesh Filter: Dropped incoming image post ${packet.id}")
+                        return false
+                    } else if (postPay.mediaMetadata.type == "video" && !filterSettings.allowIncomingVideoPosts) {
+                        Logger.info("FIREWALL", "Mesh Filter: Dropped incoming video post ${packet.id}")
+                        return false
+                    }
+                } else {
+                    // Text-only post
+                    if (!filterSettings.allowIncomingTextPosts) {
+                        Logger.info("FIREWALL", "Mesh Filter: Dropped incoming text post ${packet.id}")
+                        return false
+                    }
                 }
             }
         }

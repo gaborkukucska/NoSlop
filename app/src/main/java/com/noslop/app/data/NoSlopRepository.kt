@@ -49,6 +49,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
+    val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -60,6 +61,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         getLocalIdentity = { getLocalIdentity() },
         getLocalHandle = { getLocalHandle() },
         getUserProfile = { getUserProfile() },
+        getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() }
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
@@ -115,7 +117,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         identityRepository.saveIdentity(handle, keys, mnemonic)
-        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
+        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64) { settingsRepository.getMeshFilterSettings() }
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         
@@ -167,6 +169,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun updateMediaSettings(settings: MediaSettings) =
         settingsRepository.updateMediaSettings(settings)
+
+    suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) =
+        settingsRepository.updateMeshFilterSettings(settings)
 
     suspend fun getNotificationSettings(): NotificationSettings =
         settingsRepository.getNotificationSettings()

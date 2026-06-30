@@ -38,6 +38,7 @@ class MeshSocialRepository(
     private val getLocalIdentity: suspend () -> CryptoService.IdentityKeys?,
     private val getLocalHandle: suspend () -> String,
     private val getUserProfile: suspend () -> UserProfile,
+    private val getMeshFilterSettings: suspend () -> com.noslop.app.data.MeshFilterSettings = { com.noslop.app.data.MeshFilterSettings() }
 ) {
     private val TAG = "REPOSITORY"
 
@@ -186,6 +187,15 @@ class MeshSocialRepository(
         clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
+        val filterSettings = getMeshFilterSettings()
+        if (clearnetUrl != null) {
+            if (!filterSettings.allowOutgoingClearnetShares) return@withContext null
+        } else if (mediaMetadata != null) {
+            if (mediaMetadata.type == "image" && !filterSettings.allowOutgoingImagePosts) return@withContext null
+            if (mediaMetadata.type == "video" && !filterSettings.allowOutgoingVideoPosts) return@withContext null
+        } else {
+            if (!filterSettings.allowOutgoingTextPosts) return@withContext null
+        }
         val myKeys = getLocalIdentity() ?: return@withContext null
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
@@ -522,6 +532,7 @@ class MeshSocialRepository(
         parentCommentId: String? = null,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingComments) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
@@ -583,6 +594,7 @@ class MeshSocialRepository(
     }
 
     suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val reactionId = "${postId}_${myKeys.publicKeyB64}_$reactionType"
@@ -630,6 +642,7 @@ class MeshSocialRepository(
     }
 
     suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
@@ -714,6 +727,7 @@ class MeshSocialRepository(
     }
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
@@ -765,6 +779,7 @@ class MeshSocialRepository(
     }
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
@@ -815,6 +830,7 @@ class MeshSocialRepository(
     }
 
     suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
+        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"

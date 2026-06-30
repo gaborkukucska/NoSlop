@@ -43,6 +43,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
         ContentPreferencesScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 6) {
         ReportIssueScreen(onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 7) {
+        MeshFiltersScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -190,6 +192,21 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text("Profile & Preferences", fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 7 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.FilterAlt, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Mesh Filters", fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }

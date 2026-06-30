@@ -166,6 +166,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
+    val meshFilterSettings: StateFlow<MeshFilterSettings> = repository.meshFilterSettingsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MeshFilterSettings())
+
     val updateInfo: StateFlow<com.noslop.app.util.UpdateInfo?> = NoSlopApp.updateChecker.updateInfo
 
     val notificationSettings: StateFlow<com.noslop.app.data.NotificationSettings> = repository.notificationSettingsFlow
@@ -884,6 +887,7 @@ fun toggleAggregator() {
 
     fun updateMediaSettings(settings: MediaSettings) { viewModelScope.launch { repository.updateMediaSettings(settings) } }
     fun updateNotificationSettings(settings: com.noslop.app.data.NotificationSettings) { viewModelScope.launch { repository.updateNotificationSettings(settings) } }
+    fun updateMeshFilterSettings(settings: MeshFilterSettings) { viewModelScope.launch { repository.updateMeshFilterSettings(settings) } }
 
     fun setForegroundServiceEnabled(enabled: Boolean) {
         viewModelScope.launch {

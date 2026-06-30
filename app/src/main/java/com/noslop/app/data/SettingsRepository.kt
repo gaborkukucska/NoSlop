@@ -34,6 +34,10 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     /** Whether the user enabled the always-on foreground service. */
     val isForegroundServiceEnabled: StateFlow<Boolean> = _isForegroundServiceEnabled.asStateFlow()
 
+    private val _meshFilterSettingsFlow = MutableStateFlow(MeshFilterSettings())
+    /** Current mesh filter settings; updated by [getMeshFilterSettings] and [updateMeshFilterSettings]. */
+    val meshFilterSettingsFlow: StateFlow<MeshFilterSettings> = _meshFilterSettingsFlow.asStateFlow()
+
     private val _isSendOnEnterEnabled = MutableStateFlow(false)
     /** Whether to send chat messages on keyboard enter. */
     val isSendOnEnterEnabled: StateFlow<Boolean> = _isSendOnEnterEnabled.asStateFlow()
@@ -64,6 +68,20 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     suspend fun updateNotificationSettings(settings: NotificationSettings) = withContext(Dispatchers.IO) {
         appSettingDao.insertSetting(AppSetting("notification_settings", settings.toJson()))
         _notificationSettingsFlow.value = settings
+    }
+
+    /** Load mesh filter settings from storage, hydrating [meshFilterSettingsFlow]. */
+    suspend fun getMeshFilterSettings(): MeshFilterSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("mesh_filter_settings")
+        val settings = MeshFilterSettings.fromJson(json)
+        _meshFilterSettingsFlow.value = settings
+        settings
+    }
+
+    /** Persist mesh filter settings and push them to [meshFilterSettingsFlow]. */
+    suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("mesh_filter_settings", settings.toJson()))
+        _meshFilterSettingsFlow.value = settings
     }
 
     /** Hydrate [isForegroundServiceEnabled] from storage (defaults to false when unset). */
