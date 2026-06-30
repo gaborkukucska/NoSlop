@@ -172,7 +172,7 @@ object GossipService {
 
         // 4.5. Mesh Filters (Incoming)
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()
-        if (packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "CHAT_REACTION" || 
+        if (packet.type == "REACTION" || packet.type == "VOTE" || 
             packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE") {
             if (!filterSettings.allowIncomingReactions) {
                 var isExempt = false
@@ -183,10 +183,7 @@ object GossipService {
                             val postId = payloadObj.get("postId")?.asString
                             if (postId != null && checkEntityExists!!("POST", postId)) isExempt = true
                         }
-                        "CHAT_REACTION" -> {
-                            val msgId = payloadObj.get("messageId")?.asString
-                            if (msgId != null && checkEntityExists!!("MESSAGE", msgId)) isExempt = true
-                        }
+
                         "COMMENT_REACTION", "COMMENT_VOTE" -> {
                             val commentId = payloadObj.get("commentId")?.asString
                             if (commentId != null && checkEntityExists!!("COMMENT", commentId)) isExempt = true

@@ -786,10 +786,8 @@ class MeshSocialRepository(
                 payload = com.google.gson.Gson().toJsonTree(reactionPayload),
                 signature = signature
             )
-            if (getMeshFilterSettings().allowOutgoingReactions) {
-                repositoryScope.launch {
-                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-                }
+            repositoryScope.launch {
+                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
             }
         }
         true
