@@ -74,6 +74,10 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // so that file copies and auto-downloads don't fail with "not initialized" errors.
         com.noslop.app.mesh.MediaManager.initialize(repository)
 
+        // Hydrate the playback-position store from disk so videos resume where
+        // the user left off, even after a cold start.
+        com.noslop.app.ui.components.PlaybackPositionStore.init(this)
+
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
 

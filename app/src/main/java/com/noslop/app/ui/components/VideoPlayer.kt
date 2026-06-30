@@ -9,6 +9,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -352,12 +355,26 @@ fun VideoPlayer(
         }
         
         if (showThumbnail && (thumbnailUrl != null || decodedB64 != null)) {
-            AsyncImage(
-                model = thumbnailUrl ?: decodedB64,
-                contentDescription = "Video Thumbnail",
-                modifier = Modifier.fillMaxSize().zIndex(1f),
-                contentScale = ContentScale.Crop
-            )
+            Box(modifier = Modifier.fillMaxSize().zIndex(1f).clipToBounds()) {
+                // Blurred background layer to prevent black bars
+                AsyncImage(
+                    model = thumbnailUrl ?: decodedB64,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().scale(1.35f).blur(24.dp),
+                    contentScale = ContentScale.Crop,
+                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(
+                        PrimaryBlack.copy(alpha = 0.5f),
+                        androidx.compose.ui.graphics.BlendMode.Darken
+                    )
+                )
+                // Proper, uncropped thumbnail in front
+                AsyncImage(
+                    model = thumbnailUrl ?: decodedB64,
+                    contentDescription = "Video Thumbnail",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            }
         } else if (source == null && thumbnailUrl == null && thumbnailB64 == null && !isVideoReady) {
             Box(modifier = Modifier.fillMaxSize().zIndex(1f)) {
                 com.noslop.app.ui.LoadingShimmer()
@@ -392,11 +409,13 @@ private fun ExoVideoPlayer(
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = true
+                
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 if (resumeMs > 0L) {
                     Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $rawUrl")
                     seekTo(resumeMs)
                 }
+
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
@@ -439,12 +458,13 @@ private fun ExoVideoPlayer(
                         .setMimeType(mimeType)
                         .build()
                     setMediaItem(mediaItem)
+                    repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
+                    
                     val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                     if (resumeMs > 0L) {
                         Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $rawUrl")
                         seekTo(resumeMs)
                     }
-                    repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
 
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -479,7 +499,10 @@ private fun ExoVideoPlayer(
 
         onDispose {
             try {
-                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
+                val currentPos = player.currentPosition
+                if (currentPos > 0L) {
+                    PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                }
             } catch (e: Exception) {
                 Logger.error("VIDEO", "Failed to save playback position during dispose: ${e.message}")
             }
@@ -493,7 +516,10 @@ private fun ExoVideoPlayer(
         while (true) {
             kotlinx.coroutines.delay(1000L)
             try {
-                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
+                val currentPos = player.currentPosition
+                if (currentPos > 0L) {
+                    PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                }
             } catch (e: Exception) {
                 break
             }

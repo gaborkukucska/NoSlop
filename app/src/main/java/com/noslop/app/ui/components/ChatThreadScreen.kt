@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
+import coil.ImageLoader
+import coil.compose.LocalImageLoader
 import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.ChatMessage
 import com.noslop.app.data.Peer
@@ -71,6 +73,20 @@ fun ChatThreadScreen(
 
     val context = LocalContext.current
     val captureManager = remember { MediaCaptureManager(context) }
+
+    // GIF-aware Coil ImageLoader — matches UnifiedFeedTab's configuration
+    // so that animated GIFs play on loop instead of rendering as static images.
+    val gifImageLoader = remember {
+        ImageLoader.Builder(context)
+            .components {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
+            }
+            .build()
+    }
 
     // System file picker (images, video, audio, any file — mirrors gChat's handleAttachClick)
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -222,6 +238,7 @@ fun ChatThreadScreen(
         return // Don't render the rest of the chat while camera is showing
     }
 
+    CompositionLocalProvider(LocalImageLoader provides gifImageLoader) {
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // ── Thread header ──
         Row(
@@ -363,6 +380,7 @@ fun ChatThreadScreen(
 
                                     if (canRender) {
                                         val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
+                                        val isGif = mid.endsWith(".gif", ignoreCase = true) || mid.startsWith("noslop-gif://") || parsedMediaMetadata?.mimeType == "image/gif"
                                         val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
                                         
                                         Box(
@@ -374,12 +392,31 @@ fun ChatThreadScreen(
                                                 .background(PrimaryBlack.copy(alpha = 0.5f))
                                                 .clickable { 
                                                     if (isVideo) fullscreenVideo = localFile?.absolutePath 
-                                                    else fullscreenImage = localFile?.absolutePath 
+                                                    else if (!isGif) fullscreenImage = localFile?.absolutePath
+                                                    // GIFs already play animated in-place — no fullscreen needed
                                                 },
                                             contentAlignment = Alignment.Center
                                         ) {
                                             val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                            if (meta?.thumbnailB64 != null) {
+                                            if (isGif) {
+                                                // Animated GIF — render directly with the GIF-aware ImageLoader
+                                                val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
+                                                    val url = mid.removePrefix("noslop-gif://")
+                                                    if (url.startsWith("data:image/gif;base64,")) {
+                                                        android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT)
+                                                    } else url
+                                                } else {
+                                                    val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
+                                                    if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
+                                                }
+                                                coil.compose.AsyncImage(
+                                                    model = gifModel,
+                                                    contentDescription = "GIF",
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                                                    imageLoader = gifImageLoader,
+                                                    modifier = Modifier.fillMaxSize()
+                                                )
+                                            } else if (meta?.thumbnailB64 != null && isVideo) {
                                                 val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
                                                 coil.compose.AsyncImage(
                                                     model = decoded,
@@ -646,4 +683,5 @@ fun ChatThreadScreen(
             }
         }
     }
+    } // end CompositionLocalProvider
 }

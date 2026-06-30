@@ -16,10 +16,9 @@ import java.util.concurrent.ConcurrentHashMap
 // items keyed by their resolved media URL, so re-visiting a feed/mesh card
 // resumes playback instead of restarting from zero.
 //
-// In-memory only (ConcurrentHashMap), scoped to the process lifetime — this
-// matches the existing `sourceCache` pattern in VideoPlayer.kt. Positions are
-// small (a Long per URL) so there's no real memory pressure from keeping them
-// around for the life of the app.
+// Backed by SharedPreferences with LRU eviction (200 entries max) so that
+// positions survive process death and cold restarts.  Disk writes are throttled
+// to avoid I/O pressure from the 200ms playback polling loops.
 // ─────────────────────────────────────────────────────────────────────────────
 internal object PlaybackPositionStore {
 
@@ -34,14 +33,53 @@ internal object PlaybackPositionStore {
      *  resuming 1.2s from the end. */
     private const val MIN_REMAINING_MS = 2000L
 
+    /** Maximum entries to persist on disk — LRU eviction keeps this bounded. */
+    private const val MAX_PERSISTED_ENTRIES = 200
+
+    /** Only flush to disk when the position has moved by at least this much
+     *  since the last persisted write, to avoid thrashing SharedPreferences. */
+    private const val DISK_WRITE_THRESHOLD_MS = 2000L
+
+    private const val PREFS_NAME = "noslop_playback_positions"
+    private const val KEY_PREFIX = "pos_"
+    private const val ORDER_KEY = "lru_order"
+
+    private var prefs: android.content.SharedPreferences? = null
+    /** Tracks the last position value that was actually flushed to disk per URL. */
+    private val lastPersistedMs = ConcurrentHashMap<String, Long>()
+
+    /**
+     * Bootstrap the persistent backing store.  Call once from Application.onCreate().
+     * Also pre-loads any previously saved positions into the in-memory cache so that
+     * the very first `resumePositionFor()` call (which happens inside DisposableEffect
+     * before any save()) already has data.
+     */
+    fun init(context: Context) {
+        prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // Hydrate in-memory cache from disk
+        prefs?.all?.forEach { (key, value) ->
+            if (key.startsWith(KEY_PREFIX) && value is Long && value > 0L) {
+                val url = key.removePrefix(KEY_PREFIX)
+                positions[url] = value
+            }
+        }
+        Logger.info("VIDEO", "PlaybackPositionStore initialised — loaded ${positions.size} persisted positions")
+    }
+
     /** Save the current position for [url]. Call this from onDispose / pause,
      *  not on a tight timer, to keep writes cheap. */
     fun save(url: String, positionMs: Long, durationMs: Long) {
-        if (url.isBlank()) return
-        if (positionMs > 0L) {
-            positions[url] = positionMs
+        if (url.isBlank() || positionMs <= 0L) return
+
+        if (positionMs < 1000L) return // Ignore noisy saves at the very beginning
+
+        positions[url] = positionMs
+
+        // Throttle disk writes: only flush if position has moved meaningfully.
+        val lastDisk = lastPersistedMs[url] ?: 0L
+        if (kotlin.math.abs(positionMs - lastDisk) >= DISK_WRITE_THRESHOLD_MS) {
+            persistSave(url, positionMs)
         }
-        Logger.info("VIDEO", "Saved position for $url -> ${positionMs}ms")
     }
 
     /** Returns the remembered position for [url], or 0L if none / not resumable. */
@@ -49,6 +87,50 @@ internal object PlaybackPositionStore {
 
     fun clear(url: String) {
         positions.remove(url)
+        persistRemove(url)
+    }
+
+    // ─── Disk helpers ───────────────────────────────────────────────────────
+
+    private fun persistSave(url: String, positionMs: Long) {
+        val sp = prefs ?: return
+        lastPersistedMs[url] = positionMs
+        try {
+            val editor = sp.edit()
+            editor.putLong("$KEY_PREFIX$url", positionMs)
+
+            // LRU bookkeeping — keep the most recent MAX_PERSISTED_ENTRIES entries.
+            val order = sp.getString(ORDER_KEY, "")?.split("\n")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf()
+            order.remove(url)
+            order.add(0, url) // Most recent first
+            if (order.size > MAX_PERSISTED_ENTRIES) {
+                val evicted = order.subList(MAX_PERSISTED_ENTRIES, order.size).toList()
+                for (e in evicted) {
+                    editor.remove("$KEY_PREFIX$e")
+                    lastPersistedMs.remove(e)
+                }
+                while (order.size > MAX_PERSISTED_ENTRIES) order.removeAt(order.size - 1)
+            }
+            editor.putString(ORDER_KEY, order.joinToString("\n"))
+            editor.apply()
+        } catch (e: Exception) {
+            Logger.warn("VIDEO", "Failed to persist playback position: ${e.message}")
+        }
+    }
+
+    private fun persistRemove(url: String) {
+        val sp = prefs ?: return
+        lastPersistedMs.remove(url)
+        try {
+            val editor = sp.edit()
+            editor.remove("$KEY_PREFIX$url")
+            val order = sp.getString(ORDER_KEY, "")?.split("\n")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf()
+            order.remove(url)
+            editor.putString(ORDER_KEY, order.joinToString("\n"))
+            editor.apply()
+        } catch (e: Exception) {
+            Logger.warn("VIDEO", "Failed to remove persisted playback position: ${e.message}")
+        }
     }
 }
 

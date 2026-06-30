@@ -31,6 +31,13 @@ android {
         }
     }
 
+    val localProperties = java.util.Properties()
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localProperties.load(java.io.FileInputStream(localPropertiesFile))
+    }
+    val githubPat = localProperties.getProperty("GITHUB_PAT", "")
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")  // add this
@@ -46,6 +53,8 @@ android {
             // Tor proxy ports
             buildConfigField("int", "TOR_SOCKS_PORT", "9050")
             buildConfigField("int", "TOR_CONTROL_PORT", "9051")
+            
+            buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
         }
         debug {
             isDebuggable = true
@@ -63,6 +72,8 @@ android {
             // Tor proxy ports for debug build
             buildConfigField("int", "TOR_SOCKS_PORT", "9052")
             buildConfigField("int", "TOR_CONTROL_PORT", "9053")
+
+            buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
         }
     }
 

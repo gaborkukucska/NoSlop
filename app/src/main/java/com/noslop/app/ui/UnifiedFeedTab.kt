@@ -11,6 +11,8 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -757,13 +759,15 @@ fun UnifiedFeedTab(
     if (showSearchModal) {
         var localSearchQuery by remember { mutableStateOf(searchQuery) }
         var localFilterMode by remember { mutableStateOf(filterMode) }
-
         AlertDialog(
             onDismissRequest = { showSearchModal = false },
             containerColor = SurfaceDark,
             title = { Text("Search & Filter", color = AccentGreen, fontWeight = FontWeight.Bold) },
             text = {
-                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     OutlinedTextField(
                         value = localSearchQuery,
                         onValueChange = { localSearchQuery = it },
@@ -775,8 +779,12 @@ fun UnifiedFeedTab(
                             }
                         },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, focusedTextColor = TextLight, unfocusedTextColor = TextLight),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, 
+                            focusedTextColor = TextLight, unfocusedTextColor = TextLight,
+                            focusedContainerColor = PrimaryBlack, unfocusedContainerColor = PrimaryBlack
+                        ),
                         shape = RoundedCornerShape(12.dp),
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
@@ -793,30 +801,31 @@ fun UnifiedFeedTab(
                         )
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
                     Button(
-                        onClick = {
-                            val q = if (localSearchQuery.isNotBlank()) localSearchQuery else "Trending"
+                        onClick = { 
+                            val q = localSearchQuery.trim()
                             if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                             searchQuery = q
                             filterMode = localFilterMode
-                            searchResultsActive = true
-                            viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                            if (q.isNotBlank()) {
+                                searchResultsActive = true
+                                viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                            }
                             showSearchModal = false
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                        modifier = Modifier.fillMaxWidth().height(44.dp), shape = RoundedCornerShape(12.dp)
+                        modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold)
+                        Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
-                    Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     val myContentSelected = localFilterMode == "My Content"
                     Box(
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (myContentSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "My Content" }
-                            .then(if (myContentSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                            .then(if (myContentSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -825,11 +834,10 @@ fun UnifiedFeedTab(
                             Text("My Content", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
                     val meshSelected = localFilterMode == "Mesh"
                     Box(
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (meshSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "Mesh" }
-                            .then(if (meshSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                            .then(if (meshSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -838,17 +846,16 @@ fun UnifiedFeedTab(
                             Text("Mesh Network", color = if (meshSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (meshSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Random" to Icons.Default.Shuffle, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 row.forEach { (mode, icon) ->
                                     val selected = localFilterMode == mode
                                     Box(
                                         modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = mode }
-                                            .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                                            .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 8.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -863,13 +870,13 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    Text("Lists", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Lists", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("History" to Icons.Default.History, "Liked" to Icons.Default.Favorite).forEach { (mode, icon) ->
                             val selected = localFilterMode == mode
                             Box(
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = mode }
-                                    .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .then(if (selected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -883,6 +890,24 @@ fun UnifiedFeedTab(
 
                     Button(
                         onClick = { 
+                            searchQuery = ""
+                            filterMode = "Live Feed"
+                            searchResultsActive = false
+                            viewModel.refreshLiveFeed()
+                            showSearchModal = false 
+                        },
+                        modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 8.dp), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen.copy(alpha = 0.15f), contentColor = AccentGreen),
+                        border = BorderStroke(1.dp, AccentGreen)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Refresh Feed", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+
+                    Button(
+                        onClick = { 
                             if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                             searchQuery = ""
                             filterMode = "Random"
@@ -890,11 +915,11 @@ fun UnifiedFeedTab(
                             viewModel.syncFilterMode("Random")
                             showSearchModal = false 
                         },
-                        modifier = Modifier.fillMaxWidth().height(44.dp), 
+                        modifier = Modifier.fillMaxWidth().height(40.dp), 
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen)
                     ) {
-                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Random Discover", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }

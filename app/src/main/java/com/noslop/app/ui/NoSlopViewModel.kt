@@ -779,6 +779,42 @@ fun toggleAggregator() {
         }
     }
 
+    /**
+     * Refreshes the Live Feed with a completely fresh mix of content from the
+     * existing database — no network fetch.  Clears the session-seen IDs and
+     * refreshes the exclusion caches (viewed / swiped) so the new mix excludes
+     * anything the user has already consumed, then rebuilds the interleaved
+     * feed from scratch and scrolls to the top.
+     */
+    fun refreshLiveFeed() {
+        if (_isRefreshingFeeds.value) return
+        _isRefreshingFeeds.value = true
+        viewModelScope.launch {
+            try {
+                // Reset feed state without nuking the underlying DB content
+                _unifiedFeed.value = emptyList()
+                cachedDefaultFeed = emptyList()
+                sessionLoadedIds.clear()
+                isSearchModeActive = false
+                savedFeedItemId = null
+                currentFilterMode = "Live Feed"
+
+                // Refresh what's been seen / swiped so the new mix excludes them
+                refreshExclusionCaches()
+
+                // Rebuild a fresh interleaved batch from existing allFeeds / allMeshes
+                loadMoreFeedItems("Live Feed")
+
+                // Scroll the pager back to the top
+                _scrollToTopEvent.emit(Unit)
+            } catch (e: Exception) {
+                Logger.error("VM", "Refresh live feed exception: ${e.message}")
+            } finally {
+                _isRefreshingFeeds.value = false
+            }
+        }
+    }
+
     fun markItemReadState(id: String, isRead: Boolean) {
         viewModelScope.launch { repository.updateReadState(id, isRead) }
     }
