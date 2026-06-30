@@ -32,18 +32,21 @@ object GossipService {
     private var transport: MeshTransport? = null
     private var localPublicKeyB64: String = ""
     private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
+    private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun initialize(
         peerDao: PeerDao,
         transport: MeshTransport,
         localPublicKeyB64: String,
-        getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
+        getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null,
+        checkEntityExists: (suspend (String, String) -> Boolean)? = null
     ) {
         this.peerDao = peerDao
         this.transport = transport
         this.localPublicKeyB64 = localPublicKeyB64
         this.getMeshFilterSettings = getMeshFilterSettings
+        this.checkEntityExists = checkEntityExists
         
         cleanupJob?.cancel()
         cleanupJob = scope.launch {
@@ -172,13 +175,43 @@ object GossipService {
         if (packet.type == "REACTION" || packet.type == "VOTE" || packet.type == "CHAT_REACTION" || 
             packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE") {
             if (!filterSettings.allowIncomingReactions) {
-                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id}")
-                return false
+                var isExempt = false
+                val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
+                if (payloadObj != null && checkEntityExists != null) {
+                    when (packet.type) {
+                        "REACTION", "VOTE" -> {
+                            val postId = payloadObj.get("postId")?.asString
+                            if (postId != null && checkEntityExists!!("POST", postId)) isExempt = true
+                        }
+                        "CHAT_REACTION" -> {
+                            val msgId = payloadObj.get("messageId")?.asString
+                            if (msgId != null && checkEntityExists!!("MESSAGE", msgId)) isExempt = true
+                        }
+                        "COMMENT_REACTION", "COMMENT_VOTE" -> {
+                            val commentId = payloadObj.get("commentId")?.asString
+                            if (commentId != null && checkEntityExists!!("COMMENT", commentId)) isExempt = true
+                        }
+                    }
+                }
+                
+                if (!isExempt) {
+                    Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally)")
+                    return false
+                }
             }
         } else if (packet.type == "COMMENT") {
             if (!filterSettings.allowIncomingComments) {
-                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id}")
-                return false
+                var isExempt = false
+                val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
+                if (payloadObj != null && checkEntityExists != null) {
+                    val postId = payloadObj.get("postId")?.asString
+                    if (postId != null && checkEntityExists!!("POST", postId)) isExempt = true
+                }
+                
+                if (!isExempt) {
+                    Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")
+                    return false
+                }
             }
         } else if (packet.type == "POST") {
             val postPay = packet.getPostPayload()

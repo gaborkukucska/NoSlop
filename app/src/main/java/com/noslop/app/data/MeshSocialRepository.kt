@@ -187,15 +187,6 @@ class MeshSocialRepository(
         clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
-        val filterSettings = getMeshFilterSettings()
-        if (clearnetUrl != null) {
-            if (!filterSettings.allowOutgoingClearnetShares) return@withContext null
-        } else if (mediaMetadata != null) {
-            if (mediaMetadata.type == "image" && !filterSettings.allowOutgoingImagePosts) return@withContext null
-            if (mediaMetadata.type == "video" && !filterSettings.allowOutgoingVideoPosts) return@withContext null
-        } else {
-            if (!filterSettings.allowOutgoingTextPosts) return@withContext null
-        }
         val myKeys = getLocalIdentity() ?: return@withContext null
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
@@ -262,7 +253,20 @@ class MeshSocialRepository(
         postDao.insertPost(localPost)
         Logger.info(TAG, "Local post created and signed", "postId=${id}")
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        val filterSettings = getMeshFilterSettings()
+        val shouldBroadcast = if (clearnetUrl != null) {
+            filterSettings.allowOutgoingClearnetShares
+        } else if (mediaMetadata != null) {
+            if (mediaMetadata.type == "image") filterSettings.allowOutgoingImagePosts
+            else if (mediaMetadata.type == "video") filterSettings.allowOutgoingVideoPosts
+            else true
+        } else {
+            filterSettings.allowOutgoingTextPosts
+        }
+
+        if (shouldBroadcast) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         localPost
     }
 
@@ -532,7 +536,6 @@ class MeshSocialRepository(
         parentCommentId: String? = null,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingComments) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
@@ -589,12 +592,16 @@ class MeshSocialRepository(
         )
 
         commentDao.insertComment(localComment)
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        
+        // Always broadcast comments on mesh posts (if we are commenting, the post is already tracked locally).
+        // If we want to support isBridging for comments later, we can add it here.
+        if (getMeshFilterSettings().allowOutgoingComments) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         true
     }
 
-    suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
+    suspend fun reactToMeshPost(postId: String, reactionType: String, isBridging: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val reactionId = "${postId}_${myKeys.publicKeyB64}_$reactionType"
@@ -636,13 +643,20 @@ class MeshSocialRepository(
             )
             reactionDao.insertReaction(localReaction)
         }
+        
+        val shouldBroadcast = if (isBridging) {
+            getMeshFilterSettings().allowOutgoingReactions
+        } else {
+            true // Already shared on the mesh
+        }
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        if (shouldBroadcast) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         true
     }
 
     suspend fun voteToMeshPost(postId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val voteId = "${postId}_${myKeys.publicKeyB64}_$voteType"
@@ -685,7 +699,9 @@ class MeshSocialRepository(
             voteDao.insertVote(localVote)
         }
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        if (getMeshFilterSettings().allowOutgoingReactions) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         true
     }
 
@@ -723,11 +739,10 @@ class MeshSocialRepository(
             )
         }
 
-        reactToMeshPost(anchorId, reactionType)
+        reactToMeshPost(anchorId, reactionType, existingCount == 0)
     }
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
@@ -771,15 +786,16 @@ class MeshSocialRepository(
                 payload = com.google.gson.Gson().toJsonTree(reactionPayload),
                 signature = signature
             )
-            repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+            if (getMeshFilterSettings().allowOutgoingReactions) {
+                repositoryScope.launch {
+                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                }
             }
         }
         true
     }
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
@@ -825,12 +841,13 @@ class MeshSocialRepository(
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
             signature = signature
         )
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        if (getMeshFilterSettings().allowOutgoingReactions) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         true
     }
 
     suspend fun voteToComment(commentId: String, voteType: String): Boolean = withContext(Dispatchers.IO) {
-        if (!getMeshFilterSettings().allowOutgoingReactions) return@withContext false
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val voteId = "${commentId}_${myKeys.publicKeyB64}_$voteType"
@@ -873,7 +890,9 @@ class MeshSocialRepository(
             commentVoteDao.insertVote(localVote)
         }
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        if (getMeshFilterSettings().allowOutgoingReactions) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         true
     }
 

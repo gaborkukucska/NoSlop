@@ -85,7 +85,13 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()
             if (identity != null) {
-                GossipService.initialize(repository.peerDao, repository.meshTransport, identity.publicKeyB64)
+                GossipService.initialize(
+                    repository.peerDao, 
+                    repository.meshTransport, 
+                    identity.publicKeyB64,
+                    getMeshFilterSettings = { repository.getMeshFilterSettings() },
+                    checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) }
+                )
                 repository.startPresenceHeartbeat()
             }
         }

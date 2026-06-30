@@ -66,6 +66,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
+    suspend fun checkEntityExistsLocally(type: String, id: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        when(type) {
+            "POST" -> db.postDao().hasPost(id) > 0
+            "COMMENT" -> db.commentDao().hasComment(id) > 0
+            "MESSAGE" -> db.messageDao().hasMessage(id) > 0
+            else -> false
+        }
+    }
+
     // --- State Observables ---
     // Feed observables re-exposed from FeedRepository (Stage 0.3) so UI subscribers are unchanged.
     val allSources: Flow<List<FeedSource>> = feedRepository.allSources
@@ -117,7 +126,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         identityRepository.saveIdentity(handle, keys, mnemonic)
-        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64) { settingsRepository.getMeshFilterSettings() }
+        com.noslop.app.mesh.GossipService.initialize(
+            peerDao, 
+            meshTransport, 
+            keys.publicKeyB64,
+            getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
+            checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) }
+        )
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         
@@ -169,6 +184,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun updateMediaSettings(settings: MediaSettings) =
         settingsRepository.updateMediaSettings(settings)
+
+    suspend fun getMeshFilterSettings(): MeshFilterSettings =
+        settingsRepository.getMeshFilterSettings()
 
     suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) =
         settingsRepository.updateMeshFilterSettings(settings)

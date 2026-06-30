@@ -105,6 +105,9 @@ interface MessageDao {
     @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub ORDER BY timestamp ASC")
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>>
 
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE id = :id")
+    suspend fun hasMessage(id: String): Int
+
     @Query("""
         SELECT * FROM chat_messages 
         GROUP BY chatWithPeerPub 
@@ -126,6 +129,9 @@ interface MessageDao {
 interface CommentDao {
     @Query("SELECT * FROM mesh_comments WHERE postId = :postId ORDER BY timestamp ASC")
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>>
+
+    @Query("SELECT COUNT(*) FROM mesh_comments WHERE id = :id")
+    suspend fun hasComment(id: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComment(comment: MeshComment)
