@@ -43,6 +43,9 @@ android {
             // Local bind port — Tor maps external 9999 → this port.
             buildConfigField("int", "MESH_LISTEN_PORT", "9999")
             buildConfigField("int", "MEDIA_PROXY_PORT", "8080")
+            // Tor proxy ports
+            buildConfigField("int", "TOR_SOCKS_PORT", "9050")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9051")
         }
         debug {
             isDebuggable = true
@@ -57,6 +60,9 @@ android {
             // Tor will map external 9999 → local 9998 for this build.
             buildConfigField("int", "MESH_LISTEN_PORT", "9998")
             buildConfigField("int", "MEDIA_PROXY_PORT", "8081")
+            // Tor proxy ports for debug build
+            buildConfigField("int", "TOR_SOCKS_PORT", "9052")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9053")
         }
     }
 

@@ -17,6 +17,13 @@ object Constants {
     val MESH_LISTEN_PORT: Int = com.noslop.app.BuildConfig.MESH_LISTEN_PORT
 
     /**
+     * Ports for the embedded Tor daemon.
+     * Different builds use different ports so their Tor instances don't collide when running side-by-side.
+     */
+    val TOR_SOCKS_PORT: Int = com.noslop.app.BuildConfig.TOR_SOCKS_PORT
+    val TOR_CONTROL_PORT: Int = com.noslop.app.BuildConfig.TOR_CONTROL_PORT
+
+    /**
      * The NoSlop landing page's content.json — same file the website reads to render the
      * hero download button. We re-use `hero.apkUrl` (which embeds the release version in
      * its GitHub path, e.g. ".../download/v0.1.3-alpha/NoSlop.apk") as our single source of

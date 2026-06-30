@@ -29,7 +29,7 @@ enum class TorState { IDLE, STARTING, PROXY_READY, READY, FAILED }
 object TorService {
 
     private const val TAG = "TOR"
-    const val SOCKS_PORT = 9050
+    val SOCKS_PORT = Constants.TOR_SOCKS_PORT
     const val PROXY_HOST = "127.0.0.1"
 
     var onAddressCallback: ((String) -> Unit)? = null
@@ -181,7 +181,7 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
             
-            val content = "ControlPort 9051\nCookieAuthentication 1\n"
+            val content = "SocksPort $SOCKS_PORT\nControlPort ${Constants.TOR_CONTROL_PORT}\nCookieAuthentication 1\n"
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {
@@ -197,7 +197,7 @@ object TorService {
             for (attempt in 1..timeoutSeconds) {
                 try {
                     Socket().use { socket ->
-                        socket.connect(InetSocketAddress(PROXY_HOST, 9051), 500)
+                        socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 500)
                         return@withContext true
                     }
                 } catch (e: Exception) {
@@ -278,10 +278,10 @@ object TorService {
         withContext(Dispatchers.IO) {
             Logger.info(TAG, "Registering Tor hidden service on port ${Constants.MESH_PORT} (persistent=${privateKeyB64 != null})...")
             try {
-                // Wait for control port 9051 to be ready
+                // Wait for control port to be ready
                 waitForControlPort(timeoutSeconds = 10)
 
-                val controlSocket = Socket(PROXY_HOST, 9051)
+                val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
                 val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
 

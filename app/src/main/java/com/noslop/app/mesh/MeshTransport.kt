@@ -16,7 +16,7 @@ class MeshTransport(
     val repository: NoSlopRepository,
     private val listenPort: Int = Constants.MESH_LISTEN_PORT,
     private val socksHost: String = "127.0.0.1",
-    private val socksPort: Int = 9050
+    private val socksPort: Int = Constants.TOR_SOCKS_PORT
 ) {
     private val TAG = "MESH_TRANSPORT"
     private var serverSocket: ServerSocket? = null
