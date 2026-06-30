@@ -17,6 +17,13 @@
 *   **Native GitHub Issue Reporting**: Upgraded the "Bug Report" flow from a raw browser intent to a native GitHub REST API submission tool. It now automatically pulls `GITHUB_PAT` and `GITHUB_ASSIGNEE` from `local.properties` (exposed via `BuildConfig`), allows users to select an Issue Type (Bug, Feature Request, Question), and automatically formats and attaches their device hardware info and recent app logs to the GitHub issue.
 
 ## Completed Changes (2026-06-29)
+
+### 1. Bouncy Castle Migration & Lazysodium Key Generation
+*   **Unified Bouncy Castle Signing**: Completely migrated `CryptoService.kt` to use Bouncy Castle's lightweight `Ed25519Signer` directly, bypassing the platform JCA `Signature` API. This unifies signing across all Android versions (API 24-35).
+*   **Lazysodium Key Generation**: Added `lazysodium-android` as the primary key generator for Ed25519, ensuring high-quality keys consistent with iOS and other platforms. Includes a Bouncy Castle fallback if the JNA native library fails to load.
+*   **ProGuard Fixes**: Added explicit keep rules for `com.goterl.lazysodium.**` and `com.sun.jna.**` to prevent release builds from crashing due to R8 stripping native method bindings.
+
+### 2. DM Chat UI & Navigation Fixes
 *   **NavigationBar Keyboard Fix**: Fixed a visual glitch where the bottom navigation bar remained behind the keyboard when typing in a DM, exposing an empty black space. The `NavigationBar` and `FloatingActionButton` are now explicitly hidden when the user is in an active chat thread (`selectedPeerPub != null`).
 *   **Hardware Back Button Navigation**: Implemented a Compose `BackHandler` in `DMsTab`. Pressing the phone's hardware back button while in a chat now properly returns to the contacts list instead of minimizing the entire application.
 
