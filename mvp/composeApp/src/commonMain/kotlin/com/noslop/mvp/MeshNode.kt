@@ -32,6 +32,9 @@ interface MeshSink {
     suspend fun onEditPost(packet: NetworkPacket, e: EditPostPayload) {}
     /** A DELETE_POST arrived (signature verified; the sink must still enforce the author-match rule). */
     suspend fun onDeletePost(packet: NetworkPacket, d: DeletePostPayload) {}
+    /** A SYNC_RESPONSE batch arrived. Items are only author-signed individually — the sink must verify
+     *  each one before applying (the packet itself is unsigned, like Android's). */
+    suspend fun onSyncResponse(packet: NetworkPacket, s: SyncResponsePayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -93,6 +96,7 @@ class MeshNode(
         packet.getMediaRequestPayload()?.let { sink.onMediaRequest(packet, it) }
         packet.getEditPostPayload()?.let { sink.onEditPost(packet, it) }
         packet.getDeletePostPayload()?.let { sink.onDeletePost(packet, it) }
+        packet.getSyncResponsePayload()?.let { sink.onSyncResponse(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {

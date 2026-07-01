@@ -985,12 +985,23 @@ private class MeshUiState(private val scope: CoroutineScope) {
         }
     }
 
+    private var syncRequested = false   // once per app session — reconnects don't re-spam (dedup would eat it anyway)
+
     private fun onLinked(invite: MeshInvite, save: Boolean, how: String) {
         connected = true
         status = "Connected ✓ ${how.ifBlank { "" }}— ${client.linkCount} link(s)".replace("  ", " ")
         if (save) { SavedNodes.add(invite.toUri()); reloadSaved() }
         // Re-handshake every Android contact through the (now-connected) bridge: dial + signed CONNECTION_REQUEST.
         contacts.filter { it.onionAddress != null }.forEach { handshakeAndroidContact(it) }
+        // Engagement sync: ask peers for the last week's posts/comments/reactions we missed while offline.
+        // Delayed so the bridge has dialed our Android peers first (a request with 0 linked peers is lost).
+        if (!syncRequested) {
+            syncRequested = true
+            scope.launch {
+                delay(25_000)
+                client.requestSync(since = nowMillis() - SYNC_WINDOW_MS)
+            }
+        }
     }
 
     /** User-initiated disconnect: stop auto-reconnect and drop the link, keeping the client reusable. */
@@ -1081,6 +1092,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
     private companion object {
         const val HANDSHAKE_RETRY_MS = 3L * 24 * 60 * 60 * 1000   // ~3 days between handshake retries
         const val BLOCKED_KEY = "blocked_authors"                  // meta-store key, newline-joined author ids
+        const val SYNC_WINDOW_MS = 7L * 24 * 60 * 60 * 1000       // catch-up horizon for SYNC_REQUEST
     }
 
     /** My Android-b64 author id — what my own posts/comments carry as `authorId`. */

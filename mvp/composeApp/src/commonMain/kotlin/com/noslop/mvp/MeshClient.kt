@@ -71,6 +71,47 @@ class MeshClient(
             override suspend fun onDeletePost(packet: NetworkPacket, d: DeletePostPayload) {
                 onDeletePost?.invoke(d)
             }
+            override suspend fun onSyncResponse(packet: NetworkPacket, s: SyncResponsePayload) {
+                // Catch-up batches answering our SYNC_REQUEST (targeted; the bridge fans inbound packets to
+                // all leaves, so drop ones aimed at another leaf). Every item is verified exactly like its
+                // live packet, then fed through the SAME callbacks — one dedup/aggregation path for both.
+                if (packet.targetUserId != null && packet.targetUserId != nodeId) return
+                var applied = 0
+                for (p in s.posts) {
+                    val sig = p.signature ?: continue
+                    val msg = buildString {
+                        append(p.id).append('|').append(p.authorId).append('|').append(p.content).append('|').append(p.timestamp)
+                        p.authorAvatarB64?.let { append('|').append(it) }
+                    }
+                    if (!verify(msg, sig, p.authorId)) continue
+                    store?.savePost(p.toMeshPost())
+                    onPost?.invoke(p); applied++
+                }
+                s.comments?.forEach { c ->
+                    val msg = buildString {
+                        append(c.postId).append('|').append(c.id).append('|').append(c.content).append('|').append(c.timestamp)
+                        c.authorAvatarB64?.let { append('|').append(it) }
+                    }
+                    if (!verify(msg, c.signature, c.authorId)) return@forEach
+                    onComment?.invoke(CommentPayload(
+                        postId = c.postId,
+                        comment = CommentData(
+                            id = c.id, authorId = c.authorId, authorName = c.authorName,
+                            authorAvatarB64 = c.authorAvatarB64, content = c.content,
+                            timestamp = c.timestamp, signature = c.signature,
+                        ),
+                        parentCommentId = c.parentCommentId,
+                    )); applied++
+                }
+                s.reactions?.forEach { r ->
+                    if (!verify("${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}", r.signature, r.authorId)) return@forEach
+                    onReaction?.invoke(ReactionPayload(
+                        postId = r.postId, reactionType = r.reactionType, authorId = r.authorId,
+                        timestamp = r.timestamp, signature = r.signature, action = "add",
+                    )); applied++
+                }
+                if (applied > 0) com.noslop.mvp.debug.Logger.info("SYNC", "applied $applied synced item(s)")
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
@@ -322,6 +363,19 @@ class MeshClient(
         store?.markPostOrphaned(postId)
         node.broadcast(deletePostPacket(nodeId, payload))
         return true
+    }
+
+    /**
+     * Ask peers for content/engagement since [since] — the catch-up a joining node needs (roadmap
+     * "engagement sync in gossip"). Broadcast via the bridge; every handshaked Android peer that has us
+     * in its peer table answers with targeted SYNC_RESPONSE batches (handled in the sink above).
+     * Unsigned + rate-limit-exempt on both platforms.
+     */
+    suspend fun requestSync(since: Long) {
+        node.broadcast(NetworkPacket(
+            id = randomId(), hops = 2, senderId = nodeId, type = "SYNC_REQUEST",
+            payload = NetworkPacket.payloadOf(SyncRequestPayload(since), SyncRequestPayload.serializer()),
+        ))
     }
 
     /** Drop all links but keep the client usable for a fresh [connect] (user-initiated disconnect). */

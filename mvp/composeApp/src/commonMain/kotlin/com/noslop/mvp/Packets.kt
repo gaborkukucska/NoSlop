@@ -68,6 +68,8 @@ data class NetworkPacket(
     fun getMediaTransferAckPayload(): MediaTransferAckPayload? = decode("MEDIA_TRANSFER_ACK", MediaTransferAckPayload.serializer())
     fun getEditPostPayload(): EditPostPayload? = decode("EDIT_POST", EditPostPayload.serializer())
     fun getDeletePostPayload(): DeletePostPayload? = decode("DELETE_POST", DeletePostPayload.serializer())
+    fun getSyncRequestPayload(): SyncRequestPayload? = decode("SYNC_REQUEST", SyncRequestPayload.serializer())
+    fun getSyncResponsePayload(): SyncResponsePayload? = decode("SYNC_RESPONSE", SyncResponsePayload.serializer())
 }
 
 /**
@@ -250,6 +252,49 @@ data class CommentData(
     val content: String,
     val timestamp: Long,
     val signature: String,
+)
+
+/** Ask peers for content/engagement since [since] (ms epoch). Peers answer with **targeted**
+ *  SYNC_RESPONSE batches (Android sends ≤5 items per packet, one kind per packet). Unsigned on Android. */
+@Serializable
+data class SyncRequestPayload(val since: Long)
+
+/** A comment inside a SYNC_RESPONSE — flat, unlike the live COMMENT's nested [CommentData]. Signed the
+ *  same as a live comment: `"$postId|$id|$content|$timestamp"` (+avatar). */
+@Serializable
+data class CommentSyncData(
+    val id: String,
+    @SerialName("post_id") val postId: String,
+    @SerialName("author_id") val authorId: String,
+    @SerialName("author_name") val authorName: String,
+    @SerialName("author_avatar_b64") val authorAvatarB64: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val signature: String,
+    @SerialName("parent_comment_id") val parentCommentId: String? = null,
+    @SerialName("media_id") val mediaId: String? = null,
+    @SerialName("media_type") val mediaType: String? = null,
+    @SerialName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+)
+
+/** A reaction inside a SYNC_RESPONSE. Signed like a live reaction: `"$postId|$reactionType|$authorId|$timestamp"`. */
+@Serializable
+data class ReactionSyncData(
+    val id: String,
+    @SerialName("post_id") val postId: String,
+    @SerialName("author_id") val authorId: String,
+    @SerialName("reaction_type") val reactionType: String,
+    val timestamp: Long,
+    val signature: String,
+)
+
+/** One SYNC_RESPONSE batch. Unsigned at the packet level — every carried item is individually
+ *  author-signed and MUST be verified before applying (Android `handleSyncResponse` does the same). */
+@Serializable
+data class SyncResponsePayload(
+    val posts: List<PostPayload> = emptyList(),
+    val comments: List<CommentSyncData>? = null,
+    val reactions: List<ReactionSyncData>? = null,
 )
 
 /** Author edits their post — signed `"$postId|$authorId|$content|$timestamp"`. Receivers must check the
