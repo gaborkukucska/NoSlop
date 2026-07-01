@@ -275,6 +275,26 @@ private fun FeedScreen(mesh: MeshUiState) {
     var backgroundSyncEnabled by remember { mutableStateOf(false) }
     var commentsForPost by remember { mutableStateOf<String?>(null) }   // mesh post whose comments are open
     val scheduler = remember { BackgroundScheduler() }
+    // Manual search routed by media type (Roadmap #8). Results replace the feed; ↻ restores it.
+    var searchText by remember { mutableStateOf("") }
+    var searchMode by remember { mutableStateOf<String?>(null) }        // null = everything
+
+    fun runSearch() {
+        val q = searchText.trim()
+        if (q.isEmpty()) return
+        loading = true; error = null
+        scope.launch {
+            runCatching { repo.search(q, searchMode) }
+                .onSuccess { results ->
+                    stories = results
+                    FeedSession.stories = results
+                    FeedSession.page = 0
+                    if (results.isEmpty()) error = "No results for \"$q\""
+                }
+                .onFailure { error = it.message ?: "Search failed" }
+            loading = false
+        }
+    }
 
     fun load() {
         loading = true; error = null
@@ -369,6 +389,26 @@ private fun FeedScreen(mesh: MeshUiState) {
             if (showFilters) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Search across the public sources, routed by result type (Android search parity).
+                        OutlinedTextField(
+                            searchText, { searchText = it },
+                            label = { Text("Search sources") }, modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focus.clearFocus(); runSearch() }),
+                            trailingIcon = { Text("🔎", modifier = Modifier.clickable { focus.clearFocus(); runSearch() }.padding(8.dp)) },
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(null to "All", "Videos" to "Videos", "Audio" to "Audio", "Images" to "Images", "Articles" to "Articles")
+                                .forEach { (mode, label) ->
+                                    val on = searchMode == mode
+                                    Box(
+                                        Modifier.clip(RoundedCornerShape(12.dp))
+                                            .background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else SurfaceDark)
+                                            .clickable { searchMode = mode }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                                    ) { Text(label, fontSize = 11.sp, color = if (on) MaterialTheme.colorScheme.primary else TextMuted) }
+                                }
+                        }
                         OutlinedTextField(
                             mutedText, { mutedText = it; SavedFilters.saveTexts(it, requiredText) },
                             label = { Text("Mute words (comma-separated)") }, modifier = Modifier.fillMaxWidth(),

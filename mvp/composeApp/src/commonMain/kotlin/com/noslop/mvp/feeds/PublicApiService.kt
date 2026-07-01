@@ -113,6 +113,28 @@ object PublicApiService {
                 { reddit.fetchSubreddit("technology", "new") },
                 { HackerNewsApiClient(client).fetchTopStories() },
             )
+            // Media-type search routing (Roadmap #8 — Android `searchCustomFeed` parity): a manual query
+            // dispatched to the sources that return that result type. Same sources as Android, plus
+            // Internet Archive video (keyless, reliable) so one flaky Invidious instance can't turn a
+            // video search into zero results.
+            "Search Videos" -> listOf(
+                { invidious.searchVideos("$query $language") },
+                { InternetArchiveApiClient(client).searchVideos(query) },
+            )
+            "Search Audio" -> listOf(
+                { JamendoApiClient(client).searchTracks(query) },
+                { PodcastIndexApiClient(client).searchEpisodes(query, getKey, language = language) },
+                { InternetArchiveApiClient(client).searchAudio(query) },
+            )
+            "Search Images" -> listOf(
+                { PexelsApiClient(client).searchPhotos(query, getKey) },
+                { NasaApiClient(client).searchImageLibrary(query) },
+            )
+            "Search Articles" -> listOf(
+                { news.searchArticles(query, null, getKey, language = language) },
+                { guardian.searchArticles(query, null, getKey) },
+            )
+            // "Search" (everything) intentionally falls through to the generic else — same as Android's.
             else -> listOf(
                 { news.searchArticles(query, null, getKey, language = language) },
                 { invidious.searchVideos("$query $language") },

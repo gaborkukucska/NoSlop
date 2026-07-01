@@ -69,6 +69,34 @@ class FeedRepository(
         }
     }
 
+    /**
+     * Manual search routed by media type (Roadmap #8 — Android `searchCustomFeed` parity). [mode] is
+     * "Videos" / "Audio" / "Images" / "Articles", or null to search everything. Applies the same
+     * negative-keyword curation as the main feed; results replace the feed until the next refresh.
+     */
+    suspend fun search(query: String, mode: String?): List<FeedItem> = withContext(Dispatchers.Default) {
+        val language = runCatching { prefs.getLanguagePreference() }.getOrDefault("en")
+        val negatives = runCatching { prefs.getUserNegativeKeywords() }.getOrDefault(emptyList())
+            .map { it.lowercase() }.filter { it.isNotBlank() }
+        val category = when (mode) {
+            "Videos" -> "Search Videos"
+            "Audio" -> "Search Audio"
+            "Images" -> "Search Images"
+            "Articles" -> "Search Articles"
+            else -> "Search"
+        }
+        val items = withTimeoutOrNull(API_TIMEOUT_MS) {
+            runCatching {
+                PublicApiService.fetchItemsForCategory(category, listOf(query), apiKeyResolver, language, client)
+            }.getOrDefault(emptyList())
+        } ?: emptyList()
+        if (negatives.isEmpty()) items
+        else items.filterNot { item ->
+            val hay = (item.title + " " + (item.excerpt ?: "")).lowercase()
+            negatives.any { hay.contains(it) }
+        }
+    }
+
     private suspend fun fetchRss(src: BuiltInSource, limit: Int): List<FeedItem> {
         val xml = client.get(src.url) { header("User-Agent", "NoSlopMVP/0.1") }.bodyAsText()
         return FeedParser.parseStream(xml, src.id).take(limit)
