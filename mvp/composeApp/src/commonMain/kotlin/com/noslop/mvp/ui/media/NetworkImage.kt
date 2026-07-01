@@ -14,11 +14,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import com.noslop.mvp.httpClientEngineFactory
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.contentLength
+import io.ktor.utils.io.readRemaining
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.io.readByteArray
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -64,18 +67,26 @@ fun LocalFileImage(path: String, contentScale: ContentScale, modifier: Modifier)
 // drag in its own ktor and crash the iOS Darwin engine — see the ktor-3.0.3 pin).
 private val imageClient: HttpClient by lazy { httpClientEngineFactory() }
 
+/** Refuse to buffer more than this per image (punch-list M4) — a hostile URL can't OOM us with one response. */
+private const val MAX_IMAGE_BYTES = 10L * 1024 * 1024
+
 /**
  * Minimal, dependency-free network image: fetch bytes with our ktor client, decode via the platform codec
  * (Skia on iOS/desktop, BitmapFactory on Android). The media components ([BlurredImageBackground],
  * [SegmentedArticleReader]) take this as their injected `imageContent`. Fail-safe: any error just leaves an
- * empty box — it never throws, so a bad URL or decode can't crash the feed.
+ * empty box — it never throws, so a bad URL or decode can't crash the feed. Responses are size-capped at
+ * [MAX_IMAGE_BYTES] (checked against Content-Length up front AND while reading, since the header can lie).
  */
 @Composable
 fun NetworkImage(url: String, contentScale: ContentScale, modifier: Modifier) {
     var bitmap by remember(url) { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(url) {
         bitmap = runCatching {
-            val bytes: ByteArray = imageClient.get(url) { header("User-Agent", "NoSlopMVP/0.1") }.body()
+            val response = imageClient.get(url) { header("User-Agent", "NoSlopMVP/0.1") }
+            val declared = response.contentLength()
+            if (declared != null && declared > MAX_IMAGE_BYTES) return@runCatching null
+            val bytes = response.bodyAsChannel().readRemaining(MAX_IMAGE_BYTES + 1).readByteArray()
+            if (bytes.size > MAX_IMAGE_BYTES) return@runCatching null
             withContext(Dispatchers.Default) { decodeImageBitmapOrNull(bytes) }
         }.getOrNull()
     }

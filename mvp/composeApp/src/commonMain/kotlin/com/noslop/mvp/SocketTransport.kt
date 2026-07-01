@@ -36,6 +36,14 @@ import kotlinx.coroutines.sync.withLock
 /** A SOCKS5 proxy to tunnel outbound links through — e.g. Tor's `127.0.0.1:9050`. */
 data class SocksProxy(val host: String, val port: Int)
 
+/**
+ * The node answering at the dialed address is not the one we were told to expect (punch-list H2) —
+ * whoever controls the endpoint (or the route to it) is impersonating the hub. Callers must NOT fall
+ * back to connecting anyway; surface it to the user and stop retrying.
+ */
+class HubIdentityMismatch(val expected: String, val actual: String) :
+    Exception("hub identity mismatch: expected ${expected.take(16)}…, got ${actual.take(16)}…")
+
 class SocketTransport(
     val nodeId: String,
     private val scope: CoroutineScope,
@@ -88,18 +96,21 @@ class SocketTransport(
      * Dial an outbound link (leaf → HUB). Suspends until the id handshake completes and the link is up.
      * If [proxy] is set, the connection is tunnelled through a SOCKS5 proxy — this is how a leaf reaches a
      * HUB's `.onion` via Tor (point [proxy] at Tor's SOCKS port and pass the onion address as [host]).
+     * With [expectedPeerId] set, the peer's handshaked node id is **pinned**: a mismatch closes the socket
+     * and throws [HubIdentityMismatch] instead of linking (punch-list H2 — anyone answering at the onion
+     * must not silently become our hub).
      */
     suspend fun connect(
         host: String, port: Int, proxy: SocksProxy? = null,
-        handshake: Boolean = true, peerId: String? = null,
+        handshake: Boolean = true, peerId: String? = null, expectedPeerId: String? = null,
     ) {
         if (proxy == null) {
             val socket = aSocket(selector).tcp().connect(host, port)
-            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true), handshake, peerId)
+            handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true), handshake, peerId, expectedPeerId)
         } else {
             // socks5Connect opens the channels for the handshake; reuse them (a socket's channels open once).
             val (socket, input, output) = socks5Connect(proxy, host, port)
-            handle(socket, input, output, handshake, peerId)
+            handle(socket, input, output, handshake, peerId, expectedPeerId)
         }
     }
 
@@ -153,7 +164,7 @@ class SocketTransport(
 
     private suspend fun handle(
         socket: Socket, input: ByteReadChannel, output: ByteWriteChannel,
-        handshake: Boolean = true, knownPeerId: String? = null,
+        handshake: Boolean = true, knownPeerId: String? = null, expectedPeerId: String? = null,
     ) {
         val peer = socket.remoteAddress
         val peerId: String
@@ -167,6 +178,13 @@ class SocketTransport(
             } catch (e: Throwable) {
                 println("[transport] handshake error with $peer: $e")
                 runCatching { socket.close() }; return
+            }
+            // Identity pinning (H2): the invite told us who should answer here — reject an impostor
+            // BEFORE registering the link (else it would receive our broadcasts, incl. DMs to relay).
+            if (expectedPeerId != null && peerId != expectedPeerId) {
+                println("[transport] REJECTED link from $peer: id ${peerId.take(16)}… ≠ pinned ${expectedPeerId.take(16)}…")
+                runCatching { socket.close() }
+                throw HubIdentityMismatch(expected = expectedPeerId, actual = peerId)
             }
         } else {
             // Handshake-less (Android-protocol peer): no preamble, just NetworkPacket JSON lines. We already

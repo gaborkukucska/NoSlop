@@ -127,9 +127,12 @@ class MeshClient(
 
     /**
      * Dial a HUB. With [proxy] set, tunnels through a SOCKS5 proxy — pass Tor's SOCKS port and an `.onion`
-     * [host] to reach the hub over Tor. Throws on failure (no hub/proxy, refused, …); caller surfaces it.
+     * [host] to reach the hub over Tor. With [expectedNodeId] set (from the invite QR), the hub's identity
+     * is pinned — an impostor answering at the address throws [HubIdentityMismatch] instead of linking (H2).
+     * Throws on failure (no hub/proxy, refused, …); caller surfaces it.
      */
-    suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null) = transport.connect(host, port, proxy)
+    suspend fun connect(host: String, port: Int, proxy: SocksProxy? = null, expectedNodeId: String? = null) =
+        transport.connect(host, port, proxy, expectedPeerId = expectedNodeId)
 
     /**
      * Publish a text post to the mesh (and persist our own copy). Signed exactly the way Android verifies —

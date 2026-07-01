@@ -832,9 +832,15 @@ private class MeshUiState(private val scope: CoroutineScope) {
                         val phase = when { prog in 1..99 -> "bootstrapping $prog%"; prog >= 100 -> "building circuit"; else -> "starting Tor" }
                         status = "Connecting via Tor… $phase (${waited / 1000}s)"
                         if (sp > 0) {
-                            val ok = runCatching { client.connect(invite.host, invite.port, SocksProxy("127.0.0.1", sp)) }
-                                .map { client.linkCount > 0 }.getOrDefault(false)
-                            if (ok) { onLinked(invite, save, "over Tor"); return@launch }
+                            val attempt = runCatching { client.connect(invite.host, invite.port, SocksProxy("127.0.0.1", sp), expectedNodeId = invite.nodeId) }
+                            // H2: whoever answered is NOT the hub the invite named. Do not retry into an
+                            // impostor — stop and tell the user (retrying would just re-link to the attacker).
+                            (attempt.exceptionOrNull() as? HubIdentityMismatch)?.let {
+                                status = "⚠️ Hub identity mismatch — the node answering isn't the one you paired with. Not connecting."
+                                activeInvite = null   // and stop the reconnect monitor from re-dialing the impostor
+                                return@launch
+                            }
+                            if (attempt.map { client.linkCount > 0 }.getOrDefault(false)) { onLinked(invite, save, "over Tor"); return@launch }
                         }
                         delay(4000); waited += 4000
                     }
@@ -842,9 +848,15 @@ private class MeshUiState(private val scope: CoroutineScope) {
                     return@launch
                 }
                 status = "Connecting…"
-                runCatching { client.connect(invite.host, invite.port, null) }
+                runCatching { client.connect(invite.host, invite.port, null, expectedNodeId = invite.nodeId) }
                     .onSuccess { if (client.linkCount > 0) onLinked(invite, save, "") else { connected = false; status = "No link" } }
-                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; status = "Error: ${it.message}" }
+                    .onFailure {
+                        if (it is kotlinx.coroutines.CancellationException) throw it
+                        if (it is HubIdentityMismatch) {
+                            status = "⚠️ Hub identity mismatch — the node answering isn't the one you paired with. Not connecting."
+                            activeInvite = null   // stop the reconnect monitor from re-dialing the impostor
+                        } else status = "Error: ${it.message}"
+                    }
             } finally {
                 if (activeInvite == invite) connecting = false   // only the latest dial owns the flag
             }

@@ -33,9 +33,20 @@ object NodeId {
         raw.toHexString()
     }.getOrDefault(b64)
 
-    /** True if [s] looks like an Android-style base64 X.509 Ed25519 key (vs. our hex). */
-    fun isAndroidId(s: String): Boolean =
-        s.any { it == '+' || it == '/' || it == '=' } || s.any { it in 'g'..'z' || it in 'G'..'Z' }
+    /**
+     * True iff [s] is this app's id form: **exactly 64 lowercase hex chars** (a raw 32-byte Ed25519 key,
+     * the invariant `Identity.publicKeyHex` produces). Structural, not a char-class guess.
+     */
+    fun isHexId(s: String): Boolean = s.length == 64 && s.all { it in '0'..'9' || it in 'a'..'f' }
+
+    /**
+     * True if [s] is an Android-side id (base64 X.509 Ed25519 key — or any non-hex link id, e.g. the
+     * bridge's handshake-less `peer-…` fallbacks, which only ever tag Android links). Defined as ¬[isHexId]
+     * rather than the old char-class heuristic (punch-list M2): all of the bridge's routing hangs off this
+     * predicate, and a probabilistic answer meant a possible silently-undeliverable DM. Our own ids satisfy
+     * the 64-lowercase-hex invariant *always*, so the complement is exact, not heuristic.
+     */
+    fun isAndroidId(s: String): Boolean = !isHexId(s)
 
     /** Idempotent: ensure [id] is in Android (base64) form. */
     fun toAndroid(id: String): String = if (isAndroidId(id)) id else hexToAndroid(id)

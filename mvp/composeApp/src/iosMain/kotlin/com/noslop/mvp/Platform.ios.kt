@@ -314,7 +314,14 @@ actual object VideoPlayer {
     actual fun play(url: String) { IosFullscreenVideoBridge.player?.play(url) }
 }
 
-actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin)
+// Client-level timeouts (punch-list M4): per-source timeouts exist in the feed aggregator, but without
+// these a hostile/hung server could pin a fetch (and its coroutine) forever — e.g. via NetworkImage.
+actual fun httpClientEngineFactory(): HttpClient = HttpClient(Darwin) {
+    install(io.ktor.client.plugins.HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
+}
 
 actual fun nowMillis(): Long = (NSDate().timeIntervalSince1970 * 1000.0).toLong()
 actual fun randomId(): String = NSUUID().UUIDString()

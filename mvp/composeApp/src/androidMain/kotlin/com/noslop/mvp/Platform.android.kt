@@ -247,7 +247,13 @@ actual object DbDriverFactory {
         )
 }
 
-actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp)
+// Client-level timeouts (punch-list M4) — a hostile/hung server must not pin a fetch forever.
+actual fun httpClientEngineFactory(): HttpClient = HttpClient(OkHttp) {
+    install(io.ktor.client.plugins.HttpTimeout) {
+        requestTimeoutMillis = 30_000
+        connectTimeoutMillis = 15_000
+    }
+}
 
 actual fun nowMillis(): Long = System.currentTimeMillis()
 actual fun randomId(): String = java.util.UUID.randomUUID().toString()
