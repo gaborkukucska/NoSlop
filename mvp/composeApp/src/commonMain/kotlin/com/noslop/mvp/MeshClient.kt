@@ -59,10 +59,28 @@ class MeshClient(
             override suspend fun onCommentVote(packet: NetworkPacket, v: CommentVotePayload) {
                 onCommentVote?.invoke(v)
             }
+            override suspend fun onMediaChunk(packet: NetworkPacket, c: MediaChunkPayload) {
+                media.handleChunk(c)
+            }
+            override suspend fun onMediaRecoveryFound(packet: NetworkPacket, f: MediaRecoveryFoundPayload) {
+                media.handleRecoveryFound(f)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
     )
+
+    /**
+     * Media download pipeline (Roadmap #5b): requests broadcast through the bridge to Android origins;
+     * chunks land here via the sink. UI sets [MediaDownloadManager.onProgress]/[MediaDownloadManager.onComplete]
+     * and calls [requestMedia]. Bytes only ever move over the mesh link (Tor) — never clearnet.
+     */
+    // Explicit type: the sink above references `media` while this initializer references `node` — without
+    // the annotation Kotlin's inference recurses on the cycle and fails to compile.
+    val media: MediaDownloadManager = MediaDownloadManager(scope, nodeId, send = { node.broadcast(it) })
+
+    /** Start downloading a mesh post's media (see [MediaDownloadManager.start] for the safety bounds). */
+    suspend fun requestMedia(metadata: MediaMetadata) = media.start(metadata)
 
     /** Called for every post received from the mesh (set by the UI). */
     var onPost: ((PostPayload) -> Unit)? = null

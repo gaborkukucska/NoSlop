@@ -41,6 +41,25 @@ fun Base64Image(base64: String, contentScale: ContentScale, modifier: Modifier) 
     else Box(modifier.fillMaxSize())
 }
 
+/**
+ * Render an image from an **absolute local file path** — for media that already arrived over the mesh
+ * (Roadmap #5b downloads land in [com.noslop.mvp.MediaFiles]). Reads from disk, never the network, so
+ * it's safe for untrusted mesh content (bad bytes decode to null → empty box). Full-size images can be
+ * multi-MB, so the read+decode runs off the UI thread.
+ */
+@Composable
+fun LocalFileImage(path: String, contentScale: ContentScale, modifier: Modifier) {
+    var bitmap by remember(path) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(path) {
+        bitmap = withContext(Dispatchers.Default) {
+            runCatching { com.noslop.mvp.MediaFiles.readBytes(path)?.let { decodeImageBitmapOrNull(it) } }.getOrNull()
+        }
+    }
+    val bmp = bitmap
+    if (bmp != null) Image(bitmap = bmp, contentDescription = null, contentScale = contentScale, modifier = modifier)
+    else Box(modifier.fillMaxSize())
+}
+
 // One shared client for all image fetches — reuses the ktor engine we already ship (NOT Coil, so it can't
 // drag in its own ktor and crash the iOS Darwin engine — see the ktor-3.0.3 pin).
 private val imageClient: HttpClient by lazy { httpClientEngineFactory() }

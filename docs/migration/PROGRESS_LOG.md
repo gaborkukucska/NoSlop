@@ -4,6 +4,42 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-07-01 — Roadmap #5b: media download pipeline (images over the mesh) 🟢
+
+An Android media post's **full image now downloads over the mesh and renders on iOS** — thumbnail shows
+instantly (5a), the file transfers through the bridge over Tor, and the feed card swaps to the full image.
+Adopted the design-doc defaults: auto-download images ≤ 5 MB, tap-to-load for bigger ones, 64 KB chunk cap,
+broadcast request routing (option A — zero bridge changes needed).
+
+What landed:
+- **Wire payloads** (`Packets.kt`): `MediaRequestPayload` / `MediaChunkPayload` / `MediaRelayRequestPayload`
+  / `MediaRecoveryFoundPayload` / `MediaTransferAckPayload`, byte-compatible with Android's Gson shapes;
+  golden-vector `MediaWireTest` incl. parsing a literal Android chunk JSON.
+- **`MediaDownloadManager`** (commonMain): port of Android `MediaManager`'s receiver half — requester-driven
+  byte ranges, AIMD (16 KB slow start → 64 KB cap, concurrency 1→4, halve on timeout), 120 s chunk timeout +
+  retry queue, 4-timeout → `MEDIA_RELAY_REQUEST` recovery broadcast, EOF via short read, `.part` → rename,
+  `MEDIA_TRANSFER_ACK` on completion. Hostile-input hardening beyond Android: media ids sanitized to a safe
+  file name (no path escape), transfers rejected when `size` is 0/absurd (25 MB hard cap), writes bounded to
+  the declared size (a lying origin can't grow the file).
+- **`MediaFiles` expect/actual**: random-access offset writes — iOS `NSFileHandle` (Application
+  Support/NoSlopMedia), JVM `RandomAccessFile` (`~/.noslop-hub/media`), Android `filesDir/NoSlopMedia`.
+- **Firewall parity fix** (`MeshFirewall`): `MEDIA_*`/`SYNC_*` are exempt from the 20/10 s rate limit exactly
+  like Android's GossipService — without this, both the leaf and the **bridge** silently rate-dropped chunk
+  streams into a timeout crawl. Dedup + TTL still apply.
+- **UI**: `LocalFileImage` (decode-from-disk, no fetch), download progress chip over the thumbnail,
+  "Load full image" tap affordance for over-cap images, auto-download kick on POST receipt.
+- Tests: `MediaWireTest` (6), `MediaDownloaderTest` (6, real file I/O on every target incl. out-of-order
+  reassembly + hostile-metadata cases), firewall exemption cases (12 total). All jvmTest green.
+
+Routing note (why option A works): the Android origin answers a MEDIA_REQUEST by dialing the requester's
+onion **from its peer table** — for an iOS leaf that's the bridge onion (set at handshake via
+`from_home_node`), so chunks flow origin → bridge:9999 → leaf with no bridge code changes.
+
+**Next:** 5c (video/audio + progressive playback), then #6 upload/bridge-cache. Independent quick wins
+queued: feed viewed-history (#7), punch-list H2/M2/M4 hardening.
+
+---
+
 ## 2026-06-19 (later) — Android interop: signed handshake DELIVERED to a live Android node 🟢🟡
 
 The bridge is now a complete bidirectional gateway, and a **signed CONNECTION_REQUEST from the iPhone was

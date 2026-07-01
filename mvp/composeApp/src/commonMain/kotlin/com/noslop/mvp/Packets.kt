@@ -61,6 +61,11 @@ data class NetworkPacket(
     fun getCommentVotePayload(): CommentVotePayload? = decode("COMMENT_VOTE", CommentVotePayload.serializer())
     fun getConnectionRequestPayload(): PeerHandshakePayload? = decode("CONNECTION_REQUEST", PeerHandshakePayload.serializer())
     fun getUserHandshakePayload(): PeerHandshakePayload? = decode("USER_HANDSHAKE", PeerHandshakePayload.serializer())
+    fun getMediaRequestPayload(): MediaRequestPayload? = decode("MEDIA_REQUEST", MediaRequestPayload.serializer())
+    fun getMediaChunkPayload(): MediaChunkPayload? = decode("MEDIA_CHUNK", MediaChunkPayload.serializer())
+    fun getMediaRelayRequestPayload(): MediaRelayRequestPayload? = decode("MEDIA_RELAY_REQUEST", MediaRelayRequestPayload.serializer())
+    fun getMediaRecoveryFoundPayload(): MediaRecoveryFoundPayload? = decode("MEDIA_RECOVERY_FOUND", MediaRecoveryFoundPayload.serializer())
+    fun getMediaTransferAckPayload(): MediaTransferAckPayload? = decode("MEDIA_TRANSFER_ACK", MediaTransferAckPayload.serializer())
 }
 
 /**
@@ -107,6 +112,56 @@ data class MediaMetadata(
     @SerialName("origin_node") val originNode: String? = null,
     @SerialName("owner_id") val ownerId: String? = null,
     @SerialName("thumbnail_b64") val thumbnailB64: String? = null,
+)
+
+/**
+ * Ask a peer for a byte range of a media file — the requester-driven transfer model (Android
+ * `MediaManager.handleMediaRequest`): the receiver dictates `[byte_offset, byte_length)` and the origin
+ * just reads it off disk into a [MediaChunkPayload]. `chunk_index`/`chunk_size` are the legacy index-math
+ * fallback for peers without byte-range support; we always send both. NOT signed on Android (integrity
+ * rides on Tor + the trust firewall) — treat as parity, don't add fields.
+ */
+@Serializable
+data class MediaRequestPayload(
+    @SerialName("media_id") val mediaId: String,
+    @SerialName("chunk_index") val chunkIndex: Int,
+    @SerialName("chunk_size") val chunkSize: Int,
+    @SerialName("byte_offset") val byteOffset: Long? = null,
+    @SerialName("byte_length") val byteLength: Int? = null,
+    @SerialName("access_key") val accessKey: String? = null,
+    @SerialName("hls_file") val hlsFile: String? = null,
+)
+
+/** One slice of a media file in reply to a [MediaRequestPayload]. Empty [data] = read past EOF. */
+@Serializable
+data class MediaChunkPayload(
+    @SerialName("media_id") val mediaId: String,
+    @SerialName("chunk_index") val chunkIndex: Int,
+    @SerialName("total_chunks") val totalChunks: Int,
+    @SerialName("byte_offset") val byteOffset: Long? = null,
+    val data: String,   // base64 (NO_WRAP)
+)
+
+/** Broadcast "who has media X?" — mesh recovery when the origin is unreachable (Android `attemptMeshRecovery`). */
+@Serializable
+data class MediaRelayRequestPayload(
+    @SerialName("media_id") val mediaId: String,
+    @SerialName("origin_node") val originNode: String? = null,
+    @SerialName("owner_id") val ownerId: String? = null,
+    @SerialName("access_key") val accessKey: String? = null,
+    val metadata: MediaMetadata? = null,
+)
+
+/** "I have media X" — a peer's answer to a [MediaRelayRequestPayload]; resume the download from them. */
+@Serializable
+data class MediaRecoveryFoundPayload(
+    @SerialName("media_id") val mediaId: String,
+)
+
+/** Receiver → origin: transfer complete (lets the origin release per-transfer state). */
+@Serializable
+data class MediaTransferAckPayload(
+    @SerialName("media_id") val mediaId: String,
 )
 
 @Serializable

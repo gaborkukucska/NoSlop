@@ -22,6 +22,12 @@ interface MeshSink {
     suspend fun onCommentReaction(packet: NetworkPacket, r: CommentReactionPayload) {}
     /** A COMMENT_VOTE arrived (up/down on a comment). [v.action] is "add" or "remove". */
     suspend fun onCommentVote(packet: NetworkPacket, v: CommentVotePayload) {}
+    /** A MEDIA_CHUNK arrived (a byte range of a media file we requested). Unsigned on Android — parity. */
+    suspend fun onMediaChunk(packet: NetworkPacket, c: MediaChunkPayload) {}
+    /** A MEDIA_RECOVERY_FOUND arrived (a peer has the media we broadcast a MEDIA_RELAY_REQUEST for). */
+    suspend fun onMediaRecoveryFound(packet: NetworkPacket, f: MediaRecoveryFoundPayload) {}
+    /** A MEDIA_REQUEST arrived (a peer asks us for a byte range — Phase-6 serving; leaves ignore it). */
+    suspend fun onMediaRequest(packet: NetworkPacket, r: MediaRequestPayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -78,6 +84,9 @@ class MeshNode(
         packet.getChatReactionPayload()?.let { sink.onChatReaction(packet, it) }
         packet.getCommentReactionPayload()?.let { sink.onCommentReaction(packet, it) }
         packet.getCommentVotePayload()?.let { sink.onCommentVote(packet, it) }
+        packet.getMediaChunkPayload()?.let { sink.onMediaChunk(packet, it) }
+        packet.getMediaRecoveryFoundPayload()?.let { sink.onMediaRecoveryFound(packet, it) }
+        packet.getMediaRequestPayload()?.let { sink.onMediaRequest(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {

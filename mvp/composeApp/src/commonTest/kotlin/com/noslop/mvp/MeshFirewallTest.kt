@@ -66,4 +66,24 @@ class MeshFirewallTest {
         clock += 10_001 // advance past the 10s window
         assertTrue(fw.admit(post("w-21", "sender")), "old entries expired → allowed again")
     }
+
+    // --- Media/sync exemption (Android GossipService parity — chunk streams must not be rate-dropped) ---
+    @Test fun rateLimit_exemptsMediaStreams() = runTest {
+        val fw = firewall()
+        for (i in 0 until 100) {
+            assertTrue(
+                fw.admit(NetworkPacket(id = "mc-$i", hops = 1, senderId = "origin", type = "MEDIA_CHUNK")),
+                "chunk $i of a media stream must not be rate-limited",
+            )
+        }
+        // The exemption doesn't leak: the same flooder's non-media packets still hit the limit.
+        for (i in 0 until 20) fw.admit(post("mix-$i", "origin"))
+        assertFalse(fw.admit(post("mix-20", "origin")), "non-media packets from the same sender still limited")
+    }
+
+    @Test fun dedup_stillAppliesToMediaPackets() = runTest {
+        val fw = firewall()
+        assertTrue(fw.admit(NetworkPacket(id = "mc-dup", hops = 1, senderId = "origin", type = "MEDIA_CHUNK")))
+        assertFalse(fw.admit(NetworkPacket(id = "mc-dup", hops = 1, senderId = "origin", type = "MEDIA_CHUNK")))
+    }
 }

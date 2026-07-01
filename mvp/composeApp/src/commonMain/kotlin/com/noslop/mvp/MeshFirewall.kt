@@ -46,11 +46,18 @@ class MeshFirewall(
             seen.add(id)
 
             // Rate limit — at most rateLimitMax packets per sender per sliding rateWindowMs window.
-            val t = now()
-            val window = rates.getOrPut(packet.senderId) { mutableListOf() }
-            window.removeAll { t - it > rateWindowMs }
-            if (window.size >= rateLimitMax) return@withLock false
-            window.add(t)
+            // MEDIA_* and SYNC_* streams are exempt, exactly like Android's GossipService: a chunked media
+            // transfer legitimately sends far more than 20 packets/10s, and rate-dropping chunks turns
+            // every download into a timeout-retry crawl. Dedup + TTL above still apply to them.
+            val exempt = packet.type.startsWith("MEDIA_") || packet.type.startsWith("SYNC_") ||
+                packet.type == "INVENTORY_SYNC_REQUEST"
+            if (!exempt) {
+                val t = now()
+                val window = rates.getOrPut(packet.senderId) { mutableListOf() }
+                window.removeAll { t - it > rateWindowMs }
+                if (window.size >= rateLimitMax) return@withLock false
+                window.add(t)
+            }
             true
         }
     }

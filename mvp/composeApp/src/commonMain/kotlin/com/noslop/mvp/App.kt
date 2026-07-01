@@ -32,6 +32,7 @@ import com.noslop.mvp.feeds.BackgroundScheduler
 import com.noslop.mvp.ui.media.AudioPlayer
 import androidx.compose.ui.layout.ContentScale
 import com.noslop.mvp.ui.media.Base64Image
+import com.noslop.mvp.ui.media.LocalFileImage
 import com.noslop.mvp.ui.media.BlurredImageBackground
 import com.noslop.mvp.ui.media.NetworkImage
 import com.noslop.mvp.ui.media.SegmentedArticleReader
@@ -269,7 +270,10 @@ private fun FeedScreen(mesh: MeshUiState) {
 
     val filters = FeedFilters.from(mutedText, requiredText)
     // Mesh posts (mine + received from the network) lead the feed, then the curated clearnet items.
-    val meshItems = mesh.received.map { it.toFeedItem() }
+    // A post whose media finished downloading (5b) renders the full file from disk instead of its thumbnail.
+    val meshItems = mesh.received.map { p ->
+        p.toFeedItem(localMediaPath = p.mediaMetadata?.id?.let { mesh.mediaLocalPath[it] })
+    }
     val shown = meshItems + filters.apply(stories)
 
     // Full-screen vertical pager (one item per screen, swipe up) — the Android NoSlop feed feel. Each page
@@ -287,6 +291,9 @@ private fun FeedScreen(mesh: MeshUiState) {
                 VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                     val item = shown[page]
                     val isMesh = item.sourceId == "mesh"
+                    // The post's media id keys the 5b download state (progress while transferring, and a
+                    // tap-to-download affordance for media outside the auto policy — big images for now).
+                    val meshMedia = if (isMesh) mesh.received.firstOrNull { it.id == item.id }?.mediaMetadata else null
                     FeedMediaCard(
                         item, isVisible = page == pager.currentPage,
                         commentCount = if (isMesh) mesh.commentsFor(item.id).size else 0,
@@ -294,6 +301,14 @@ private fun FeedScreen(mesh: MeshUiState) {
                         myVote = if (isMesh) mesh.myVote[item.id] else null,
                         onVote = if (isMesh) ({ vt -> mesh.vote(item.id, vt) }) else null,
                         onOpenComments = if (isMesh) ({ commentsForPost = item.id }) else null,
+                        mediaProgress = meshMedia?.let { mesh.mediaProgress[it.id] },
+                        onDownloadMedia = meshMedia
+                            ?.takeIf { m ->
+                                // Only images are renderable in 5b — don't offer a download we can't show yet.
+                                (m.type == "image" || m.mimeType.startsWith("image/")) &&
+                                    item.localMediaPath == null && mesh.mediaProgress[m.id] == null
+                            }
+                            ?.let { meta -> { mesh.downloadMedia(meta) } },
                     )
                 }
             }
@@ -348,25 +363,48 @@ private fun FeedMediaCard(
     item: FeedItem, isVisible: Boolean,
     commentCount: Int = 0, score: Int = 0, myVote: String? = null,
     onVote: ((String) -> Unit)? = null, onOpenComments: (() -> Unit)? = null,
+    mediaProgress: Int? = null, onDownloadMedia: (() -> Unit)? = null,
 ) {
     val url = item.mediaUrl
     val thumb = item.thumbnailB64
-    // A mesh media post has no playable url yet (download is 5b) but carries an in-band base64 thumbnail —
-    // render it as an image card (no fetch) instead of falling back to the text article view.
+    val local = item.localMediaPath
+    // Mesh media renders by download state (5b): the full file from disk once it arrived; until then the
+    // in-band base64 thumbnail (no fetch — no deanon), with transfer progress overlaid while in flight.
     val kind = when {
+        local != null -> FeedKind.IMAGE   // 5b downloads are images; video/audio come with 5c
         url != null -> feedKind(item, url)
         thumb != null -> FeedKind.IMAGE
         else -> FeedKind.ARTICLE
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when {
+            local != null ->
+                LocalFileImage(local, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
             url != null && kind == FeedKind.VIDEO ->
                 com.noslop.mvp.ui.media.VideoPlayer(url = url, isVisible = isVisible, modifier = Modifier.fillMaxSize())
             url != null && kind == FeedKind.AUDIO -> AudioPlayer(url = url, isVisible = isVisible)
             url != null && kind == FeedKind.IMAGE ->
                 BlurredImageBackground(url = url, imageContent = { u, cs, m -> NetworkImage(u, cs, m) })
-            url == null && thumb != null ->
+            url == null && thumb != null -> {
                 Base64Image(thumb, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                when {
+                    mediaProgress != null -> androidx.compose.material3.Surface(
+                        color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.align(Alignment.Center),
+                    ) {
+                        Text("⇣ $mediaProgress%", color = Color.White, fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    }
+                    onDownloadMedia != null -> androidx.compose.material3.Surface(
+                        onClick = onDownloadMedia,
+                        color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.align(Alignment.Center),
+                    ) {
+                        Text("⇣ Load full image", color = Color.White, fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                    }
+                }
+            }
             else -> ArticleView(item)
         }
         // Video/audio/image fill the screen and get the bottom overlay; the article reader has its own header.
@@ -552,7 +590,7 @@ private fun sourceLabel(item: FeedItem): String = (item.apiSource ?: item.source
  * eagerly via NetworkImage/VideoPlayer) are left null; the post renders as text. `url` is kept only for the
  * user-initiated "open link" tap (their explicit choice, like tapping any link), never auto-loaded.
  */
-private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
+private fun PostPayload.toFeedItem(localMediaPath: String? = null): FeedItem = FeedItem(
     id = id,
     sourceId = "mesh",
     title = (clearnetTitle ?: content).trim().lineSequence().firstOrNull()?.take(100).orEmpty().ifBlank { content.take(100) },
@@ -563,9 +601,11 @@ private fun PostPayload.toFeedItem(): FeedItem = FeedItem(
     publishedAt = timestamp,
     fullContent = content,
     mediaUrl = null,       // ditto for media — no auto clearnet fetch from an untrusted post
-    // The post's own thumbnail travels in-band (base64) — safe to show with no fetch (5a). Full media
-    // download (5b) comes later; for now an Android media post at least renders its preview.
+    mediaType = mediaMetadata?.type,
+    // The post's own thumbnail travels in-band (base64) — safe to show with no fetch (5a); once the 5b
+    // download completes, [localMediaPath] points at the full file on disk and the card renders that.
     thumbnailB64 = mediaMetadata?.thumbnailB64,
+    localMediaPath = localMediaPath,
     apiSource = "mesh",
 )
 
@@ -622,6 +662,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
     val chatReactionCounts = mutableStateMapOf<String, Int>()
     val myChatReactions = mutableStateMapOf<String, Boolean>()
     private val chatReactionSeen = mutableSetOf<String>()       // "messageId|emoji|authorId" — dedup across echoes
+    // Mesh media downloads (5b): mediaId → local absolute path once complete / percent while in flight.
+    val mediaLocalPath = mutableStateMapOf<String, String>()
+    val mediaProgress = mutableStateMapOf<String, Int>()
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -640,7 +683,16 @@ private class MeshUiState(private val scope: CoroutineScope) {
     val linkCount: Int get() = client.linkCount
 
     init {
-        client.onPost = { post -> scope.launch { if (received.none { it.id == post.id }) received.add(0, post) } }
+        client.onPost = { post ->
+            scope.launch {
+                if (received.none { it.id == post.id }) received.add(0, post)
+                maybeAutoDownloadMedia(post.mediaMetadata)
+            }
+        }
+        // Media pipeline → UI state. Callbacks fire on transfer coroutines; hop to the UI scope.
+        client.media.onProgress = { id, pct -> scope.launch { if (mediaLocalPath[id] == null) mediaProgress[id] = pct } }
+        client.media.onComplete = { id, path -> scope.launch { mediaProgress.remove(id); mediaLocalPath[id] = path } }
+        client.media.onFailed = { id, _ -> scope.launch { mediaProgress.remove(id) } }
         client.onDm = { fromNodeId, fromEncPub, text, messageId, replyTo ->
             scope.launch {
                 // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.
@@ -935,6 +987,26 @@ private class MeshUiState(private val scope: CoroutineScope) {
             if (received.none { it.id == post.id }) received.add(0, post)   // show my own post too
             status = "Posted ✓ — ${client.linkCount} link(s)"
         }
+    }
+
+    /**
+     * Auto-download policy (5b, per MEDIA_OVER_MESH_DESIGN): images ≤ 5 MB fetch automatically — they move
+     * over Tor through the bridge, so there's no clearnet deanon — anything else (video/audio/oversize)
+     * waits for an explicit tap ([downloadMedia]). `media_metadata` is unsigned/untrusted: the manager
+     * enforces the size caps and the sandboxed file name; we additionally require an image MIME here.
+     */
+    private suspend fun maybeAutoDownloadMedia(meta: MediaMetadata?) {
+        val m = meta ?: return
+        if (mediaLocalPath.containsKey(m.id)) return
+        client.media.localPathFor(m.id)?.let { mediaLocalPath[m.id] = it; return }   // already on disk
+        val isImage = m.type == "image" || m.mimeType.startsWith("image/")
+        if (!isImage || m.size !in 1..(5L * 1024 * 1024)) return
+        client.requestMedia(m)
+    }
+
+    /** Explicit tap-to-download for media outside the auto policy (big images; video/audio come with 5c). */
+    fun downloadMedia(meta: MediaMetadata) {
+        scope.launch { client.requestMedia(meta) }
     }
 
     /** Fold one reaction (ours or a peer's) into the aggregated counts, deduped by (post, emoji, author). */
