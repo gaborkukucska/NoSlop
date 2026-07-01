@@ -240,14 +240,34 @@ private fun Field(label: String, value: String) {
     }
 }
 
+/**
+ * Session-scoped feed memory (Roadmap #7): [FeedScreen] is recreated on every tab switch (the `when(tab)`
+ * in [App]), which used to reload the feed and reset the scroll to the top. Loaded stories and the pager
+ * position are parked here so returning to the Feed tab resumes exactly where the user left off.
+ * Process-lifetime only; the *persistent* "don't re-show seen items" memory is the viewed-history table.
+ */
+private object FeedSession {
+    var stories: List<FeedItem> = emptyList()
+    var page: Int = 0
+}
+
 @Composable
 private fun FeedScreen(mesh: MeshUiState) {
     val scope = rememberCoroutineScope()
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val repo = remember { FeedRepository() }
-    var stories by remember { mutableStateOf<List<FeedItem>>(emptyList()) }
+    val store = remember { MeshStoreProvider.get() }
+    var stories by remember { mutableStateOf(FeedSession.stories) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    // Persistent viewed-history (Roadmap #7, Android EngagementRepository parity): an item on screen >5 s
+    // is recorded; on the NEXT load it's excluded — never live, so the current page doesn't vanish.
+    var viewedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(Unit) {
+        viewedIds = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            runCatching { store?.viewedIds() }.getOrNull() ?: emptySet()
+        }
+    }
     // Feed curation (the "NoSlop" core). Persisted raw text; applied live.
     val saved = remember { SavedFilters.loadTexts() }
     var mutedText by remember { mutableStateOf(saved.first) }
@@ -261,12 +281,19 @@ private fun FeedScreen(mesh: MeshUiState) {
         loading = true; error = null
         scope.launch {
             runCatching { repo.loadFeed() }
-                .onSuccess { stories = it }
+                .onSuccess { fetched ->
+                    // Exclude already-seen clearnet items (mesh posts stay — they're the social stream and
+                    // carry live engagement). If literally everything was seen, show it all rather than blank.
+                    val fresh = fetched.filterNot { it.id in viewedIds }
+                    stories = fresh.ifEmpty { fetched }
+                    FeedSession.stories = stories
+                    FeedSession.page = 0
+                }
                 .onFailure { error = it.message ?: "Failed to load feed" }
             loading = false
         }
     }
-    LaunchedEffect(Unit) { load() } // auto-load on first open
+    LaunchedEffect(Unit) { if (stories.isEmpty()) load() } // first open only — tab switches resume the session
 
     val filters = FeedFilters.from(mutedText, requiredText)
     // Mesh posts (mine + received from the network) lead the feed, then the curated clearnet items.
@@ -287,7 +314,23 @@ private fun FeedScreen(mesh: MeshUiState) {
                 Text(if (stories.isEmpty()) "No items yet" else "All ${stories.size} filtered out",
                     color = Color.White, modifier = Modifier.align(Alignment.Center))
             else -> {
-                val pager = rememberPagerState { shown.size }
+                val pager = rememberPagerState(
+                    initialPage = FeedSession.page.coerceIn(0, (shown.size - 1).coerceAtLeast(0)),
+                ) { shown.size }
+                // Feed memory: park the position for the next tab switch, and after 5 s on one item record
+                // it as viewed (Android's dwell rule) — the LaunchedEffect cancels on swipe, so a fast
+                // scroll past something never marks it.
+                LaunchedEffect(pager.currentPage) {
+                    FeedSession.page = pager.currentPage
+                    val item = shown.getOrNull(pager.currentPage) ?: return@LaunchedEffect
+                    delay(5000)
+                    if (item.id !in viewedIds) {
+                        viewedIds = viewedIds + item.id
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            runCatching { store?.markViewed(item.id, if (item.sourceId == "mesh") "mesh" else "feed") }
+                        }
+                    }
+                }
                 VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                     val item = shown[page]
                     val isMesh = item.sourceId == "mesh"

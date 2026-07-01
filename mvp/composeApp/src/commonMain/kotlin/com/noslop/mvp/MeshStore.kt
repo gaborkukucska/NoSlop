@@ -52,6 +52,17 @@ class MeshStore(driver: SqlDriver) {
     fun peer(publicKeyB64: String): Peer? = peers.getByKey(publicKeyB64).executeAsOneOrNull()
     fun peerCount(): Long = peers.count().executeAsOne()
 
+    // --- Engagement: viewed history for feed de-dup (mirrors Android's EngagementRepository) ---
+    /** Record an item as viewed (>5 s on screen); history capped at [VIEWED_HISTORY_LIMIT], oldest pruned. */
+    fun markViewed(itemId: String, itemType: String, at: Long = nowMillis()) {
+        engagement.insertViewedItem(com.noslop.mvp.db.ViewedHistoryItem(itemId, itemType, at))
+        val count = engagement.getCount().executeAsOne()
+        if (count > VIEWED_HISTORY_LIMIT) engagement.pruneOldest(count - VIEWED_HISTORY_LIMIT)
+    }
+
+    /** All viewed item ids — the feed excludes these on load so seen items aren't re-shown. */
+    fun viewedIds(): Set<String> = engagement.getAllViewedIds().executeAsList().toSet()
+
     // --- Meta key/value ---
     fun meta(key: String): String? = meta.get(key).executeAsOneOrNull()
     fun putMeta(key: String, value: String) = meta.put(com.noslop.mvp.db.AppMeta(key, value))
@@ -65,5 +76,10 @@ class MeshStore(driver: SqlDriver) {
 
     fun wipe() {
         posts.deleteAll(); messages.deleteAll(); peers.deleteAll()
+    }
+
+    companion object {
+        /** Max viewed-history rows retained (Android parity: EngagementRepository.HISTORY_LIMIT). */
+        const val VIEWED_HISTORY_LIMIT = 5000L
     }
 }
