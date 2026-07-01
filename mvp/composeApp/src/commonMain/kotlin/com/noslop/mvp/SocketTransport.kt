@@ -1,5 +1,6 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.debug.Logger
 import io.ktor.network.selector.SelectorManager
 import io.ktor.network.sockets.InetSocketAddress
 import io.ktor.network.sockets.ServerSocket
@@ -79,11 +80,11 @@ class SocketTransport(
                     // A closed server socket means we're shutting down — exit. Otherwise the JVM selector can
                     // throw transient EINVAL ("Invalid argument") between accepts; tolerate a few in a row so a
                     // single hiccup doesn't permanently kill the listener (which would drop every later peer).
-                    if (server == null) { println("[transport] accept loop ended (server closed)"); break }
-                    if (++consecutiveErrors > 50) { println("[transport] accept loop giving up after $consecutiveErrors errors: $e"); break }
+                    if (server == null) { Logger.info("TRANSPORT", "accept loop ended (server closed)"); break }
+                    if (++consecutiveErrors > 50) { Logger.error("TRANSPORT", "accept loop giving up after $consecutiveErrors errors: $e"); break }
                     // Note: macOS throws EINVAL here for *hairpin* self-connections (a host dialing its own LAN
                     // IP) — a test-only artifact; genuine remote clients (the iOS leaf) accept cleanly.
-                    println("[transport] accept error #$consecutiveErrors (continuing): $e")
+                    Logger.warn("TRANSPORT", "accept error #$consecutiveErrors (continuing): $e")
                     continue
                 }
                 scope.launch { handle(socket, socket.openReadChannel(), socket.openWriteChannel(autoFlush = true)) }
@@ -172,17 +173,17 @@ class SocketTransport(
             try {
                 output.writeStringUtf8("$nodeId\n")                  // handshake: announce our id first…
                 peerId = input.readUTF8Line() ?: run {               // …then learn theirs
-                    println("[transport] EOF reading peer id from $peer")
+                    Logger.warn("TRANSPORT", "EOF reading peer id from $peer")
                     runCatching { socket.close() }; return
                 }
             } catch (e: Throwable) {
-                println("[transport] handshake error with $peer: $e")
+                Logger.warn("TRANSPORT", "handshake error with $peer: $e")
                 runCatching { socket.close() }; return
             }
             // Identity pinning (H2): the invite told us who should answer here — reject an impostor
             // BEFORE registering the link (else it would receive our broadcasts, incl. DMs to relay).
             if (expectedPeerId != null && peerId != expectedPeerId) {
-                println("[transport] REJECTED link from $peer: id ${peerId.take(16)}… ≠ pinned ${expectedPeerId.take(16)}…")
+                Logger.error("TRANSPORT", "REJECTED link from $peer: id ${peerId.take(16)}… ≠ pinned ${expectedPeerId.take(16)}…")
                 runCatching { socket.close() }
                 throw HubIdentityMismatch(expected = expectedPeerId, actual = peerId)
             }
@@ -191,7 +192,7 @@ class SocketTransport(
             // know the peer's id (from its contact card), so use that as the link id.
             peerId = knownPeerId ?: "peer-$peer"
         }
-        println("[transport] link up: ${peerId.take(16)} from $peer")
+        Logger.info("TRANSPORT", "link up: ${peerId.take(16)} from $peer")
         val conn = Conn(socket, output)
         lock.withLock { conns[peerId] = conn }
         scope.launch {

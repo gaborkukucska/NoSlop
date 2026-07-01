@@ -1,5 +1,6 @@
 package com.noslop.mvp
 
+import com.noslop.mvp.debug.Logger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -121,6 +122,7 @@ class MediaDownloadManager(
             MediaFiles.delete(dl.partName)                 // wipe a stale part from a killed run
             downloads[metadata.id] = dl
             if (!tickStarted) { tickStarted = true; scope.launch { tickLoop() } }
+            Logger.info("MEDIA", "downloading ${metadata.id.take(24)} (${metadata.size} B, ${metadata.mimeType})")
             nextRequests(dl)
         }
         onProgress?.invoke(metadata.id, 0)
@@ -318,6 +320,7 @@ class MediaDownloadManager(
             onFailed?.invoke(dl.metadata.id, "finalize failed")
             return
         }
+        Logger.info("MEDIA", "download complete: ${dl.metadata.id.take(24)} → ${dl.fileName}")
         onProgress?.invoke(dl.metadata.id, 100)
         onComplete?.invoke(dl.metadata.id, MediaFiles.absolutePath(dl.fileName))
         send(NetworkPacket(
@@ -329,7 +332,8 @@ class MediaDownloadManager(
     }
 
     /** Mark failed + clean the part file. Call under [mutex]. */
-    private fun fail(dl: Download, @Suppress("UNUSED_PARAMETER") reason: String) {
+    private fun fail(dl: Download, reason: String) {
+        Logger.warn("MEDIA", "download failed: ${dl.metadata.id.take(24)} — $reason")
         dl.status = Download.Status.FAILED
         downloads.remove(dl.metadata.id)
         MediaFiles.delete(dl.partName)

@@ -2,6 +2,8 @@ package com.noslop.mvp.ui.tabs
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
@@ -12,13 +14,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.mvp.debug.Logger
 
+/** Live view of [Logger]'s in-memory ring — transport link-ups, relays, media transfers — for debugging
+ *  mesh behavior on a device with no console attached. Newest at the bottom, auto-scrolled. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LogsViewerScreen(onBack: () -> Unit) {
-    var logs by remember { mutableStateOf("Loading logs...") }
-    
-    LaunchedEffect(Unit) {
-        logs = "System logs will appear here in future updates.\n"
+    val lines by Logger.lines.collectAsState()
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
     }
 
     Scaffold(
@@ -34,10 +38,14 @@ fun LogsViewerScreen(onBack: () -> Unit) {
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)
+            state = listState,
+            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)
         ) {
-            item {
-                Text(text = logs, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            if (lines.isEmpty()) item {
+                Text("Nothing logged yet this session.", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            }
+            items(lines) { line ->
+                Text(text = line, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 1.dp))
             }
         }
     }

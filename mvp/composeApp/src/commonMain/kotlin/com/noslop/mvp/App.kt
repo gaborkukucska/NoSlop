@@ -92,7 +92,6 @@ import com.noslop.mvp.ui.settings.SettingsScreen
 import com.noslop.mvp.ui.settings.ContentPreferencesScreen
 import com.noslop.mvp.data.SettingsRepository
 import com.noslop.mvp.data.PreferencesRepository
-import com.noslop.mvp.ui.tabs.ChatScreen
 import com.noslop.mvp.ui.tabs.LogsViewerScreen
 import com.noslop.mvp.ui.tabs.ApiKeysScreen
 import com.noslop.mvp.ui.tabs.NotificationsScreen
@@ -785,6 +784,16 @@ private class MeshUiState(private val scope: CoroutineScope) {
         reloadContacts()
         // Prefill the fields with the most recent saved hub so the UI shows what auto-connect will dial.
         savedNodes.firstOrNull()?.let { host = it.host; port = it.port.toString(); viaTor = it.tor }
+        // Load persisted posts so the mesh feed survives a relaunch (the store was write-only — posts were
+        // saved on receipt but never read back). recentPosts is newest-first, matching `received`'s order.
+        scope.launch {
+            val stored = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                runCatching { MeshStoreProvider.get()?.recentPosts(100) }.getOrNull() ?: emptyList()
+            }
+            stored.map { it.toPostPayload() }.forEach { p ->
+                if (received.none { it.id == p.id }) received.add(p)
+            }
+        }
     }
 
     private fun reloadSaved() { savedNodes.clear(); savedNodes.addAll(SavedNodes.list()) }
@@ -921,7 +930,6 @@ private class MeshUiState(private val scope: CoroutineScope) {
 
     private fun reloadContacts() { contacts.clear(); contacts.addAll(SavedContacts.list()) }
 
-    /** My shareable contact card as a QR string — Android-compatible shape so both iOS *and* Android can scan it. */
     /**
      * My shareable card. An iOS leaf has no onion, so advertise the BRIDGE onion as my reachable address —
      * then a peer (e.g. Gabby) who scans this dials the bridge, which relays to my phone (inbound path).

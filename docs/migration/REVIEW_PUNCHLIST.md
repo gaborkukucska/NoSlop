@@ -38,28 +38,33 @@ themselves (fresh 12-byte nonces, correct AEAD tag handling, consistent key enco
   per-link read-loop coroutines on the hub/bridge (not the iOS single-leaf). Corrupted dedup →
   dropped/duplicated packets or a hung hub under fan-out. *(ours)* — `MeshFirewall.kt:21–47`,
   `SocketTransport.kt:179`, `BridgeMain.kt:50,106`. Fix: guard with a Mutex/lock.
-- [ ] **H2 No hub identity pinning.** `MeshInvite.nodeId` is transmitted but never compared on
+- [x] **H2 No hub identity pinning.** `MeshInvite.nodeId` is transmitted but never compared on
   connect — anyone answering at the onion becomes the hub undetected. *(ours)* — `App.kt:525`,
-  `SocketTransport.kt:160`.
+  `SocketTransport.kt:160`. *(Closed 2026-07-01: `SocketTransport.connect(expectedPeerId)` pins the
+  handshaked id — mismatch closes the socket and throws `HubIdentityMismatch` before the link registers;
+  the UI surfaces it and stops the reconnect monitor.)*
 - [ ] **H3 Bridge inbound listener authenticates nothing.** Anyone who learns the bridge onion can
   inject packets to all leaves (remote delivery path for C1/C2). Blind-hub property itself is intact
   (never decrypts DMs). *(ours)* — `BridgeMain.kt:93–124`.
 
 ## 🟡 MEDIUM
 
-- [ ] **M1 ★ Two conflicting mesh-social code paths.** `data/MeshSocialRepository.kt` +
+- [x] **M1 ★ Two conflicting mesh-social code paths.** `data/MeshSocialRepository.kt` +
   `EngagementRepository.kt` (~326 LOC, from upstream) re-invent `ReactionPayload`/`CommentPayload`
   with a wire shape incompatible with our pinned `Packets.kt`, and `MeshNode` doesn't deliver their
   types. Currently **dead** (zero refs) but a landmine. *(upstream — likely changes in Gabby's wave,
-  defer)* — collapse onto `Packets.kt` or delete.
-- [ ] **M2 ★ `NodeId.isAndroidId` is a char-class heuristic** gating all bridge routing; a
+  defer)* — collapse onto `Packets.kt` or delete. *(Closed 2026-07-01: deleted both dead files (~326 LOC);
+  viewed-history was re-implemented on `MeshStore` directly for Roadmap #7.)*
+- [x] **M2 ★ `NodeId.isAndroidId` is a char-class heuristic** gating all bridge routing; a
   misclassification = silently undeliverable DMs. *(ours)* — `NodeId.kt:37–38`. Fix: structural
-  length/DER check + enforce 64-lowercase-hex invariant.
+  length/DER check + enforce 64-lowercase-hex invariant. *(Closed 2026-07-01: `isHexId` = exactly
+  64-lowercase-hex; `isAndroidId` = its complement. `NodeIdTest` locks classification + round-trips.)*
 - [ ] **M3 `DIAL_PEER` processed pre-firewall, unsigned, unbounded** — a leaf can make the bridge
   dial arbitrary onions; peer map uncapped. *(ours)* — `BridgeMain.kt:44–49,141–153`.
-- [ ] **M4 No `HttpTimeout`/response-size cap** on fetches → decode-bomb/OOM/hang via hostile URL.
+- [x] **M4 No `HttpTimeout`/response-size cap** on fetches → decode-bomb/OOM/hang via hostile URL.
   (Per-source timeouts exist in the feed, but not at HttpClient level or in `NetworkImage`.) *(ours)*
-  — `NetworkImage.kt:28`, `Feed.kt`, `feeds/api/*`.
+  — `NetworkImage.kt:28`, `Feed.kt`, `feeds/api/*`. *(Closed 2026-07-01: HttpTimeout 30s/15s in all three
+  `httpClientEngineFactory` actuals; `NetworkImage` capped at 10 MB, checked pre- and mid-read.)*
 - [ ] **M5 DMs encrypted but not sender-authenticated** — decryption uses sender-supplied enc key;
   reply contact uses sender-supplied node id. Bind to verified identity (follow-on from C1/C2).
   *(ours)* — `MeshClient.kt:33,37`.
@@ -74,13 +79,17 @@ themselves (fresh 12-byte nonces, correct AEAD tag handling, consistent key enco
 - [ ] `MeshUiState` is a ~300-line god-object (connection + Tor retry + handshake state machine +
   reactions + DMs) in UI code, untestable — extract a non-UI `MeshController`/`MeshSession`.
   `App.kt:429–739`.
-- [ ] Persistence is write-only from the UI — `MeshStore` exists but feed/reactions aren't loaded on
-  launch. `App.kt:432,458`.
-- [ ] Dead code: `MeshClient.dmPublicKeyB64()` (`MeshClient.kt:68`), unused `ChatScreen` +
+- [x] Persistence is write-only from the UI — `MeshStore` exists but feed/reactions aren't loaded on
+  launch. `App.kt:432,458`. *(Posts now load on launch (`MeshPost.toPostPayload`), 2026-07-01; reactions
+  still session-only.)*
+- [x] Dead code: `MeshClient.dmPublicKeyB64()` (`MeshClient.kt:68`), unused `ChatScreen` +
   its import (`App.kt:91`, `ui/tabs/ChatScreen.kt`), doubled KDoc on `myContactQr()` (`App.kt:624–629`).
+  *(All removed 2026-07-01.)*
 - [ ] Duplicated helpers across the 12 API clients: `parseDate`/`stripHtml`/`Json{}` (~120–180 LOC) →
   one `feeds/api/ApiUtil.kt`. *(touches upstream-adjacent surface — defer to post-merge.)*
-- [ ] Route transport/bridge `println` through the existing `debug/Logger`.
+- [x] Route transport/bridge `println` through the existing `debug/Logger`. *(2026-07-01: transport routed;
+  `Logger` now keeps a 500-line in-memory ring and `LogsViewerScreen` shows it live — on-device mesh
+  debugging. Bridge/hub keep `println` (their console IS the UI).)*
 - [ ] Make `NetworkPacket.signature` a `val`; document which of packet-level vs payload-level
   signature is canonical. `Packets.kt:35`.
 

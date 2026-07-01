@@ -117,9 +117,6 @@ class MeshClient(
     /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
     val androidId: String get() = NodeId.toAndroid(nodeId)
 
-    /** Our X25519 DM public key (X.509 b64) — share via a [MeshContact] so peers can encrypt to us. */
-    fun dmPublicKeyB64(): String = DmKeys.publicKeyX509B64()
-
     /** Our shareable contact card (handle + node id + DM public key). */
     fun contactCard(): MeshContact = MeshContact(identity.handle, nodeId, DmKeys.publicKeyX509B64())
 
