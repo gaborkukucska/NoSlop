@@ -66,6 +66,8 @@ data class NetworkPacket(
     fun getMediaRelayRequestPayload(): MediaRelayRequestPayload? = decode("MEDIA_RELAY_REQUEST", MediaRelayRequestPayload.serializer())
     fun getMediaRecoveryFoundPayload(): MediaRecoveryFoundPayload? = decode("MEDIA_RECOVERY_FOUND", MediaRecoveryFoundPayload.serializer())
     fun getMediaTransferAckPayload(): MediaTransferAckPayload? = decode("MEDIA_TRANSFER_ACK", MediaTransferAckPayload.serializer())
+    fun getEditPostPayload(): EditPostPayload? = decode("EDIT_POST", EditPostPayload.serializer())
+    fun getDeletePostPayload(): DeletePostPayload? = decode("DELETE_POST", DeletePostPayload.serializer())
 }
 
 /**
@@ -246,6 +248,27 @@ data class CommentData(
     @SerialName("author_name") val authorName: String,
     @SerialName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
+    val timestamp: Long,
+    val signature: String,
+)
+
+/** Author edits their post — signed `"$postId|$authorId|$content|$timestamp"`. Receivers must check the
+ *  author matches the stored post's author (the signature alone only proves *someone* signed it). */
+@Serializable
+data class EditPostPayload(
+    @SerialName("post_id") val postId: String,
+    @SerialName("author_id") val authorId: String,
+    val content: String,
+    val timestamp: Long,
+    val signature: String,
+)
+
+/** Author deletes their post — signed `"$postId|$authorId|$timestamp"`. Same author-match rule; the post
+ *  is marked orphaned rather than removed (so a late gossip echo can't resurrect it). */
+@Serializable
+data class DeletePostPayload(
+    @SerialName("post_id") val postId: String,
+    @SerialName("author_id") val authorId: String,
     val timestamp: Long,
     val signature: String,
 )

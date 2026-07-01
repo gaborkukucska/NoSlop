@@ -123,4 +123,27 @@ class PacketVerifierTest {
         val dm = EncryptedPayload(id = "m1", nonce = "n", ciphertext = "c")
         assertTrue(verifyPacket(messagePacket("s", "t", dm)), "E2E DM has no packet signature — allowed")
     }
+
+    @Test
+    fun valid_edit_post_passes_tampered_fails() {
+        val ts = 1718900008000L
+        val e = EditPostPayload(postId = "p1", authorId = pub, content = "edited text", timestamp = ts,
+            signature = sign("p1|$pub|edited text|$ts", priv))
+        assertTrue(verifyPacket(editPostPacket("sender", e)), "a correctly signed edit must verify")
+        val forged = editPostPacket("sender", e).copy(
+            payload = NetworkPacket.payloadOf(e.copy(content = "attacker text"), EditPostPayload.serializer()))
+        assertFalse(verifyPacket(forged), "edit with tampered content vs its signature must be rejected")
+    }
+
+    @Test
+    fun valid_delete_post_passes_retargeted_fails() {
+        val ts = 1718900009000L
+        val d = DeletePostPayload(postId = "p1", authorId = pub, timestamp = ts,
+            signature = sign("p1|$pub|$ts", priv))
+        assertTrue(verifyPacket(deletePostPacket("sender", d)), "a correctly signed delete must verify")
+        // Re-aim the signed delete at a different post — the classic replay-against-another-target.
+        val retargeted = deletePostPacket("sender", d).copy(
+            payload = NetworkPacket.payloadOf(d.copy(postId = "p2"), DeletePostPayload.serializer()))
+        assertFalse(verifyPacket(retargeted), "delete re-aimed at another post id must be rejected")
+    }
 }

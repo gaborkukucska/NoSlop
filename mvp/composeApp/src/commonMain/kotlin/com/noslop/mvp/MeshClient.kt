@@ -65,6 +65,12 @@ class MeshClient(
             override suspend fun onMediaRecoveryFound(packet: NetworkPacket, f: MediaRecoveryFoundPayload) {
                 media.handleRecoveryFound(f)
             }
+            override suspend fun onEditPost(packet: NetworkPacket, e: EditPostPayload) {
+                onEditPost?.invoke(e)
+            }
+            override suspend fun onDeletePost(packet: NetworkPacket, d: DeletePostPayload) {
+                onDeletePost?.invoke(d)
+            }
         },
         firewall = MeshFirewall(now = { nowMillis() }),
         verify = ::verifyPacket,   // reject forged/unsigned handshakes + reactions (was unwired — accepted all)
@@ -113,6 +119,13 @@ class MeshClient(
 
     /** Called for every incoming COMMENT_VOTE (up/down on a comment). [CommentVotePayload.action] add/remove. */
     var onCommentVote: ((v: CommentVotePayload) -> Unit)? = null
+
+    /** Called for every incoming (signature-verified) EDIT_POST. The handler MUST still check the author
+     *  matches the stored post's author before applying — the signature alone doesn't prove ownership. */
+    var onEditPost: ((e: EditPostPayload) -> Unit)? = null
+
+    /** Called for every incoming (signature-verified) DELETE_POST. Same author-match rule as [onEditPost]. */
+    var onDeletePost: ((d: DeletePostPayload) -> Unit)? = null
 
     /** Our node id in Android base64 form (X.509 Ed25519) — the `authorId` we sign reactions/handshakes with. */
     val androidId: String get() = NodeId.toAndroid(nodeId)
@@ -279,6 +292,35 @@ class MeshClient(
             timestamp = ts, signature = signature, action = if (add) "add" else "remove",
         )
         node.broadcast(commentVotePacket(nodeId, payload))
+        return true
+    }
+
+    /**
+     * Edit my own post [postId] to [newContent]. Signed the way Android verifies —
+     * `"$postId|$authorId|$content|$timestamp"` (`PostPacketHandler.handleEditPost`) — so Android peers
+     * apply it. Only works for posts we authored (peers enforce author-match). Returns false if we can't sign.
+     */
+    suspend fun sendEditPost(postId: String, newContent: String): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$postId|$authorId|$newContent|$ts") ?: return false
+        val payload = EditPostPayload(postId = postId, authorId = authorId, content = newContent, timestamp = ts, signature = signature)
+        store?.updatePostContent(postId, newContent)
+        node.broadcast(editPostPacket(nodeId, payload))
+        return true
+    }
+
+    /**
+     * Delete my own post [postId]. Signed `"$postId|$authorId|$timestamp"` (Android
+     * `PostPacketHandler.handleDeletePost`); peers mark it orphaned. Returns false if we can't sign.
+     */
+    suspend fun sendDeletePost(postId: String): Boolean {
+        val authorId = androidId
+        val ts = nowMillis()
+        val signature = signWithIdentity("$postId|$authorId|$ts") ?: return false
+        val payload = DeletePostPayload(postId = postId, authorId = authorId, timestamp = ts, signature = signature)
+        store?.markPostOrphaned(postId)
+        node.broadcast(deletePostPacket(nodeId, payload))
         return true
     }
 

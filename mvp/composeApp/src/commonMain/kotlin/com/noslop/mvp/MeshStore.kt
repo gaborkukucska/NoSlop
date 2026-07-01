@@ -39,6 +39,11 @@ class MeshStore(driver: SqlDriver) {
     fun recentPosts(limit: Long = 100): List<MeshPost> = posts.selectRecent(limit).executeAsList()
     fun post(id: String): MeshPost? = posts.getById(id).executeAsOneOrNull()
     fun postCount(): Long = posts.count().executeAsOne()
+    /** Apply a (verified, author-matched) EDIT_POST: content only — timestamp/order unchanged (Android parity). */
+    fun updatePostContent(id: String, content: String) = posts.updateContent(content, id)
+    /** Apply a (verified, author-matched) DELETE_POST: mark orphaned, don't remove — a late gossip echo
+     *  of the original post is then deduped by INSERT OR IGNORE instead of resurrecting it. */
+    fun markPostOrphaned(id: String) = posts.markOrphaned(id)
 
     // --- Encrypted DMs (ciphertext+nonce only) ---
     fun saveMessage(message: Message) = messages.insertIgnore(message)

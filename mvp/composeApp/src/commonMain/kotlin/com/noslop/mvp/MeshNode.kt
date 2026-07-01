@@ -28,6 +28,10 @@ interface MeshSink {
     suspend fun onMediaRecoveryFound(packet: NetworkPacket, f: MediaRecoveryFoundPayload) {}
     /** A MEDIA_REQUEST arrived (a peer asks us for a byte range — Phase-6 serving; leaves ignore it). */
     suspend fun onMediaRequest(packet: NetworkPacket, r: MediaRequestPayload) {}
+    /** An EDIT_POST arrived (signature verified; the sink must still enforce the author-match rule). */
+    suspend fun onEditPost(packet: NetworkPacket, e: EditPostPayload) {}
+    /** A DELETE_POST arrived (signature verified; the sink must still enforce the author-match rule). */
+    suspend fun onDeletePost(packet: NetworkPacket, d: DeletePostPayload) {}
 }
 
 /** A sink that just records what arrived — for the self-test and unit tests. */
@@ -87,6 +91,8 @@ class MeshNode(
         packet.getMediaChunkPayload()?.let { sink.onMediaChunk(packet, it) }
         packet.getMediaRecoveryFoundPayload()?.let { sink.onMediaRecoveryFound(packet, it) }
         packet.getMediaRequestPayload()?.let { sink.onMediaRequest(packet, it) }
+        packet.getEditPostPayload()?.let { sink.onEditPost(packet, it) }
+        packet.getDeletePostPayload()?.let { sink.onDeletePost(packet, it) }
     }
 
     private suspend fun forward(fromLink: String, packet: NetworkPacket) {
@@ -160,6 +166,20 @@ fun commentVotePacket(senderId: String, v: CommentVotePayload, hops: Int = 6): N
     NetworkPacket(
         id = randomId(), hops = hops, senderId = senderId, type = "COMMENT_VOTE",
         payload = NetworkPacket.payloadOf(v, CommentVotePayload.serializer()), signature = v.signature,
+    )
+
+/** Build an EDIT_POST packet (author edits their own post). Carries the author signature; stamped at packet level. */
+fun editPostPacket(senderId: String, e: EditPostPayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "EDIT_POST",
+        payload = NetworkPacket.payloadOf(e, EditPostPayload.serializer()), signature = e.signature,
+    )
+
+/** Build a DELETE_POST packet (author deletes their own post). Carries the author signature; stamped at packet level. */
+fun deletePostPacket(senderId: String, d: DeletePostPayload, hops: Int = 6): NetworkPacket =
+    NetworkPacket(
+        id = randomId(), hops = hops, senderId = senderId, type = "DELETE_POST",
+        payload = NetworkPacket.payloadOf(d, DeletePostPayload.serializer()), signature = d.signature,
     )
 
 /** Build a signed handshake packet — [type] is "CONNECTION_REQUEST" (request) or "USER_HANDSHAKE" (accept).

@@ -353,9 +353,10 @@ private fun FeedScreen(mesh: MeshUiState) {
                 VerticalPager(state = pager, modifier = Modifier.fillMaxSize()) { page ->
                     val item = shown[page]
                     val isMesh = item.sourceId == "mesh"
-                    // The post's media id keys the 5b download state (progress while transferring, and a
-                    // tap-to-download affordance for media outside the auto policy — big images for now).
-                    val meshMedia = if (isMesh) mesh.received.firstOrNull { it.id == item.id }?.mediaMetadata else null
+                    // The mesh post behind this item drives the 5b media download state and the moderation
+                    // affordances (delete my own post / block another author — Roadmap #9).
+                    val meshPost = if (isMesh) mesh.received.firstOrNull { it.id == item.id } else null
+                    val meshMedia = meshPost?.mediaMetadata
                     FeedMediaCard(
                         item, isVisible = page == pager.currentPage,
                         commentCount = if (isMesh) mesh.commentsFor(item.id).size else 0,
@@ -367,6 +368,8 @@ private fun FeedScreen(mesh: MeshUiState) {
                         onDownloadMedia = meshMedia
                             ?.takeIf { item.localMediaPath == null && mesh.mediaProgress[it.id] == null }
                             ?.let { meta -> { mesh.downloadMedia(meta) } },
+                        onDeletePost = meshPost?.takeIf { it.authorId == mesh.myId }?.let { { mesh.deletePost(item.id) } },
+                        onBlockAuthor = meshPost?.takeIf { it.authorId != mesh.myId }?.let { p -> { mesh.blockAuthor(p.authorId) } },
                     )
                 }
             }
@@ -442,6 +445,7 @@ private fun FeedMediaCard(
     commentCount: Int = 0, score: Int = 0, myVote: String? = null,
     onVote: ((String) -> Unit)? = null, onOpenComments: (() -> Unit)? = null,
     mediaProgress: Int? = null, onDownloadMedia: (() -> Unit)? = null,
+    onDeletePost: (() -> Unit)? = null, onBlockAuthor: (() -> Unit)? = null,
 ) {
     val url = item.mediaUrl
     val thumb = item.thumbnailB64
@@ -540,6 +544,17 @@ private fun FeedMediaCard(
                         color = Color.White, fontSize = 14.sp,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                     )
+                }
+                // Moderation (Roadmap #9): my post → delete everywhere; someone else's → block the author.
+                onDeletePost?.let { del ->
+                    androidx.compose.material3.Surface(onClick = del, color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(20.dp)) {
+                        Text("🗑", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                    }
+                }
+                onBlockAuthor?.let { block ->
+                    androidx.compose.material3.Surface(onClick = block, color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(20.dp)) {
+                        Text("🚫", color = Color.White, fontSize = 14.sp, modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp))
+                    }
                 }
             }
         }
@@ -757,6 +772,9 @@ private class MeshUiState(private val scope: CoroutineScope) {
     // Mesh media downloads (5b): mediaId → local absolute path once complete / percent while in flight.
     val mediaLocalPath = mutableStateMapOf<String, String>()
     val mediaProgress = mutableStateMapOf<String, Int>()
+    // Blocked authors (Roadmap #9) — Android-b64 author ids whose posts/comments/DMs we drop. Local-only
+    // moderation (nothing broadcast); persisted in the meta store.
+    val blockedAuthors = mutableStateListOf<String>()
     var host by mutableStateOf("127.0.0.1")
     var port by mutableStateOf("9876")
     var viaTor by mutableStateOf(false)
@@ -775,10 +793,34 @@ private class MeshUiState(private val scope: CoroutineScope) {
     val linkCount: Int get() = client.linkCount
 
     init {
+        runCatching { MeshStoreProvider.get()?.meta(BLOCKED_KEY) }.getOrNull()
+            ?.lineSequence()?.filter { it.isNotBlank() }?.let { blockedAuthors.addAll(it) }
         client.onPost = { post ->
             scope.launch {
+                if (post.authorId in blockedAuthors) return@launch
                 if (received.none { it.id == post.id }) received.add(0, post)
                 maybeAutoDownloadMedia(post.mediaMetadata)
+            }
+        }
+        // Moderation (Roadmap #9). The verifier already checked the payload signature; here we enforce the
+        // AUTHOR-MATCH rule (only the stored post's author may edit/delete it) and the no-backdating rule —
+        // exactly Android's PostPacketHandler.handleEditPost/handleDeletePost semantics.
+        client.onEditPost = { e ->
+            scope.launch {
+                val idx = received.indexOfFirst { it.id == e.postId }
+                if (idx >= 0 && received[idx].authorId == e.authorId && e.timestamp >= received[idx].timestamp) {
+                    received[idx] = received[idx].copy(content = e.content)
+                    runCatching { MeshStoreProvider.get()?.updatePostContent(e.postId, e.content) }
+                }
+            }
+        }
+        client.onDeletePost = { d ->
+            scope.launch {
+                val idx = received.indexOfFirst { it.id == d.postId }
+                if (idx >= 0 && received[idx].authorId == d.authorId && d.timestamp >= received[idx].timestamp) {
+                    received.removeAt(idx)
+                    runCatching { MeshStoreProvider.get()?.markPostOrphaned(d.postId) }
+                }
             }
         }
         // Media pipeline → UI state. Callbacks fire on transfer coroutines; hop to the UI scope.
@@ -787,6 +829,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
         client.media.onFailed = { id, why -> scope.launch { mediaProgress.remove(id); status = "Media download failed: $why" } }
         client.onDm = { fromNodeId, fromEncPub, text, messageId, replyTo ->
             scope.launch {
+                if (NodeId.toAndroid(fromNodeId) in blockedAuthors) return@launch   // blocked sender — drop
                 // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.
                 if (contacts.none { it.nodeId == fromNodeId }) {
                     val c = MeshContact("${fromNodeId.take(8)}…", fromNodeId, fromEncPub)
@@ -1035,7 +1078,32 @@ private class MeshUiState(private val scope: CoroutineScope) {
         }
     }
 
-    private companion object { const val HANDSHAKE_RETRY_MS = 3L * 24 * 60 * 60 * 1000 }  // ~3 days between retries
+    private companion object {
+        const val HANDSHAKE_RETRY_MS = 3L * 24 * 60 * 60 * 1000   // ~3 days between handshake retries
+        const val BLOCKED_KEY = "blocked_authors"                  // meta-store key, newline-joined author ids
+    }
+
+    /** My Android-b64 author id — what my own posts/comments carry as `authorId`. */
+    val myId: String get() = client.androidId
+
+    /** Delete my own post everywhere: signed DELETE_POST broadcast + local remove (Roadmap #9). */
+    fun deletePost(postId: String) {
+        scope.launch {
+            if (client.sendDeletePost(postId)) {
+                received.removeAll { it.id == postId }
+                status = "Post deleted"
+            } else status = "Delete failed (identity key)"
+        }
+    }
+
+    /** Hide everything from [authorId] — posts already shown, future posts/comments, and DMs. Local-only. */
+    fun blockAuthor(authorId: String) {
+        if (authorId == myId || authorId in blockedAuthors) return
+        blockedAuthors.add(authorId)
+        received.removeAll { it.authorId == authorId }
+        runCatching { MeshStoreProvider.get()?.putMeta(BLOCKED_KEY, blockedAuthors.joinToString("\n")) }
+        status = "Author blocked"
+    }
 
     /** Give a contact a meaningful name (keyed by node id; survives relaunches). */
     fun renameContact(contact: MeshContact, newName: String) {
@@ -1165,9 +1233,10 @@ private class MeshUiState(private val scope: CoroutineScope) {
         }
     }
 
-    /** Comments on [postId], oldest first. */
+    /** Comments on [postId], oldest first — minus blocked authors (Roadmap #9). */
     fun commentsFor(postId: String): List<CommentPayload> =
-        comments.filter { it.postId == postId }.sortedBy { it.comment.timestamp }
+        comments.filter { it.postId == postId && it.comment.authorId !in blockedAuthors }
+            .sortedBy { it.comment.timestamp }
 
     /** Post a comment (or threaded reply) on [postId]; broadcast signed + echo locally. */
     fun sendComment(postId: String, text: String, parentCommentId: String? = null) {

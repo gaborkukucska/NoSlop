@@ -17,6 +17,10 @@ package com.noslop.mvp
  *  - POST: `"$id|$authorId|$content|$timestamp"` (+`"|$avatar"`) against `authorId` (== `authorPublicKey`).
  *    **Required** — iOS now signs posts ([MeshClient.publish]) and Android verifies with `signature ?: ""`
  *    (so it already rejects unsigned posts); rejecting unsigned here closes the C1 lenient-POST gap.
+ *  - EDIT_POST: `"$postId|$authorId|$content|$timestamp"` / DELETE_POST: `"$postId|$authorId|$timestamp"`
+ *    against `authorId`. **Required** (both sign). NOTE: the signature only proves the payload's author
+ *    signed it — receivers must additionally check `authorId` matches the STORED post's author
+ *    (see the Android `PostPacketHandler` author-match rule; ours is in `MeshUiState`).
  *  - MESSAGE (E2E DM — authenticated by its AEAD, not a packet signature), DIAL_PEER (bridge control),
  *    and anything else: allowed.
  *
@@ -54,6 +58,12 @@ fun verifyPacket(packet: NetworkPacket): Boolean {
             cd.authorAvatarB64?.let { append('|').append(it) }
         }
         return verify(msg, cd.signature, cd.authorId)   // signer = comment author
+    }
+    packet.getEditPostPayload()?.let { e ->
+        return verify("${e.postId}|${e.authorId}|${e.content}|${e.timestamp}", e.signature, e.authorId)
+    }
+    packet.getDeletePostPayload()?.let { d ->
+        return verify("${d.postId}|${d.authorId}|${d.timestamp}", d.signature, d.authorId)
     }
     packet.getPostPayload()?.let { p ->
         val sig = p.signature ?: return false     // posts are required-signed now (iOS signs; Android always has)

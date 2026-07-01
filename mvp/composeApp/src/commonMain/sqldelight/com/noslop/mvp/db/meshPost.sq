@@ -32,8 +32,17 @@ INSERT OR IGNORE INTO meshPost VALUES ?;
 bumpGossip:
 UPDATE meshPost SET gossipCount = gossipCount + 1 WHERE id = ?;
 
+-- Orphaned = deleted by its author via a signed DELETE_POST (Android semantics: rows are marked, not
+-- removed, so a late gossip echo of the post can't resurrect it via INSERT OR IGNORE).
 selectRecent:
-SELECT * FROM meshPost ORDER BY timestamp DESC LIMIT ?;
+SELECT * FROM meshPost WHERE isOrphaned = 0 ORDER BY timestamp DESC LIMIT ?;
+
+-- Content only — the post keeps its original timestamp (Android parity: an edit must not re-sort the feed).
+updateContent:
+UPDATE meshPost SET content = ? WHERE id = ?;
+
+markOrphaned:
+UPDATE meshPost SET isOrphaned = 1 WHERE id = ?;
 
 getById:
 SELECT * FROM meshPost WHERE id = ?;
