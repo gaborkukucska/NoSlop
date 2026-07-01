@@ -4,6 +4,40 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-07-02 (overnight session, cont.) — Roadmap #5c, #7, #8, #9, engagement sync, hardening 🟢
+
+Autonomous overnight run continuing from #5b (below). Seven more increments, each compile-tested
+(jvmTest + compileKotlinIosArm64; full iosSimulatorArm64Test green at checkpoints):
+
+- **#5c video/audio** (`3e97bf0`) — tap-to-download any media type, playback from `file://` via the
+  existing players.
+- **#7 feed memory + viewed-history** (`2364849`) — `FeedSession` position memory across tab switches;
+  >5 s dwell → SQLDelight viewed-history, excluded next load (5000 cap, Android parity).
+- **#8 search by media type** (`0ef0166`) — Search Videos/Audio/Images/Articles routed to Android's
+  source sets; UI chips in the filters card.
+- **#9 moderation** (`8dcb566`) — EDIT_POST/DELETE_POST wire + required-signed verifier + author-match
+  apply; 🗑 delete-own-post, 🚫 block-author (persisted; hides posts/comments/DMs).
+- **Engagement sync** (`ba6dfea`) — SYNC_REQUEST on connect; verified SYNC_RESPONSE items fed through
+  the live-gossip callbacks (single dedup path). SyncWireTest parses literal Android JSON.
+- **Punch-list hardening** (`473e93a`) — H2 hub identity pinning (`HubIdentityMismatch`, reconnect
+  monitor stops on impostor), M2 structural NodeId (64-lowercase-hex invariant + NodeIdTest), M4
+  HttpTimeout 30s/15s everywhere + 10 MB NetworkImage cap.
+- **Portability cleanups** (`929688d`) — deleted dead `data/MeshSocialRepository`/`EngagementRepository`
+  (M1) + ChatScreen stub; Logger ring buffer + live LogsViewerScreen; transport logs routed; mesh posts
+  now LOAD from the store on launch (was write-only).
+
+**Still open (biggest first):** #6 media upload/broadcast + bridge cache (architectural — bridge becomes
+a media host; design in MEDIA_OVER_MESH_DESIGN.md §Upload), chat media attachments (blocked on #6),
+progressive streaming for large video, edit-post UI, creator follow, exit/rejected announcements,
+H3/M3/M5/M6 punch-list items, ApiUtil dedup.
+
+**Upstream note (fetched 2026-07-01):** Gabor pushed a new `Legacy-Android` branch + `v0.2.2-alpha` tag
+(NOT on main): mesh packet filtering (peers can drop packet types!), CHAT_REACTION support REMOVED on
+Android, crypto migrated to Lazysodium/BC-raw (wire format preserved, "backwards compatibility is
+partial"). When that lands on main, re-test chat reactions + run a signature round-trip.
+
+---
+
 ## 2026-07-01 — Roadmap #5b: media download pipeline (images over the mesh) 🟢
 
 An Android media post's **full image now downloads over the mesh and renders on iOS** — thumbnail shows

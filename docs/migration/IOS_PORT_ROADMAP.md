@@ -22,8 +22,10 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 - ✅ **Comment + chat-message reactions** — DONE. `ChatReactionPayload`/`CommentReactionPayload` added to mvp
   Packets; `sendChatReaction`/`sendCommentReaction` + aggregation; CHAT_REACTION now mesh-relayed (DM message
   ids keyed on the wire `EncryptedPayload.id` so reactions correlate with Android both directions).
-- **Engagement sync in gossip** — comments/reactions/votes carried in the sync response so a joining
-  peer catches up. **[M]**
+- ✅ **Engagement sync in gossip** — DONE (2026-07-02). Leaf broadcasts `SYNC_REQUEST` (7-day window,
+  25 s after first link-up); `SYNC_RESPONSE` batches are per-item verified and fed through the same
+  onPost/onComment/onReaction callbacks as live gossip (one dedup path). Votes aren't in Android's sync
+  payload (posts/comments/reactions only) — parity preserved.
 
 ### Messaging
 - ✅ **Message replies** (`replyToMessageId`) + reply-quote UI — DONE. DMs now use Android's
@@ -39,12 +41,19 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
   **[L — largest item, split into download pipeline then upload/broadcast]**
 
 ### Feed UX / curation
-- **Feed position memory + viewed-history / swipe exclusion** (don't re-show seen items). **[S]**
-- **Search routing by media type** (Search Videos/Audio/Images/Articles) + creator search/follow. **[S–M]**
+- ✅ **Feed position memory + viewed-history** — DONE (2026-07-02). `FeedSession` keeps stories + pager
+  position across tab switches; >5 s dwell records to the SQLDelight viewed-history (5000 cap, Android
+  parity), excluded on next load. Swipe-away exclusion N/A to our vertical-pager UX (no dismiss gesture).
+- ✅ **Search routing by media type** — DONE (2026-07-02). Search field + All/Videos/Audio/Images/Articles
+  chips; `Search *` categories in `PublicApiService` dispatch to Android's source sets (+ Internet Archive
+  video for resilience). Creator search/follow still open. **[S]**
 
 ### Moderation / safety
-- Post **edit/delete** (`EditPostPayload`/`DeletePostPayload`), user-exit + connection-rejected
-  announcements, peer blocking. **[M]**
+- ✅ Post **edit/delete** — DONE (2026-07-02). `EditPostPayload`/`DeletePostPayload` wire + verifier
+  (required-signed), receive-side author-match + no-backdating (Android `PostPacketHandler` semantics),
+  delete marks orphaned (no resurrection via gossip echo). Send: `sendEditPost`/`sendDeletePost`; 🗑 UI on
+  own posts (edit UI still open). ✅ **Peer blocking** — 🚫 hides an author's posts/comments/DMs, persisted.
+  Still open: user-exit + connection-rejected announcements. **[S remains]**
 
 ## Recommended order (dependency- and value-aware)
 
@@ -54,6 +63,10 @@ golden `WireProtocolTest` vectors); port social/mesh ops onto our **working** pa
 | ✅ 2 | **Votes + comment/chat reactions** | M | DONE — post votes (`sendVote`/`vote`), comment votes (`sendCommentVote`/`voteComment`), comment reactions (`sendCommentReaction`), and DM chat reactions (`sendChatReaction`, real CHAT_REACTION replacing the local-only `dmReactions`). All signed Android-byte-compatible; verifier + tests added. |
 | ✅ 3 | **Message replies** (text only) | S–M | DONE — adopted Android's `{"content":…,"replyTo":…}` DM envelope (`DmEnvelope.kt`) + reply UI; fixed the latent JSON-braces display bug. |
 | ✅ 4 | **Sign iOS posts** (punch-list follow-up) | S | DONE — `publish()` signs `"$id|$authorId|$content|$ts"` (authorId = our Android b64 id); verifier now requires POST signatures (closes the C1 lenient gap). Android already rejected our unsigned posts, so this is what makes them land. |
+| ✅ 5c | **Video/audio download + local playback** | S | DONE (2026-07-02) — tap-to-download any media type (auto stays images ≤5 MB); downloaded video/audio play via `VideoPlayer`/`AudioPlayer` from a `file://` URL (`VideoSource` resolves `file://` as Direct). Progressive/streaming playback of larger files still open. |
+| ✅ 7 | **Feed memory + viewed-history** | S | DONE (2026-07-02) — see Feed UX section. |
+| ✅ 8 | **Search routing / media typing** | S–M | DONE (2026-07-02) — media-type search chips; creator follow still open. |
+| ✅ 9 | **Moderation (edit/delete/block) + sync** | M | DONE (2026-07-02) — edit/delete wire + author-match apply + 🗑/🚫 UI; author blocking; engagement sync on connect. Edit UI + exit/rejected announcements still open. |
 | 🔄 5 | **Media over mesh — download pipeline** | L | IN PROGRESS. **5a DONE** — inline thumbnails: `Base64Image` renders an Android post's in-band `thumbnail_b64` with zero fetch (no deanon); media posts now show their preview. **5b DONE** (2026-07-01) — image downloader: Android-wire media payloads in `Packets.kt`, `MediaDownloadManager` (AIMD 16→64 KB / conc 4, timeout-retry, recovery broadcast, EOF/short-read, `.part`→rename, ACK), expect/actual `MediaFiles` (NSFileHandle / RandomAccessFile), firewall `MEDIA_*`/`SYNC_*` rate-limit exemption (GossipService parity), auto-download images ≤ 5 MB + tap-to-load for bigger, `LocalFileImage` renders the downloaded file in the feed card. Requests broadcast via the bridge (design option A — zero bridge changes). **5c NEXT** (video/audio + streaming playback). |
 | 6 | **Media over mesh — upload/broadcast + chat media** | M | Builds on #5; enables sharing images/video/GIFs in posts + DMs. |
 | 7 | **Feed memory + viewed-history** | S | Independent UX win; can slot in anytime. |
