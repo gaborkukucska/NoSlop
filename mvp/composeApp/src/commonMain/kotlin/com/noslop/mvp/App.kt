@@ -345,11 +345,7 @@ private fun FeedScreen(mesh: MeshUiState) {
                         onOpenComments = if (isMesh) ({ commentsForPost = item.id }) else null,
                         mediaProgress = meshMedia?.let { mesh.mediaProgress[it.id] },
                         onDownloadMedia = meshMedia
-                            ?.takeIf { m ->
-                                // Only images are renderable in 5b — don't offer a download we can't show yet.
-                                (m.type == "image" || m.mimeType.startsWith("image/")) &&
-                                    item.localMediaPath == null && mesh.mediaProgress[m.id] == null
-                            }
+                            ?.takeIf { item.localMediaPath == null && mesh.mediaProgress[it.id] == null }
                             ?.let { meta -> { mesh.downloadMedia(meta) } },
                     )
                 }
@@ -410,16 +406,25 @@ private fun FeedMediaCard(
     val url = item.mediaUrl
     val thumb = item.thumbnailB64
     val local = item.localMediaPath
-    // Mesh media renders by download state (5b): the full file from disk once it arrived; until then the
-    // in-band base64 thumbnail (no fetch — no deanon), with transfer progress overlaid while in flight.
+    // Mesh media renders by download state (5b/5c): the full file from disk once it arrived (image inline,
+    // video/audio through the players via a file:// URL); until then the in-band base64 thumbnail (no fetch
+    // — no deanon), with transfer progress overlaid while in flight.
     val kind = when {
-        local != null -> FeedKind.IMAGE   // 5b downloads are images; video/audio come with 5c
+        local != null -> when (item.mediaType) {
+            "video" -> FeedKind.VIDEO
+            "audio" -> FeedKind.AUDIO
+            else -> FeedKind.IMAGE
+        }
         url != null -> feedKind(item, url)
         thumb != null -> FeedKind.IMAGE
         else -> FeedKind.ARTICLE
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         when {
+            local != null && kind == FeedKind.VIDEO ->
+                com.noslop.mvp.ui.media.VideoPlayer(url = "file://$local", isVisible = isVisible, modifier = Modifier.fillMaxSize())
+            local != null && kind == FeedKind.AUDIO ->
+                AudioPlayer(url = "file://$local", isVisible = isVisible)
             local != null ->
                 LocalFileImage(local, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
             url != null && kind == FeedKind.VIDEO ->
@@ -442,7 +447,12 @@ private fun FeedMediaCard(
                         color = Color.Black.copy(alpha = 0.55f), shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.align(Alignment.Center),
                     ) {
-                        Text("⇣ Load full image", color = Color.White, fontSize = 13.sp,
+                        val label = when (item.mediaType) {
+                            "video" -> "⇣ Load video"
+                            "audio" -> "⇣ Load audio"
+                            else -> "⇣ Load full image"
+                        }
+                        Text(label, color = Color.White, fontSize = 13.sp,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                     }
                 }
@@ -734,7 +744,7 @@ private class MeshUiState(private val scope: CoroutineScope) {
         // Media pipeline → UI state. Callbacks fire on transfer coroutines; hop to the UI scope.
         client.media.onProgress = { id, pct -> scope.launch { if (mediaLocalPath[id] == null) mediaProgress[id] = pct } }
         client.media.onComplete = { id, path -> scope.launch { mediaProgress.remove(id); mediaLocalPath[id] = path } }
-        client.media.onFailed = { id, _ -> scope.launch { mediaProgress.remove(id) } }
+        client.media.onFailed = { id, why -> scope.launch { mediaProgress.remove(id); status = "Media download failed: $why" } }
         client.onDm = { fromNodeId, fromEncPub, text, messageId, replyTo ->
             scope.launch {
                 // Learn the sender as a contact (so the user can reply) if we don't have them yet — persisted.

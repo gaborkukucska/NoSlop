@@ -78,6 +78,10 @@ private fun doResolve(rawUrl: String): VideoSource {
     }
 
     return when {
+        // 0. Local file on disk (media downloaded over the mesh, 5c) — direct by definition, no probing.
+        //    Media ids often have no extension, so this must come before the extension-based check.
+        rawUrl.startsWith("file://") -> VideoSource.Direct(rawUrl)
+
         // 1. Direct file / local proxy
         isDirectFileUrl(rawUrl) -> VideoSource.Direct(rawUrl)
 
