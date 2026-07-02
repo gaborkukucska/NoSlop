@@ -44,7 +44,7 @@ class HandshakePacketHandler(
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         val peer = Peer(
             publicKeyB64 = connPay.fromUserId,
-            handle = connPay.fromUsername.split(".")[0],
+            handle = connPay.fromUsername,
             tripcode = tripcode,
             onionAddress = connPay.fromHomeNode,
             encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
@@ -113,7 +113,7 @@ class HandshakePacketHandler(
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val newPeer = Peer(
                 publicKeyB64 = handPay.fromUserId,
-                handle = handPay.fromUsername.split(".")[0],
+                handle = handPay.fromUsername,
                 tripcode = tripcode,
                 onionAddress = handPay.fromHomeNode,
                 encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
@@ -126,7 +126,7 @@ class HandshakePacketHandler(
 
         // Generate the accepted notification
         val title = "Connection Accepted"
-        val msg = "${handPay.fromUsername.split(".")[0]} accepted your connection request."
+        val msg = "${handPay.fromUsername} accepted your connection request."
         val route = "chat/${handPay.fromUserId}"
 
         notificationDao.insertNotification(

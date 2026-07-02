@@ -393,7 +393,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 Column {
                     Text("Incoming mesh connection request from:", color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("${peer.handle}.${peer.tripcode}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                    Text(peer.handle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                 }
             },
             confirmButton = {

@@ -284,7 +284,7 @@ class MeshSocialRepository(
         onionAddress: String,
         encPublicKeyB64: String = ""
     ): Boolean = withContext(Dispatchers.IO) {
-        val cleanHandle = handle.split(".")[0]
+        val cleanHandle = handle
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
@@ -307,7 +307,7 @@ class MeshSocialRepository(
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.split(".")[0],
+                fromUsername = myKeys.displayName.substringBeforeLast("."),
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
                 fromHomeNode = myKeys.onionAddress,
@@ -348,7 +348,7 @@ class MeshSocialRepository(
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.split(".")[0],
+                fromUsername = myKeys.displayName.substringBeforeLast("."),
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
                 fromHomeNode = myKeys.onionAddress,

@@ -23,7 +23,8 @@ import com.noslop.app.ui.theme.*
 import androidx.compose.ui.graphics.Color
 import com.noslop.app.ui.*
 import com.noslop.app.ui.components.*
-
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 @Composable
 fun SettingsTab(viewModel: NoSlopViewModel) {
     val torState by viewModel.torReadyState.collectAsState()
@@ -614,9 +615,29 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             var showFactoryResetConfirm by remember { mutableStateOf(false) }
+                            var showMnemonicDialog by remember { mutableStateOf(false) }
+                            var isExporting by remember { mutableStateOf(false) }
+                            var mnemonicInput by remember { mutableStateOf("") }
+
+                            val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+                                if (uri != null && mnemonicInput.isNotBlank()) {
+                                    viewModel.exportBackupToUri(context, mnemonicInput, uri)
+                                    mnemonicInput = ""
+                                }
+                            }
+
+                            val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                                if (uri != null && mnemonicInput.isNotBlank()) {
+                                    viewModel.importBackupFromUri(context, mnemonicInput, uri)
+                                    mnemonicInput = ""
+                                }
+                            }
 
                             Button(
-                                onClick = { /* Export Trigger */ },
+                                onClick = { 
+                                    isExporting = true
+                                    showMnemonicDialog = true
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                                 border = BorderStroke(1.dp, AccentGreen)
@@ -629,7 +650,10 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Button(
-                                onClick = { /* Import Trigger */ },
+                                onClick = { 
+                                    isExporting = false
+                                    showMnemonicDialog = true
+                                },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                                 border = BorderStroke(1.dp, AccentGreen)
@@ -642,6 +666,52 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             Spacer(modifier = Modifier.height(24.dp))
                             HorizontalDivider(color = BorderSubtle)
                             Spacer(modifier = Modifier.height(24.dp))
+
+                            if (showMnemonicDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showMnemonicDialog = false },
+                                    title = { Text(if (isExporting) "Export Backup" else "Import Backup") },
+                                    text = {
+                                        Column {
+                                            Text("Please enter your Word Cloud password to encrypt/decrypt the backup.", color = TextMuted)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            OutlinedTextField(
+                                                value = mnemonicInput,
+                                                onValueChange = { mnemonicInput = it },
+                                                label = { Text("Word Cloud (BIP39 Mnemonic)") },
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedBorderColor = AccentGreen,
+                                                    unfocusedBorderColor = BorderSubtle,
+                                                    focusedTextColor = TextLight,
+                                                    unfocusedTextColor = TextLight
+                                                )
+                                            )
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                showMnemonicDialog = false
+                                                if (isExporting) {
+                                                    exportLauncher.launch("noslop_backup.zip")
+                                                } else {
+                                                    importLauncher.launch(arrayOf("application/zip"))
+                                                }
+                                            },
+                                            enabled = mnemonicInput.isNotBlank()
+                                        ) {
+                                            Text(if (isExporting) "Save File" else "Select File", color = AccentGreen, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showMnemonicDialog = false }) {
+                                            Text("Cancel", color = TextMuted)
+                                        }
+                                    },
+                                    containerColor = SurfaceDark,
+                                    titleContentColor = TextLight
+                                )
+                            }
 
                             Button(
                                 onClick = { showFactoryResetConfirm = true },

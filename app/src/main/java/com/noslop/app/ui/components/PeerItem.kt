@@ -75,7 +75,7 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${peer.handle}.${peer.tripcode}",
+                        text = peer.handle,
                         fontWeight = FontWeight.Bold,
                         color = TextLight,
                         fontFamily = FontFamily.Monospace,
@@ -370,7 +370,7 @@ private fun ContactCardDialog(
             },
             text = {
                 Text(
-                    "You are about to remove ${peer.handle}.${peer.tripcode} from your contacts. " +
+                    "You are about to remove ${peer.handle} from your contacts. " +
                             "All messages with this peer will be lost. This cannot be undone.",
                     color = TextMuted,
                     textAlign = TextAlign.Center,

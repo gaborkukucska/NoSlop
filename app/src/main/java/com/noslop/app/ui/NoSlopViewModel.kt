@@ -742,13 +742,25 @@ fun toggleAggregator() {
         viewModelScope.launch { _isLocked.value = repository.isLocked() }
     }
 
-    fun exportBackup(context: Context, mnemonic: String, file: java.io.File) {
-        viewModelScope.launch { com.noslop.app.data.BackupManager.exportData(context, mnemonic, file) }
+    fun exportBackupToUri(context: Context, mnemonic: String, uri: android.net.Uri) {
+        viewModelScope.launch {
+            val outputStream = context.contentResolver.openOutputStream(uri)
+            if (outputStream != null) {
+                com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream)
+            }
+        }
     }
 
-    fun importBackup(context: Context, mnemonic: String, file: java.io.File) {
-        viewModelScope.launch { com.noslop.app.data.BackupManager.importData(context, mnemonic, file) }
+    fun importBackupFromUri(context: Context, mnemonic: String, uri: android.net.Uri) {
+        viewModelScope.launch {
+            val inputStream = context.contentResolver.openInputStream(uri)
+            if (inputStream != null) {
+                com.noslop.app.data.BackupManager.importData(context, mnemonic, inputStream)
+            }
+        }
     }
+
+
 
     fun refreshFeeds() {
         if (_isRefreshingFeeds.value) return

@@ -22,7 +22,7 @@ object BackupManager {
     private const val DB_NAME = "noslop_db"
     private const val PREFS_NAME = "noslop_identity_secure" // This might vary if fallback was used
 
-    fun exportData(context: Context, mnemonic: String, targetFile: File): Boolean {
+    fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {
         Logger.info(TAG, "Starting data export...")
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
@@ -72,7 +72,7 @@ object BackupManager {
             cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
 
             FileInputStream(tempZip).use { input ->
-                FileOutputStream(targetFile).use { output ->
+                targetStream.use { output ->
                     output.write(iv) // Prepend IV
                     val buffer = ByteArray(8192)
                     var read: Int
@@ -86,7 +86,7 @@ object BackupManager {
             }
             
             tempZip.delete()
-            Logger.info(TAG, "Export completed: ${targetFile.absolutePath}")
+            Logger.info(TAG, "Export completed to OutputStream")
             true
         } catch (e: Exception) {
             Logger.error(TAG, "Export failed: ${e.message}")
@@ -94,7 +94,7 @@ object BackupManager {
         }
     }
 
-    fun importData(context: Context, mnemonic: String, sourceFile: File): Boolean {
+    fun importData(context: Context, mnemonic: String, sourceStream: InputStream): Boolean {
         Logger.info(TAG, "Starting data import...")
         return try {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
@@ -102,7 +102,7 @@ object BackupManager {
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
             
             val tempZip = File(context.cacheDir, "noslop_restore.zip")
-            FileInputStream(sourceFile).use { input ->
+            sourceStream.use { input ->
                 val iv = ByteArray(16)
                 input.read(iv)
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(iv))

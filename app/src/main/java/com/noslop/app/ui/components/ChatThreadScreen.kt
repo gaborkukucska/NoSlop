@@ -262,7 +262,7 @@ fun ChatThreadScreen(
 
             Column {
                 Text(
-                    text = "${peer.handle}.${peer.tripcode}",
+                    text = peer.handle,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     color = TextLight
