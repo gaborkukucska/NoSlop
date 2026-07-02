@@ -488,36 +488,45 @@ fun OverlayInteractions(
         if (!isBlocked) {
             // ─── Reaction Pills (gChat-style: each emoji with its own counter) ───
             if (reactionSummary.isNotEmpty()) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                val activeReactions = reactionSummary.entries
+                    .filter { it.value > 0 }
+                    .sortedByDescending { it.value }
+
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    reactionSummary.entries
-                        .filter { it.value > 0 }
-                        .sortedByDescending { it.value }
-                        .forEach { (type, count) ->
-                            val emoji = emojiMap[type] ?: type
-                            Surface(
-                                onClick = { onReaction(type) },
-                                color = SurfaceDark.copy(alpha = 0.7f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, BorderSubtle)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    activeReactions.chunked(3).reversed().forEach { chunk ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            chunk.forEach { (type, count) ->
+                                val emoji = emojiMap[type] ?: type
+                                Surface(
+                                    onClick = { onReaction(type) },
+                                    color = SurfaceDark.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, BorderSubtle)
                                 ) {
-                                    Text(emoji, fontSize = 14.sp)
-                                    Text(
-                                        count.toString(),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentGreen
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(emoji, fontSize = 14.sp)
+                                        Text(
+                                            count.toString(),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AccentGreen
+                                        )
+                                    }
                                 }
                             }
                         }
+                    }
                 }
             }
 

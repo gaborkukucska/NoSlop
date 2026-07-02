@@ -821,7 +821,21 @@ fun UnifiedFeedTab(
                         Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
-                    Text("Your Profile", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Text("Feeds", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    
+                    val liveFeedSelected = localFilterMode == "Live Feed"
+                    Box(
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (liveFeedSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "Live Feed" }
+                            .then(if (liveFeedSelected) Modifier.border(1.dp, AccentGreen, RoundedCornerShape(12.dp)) else Modifier.border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))).padding(horizontal = 12.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, tint = if (liveFeedSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Live Feed", color = if (liveFeedSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (liveFeedSelected) FontWeight.Bold else FontWeight.Normal)
+                        }
+                    }
+
                     val myContentSelected = localFilterMode == "My Content"
                     Box(
                         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (myContentSelected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = "My Content" }
@@ -831,7 +845,7 @@ fun UnifiedFeedTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Person, contentDescription = null, tint = if (myContentSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("My Content", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text("Your Broadcasts", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
                     val meshSelected = localFilterMode == "Mesh"
@@ -847,7 +861,7 @@ fun UnifiedFeedTab(
                         }
                     }
                     Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
-                    val contentTypes = listOf("Live Feed" to Icons.Default.PlayArrow, "Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
+                    val contentTypes = listOf("Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         contentTypes.chunked(2).forEach { row ->
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -932,7 +946,15 @@ fun UnifiedFeedTab(
                 ) { Text("Apply", fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { applySearchQuery(""); filterMode = "Live Feed"; showSearchModal = false }) { Text("Clear All", color = TextMuted) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = { showSearchModal = false }) { Text("Close", color = TextMuted) }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { applySearchQuery(""); filterMode = "Live Feed"; showSearchModal = false },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
+                        shape = RoundedCornerShape(8.dp)
+                    ) { Text("Clear All", fontWeight = FontWeight.Bold) }
+                }
             }
         )
     }
