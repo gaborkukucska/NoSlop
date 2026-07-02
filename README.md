@@ -52,6 +52,7 @@ Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No cen
 - **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key (see [TECHNICAL_REFERENCE.md §3.5](docs/TECHNICAL_REFERENCE.md#35-direct-message-encryption) for the exact derivation). Only you and your contact can read them.
 - **QR pairing** — scan a contact's QR code to exchange public keys and onion addresses. One scan, done.
 - **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6) and the gossip engine enforces per-sender rate limits (20 packets per 10-second window). Duplicate packets are deduplicated by ID with an LRU cache. Spam and flood attacks don't propagate.
+- **Granular mesh filters** — control exactly which content types are pushed to and pulled from the mesh. Toggle incoming and outgoing traffic independently for reactions, comments, text posts, clearnet shares, images, and videos. Filters are network-only — your local data is always preserved, and interactions on content you already track are never blocked.
 
 ### Clearnet-to-Mesh Broadcasts
 

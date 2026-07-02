@@ -89,6 +89,7 @@ com.noslop.app
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
 │   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
+│   ├── MeshFilterSettings.kt      Mesh broadcast filter toggles (JSON in app_settings)
 │   ├── NoSlopDatabase.kt          Room database, version 23
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
@@ -115,6 +116,7 @@ com.noslop.app
 ├── ui/
 │   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
 │   ├── HaiNetTab.kt                 Mesh feed / peers tab
+│   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
 │   ├── MainScreen.kt                Top-level Compose host (god file, 2,889 LOC pre-refactor)
 │   ├── MediaComponents.kt           Shared media UI helpers
 │   ├── NoSlopViewModel.kt            ViewModel exposing repository as StateFlow
@@ -299,8 +301,8 @@ used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 ### 4.2 Gossip Protocol (`GossipService.kt`)
 
 `GossipService` is a Kotlin `object` (process-wide singleton), initialized via
-`initialize(peerDao, transport, localPublicKeyB64)` from
-`NoSlopRepository.saveLocalIdentity`.
+`initialize(peerDao, transport, localPublicKeyB64, getMeshFilterSettings, checkEntityExists)` from
+`NoSlopRepository.saveLocalIdentity` and `NoSlopApp.onCreate`.
 
 **`processIncoming(packet)` pipeline** (returns `true` if the packet should be
 processed locally by `MeshPacketHandler`):
@@ -423,6 +425,49 @@ used as the *reply vehicle* for both strategies. Full detail — diffing
 algorithm, the extended `SyncResponsePayload` with `comments`/`reactions`,
 and verification rules — is in
 [WIRE_PROTOCOL_REFERENCE.md §4](WIRE_PROTOCOL_REFERENCE.md#4-inventory-based-sync-inventory_sync_request).
+
+### 4.6 Mesh Broadcast Filters
+
+User-configurable content-type filters that gate which packets are pushed to
+and pulled from the mesh network. Filters operate **exclusively at the network
+sync layer** — all local database writes (reactions, comments, votes, posts)
+always succeed regardless of filter state.
+
+**Data model** (`MeshFilterSettings.kt`): 12 boolean flags (6 content types ×
+2 directions). Persisted as JSON in `app_settings["mesh_filter_settings"]` via
+`SettingsRepository`, exposed reactively as a `StateFlow<MeshFilterSettings>`.
+
+| Filter | Default | Outgoing gate | Incoming gate |
+|---|---|---|---|
+| Reactions | **off** | `MeshSocialRepository`: wraps `GossipService.broadcast()` call after local `reactionDao`/`voteDao` insert | `GossipService.processIncoming`: step 4.5, checks `allowIncomingReactions` |
+| Comments | on | `MeshSocialRepository.composeAndBroadcastComment`: wraps broadcast after `commentDao.insertComment` | `GossipService.processIncoming`: step 4.5, checks `allowIncomingComments` |
+| Text Posts | on | `MeshSocialRepository.composeAndBroadcastPost`: wraps broadcast after `postDao.insertPost` (when no `clearnetUrl` and no `mediaMetadata`) | `GossipService.processIncoming`: step 4.5, inspects `POST` payload |
+| Clearnet Shares | on | Same as above (when `clearnetUrl != null`) | Same as above (when `postPay.clearnetUrl != null`) |
+| Image Posts | on | Same as above (when `mediaMetadata.type == "image"`) | Same as above (when `postPay.mediaMetadata.type == "image"`) |
+| Video Posts | on | Same as above (when `mediaMetadata.type == "video"`) | Same as above (when `postPay.mediaMetadata.type == "video"`) |
+
+**"Already shared" exemption** (incoming): When a reaction, vote, or comment
+packet targets a post or comment that **already exists** in the local database
+(verified via `NoSlopRepository.checkEntityExistsLocally(type, id)` → queries
+`postDao.hasPost` / `commentDao.hasComment` / `messageDao.hasMessage`), the
+packet is exempt from the incoming filter and is always accepted. This ensures
+engagement on tracked content is never silently dropped.
+
+**Clearnet bridging guard** (outgoing): `reactToMeshPost` accepts an
+`isBridging: Boolean` parameter. When `reactToFeedItemWithType` calls it for a
+newly-created clearnet anchor post (`existingCount == 0`), `isBridging = true`
+causes the reaction broadcast to respect `allowOutgoingReactions`. For
+reactions on posts already in the database, `isBridging = false` and the
+broadcast always fires.
+
+**DM chat exemption**: `CHAT_REACTION` packets are completely excluded from
+both the incoming firewall filter check in `GossipService.processIncoming` and
+the outgoing gate in `MeshSocialRepository.reactToChat`. Direct messages and
+their reactions are never affected by mesh filter settings.
+
+**UI**: `MeshFiltersScreen.kt` (Material 3) — accessible from Settings →
+Account & Preferences → Mesh Filters. 6 content-type cards, each with
+Incoming/Outgoing toggle columns.
 
 ---
 
@@ -762,7 +807,8 @@ the ephemeral onion with the identity-derived one.
 | `app_settings` | `key` | `value` (string, often JSON) | — |
 
 `app_settings` is the catch-all KV store for: identity public data
-(`local_*`), onboarding/session flags, `media_settings` (JSON), per-category
+(`local_*`), onboarding/session flags, `media_settings` (JSON),
+`mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
 `language_preference`, `enable_aggregator`, `user_profile` (JSON).

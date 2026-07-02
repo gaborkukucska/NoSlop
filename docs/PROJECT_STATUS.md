@@ -1,5 +1,22 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-01)
+
+### 1. Granular Mesh Broadcast Filters
+*   **User-Facing Filter UI**: Added a new **Mesh Filters** screen (`MeshFiltersScreen.kt`) accessible from Settings → Account & Preferences → Mesh Filters. Provides 12 toggle switches (6 content types × 2 directions) controlling which packet types are pushed to and pulled from the mesh network:
+    *   Reactions (default: **off** for both directions to reduce noise)
+    *   Comments (default: on)
+    *   Text Posts (default: on)
+    *   Clearnet Shares (default: on)
+    *   Image Posts (default: on)
+    *   Video Posts (default: on)
+*   **Local-First Architecture**: Filters operate exclusively at the network sync layer. All user actions (reactions, comments, votes) are **always persisted locally** regardless of filter settings — only the `GossipService.broadcast()` / `MeshTransport.sendPacket()` calls are conditionally gated.
+*   **"Already Shared" Exemption**: Incoming reactions, comments, and votes targeting posts or comments that already exist in the local database are **exempt** from incoming filters. This ensures engagement on tracked content is never silently dropped, while still filtering noise from unknown/unbridged anchor posts.
+*   **Clearnet Bridging Guard**: When a user likes a clearnet feed item for the first time, NoSlop creates a deterministic anchor post and a reaction simultaneously. The `allowOutgoingReactions` filter only blocks the reaction broadcast during this initial bridging step (`isBridging = true`). Reactions on posts already present in the local database always broadcast freely.
+*   **DM Chat Fully Exempt**: Direct message chats and their reactions (`CHAT_REACTION` packets) are completely excluded from all mesh filter logic — both incoming firewall checks and outgoing broadcast gates.
+*   **Persistence**: Filter settings are stored as JSON in the `app_settings` table via `SettingsRepository` and exposed reactively via `StateFlow` through the ViewModel.
+*   **Files**: New: `MeshFilterSettings.kt`, `MeshFiltersScreen.kt`. Modified: `SettingsRepository.kt`, `NoSlopViewModel.kt`, `GossipService.kt`, `MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopApp.kt`, `SettingsTab.kt`, `Daos.kt`.
+
 ## Completed Changes (2026-06-30)
 
 ### 1. Tor Daemon Isolation & Port Decoupling
