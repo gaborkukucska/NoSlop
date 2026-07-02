@@ -18,6 +18,7 @@
 ## Backup and Restore
 *   **Word Cloud**: Your 12-word mnemonic is the ONLY way to recover your identity if you lose your device. Write it down and keep it safe.
 *   **Export Backup**: Go to Settings -> Backup to export an AES-256-CBC encrypted archive containing your identity, the full local database (peers, mesh posts, comments, DMs, votes/reactions), and any downloaded media files. The encryption key is derived from your Word Cloud mnemonic — see [TECHNICAL_REFERENCE.md §3.8](TECHNICAL_REFERENCE.md#38-bip39-mnemonic).
+*   **Import Backup (Destructive)**: Importing a `.zip` backup will **permanently wipe** your current active identity, database, and settings on the device, replacing them entirely with the contents of the archive. A warning dialog will confirm your intent before proceeding. Upon success, the app will automatically restart to securely reload the restored keys and database.
 
 ## Known Issues
 *   WebView for "Read Full Article" might not block all trackers on the source website.

@@ -7,6 +7,13 @@
 *   **Encrypted Zip Export/Import (SAF)**: Fully wired up the "Export/Import Profile" buttons in the Settings Tab. Implemented Android's Storage Access Framework (`ActivityResultContracts`) allowing users to natively choose where to save or open the encrypted `noslop_backup.zip`. Added a UI dialog to securely capture the user's Mnemonic password for AES derivation prior to reading/writing IO streams via `BackupManager`.
 *   **Cleaner Identity UI**: Scrubbed the cryptographic `.tripcode` suffix from primary user feeds and chat headers (`PeerItem`, `UnifiedFeedTab`, `ChatThreadScreen`) for a cleaner modern aesthetic, while preserving the full `handle.tripcode` hash inside the detailed ContactCardDialog and Onboarding Identity Card for verification.
 
+### 2. UI/UX Refinements & Bug Fixes
+*   **Reaction Layout Alignment**: Fixed an issue in `MediaComponents.kt` where wrapped reaction pills would misalign the primary action buttons (React, Share, Chat). The main action buttons are now strictly right-aligned in their own container independent of the reaction pills row width.
+*   **Import Destructive Warning & Restart**: Upgraded the Import Backup flow in `SettingsTab` to include a mandatory destructive warning dialog, notifying the user that their current data will be wiped. On confirmation, the system now safely closes the active Room Database (`NoSlopDatabase.closeInstance()`) before overwriting it via `BackupManager`, and then actively triggers a full application intent restart (`FLAG_ACTIVITY_CLEAR_TASK`) to safely reload the new state.
+*   **Mesh Broadcast Privacy**: Removed the cryptographic `.tripcode` suffix from the author string on Mesh Broadcast cards across `MainScreen`, `FeedCard`, and `UnifiedFeedTab` to improve privacy and visual clarity.
+*   **Interactive User Info Modal**: Added an interactive `clickable` modifier to the Avatar and Username row on Mesh Broadcast cards. Tapping now opens a `User Info Modal` displaying the user's enlarged Avatar, full Handle, Tripcode, and abbreviated Public Key.
+*   **Tearing Face Reaction Bug**: Fixed a logic bug in `MeshSocialRepository.kt` where emotional reactions like `sad` were incorrectly grouped with negative moderation signals (`downvote`, `angry`). This previously prevented `sad` from functioning as the initial reaction on a Clearnet post, as the system blocked negative signals from initializing anchor posts to prevent spam.
+
 ## Completed Changes (2026-07-01)
 
 ### 1. Granular Mesh Broadcast Filters
