@@ -1,5 +1,12 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-02)
+
+### 1. Identity Display & Backup Enhancements
+*   **Handle Dot Parsing Fix**: Updated payload generation and packet handling logic (`MeshSocialRepository`, `HandshakePacketHandler`) to properly extract handles using trailing delimiters (`substringBeforeLast`). Usernames containing dots (e.g., `satoshi.nakamoto`) are no longer prematurely truncated.
+*   **Encrypted Zip Export/Import (SAF)**: Fully wired up the "Export/Import Profile" buttons in the Settings Tab. Implemented Android's Storage Access Framework (`ActivityResultContracts`) allowing users to natively choose where to save or open the encrypted `noslop_backup.zip`. Added a UI dialog to securely capture the user's Mnemonic password for AES derivation prior to reading/writing IO streams via `BackupManager`.
+*   **Cleaner Identity UI**: Scrubbed the cryptographic `.tripcode` suffix from primary user feeds and chat headers (`PeerItem`, `UnifiedFeedTab`, `ChatThreadScreen`) for a cleaner modern aesthetic, while preserving the full `handle.tripcode` hash inside the detailed ContactCardDialog and Onboarding Identity Card for verification.
+
 ## Completed Changes (2026-07-01)
 
 ### 1. Granular Mesh Broadcast Filters

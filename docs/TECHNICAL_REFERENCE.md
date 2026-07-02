@@ -84,7 +84,7 @@ com.noslop.app
 │   └── MnemonicGenerator.kt      BIP39 12-word mnemonic (full 2048-word list per milestone 85)
 ├── data/
 │   ├── ApiKeyRepository.kt       User API keys (EncryptedSharedPreferences)
-│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media)
+│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media) via SAF streams
 │   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, Vote, AppSetting)
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
@@ -266,7 +266,7 @@ to determine which backend is actually active at runtime.
 2048-word official BIP39 English wordlist (milestone 85 — earlier versions
 used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 `docs/ANALYSiS.md`). The mnemonic seeds the AES-256-CBC key used by
-`BackupManager` for encrypted export/import.
+`BackupManager` for encrypted export/import using Android's Storage Access Framework.
 
 ---
 
