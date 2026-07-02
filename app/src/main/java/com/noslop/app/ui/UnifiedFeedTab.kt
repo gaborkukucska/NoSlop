@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -414,6 +416,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 // UNIFIED FEED TAB (TikTok-style Pager)
 // ==========================================
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UnifiedFeedTab(
     viewModel: NoSlopViewModel, 
@@ -552,7 +555,11 @@ fun UnifiedFeedTab(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { viewModel.refreshLiveFeed() },
+        modifier = Modifier.fillMaxSize()
+    ) {
         val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
         var appInForeground by remember { mutableStateOf(true) }
         DisposableEffect(lifecycleOwner) {

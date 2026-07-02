@@ -406,7 +406,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun loadMoreFeedItems(filterMode: String? = null) {
+    fun loadMoreFeedItems(filterMode: String? = null, isInjection: Boolean = false) {
         if (_isOnboardingComplete.value && localKeys.value == null) return
         val actualFilter = filterMode ?: currentFilterMode
         if (currentFilterMode != actualFilter) {
@@ -525,11 +525,33 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
             
             sessionLoadedIds.addAll(batch.map { it.id })
-            _unifiedFeed.value = _unifiedFeed.value + batch
-            if (isInitialLoad) {
+            if (isInjection) {
+                val currentList = _unifiedFeed.value.toMutableList()
+                val upFront = batch.take(3)
+                val dispersed = batch.drop(3)
+                
+                val bufferSize = 3.coerceAtMost(currentList.size)
+                currentList.addAll(bufferSize, upFront)
+                
+                dispersed.forEachIndexed { i, item ->
+                    val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
+                    currentList.add(insertIndex, item)
+                }
+                
+                _unifiedFeed.value = currentList
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(150)
-                    _scrollToTopEvent.emit(Unit)
+                    if (upFront.isNotEmpty()) {
+                        _restoreScrollPositionEvent.emit(upFront.first().id)
+                    }
+                }
+            } else {
+                _unifiedFeed.value = _unifiedFeed.value + batch
+                if (isInitialLoad) {
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        _scrollToTopEvent.emit(Unit)
+                    }
                 }
             }
             return
@@ -606,13 +628,35 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         
         sessionLoadedIds.addAll(finalBatch.map { it.id })
-        _unifiedFeed.value = _unifiedFeed.value + finalBatch
         
-        // Force the Pager to snap to the top (Index 0) on fresh filter loads
-        if (isInitialLoad) {
+        if (isInjection) {
+            val currentList = _unifiedFeed.value.toMutableList()
+            val upFront = finalBatch.take(3)
+            val dispersed = finalBatch.drop(3)
+            
+            val bufferSize = 3.coerceAtMost(currentList.size)
+            currentList.addAll(bufferSize, upFront)
+            
+            dispersed.forEachIndexed { i, item ->
+                val insertIndex = (bufferSize + 3 + 2 + (i * 2)).coerceAtMost(currentList.size)
+                currentList.add(insertIndex, item)
+            }
+            
+            _unifiedFeed.value = currentList
             viewModelScope.launch {
                 kotlinx.coroutines.delay(150)
-                _scrollToTopEvent.emit(Unit)
+                if (upFront.isNotEmpty()) {
+                    _restoreScrollPositionEvent.emit(upFront.first().id)
+                }
+            }
+        } else {
+            _unifiedFeed.value = _unifiedFeed.value + finalBatch
+            // Force the Pager to snap to the top (Index 0) on fresh filter loads
+            if (isInitialLoad) {
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(150)
+                    _scrollToTopEvent.emit(Unit)
+                }
             }
         }
     }
@@ -806,10 +850,6 @@ fun toggleAggregator() {
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                // Reset feed state without nuking the underlying DB content
-                _unifiedFeed.value = emptyList()
-                cachedDefaultFeed = emptyList()
-                sessionLoadedIds.clear()
                 isSearchModeActive = false
                 savedFeedItemId = null
                 currentFilterMode = "Live Feed"
@@ -817,11 +857,8 @@ fun toggleAggregator() {
                 // Refresh what's been seen / swiped so the new mix excludes them
                 refreshExclusionCaches()
 
-                // Rebuild a fresh interleaved batch from existing allFeeds / allMeshes
-                loadMoreFeedItems("Live Feed")
-
-                // Scroll the pager back to the top
-                _scrollToTopEvent.emit(Unit)
+                // Inject a fresh interleaved batch from existing allFeeds / allMeshes
+                loadMoreFeedItems("Live Feed", isInjection = true)
             } catch (e: Exception) {
                 Logger.error("VM", "Refresh live feed exception: ${e.message}")
             } finally {
