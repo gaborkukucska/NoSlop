@@ -493,7 +493,11 @@ fun FullScreenMeshCardV2(
                 Column(
                     modifier = Modifier.fillMaxWidth(0.8f)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    var showUserInfoDialog by remember { mutableStateOf(false) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { showUserInfoDialog = true }
+                    ) {
                         if (post.authorAvatarB64 != null) {
                             val bitmap = remember(post.authorAvatarB64) {
                                 try {
@@ -511,7 +515,46 @@ fun FullScreenMeshCardV2(
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
                         }
-                        Text("${post.authorHandle}.${post.authorTripcode}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                        Text(post.authorHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                    }
+
+                    if (showUserInfoDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showUserInfoDialog = false },
+                            title = { Text(post.authorHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                            text = {
+                                Column {
+                                    if (post.authorAvatarB64 != null) {
+                                        val bitmap = remember(post.authorAvatarB64) {
+                                            try {
+                                                val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                            } catch (e: Exception) { null }
+                                        }
+                                        if (bitmap != null) {
+                                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                                androidx.compose.foundation.Image(
+                                                    bitmap = bitmap,
+                                                    contentDescription = "Avatar",
+                                                    modifier = Modifier.size(80.dp).clip(CircleShape),
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                        }
+                                    }
+                                    Text("Tripcode", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(".${post.authorTripcode}", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Public Key", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(post.authorPublicKeyB64.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close", color = AccentGreen) }
+                            },
+                            containerColor = SurfaceDark
+                        )
                     }
                     
                     if (post.content.isNotBlank() && !isArticle) {

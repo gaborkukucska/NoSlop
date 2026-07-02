@@ -19,7 +19,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 object BackupManager {
     private const val TAG = "BACKUP_MANAGER"
-    private const val DB_NAME = "noslop_db"
+    private const val DB_NAME = "mesh.db"
     private const val PREFS_NAME = "noslop_identity_secure" // This might vary if fallback was used
 
     fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {

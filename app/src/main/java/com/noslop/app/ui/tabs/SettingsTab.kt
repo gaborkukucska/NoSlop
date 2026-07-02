@@ -618,6 +618,9 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             var showMnemonicDialog by remember { mutableStateOf(false) }
                             var isExporting by remember { mutableStateOf(false) }
                             var mnemonicInput by remember { mutableStateOf("") }
+                            var showImportWarning by remember { mutableStateOf(false) }
+                            var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                            var importStatus by remember { mutableStateOf<String?>(null) }
 
                             val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                                 if (uri != null && mnemonicInput.isNotBlank()) {
@@ -628,8 +631,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                             val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                                 if (uri != null && mnemonicInput.isNotBlank()) {
-                                    viewModel.importBackupFromUri(context, mnemonicInput, uri)
-                                    mnemonicInput = ""
+                                    pendingImportUri = uri
+                                    showImportWarning = true
                                 }
                             }
 
@@ -711,6 +714,65 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     containerColor = SurfaceDark,
                                     titleContentColor = TextLight
                                 )
+                            }
+
+                            // ─── Import Destructive Warning ───
+                            if (showImportWarning && pendingImportUri != null) {
+                                AlertDialog(
+                                    onDismissRequest = { showImportWarning = false; pendingImportUri = null },
+                                    title = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(24.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Destructive Import", color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    text = {
+                                        Column {
+                                            Text(
+                                                "This will permanently wipe your current identity, keys, contacts, and all data. " +
+                                                "The selected backup will be imported in its place.",
+                                                color = TextMuted
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                "The app will restart automatically after import.",
+                                                color = TextLight,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showImportWarning = false
+                                                importStatus = "Importing..."
+                                                viewModel.importBackupFromUri(context, mnemonicInput, pendingImportUri!!) { success ->
+                                                    if (!success) {
+                                                        importStatus = "Import failed. Check password and file."
+                                                    }
+                                                    // On success the app restarts automatically
+                                                }
+                                                mnemonicInput = ""
+                                                pendingImportUri = null
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                        ) {
+                                            Text("Wipe & Import", fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showImportWarning = false; pendingImportUri = null }) {
+                                            Text("Cancel", color = AccentGreen)
+                                        }
+                                    },
+                                    containerColor = SurfaceDark
+                                )
+                            }
+
+                            if (importStatus != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(importStatus!!, color = if (importStatus!!.contains("failed")) DestructiveRed else AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Button(

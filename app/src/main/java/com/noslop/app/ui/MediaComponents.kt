@@ -482,7 +482,7 @@ fun OverlayInteractions(
     Column(
         modifier = modifier
             .padding(end = 12.dp, bottom = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (!isBlocked) {
@@ -493,7 +493,6 @@ fun OverlayInteractions(
                     .sortedByDescending { it.value }
 
                 Row(
-                    modifier = Modifier.align(Alignment.End),
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                     verticalAlignment = Alignment.Bottom
                 ) {
@@ -530,50 +529,55 @@ fun OverlayInteractions(
                 }
             }
 
-            // ─── Main Action Buttons ───
-            if (showLike) {
-                Box {
-                    // Single tap opens picker (gChat parity), matching user request
-                    InteractionButton(
-                        icon = Icons.Default.AddReaction,
-                        label = "React",
-                        onClick = { showReactionPicker = !showReactionPicker }
-                    )
-
-                    if (showReactionPicker) {
-                        ReactionPicker(
-                            currentReactions = reactionSummary,
-                            onReactionSelect = {
-                                onReaction(it)
-                                showReactionPicker = false
-                            },
-                            onDismiss = { showReactionPicker = false }
+            // ─── Main Action Buttons (always right-aligned) ───
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (showLike) {
+                    Box {
+                        // Single tap opens picker (gChat parity), matching user request
+                        InteractionButton(
+                            icon = Icons.Default.AddReaction,
+                            label = "React",
+                            onClick = { showReactionPicker = !showReactionPicker }
                         )
+
+                        if (showReactionPicker) {
+                            ReactionPicker(
+                                currentReactions = reactionSummary,
+                                onReactionSelect = {
+                                    onReaction(it)
+                                    showReactionPicker = false
+                                },
+                                onDismiss = { showReactionPicker = false }
+                            )
+                        }
                     }
                 }
-            }
 
-            InteractionButton(
-                icon = Icons.Default.Share,
-                label = "Share",
-                onClick = onShare
-            )
-
-            if (showComment && onComment != null) {
                 InteractionButton(
-                    icon = Icons.Default.Chat,
-                    label = if (commentCount > 0) commentCount.toString() else "Chat",
-                    onClick = onComment
+                    icon = Icons.Default.Share,
+                    label = "Share",
+                    onClick = onShare
                 )
-            }
 
-            if (onDelete != null) {
-                InteractionButton(
-                    icon = Icons.Default.Delete,
-                    label = "Delete",
-                    onClick = onDelete,
-                    tint = DestructiveRed
-                )
+                if (showComment && onComment != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Chat,
+                        label = if (commentCount > 0) commentCount.toString() else "Chat",
+                        onClick = onComment
+                    )
+                }
+
+                if (onDelete != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Delete,
+                        label = "Delete",
+                        onClick = onDelete,
+                        tint = DestructiveRed
+                    )
+                }
             }
         }
     }

@@ -795,11 +795,33 @@ fun toggleAggregator() {
         }
     }
 
-    fun importBackupFromUri(context: Context, mnemonic: String, uri: android.net.Uri) {
+    fun importBackupFromUri(context: Context, mnemonic: String, uri: android.net.Uri, onResult: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
-            val inputStream = context.contentResolver.openInputStream(uri)
-            if (inputStream != null) {
-                com.noslop.app.data.BackupManager.importData(context, mnemonic, inputStream)
+            try {
+                // Close Room DB before overwriting
+                com.noslop.app.data.NoSlopDatabase.closeInstance()
+
+                val inputStream = context.contentResolver.openInputStream(uri)
+                if (inputStream != null) {
+                    val success = com.noslop.app.data.BackupManager.importData(context, mnemonic, inputStream)
+                    onResult(success)
+                    if (success) {
+                        // Restart the app process to pick up the restored DB and prefs
+                        kotlinx.coroutines.delay(500)
+                        val pm = context.packageManager
+                        val intent = pm.getLaunchIntentForPackage(context.packageName)
+                        if (intent != null) {
+                            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                            context.startActivity(intent)
+                            android.os.Process.killProcess(android.os.Process.myPid())
+                        }
+                    }
+                } else {
+                    onResult(false)
+                }
+            } catch (e: Exception) {
+                Logger.error("VM", "Import failed: ${e.message}")
+                onResult(false)
             }
         }
     }

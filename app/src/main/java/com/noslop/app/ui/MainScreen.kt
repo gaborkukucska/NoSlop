@@ -3,6 +3,7 @@ package com.noslop.app.ui
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -127,7 +128,11 @@ fun FullScreenMeshCard(
                     .padding(horizontal = 24.dp, vertical = 32.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth(0.8f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    var showUserInfoDialog by remember { mutableStateOf(false) }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { showUserInfoDialog = true }
+                    ) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
@@ -155,11 +160,49 @@ fun FullScreenMeshCard(
                             }
                         }
                         Text(
-                            "${post.authorHandle}.${post.authorTripcode}",
+                            post.authorHandle,
                             color = AccentGreen,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    if (showUserInfoDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showUserInfoDialog = false },
+                            title = { Text(post.authorHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                            text = {
+                                Column {
+                                    if (post.authorAvatarB64 != null) {
+                                        val bitmap = remember(post.authorAvatarB64) {
+                                            try {
+                                                val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                            } catch (e: Exception) { null }
+                                        }
+                                        if (bitmap != null) {
+                                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                                androidx.compose.foundation.Image(
+                                                    bitmap = bitmap,
+                                                    contentDescription = "Avatar",
+                                                    modifier = Modifier.size(80.dp).clip(RoundedCornerShape(50))
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                        }
+                                    }
+                                    Text("Tripcode", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(".${post.authorTripcode}", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text("Public Key", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text(post.authorPublicKeyB64.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close", color = AccentGreen) }
+                            },
+                            containerColor = SurfaceDark
                         )
                     }
 
