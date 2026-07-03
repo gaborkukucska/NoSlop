@@ -70,10 +70,13 @@ a media host; design in MEDIA_OVER_MESH_DESIGN.md §Upload), chat media attachme
 progressive streaming for large video, edit-post UI, creator follow, exit/rejected announcements,
 H3/M3/M5/M6 punch-list items, ApiUtil dedup.
 
-**Upstream note (fetched 2026-07-01):** Gabor pushed a new `Legacy-Android` branch + `v0.2.2-alpha` tag
-(NOT on main): mesh packet filtering (peers can drop packet types!), CHAT_REACTION support REMOVED on
-Android, crypto migrated to Lazysodium/BC-raw (wire format preserved, "backwards compatibility is
-partial"). When that lands on main, re-test chat reactions + run a signature round-trip.
+**Upstream note (fetched 2026-07-01, corrected 2026-07-03):** Gabor pushed a new `Legacy-Android`
+branch + `v0.2.2-alpha` tag (NOT on main): mesh packet filtering (peers can drop packet types!) and
+crypto migrated to Lazysodium/BC-raw (wire format preserved, "backwards compatibility is partial").
+The "remove chat reaction support" commit is narrower than its title: `handleChatReaction` (verify +
+persist, our exact signed format) is INTACT on the tag — the commit only removed CHAT_REACTION from the
+mesh-filter gating and bypassed outgoing reaction filtering. **Chat-reaction interop is preserved; no
+patch needed.** When the branch lands on main, still run a signature round-trip (crypto migration).
 
 ---
 
