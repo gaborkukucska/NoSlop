@@ -71,6 +71,9 @@ class MeshClient(
             override suspend fun onDeletePost(packet: NetworkPacket, d: DeletePostPayload) {
                 onDeletePost?.invoke(d)
             }
+            override suspend fun onMediaRequest(packet: NetworkPacket, r: MediaRequestPayload) {
+                serveMediaRequest(r)
+            }
             override suspend fun onSyncResponse(packet: NetworkPacket, s: SyncResponsePayload) {
                 // Catch-up batches answering our SYNC_REQUEST (targeted; the bridge fans inbound packets to
                 // all leaves, so drop ones aimed at another leaf). Every item is verified exactly like its
@@ -192,11 +195,12 @@ class MeshClient(
      * posts with `signature ?: ""`, so an unsigned iOS post is rejected there; this is what makes our posts
      * land. The bridge relays both ways; the signature is over payload fields, so id re-encoding is safe.
      */
-    suspend fun publish(text: String): PostPayload {
+    suspend fun publish(text: String, media: MediaMetadata? = null): PostPayload {
         val authorId = androidId                 // base64 X.509 — the id Android signs/verifies posts against
         val id = randomId()
         val ts = nowMillis()
         val signature = signWithIdentity("$id|$authorId|$text|$ts")   // no avatar segment — we don't attach one
+        // NOTE media fields are NOT part of the signed string (Android parity — see the C1 format above).
         val post = PostPayload(
             id = id,
             authorId = authorId,
@@ -205,6 +209,8 @@ class MeshClient(
             content = text,
             timestamp = ts,
             signature = signature,
+            mediaId = media?.id,
+            mediaMetadata = media,
         )
         store?.savePost(post.toMeshPost())
         node.broadcast(postPacket(nodeId, post, signature = signature))
@@ -363,6 +369,50 @@ class MeshClient(
         store?.markPostOrphaned(postId)
         node.broadcast(deletePostPacket(nodeId, payload))
         return true
+    }
+
+    /**
+     * Serve a peer's MEDIA_REQUEST from our local media store (Roadmap #6a — the leaf half of upload:
+     * the bridge *pulls* our published media with the same requester-driven protocol it relays for
+     * everyone else, then caches and serves it while we're offline). Mirrors Android
+     * `MediaManager.handleMediaRequest`: read `[offset, offset+len)`, base64 it back; an empty/short
+     * read past EOF is the end-of-file signal. Silent for media we don't have (someone else's transfer).
+     */
+    private suspend fun serveMediaRequest(r: MediaRequestPayload) {
+        val chunk = buildMediaChunk(media.fileNameFor(r.mediaId), r) ?: return   // not ours — stay silent
+        // hops=2: to the bridge (which consumes chunks for its own pull) or through it to a peer.
+        node.broadcast(NetworkPacket(
+            id = randomId(), hops = 2, senderId = nodeId, type = "MEDIA_CHUNK",
+            payload = NetworkPacket.payloadOf(chunk, MediaChunkPayload.serializer()),
+        ))
+    }
+
+    /**
+     * Import a picked file into our media store and describe it for a post (Roadmap #6c). The bytes are
+     * copied under a fresh extension-bearing media id (Android infers MIME from the id's extension), and
+     * the returned metadata advertises [bridgeOnion] as `origin_node` — Android peers fetch from the
+     * bridge's cache, which works even after this phone goes offline. Null when the file is unreadable
+     * or out of size bounds.
+     */
+    suspend fun importMediaForPost(picked: PickedMedia, bridgeOnion: String?): MediaMetadata? {
+        val bytes = MediaFiles.readBytes(picked.path) ?: return null
+        if (bytes.isEmpty() || bytes.size > MediaDownloadManager.MAX_FILE_BYTES) return null
+        val ext = when (picked.mimeType) {
+            "image/jpeg" -> "jpg"; "image/png" -> "png"; "image/webp" -> "webp"; "image/gif" -> "gif"
+            else -> "bin"
+        }
+        val mediaId = "post_${randomId()}.$ext"
+        if (!MediaFiles.writeAt(media.fileNameFor(mediaId), 0, bytes)) return null
+        return MediaMetadata(
+            id = mediaId,
+            type = if (picked.mimeType.startsWith("image")) "image" else "file",
+            mimeType = picked.mimeType,
+            size = bytes.size.toLong(),
+            chunkCount = (bytes.size / (256 * 1024)) + 1,   // Android's formula (UnifiedFeedTab composer)
+            originNode = bridgeOnion,
+            ownerId = androidId,
+            thumbnailB64 = picked.thumbnailB64,
+        )
     }
 
     /**

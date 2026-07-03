@@ -343,3 +343,28 @@ class MediaDownloadManager(
     private fun decodeChunkData(b64: String): ByteArray? =
         runCatching { if (b64.isEmpty()) ByteArray(0) else Base64.decode(b64) }.getOrNull()
 }
+
+/**
+ * The **serving** half of a media transfer, shared by the leaf ([MeshClient] answering the bridge's pull)
+ * and the bridge cache serving Android peers: read one MEDIA_REQUEST's byte range from the stored file
+ * [name] and build the reply chunk — Android `MediaManager.handleMediaRequest` semantics (an empty/short
+ * read past EOF is the end-of-file signal; `total_chunks=999` = "dynamic", as Android sends). Returns null
+ * when we don't have the file or the request is garbage (caller stays silent). [maxLen] clamps a hostile
+ * length so one request can't make us buffer unbounded bytes.
+ */
+@OptIn(ExperimentalEncodingApi::class)
+fun buildMediaChunk(
+    name: String,
+    r: MediaRequestPayload,
+    maxLen: Int = 2 * MediaDownloadManager.MAX_CHUNK,
+): MediaChunkPayload? {
+    if (MediaFiles.sizeOf(name) < 0) return null
+    val offset = r.byteOffset ?: (r.chunkIndex.toLong() * r.chunkSize)
+    if (offset < 0) return null
+    val reqLen = (r.byteLength ?: r.chunkSize).coerceIn(0, maxLen)
+    val data = MediaFiles.readRange(name, offset, reqLen) ?: return null
+    return MediaChunkPayload(
+        mediaId = r.mediaId, chunkIndex = r.chunkIndex, totalChunks = 999,
+        byteOffset = offset, data = Base64.encode(data),
+    )
+}

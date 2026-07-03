@@ -1174,9 +1174,27 @@ private class MeshUiState(private val scope: CoroutineScope) {
         }
     }
 
+    // Image staged for the next post (Roadmap #6c) — picked via the platform picker, cleared on publish.
+    var pendingMedia by mutableStateOf<PickedMedia?>(null)
+
+    /** Open the platform photo picker and stage the result for the next [publish]. */
+    fun attachImage() {
+        ImagePicker.pick { picked -> pendingMedia = picked }
+    }
+
     fun publish() {
         scope.launch {
-            val post = client.publish(draft)
+            // Import the staged image into the media store + advertise the bridge onion as origin, so
+            // Android peers fetch it from the bridge's cache even after this phone goes offline (#6).
+            val bridgeOnion = activeInvite?.takeIf { it.tor }?.host ?: savedNodes.firstOrNull { it.tor }?.host
+            val meta = pendingMedia?.let { client.importMediaForPost(it, bridgeOnion) }
+            if (pendingMedia != null && meta == null) { status = "Couldn't attach that image"; return@launch }
+            val post = client.publish(draft, meta)
+            meta?.let { m ->
+                // Our own copy is already on disk — the feed card can render the full image immediately.
+                client.media.localPathFor(m.id)?.let { mediaLocalPath[m.id] = it }
+            }
+            pendingMedia = null
             if (received.none { it.id == post.id }) received.add(0, post)   // show my own post too
             status = "Posted ✓ — ${client.linkCount} link(s)"
         }
@@ -1401,7 +1419,20 @@ private fun MeshScreen(state: MeshUiState) {
             }
         }
         OutlinedTextField(state.draft, { state.draft = it }, label = { Text("Post to the mesh") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { state.publish() }, enabled = state.connected) { Text("Broadcast post") }
+        // Attach an image to the post (#6c): staged thumbnail preview + clear; picker only where wired.
+        state.pendingMedia?.let { staged ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                staged.thumbnailB64?.let { Base64Image(it, contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp).clip(RoundedCornerShape(8.dp))) }
+                Text("Image attached (${staged.size / 1024} KB)", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline, modifier = Modifier.weight(1f))
+                Text("✕", color = MaterialTheme.colorScheme.outline, modifier = Modifier.clickable { state.pendingMedia = null }.padding(8.dp))
+            }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (ImagePicker.isAvailable) {
+                Button(onClick = { state.attachImage() }, enabled = state.connected) { Text("🖼") }
+            }
+            Button(onClick = { state.publish() }, enabled = state.connected, modifier = Modifier.weight(1f)) { Text("Broadcast post") }
+        }
 
         Text("Received from mesh (${state.received.size})", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {

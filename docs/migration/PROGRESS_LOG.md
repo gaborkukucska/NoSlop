@@ -4,6 +4,45 @@ Reverse-chronological journal. **Newest entry on top.** Read the top entry first
 
 ---
 
+## 2026-07-03 — Roadmap #6: media upload + bridge cache (iOS-authored images reach Android) 🟢
+
+The last big architectural item: an iOS post can now **carry an image**, and Android peers can fetch it
+**even after the phone goes offline** — the bridge is a media host, not just a relay.
+
+Design insight that kept this small: no new upload protocol. The bridge **pulls** the leaf's media with
+the exact requester-driven MEDIA_REQUEST/MEDIA_CHUNK flow from #5b — `MediaDownloadManager` is
+commonMain, so the JVM bridge reuses it verbatim; the leaf answers requests from disk. One protocol,
+both directions, and `MediaServeTest.uploadLoop` closes the loop in-process on every target.
+
+- **Leaf serving (#6a):** `MeshClient` answers MEDIA_REQUESTs for media it holds via `buildMediaChunk`
+  (the shared serve half — Android `handleMediaRequest` semantics: byte range, short-read EOF, clamped
+  hostile lengths).
+- **Bridge cache (#6b):** `BridgeMediaCache` — pulls on relaying a leaf POST with `media_metadata`
+  (chunks answering the pull are consumed, not relayed), serves cached media to Android peers (inbound
+  :9999 dials land here because posts advertise the bridge onion as `origin_node`; replies go over the
+  maintained peer link or a handshake-less dial), answers MEDIA_RELAY_REQUEST with MEDIA_RECOVERY_FOUND,
+  hourly LRU sweep (2 GB / 5 days, Android parity).
+- **Publish with image (#6c):** `ImagePicker` expect/actual — iOS PHPickerViewController Swift bridge
+  (no photo permission needed; returns temp path + ~90 px JPEG thumbnail b64, Android-style), desktop
+  AWT FileDialog + ImageIO thumbnail. `MeshClient.importMediaForPost` copies bytes under a fresh
+  extension-bearing media id (Android infers MIME from it) + builds Android-shape metadata
+  (`chunkCount = size/256K+1`, `ownerId`, bridge `origin_node`); `publish(text, media)` attaches it
+  (media fields are NOT in the signed string — Android parity). 🖼 attach button + staged-thumbnail row
+  in the mesh composer; own posts render the full image immediately.
+- Xcode project regenerated (xcodegen) to include `ImagePicker.swift`; registered in `iOSApp.swift`.
+
+Tests: `MediaServeTest` (4 — range/EOF/clamp/missing + the full manager↔serve upload loop, real file
+I/O on every target). jvmTest + compileKotlinIosArm64 green.
+
+**To verify live:** publish an image post from the phone → bridge logs `pulling media…` → `media
+cached:` → Gabby's node downloads from the bridge (its request should hit the inbound listener). Then
+kill the app and confirm the media still serves.
+
+**Still open:** chat media (images in DMs — same machinery, needs the DM envelope's media fields),
+progressive streaming for big video, edit-post UI, creator follow, H3/M3/M5/M6.
+
+---
+
 ## 2026-07-02 (overnight session, cont.) — Roadmap #5c, #7, #8, #9, engagement sync, hardening 🟢
 
 Autonomous overnight run continuing from #5b (below). Seven more increments, each compile-tested

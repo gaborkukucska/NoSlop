@@ -38,6 +38,11 @@ fun main(args: Array<String>) = runBlocking {
     val peers = java.util.concurrent.ConcurrentHashMap<String, DialPayload>()
     if (seedOnion != null && seedId != null) peers[seedId] = DialPayload(seedOnion, seedId, androidPort)
 
+    // Media cache/host (#6b): pulls leaf-published media, serves + recovers it for Android peers.
+    // socksPort resolves lazily — Tor isn't started yet at this point.
+    var torSocksPort = 0
+    val mediaCache = BridgeMediaCache(scope, nodeId, transport, peers, socksPort = { torSocksPort })
+
     // The relay: translate ids for the destination side and forward to the OTHER side's links.
     transport.onReceive { fromLink, packet ->
         // Control packet from a leaf: learn an Android peer to dial. Never relayed onward.
@@ -48,6 +53,18 @@ fun main(args: Array<String>) = runBlocking {
             return@onReceive
         }
         if (!firewall.admit(packet)) return@onReceive          // TTL / dedup / rate-limit
+        // Media cache interception (#6b) — BEFORE relaying:
+        //  · chunks answering our own pull are consumed, not relayed;
+        //  · requests/recovery for cached media are served here (the owning leaf may be offline);
+        //  · a leaf POST with media kicks off the pull (and still relays below).
+        if (mediaCache.consumeChunk(packet)) return@onReceive
+        packet.getMediaRequestPayload()?.let { req ->
+            if (mediaCache.serve(req, packet.senderId, fromLink)) return@onReceive
+        }
+        packet.getMediaRelayRequestPayload()?.let { rr ->
+            mediaCache.answerRelay(rr, packet.senderId, fromLink)   // answer if cached; still relay onward
+        }
+        if (packet.type == "POST" && !NodeId.isAndroidId(fromLink)) mediaCache.onLeafPost(packet)
         val next = (packet.hops ?: 6) - 1
         if (next <= 0) return@onReceive
         if (NodeId.isAndroidId(fromLink)) {                    // Android peer → iOS leaves
@@ -68,6 +85,7 @@ fun main(args: Array<String>) = runBlocking {
 
     println("[tor] launching tor + bootstrapping (first run ~30–60s)…")
     val tor = TorProcess().start()
+    torSocksPort = tor.socksPort   // media-cache replies can now dial peers through Tor
     // Persist the onion key so the bridge keeps the SAME address across restarts (no more re-scanning).
     val keyFile = java.io.File(System.getenv("NOSLOP_HOME") ?: java.io.File(System.getProperty("user.home"), ".noslop-hub").path, "bridge-onion-key")
     val savedKey = if (keyFile.exists()) keyFile.readText().trim().ifBlank { null } else null
@@ -104,6 +122,13 @@ fun main(args: Array<String>) = runBlocking {
                         if (line.isBlank()) continue
                         val pkt = runCatching { NetworkPacket.fromJson(line) }.getOrNull() ?: continue
                         if (!firewall.admit(pkt)) continue
+                        // Media cache (#6b): peers dial us here because leaf posts advertise OUR onion as
+                        // origin_node — serve cached media / recovery directly instead of forwarding.
+                        val mediaReq = pkt.getMediaRequestPayload()
+                        if (mediaReq != null && mediaCache.serve(mediaReq, pkt.senderId, fromLink = null)) continue
+                        pkt.getMediaRelayRequestPayload()?.let { rr ->
+                            mediaCache.answerRelay(rr, pkt.senderId, fromLink = null)
+                        }
                         val out = pkt.idsToHex()
                         val leaves = transport.links.filter { !NodeId.isAndroidId(it) }
                         leaves.forEach { leaf -> launch { transport.send(leaf, out) } }
