@@ -419,12 +419,6 @@ private fun ExoVideoPlayer(
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                            onReady()
-                        }
-                    }
-                    override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        if (isPlaying) onReady()
                     }
                     override fun onRenderedFirstFrame() {
                         onReady()
@@ -436,9 +430,6 @@ private fun ExoVideoPlayer(
                     }
                 })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                    onReady()
-                }
             }
         } else {
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
@@ -469,12 +460,6 @@ private fun ExoVideoPlayer(
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                            if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                                onReady()
-                            }
-                        }
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            if (isPlaying) onReady()
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
@@ -541,6 +526,7 @@ private fun ExoVideoPlayer(
                         )
                         player = exoPlayer
                         useController = true
+                        useArtwork = false
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
@@ -651,6 +637,13 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                         else -> "https://archive.org/"
                     }
 
+                    addJavascriptInterface(object {
+                        @android.webkit.JavascriptInterface
+                        fun onPlaying() {
+                            post { onReady() }
+                        }
+                    }, "NoSlopJS")
+
                     webViewClient = object : android.webkit.WebViewClient() {
                         override fun shouldOverrideUrlLoading(
                             view: android.webkit.WebView?,
@@ -691,7 +684,11 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
-                            view?.postDelayed({ onReady() }, 800)
+                            
+                            val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                            if (!isYouTube) {
+                                view?.postDelayed({ onReady() }, 800)
+                            }
                         }
 
                         override fun onReceivedError(
@@ -705,7 +702,47 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                         }
                     }
 
-                    val htmlContent = """
+                    val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                    
+                    val htmlContent = if (isYouTube) {
+                        val videoId = url.substringAfter("/embed/").substringBefore("?")
+                        """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                            <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
+                        </head>
+                        <body>
+                            <div id="player"></div>
+                            <script>
+                              var tag = document.createElement('script');
+                              tag.src = "https://www.youtube.com/iframe_api";
+                              var firstScriptTag = document.getElementsByTagName('script')[0];
+                              firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                              var player;
+                              function onYouTubeIframeAPIReady() {
+                                player = new YT.Player('player', {
+                                  height: '100%',
+                                  width: '100%',
+                                  videoId: '$videoId',
+                                  playerVars: { 'playsinline': 1, 'autoplay': 1, 'controls': 1, 'fs': 0, 'rel': 0 },
+                                  events: {
+                                    'onReady': function(event) { event.target.playVideo(); },
+                                    'onStateChange': function(event) {
+                                      if (event.data == 1) { // PLAYING state
+                                          window.NoSlopJS.onPlaying();
+                                      }
+                                    }
+                                  }
+                                });
+                              }
+                            </script>
+                        </body>
+                        </html>
+                        """.trimIndent()
+                    } else {
+                        """
                         <!DOCTYPE html>
                         <html>
                         <head>
@@ -717,7 +754,8 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                             <iframe width="100%" height="100%" src="$url" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
                         </body>
                         </html>
-                    """.trimIndent()
+                        """.trimIndent()
+                    }
                     
                     loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
                 }

@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-04)
+
+### 1. Invidious Network Latency & Fast-Failing
+*   **Lock-Free Registry Cache**: Removed a critical `@Synchronized` bottleneck in `InvidiousApiClient.getInstances()` and replaced it with a non-blocking `AtomicBoolean`. Background instance registry fetches no longer freeze the UI thread while searching. Failed registry lookups now correctly cache the hardcoded fallback list instead of hanging on every keystroke.
+*   **Strict Search Timeouts**: Swapped the underlying OkHttpClient for all Invidious search functions (`searchChannels`, `searchVideos`, `getTrendingVideos`) to a dedicated `probeClient` with a strict 5-second timeout, bypassing the default 30-second client timeouts.
+*   **Proactive Instance Pinging**: Added background asynchronous instance health checks during the `preWarmInstances()` startup phase. The app now silently pings the `stats` endpoint of the top 3 registry servers upon launch, proactively adding dead or blocked nodes to the `instanceFailureTime` blacklist before the user can even initiate a search.
+*   **Smart Instance Filtering**: Search functions now strictly filter out any instances present in the cooling-down blacklist *before* attempting network requests, preventing the 5-second timeout penalty from being absorbed repeatedly on successive search queries.
+
+### 2. Video Playback UI Polish
+*   **Disabled Default ExoPlayer Artwork**: Explicitly set `useArtwork = false` on the Android `PlayerView` component to prevent ExoPlayer from aggressively flashing its own low-quality generic media icon over the Coil high-res thumbnail before the first frame is buffered.
+*   **True Frame Rendering Transitions**: Re-wired the `isVideoReady` state to rely strictly on the `onRenderedFirstFrame()` decoder callback rather than the premature `STATE_READY` status. This guarantees the Coil thumbnail overlay remains solid until actual video pixels are ready to display.
+*   **YouTube IFrame API Sync**: Rewrote the fallback `EmbedWebViewPlayer` (used when Invidious resolution fails). Removed the blind 800ms timer that was prematurely hiding the thumbnail. Injected the official **YouTube IFrame API** and a custom Android `JavascriptInterface`, forcing the Android UI to wait for the JavaScript engine's explicit `PLAYING` state before dismissing the high-res thumbnail.
+
+### 3. Feed Recency Optimization
+*   **Chronological Feed Scoping**: Appended the `&date=month` parameter to all `searchVideos` API calls in `InvidiousApiClient.kt`. While the API still sorts by relevance by default, this strict date filter prevents the feed from surfacing extremely old videos (5-10 years ago) simply because they have higher overall view counts, ensuring the unified feed remains focused on current month/year content.
+
 ## Completed Changes (2026-07-02)
 
 ### 1. Identity Display & Backup Enhancements

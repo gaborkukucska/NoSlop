@@ -6,6 +6,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
+import kotlinx.coroutines.launch
 import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
 
@@ -84,7 +85,13 @@ object InvidiousApiClient {
      * Filters for HTTPS instances that are up and have API enabled.
      * Falls back to hardcoded list on failure.
      */
-    @Synchronized
+    private val isFetchingRegistry = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Fetch healthy Invidious instances from the official registry.
+     * Filters for HTTPS instances that are up and have API enabled.
+     * Falls back to hardcoded list on failure.
+     */
     private fun getInstances(): List<String> {
         val now = System.currentTimeMillis()
         val cached = cachedInstances
@@ -92,12 +99,17 @@ object InvidiousApiClient {
             return cached
         }
 
+        if (!isFetchingRegistry.compareAndSet(false, true)) {
+            // A fetch is already in progress. Don't block, just return what we have (or fallback).
+            return cached ?: FALLBACK_INSTANCES
+        }
+
         return try {
             val request = Request.Builder()
                 .url("https://api.invidious.io/instances.json?sort_by=type,health")
                 .header("User-Agent", BROWSER_USER_AGENT)
                 .build()
-            val response = client.newCall(request).execute()
+            val response = probeClient.newCall(request).execute()
             if (!response.isSuccessful) {
                 response.close()
                 Logger.warn(TAG, "Instance registry returned ${response.code}, using fallback")
@@ -141,11 +153,17 @@ object InvidiousApiClient {
                 result
             } else {
                 Logger.warn(TAG, "No live instances found in registry, using fallback")
+                cachedInstances = FALLBACK_INSTANCES
+                cacheTimestamp = now
                 FALLBACK_INSTANCES
             }
         } catch (e: Exception) {
             Logger.warn(TAG, "Failed to fetch instance registry: ${e.message}, using fallback")
+            cachedInstances = FALLBACK_INSTANCES
+            cacheTimestamp = now
             FALLBACK_INSTANCES
+        } finally {
+            isFetchingRegistry.set(false)
         }
     }
 
@@ -157,6 +175,40 @@ object InvidiousApiClient {
         val instances = cachedInstances ?: FALLBACK_INSTANCES
         return instances.firstOrNull { !isInstanceCoolingDown(it) }
             ?: FALLBACK_INSTANCES.first()
+    }
+
+    /**
+     * Eagerly fetch and cache healthy instances. Call this during app startup or onboarding
+     * to prevent the first search from blocking on the registry HTTP call.
+     * Also proactively pings the top instances in the background so dead ones time out
+     * before the user ever attempts a search.
+     */
+    fun preWarmInstances() {
+        val instances = getInstances()
+        
+        // Ping top 3 instances in the background to proactively filter out dead ones
+        val topInstances = instances.take(3)
+        for (instance in topInstances) {
+            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val request = Request.Builder()
+                        .url("$instance/api/v1/stats")
+                        .header("User-Agent", BROWSER_USER_AGENT)
+                        .build()
+                    val response = probeClient.newCall(request).execute()
+                    if (!response.isSuccessful) {
+                        Logger.warn(TAG, "Pre-warm: Instance $instance returned HTTP ${response.code}")
+                        markInstanceFailed(instance)
+                    } else {
+                        markInstanceOk(instance)
+                    }
+                    response.close()
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Pre-warm: Instance $instance failed: ${e.message}")
+                    markInstanceFailed(instance)
+                }
+            }
+        }
     }
 
     /**
@@ -271,14 +323,15 @@ object InvidiousApiClient {
 
     suspend fun searchVideos(query: String, sourceId: String = "api-invidious-search"): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val instances = getInstances()
+        val allInstances = getInstances()
+        val instances = allInstances.filter { !isInstanceCoolingDown(it) }
 
         for (instance in instances) {
-            val url = "$instance/api/v1/search?q=$encodedQuery&type=video"
+            val url = "$instance/api/v1/search?q=$encodedQuery&type=video&date=month"
             try {
                 Logger.info(TAG, "Trying Invidious instance: $instance")
                 val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
+                val response = probeClient.newCall(request).execute()
 
                 if (response.isSuccessful) {
                     val body = response.body?.string()
@@ -313,14 +366,15 @@ object InvidiousApiClient {
     }
 
     suspend fun getTrendingVideos(sourceId: String = "api-invidious-trending"): List<FeedItem> {
-        val instances = getInstances()
+        val allInstances = getInstances()
+        val instances = allInstances.filter { !isInstanceCoolingDown(it) }
 
         for (instance in instances) {
             val url = "$instance/api/v1/trending?type=Video"
             try {
                 Logger.info(TAG, "Trying Invidious instance: $instance")
                 val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
+                val response = probeClient.newCall(request).execute()
 
                 if (response.isSuccessful) {
                     val body = response.body?.string()
@@ -355,14 +409,15 @@ object InvidiousApiClient {
 
     suspend fun searchChannels(query: String): List<String> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val instances = getInstances()
+        val allInstances = getInstances()
+        val instances = allInstances.filter { !isInstanceCoolingDown(it) }
 
         for (instance in instances) {
             val url = "$instance/api/v1/search?q=$encodedQuery&type=channel"
             try {
                 Logger.info(TAG, "Trying Invidious instance for channel search: $instance")
                 val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
-                val response = client.newCall(request).execute()
+                val response = probeClient.newCall(request).execute()
 
                 if (response.isSuccessful) {
                     val body = response.body?.string()

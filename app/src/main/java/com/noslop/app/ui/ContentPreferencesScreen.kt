@@ -343,6 +343,13 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
                 var isSearchingChannels by remember { mutableStateOf(false) }
 
+                // Pre-warm the Invidious instance cache so the first search is fast
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try { com.noslop.app.feeds.api.InvidiousApiClient.preWarmInstances() } catch (_: Exception) {}
+                    }
+                }
+
                 LaunchedEffect(channelSearchQuery) {
                     if (channelSearchQuery.isBlank()) {
                         searchedChannels = emptyList()
@@ -350,11 +357,11 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         return@LaunchedEffect
                     }
                     isSearchingChannels = true
-                    kotlinx.coroutines.delay(600) // Debounce typing
+                    kotlinx.coroutines.delay(300) // Debounce typing
                     try {
                         searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
                     } catch (e: Exception) {
-                        com.noslop.app.debug.Logger.error("SETTINGS", "Channel search failed: ${e.message}")
+                        com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Channel search failed: ${e.message}")
                     } finally {
                         isSearchingChannels = false
                     }
