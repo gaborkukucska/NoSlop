@@ -741,8 +741,10 @@ class MeshSocialRepository(
 
         if (reactionType != "bridge_only") {
             reactToMeshPost(anchorId, reactionType, existingCount == 0)
+        } else {
+            true
         }
-    }
+}
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
