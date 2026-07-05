@@ -22,10 +22,12 @@ import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.api.InvidiousApiClient
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.Dispatchers
 import com.noslop.app.net.HttpClientProvider
 import com.noslop.app.ui.PreloadManager
 import com.noslop.app.ui.theme.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -249,7 +251,8 @@ fun VideoPlayer(
     url: String,
     isVisible: Boolean = true,
     thumbnailUrl: String? = null,
-    thumbnailB64: String? = null
+    thumbnailB64: String? = null,
+    stableKey: String? = null
 ) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -290,8 +293,9 @@ fun VideoPlayer(
                 if (activeVisible) {
                     ExoVideoPlayer(
                         url = resolved.url,
-                        rawUrl = url,
+                        rawUrl = stableKey ?: url,
                         isLandscape = isLandscape,
+                        isVisible = isVisible,
                         thumbnailUrl = thumbnailUrl,
                         thumbnailB64 = thumbnailB64,
                         onRetry = { retryTrigger++ },
@@ -304,6 +308,7 @@ fun VideoPlayer(
                 if (activeVisible) {
                     EmbedWebViewPlayer(
                         url = resolved.url,
+                        rawUrl = stableKey ?: url,
                         onRetry = { retryTrigger++ },
                         onReady = { isVideoReady = true }
                     )
@@ -389,6 +394,7 @@ private fun ExoVideoPlayer(
     url: String,
     rawUrl: String,
     isLandscape: Boolean,
+    isVisible: Boolean,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
     onRetry: () -> Unit,
@@ -399,6 +405,24 @@ private fun ExoVideoPlayer(
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var isBuffering by remember { mutableStateOf(true) }
+
+    LaunchedEffect(isVisible, exoPlayer) {
+        exoPlayer?.let { player ->
+            player.playWhenReady = isVisible
+            if (!isVisible) {
+                player.pause()
+                try {
+                    val currentPos = player.currentPosition
+                    android.util.Log.e("NoSlop/VIDEO_DEBUG", "LaunchedEffect isVisible=false. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
+                    if (currentPos > 0L) {
+                        PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("NoSlop/VIDEO_DEBUG", "Failed to save playback position on pause: ${e.message}")
+                }
+            }
+        }
+    }
 
     DisposableEffect(url) {
         Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
@@ -485,11 +509,12 @@ private fun ExoVideoPlayer(
         onDispose {
             try {
                 val currentPos = player.currentPosition
+                android.util.Log.e("NoSlop/VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
                 if (currentPos > 0L) {
                     PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
                 }
             } catch (e: Exception) {
-                Logger.error("VIDEO", "Failed to save playback position during dispose: ${e.message}")
+                android.util.Log.e("NoSlop/VIDEO_DEBUG", "Failed to save playback position during dispose: ${e.message}")
             }
             player.release()
             exoPlayer = null
@@ -569,8 +594,7 @@ private fun ExoVideoPlayer(
 }
 
 @Composable
-private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> Unit) {
-    Logger.info("VIDEO", "Loading embed in WebView: $url")
+private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit, onReady: () -> Unit) {
     var webError by remember { mutableStateOf<String?>(null) }
 
     if (webError != null) {
@@ -642,6 +666,14 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                         fun onPlaying() {
                             post { onReady() }
                         }
+
+                        @android.webkit.JavascriptInterface
+                        fun savePosition(timeSeconds: Float) {
+                            val timeMs = (timeSeconds * 1000).toLong()
+                            if (timeMs > 0) {
+                                PlaybackPositionStore.save(rawUrl, timeMs, 0L)
+                            }
+                        }
                     }, "NoSlopJS")
 
                     webViewClient = object : android.webkit.WebViewClient() {
@@ -706,6 +738,8 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                     
                     val htmlContent = if (isYouTube) {
                         val videoId = url.substringAfter("/embed/").substringBefore("?")
+                        val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
+                        val startSeconds = (resumeMs / 1000).toInt()
                         """
                         <!DOCTYPE html>
                         <html>
@@ -726,12 +760,27 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                                   height: '100%',
                                   width: '100%',
                                   videoId: '$videoId',
-                                  playerVars: { 'playsinline': 1, 'autoplay': 1, 'controls': 1, 'fs': 0, 'rel': 0 },
+                                  playerVars: { 'playsinline': 1, 'autoplay': 1, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
                                   events: {
                                     'onReady': function(event) { event.target.playVideo(); },
                                     'onStateChange': function(event) {
                                       if (event.data == 1) { // PLAYING state
                                           window.NoSlopJS.onPlaying();
+                                          if (!window.posInterval) {
+                                              window.posInterval = setInterval(function() {
+                                                  if (player && player.getCurrentTime) {
+                                                      window.NoSlopJS.savePosition(player.getCurrentTime());
+                                                  }
+                                              }, 1000);
+                                          }
+                                      } else {
+                                          if (window.posInterval) {
+                                              clearInterval(window.posInterval);
+                                              window.posInterval = null;
+                                              if (player && player.getCurrentTime) {
+                                                  window.NoSlopJS.savePosition(player.getCurrentTime());
+                                              }
+                                          }
                                       }
                                     }
                                   }
@@ -769,6 +818,7 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                 """.trimIndent(), null)
             },
             onRelease = { view ->
+                view.evaluateJavascript("if (typeof player !== 'undefined' && player.getCurrentTime) { window.NoSlopJS.savePosition(player.getCurrentTime()); }", null)
                 view.stopLoading()
                 view.loadUrl("about:blank")
                 view.destroy()

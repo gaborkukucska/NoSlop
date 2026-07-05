@@ -104,7 +104,8 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (showSplash) {
-                        com.noslop.app.ui.SplashScreen()
+                        val buildStatus by viewModel.feedBuildStatus.collectAsState()
+                        com.noslop.app.ui.SplashScreen(statusMessage = buildStatus)
                     } else {
                         MainScreen(viewModel = viewModel, initialRoute = targetRoute)
                     }

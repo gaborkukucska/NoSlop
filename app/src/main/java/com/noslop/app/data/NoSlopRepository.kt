@@ -80,6 +80,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val allSources: Flow<List<FeedSource>> = feedRepository.allSources
     val allFeedItems: Flow<List<FeedItem>> = feedRepository.allFeedItems
     val savedFeedItems: Flow<List<FeedItem>> = feedRepository.savedFeedItems
+    val feedBuildStatus: Flow<String> = feedRepository.feedBuildStatus
     val allPeers: Flow<List<Peer>> = peerDao.getAllPeers()
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()

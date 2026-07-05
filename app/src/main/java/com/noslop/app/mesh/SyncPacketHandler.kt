@@ -27,7 +27,7 @@ class SyncPacketHandler(
 
     suspend fun handleSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val syncPay = packet.getSyncRequestPayload() ?: return false
-        val recentPosts = postDao.getPostsSince(syncPay.since)
+        val recentPosts = postDao.getPostsSince(syncPay.since).filter { !it.isOrphaned }
         val postPayloads = recentPosts.map { post ->
             val rawMediaId = post.mediaUrl?.substringAfterLast("/")
             PostPayload(
@@ -64,10 +64,13 @@ class SyncPacketHandler(
                 postId = c.postId,
                 authorId = c.authorPublicKeyB64,
                 authorName = c.authorHandle,
+                authorAvatarB64 = c.authorAvatarB64,
                 content = c.content,
                 timestamp = c.timestamp,
                 signature = c.signature,
-                parentCommentId = c.parentCommentId
+                parentCommentId = c.parentCommentId,
+                mediaId = c.mediaId,
+                mediaType = c.mediaType
             )
         }
 
@@ -141,7 +144,7 @@ class SyncPacketHandler(
         val peerInventory = syncPay.inventory.associate { it.id to it.hash }
         
         val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-        val recentPosts = postDao.getPostsSince(sevenDaysAgo)
+        val recentPosts = postDao.getPostsSince(sevenDaysAgo).filter { !it.isOrphaned }
         
         val missingOrUpdatedPosts = recentPosts.filter { post ->
             val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
@@ -192,7 +195,9 @@ class SyncPacketHandler(
                 content = c.content,
                 timestamp = c.timestamp,
                 signature = c.signature,
-                parentCommentId = c.parentCommentId
+                parentCommentId = c.parentCommentId,
+                mediaId = c.mediaId,
+                mediaType = c.mediaType
             )
         }
 
@@ -277,6 +282,12 @@ class SyncPacketHandler(
             val pubBytes = Base64.decode(postPay.authorId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata?.originNode ?: peerDao.getPeerByPublicKey(packet.senderId)?.onionAddress
+            // Skip posts that are already locally orphaned (deleted) to prevent resurrection
+            val existingPost = postDao.getPostById(postPay.id)
+            if (existingPost != null && existingPost.isOrphaned) {
+                Logger.debug(TAG, "Sync: Skipping orphaned post ${postPay.id} — already deleted locally")
+                continue
+            }
             val post = MeshPost(
                 id = postPay.id,
                 authorPublicKeyB64 = postPay.authorId,
@@ -329,9 +340,17 @@ class SyncPacketHandler(
                 content = c.content,
                 timestamp = c.timestamp,
                 signature = c.signature,
-                parentCommentId = c.parentCommentId
+                parentCommentId = c.parentCommentId,
+                mediaId = c.mediaId,
+                mediaType = c.mediaType
             )
             commentDao.insertComment(meshComment)
+
+            // Trigger auto-download for comment media (GIFs, images)
+            if (c.mediaMetadata != null) {
+                val peerOnion = peerDao.getPeerByPublicKey(c.authorId)?.onionAddress
+                MediaManager.checkAndAutoDownload(c.mediaMetadata, "friends", c.authorId, peerOnion)
+            }
             storedComments++
         }
         if (storedComments > 0) Logger.info(TAG, "SYNC_RESPONSE: stored $storedComments comments")

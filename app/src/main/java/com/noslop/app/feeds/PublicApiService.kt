@@ -26,7 +26,7 @@ object PublicApiService {
         language: String = "en"
     ): List<FeedItem> {
         val items = mutableListOf<FeedItem>()
-        val query = userKeywords.firstOrNull() ?: category
+        val query = if (userKeywords.isNotEmpty()) userKeywords.joinToString(" ") else category
 
         try {
             when (category) {

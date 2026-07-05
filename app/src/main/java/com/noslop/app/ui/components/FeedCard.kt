@@ -140,9 +140,10 @@ fun FullScreenFeedCard(
                     var newlyDownloaded by remember { mutableStateOf(false) }
                     val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, item.mediaType ?: "video"))
                     val canPlay = isDownloaded || !isMesh || item.url != null
+                    val stableKeyForRestore = item.mediaUrl ?: item.url
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl, stableKey = stableKeyForRestore)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -194,7 +195,8 @@ fun FullScreenFeedCard(
                 resolvedUrl.contains(".aac") ||
                 resolvedUrl.contains(".ogg") ||
                 resolvedUrl.contains(".flac") -> {
-                    AudioPlayer(url = resolvedUrl, isVisible = isVisible)
+                    val stableKeyForRestore = item.mediaUrl ?: item.url
+                    AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 isVisualCategory && hasVisualMedia -> {
                     BlurredImageBackground(url = resolvedUrl)
@@ -390,9 +392,10 @@ fun FullScreenMeshCardV2(
                     var newlyDownloaded by remember { mutableStateOf(false) }
                     val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, effectiveMediaType ?: "video"))
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
+                    val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = post.thumbnailB64)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = post.thumbnailB64, stableKey = stableKeyForRestore)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -444,7 +447,8 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".aac") ||
                 resolvedUrl.contains(".ogg") ||
                 resolvedUrl.contains(".flac") -> {
-                    AudioPlayer(url = resolvedUrl, isVisible = isVisible)
+                    val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
+                    AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 effectiveMediaType == "image" || 
                 resolvedUrl.contains(".jpg") || 

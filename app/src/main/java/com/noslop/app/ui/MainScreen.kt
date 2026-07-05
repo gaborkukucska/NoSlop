@@ -79,12 +79,13 @@ fun FullScreenMeshCard(
                     idExtension.endsWith(".png") || idExtension.endsWith(".webp") ||
                     idExtension.endsWith(".gif") || rawUrl.startsWith("noslop-gif://")
 
+            val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
             when {
                 isVideoUrl -> {
-                    VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailB64 = post.thumbnailB64)
+                    VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailB64 = post.thumbnailB64, stableKey = stableKeyForRestore)
                 }
                 isAudioUrl -> {
-                    AudioPlayer(url = resolvedUrl, isVisible = isVisible)
+                    AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 isImageUrl -> {
                     BlurredImageBackground(url = resolvedUrl, thumbnailB64 = post.thumbnailB64)

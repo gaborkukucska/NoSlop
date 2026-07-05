@@ -154,6 +154,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val feedBuildStatus: StateFlow<String> = repository.feedBuildStatus
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
     val allNotifications: StateFlow<List<com.noslop.app.data.NotificationItem>> = repository.allNotifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -850,23 +853,21 @@ fun toggleAggregator() {
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
                 
-                // Clear the DB items, but leave the UI intact behind the splash screen
-                repository.clearFeedData()
-                repository.clearAllHistory() // TEMP FIX to flush corrupted swipe data
-                
-                // Fetch new items (this takes 5-10 seconds)
-                repository.refreshFeeds()
-                
-                // Wait for the DB Flow to emit the full Phase 2 dataset to allFeeds
-                kotlinx.coroutines.delay(1000)
-                
-                // Now wipe the old feed state and build a fresh interleaved feed
+                // Immediately remix the feed from the local DB, applying filters
+                // and preserving history (avoiding already seen content)
+                savedFeedItemId = null
+                repository.putAppSetting("saved_feed_list", "")
+                repository.putAppSetting("saved_feed_active_id", "")
+                refreshExclusionCaches()
                 _unifiedFeed.value = emptyList()
                 cachedDefaultFeed = emptyList()
                 sessionLoadedIds.clear()
                 
-                // Load the best items from the fully populated allFeeds array
+                // Load the best items instantly
                 loadMoreFeedItems()
+                
+                // Kick off background fetch to replenish the database
+                repository.refreshFeeds()
                 
             } catch (e: Exception) {
                 Logger.error("VM", "Force reset exception: ${e.message}")
@@ -892,11 +893,20 @@ fun toggleAggregator() {
                 savedFeedItemId = null
                 currentFilterMode = "Live Feed"
 
+                // Clear saved feed persistence so the DB flow doesn't resurrect old state
+                repository.putAppSetting("saved_feed_list", "")
+                repository.putAppSetting("saved_feed_active_id", "")
+
                 // Refresh what's been seen / swiped so the new mix excludes them
                 refreshExclusionCaches()
 
-                // Inject a fresh interleaved batch from existing allFeeds / allMeshes
-                loadMoreFeedItems("Live Feed", isInjection = true)
+                // Clear session and rebuild from scratch
+                sessionLoadedIds.clear()
+                _unifiedFeed.value = emptyList()
+                cachedDefaultFeed = emptyList()
+                loadMoreFeedItems("Live Feed")
+
+                _scrollToTopEvent.emit(Unit)
             } catch (e: Exception) {
                 Logger.error("VM", "Refresh live feed exception: ${e.message}")
             } finally {
@@ -1061,6 +1071,11 @@ fun toggleAggregator() {
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {
+            if (reactionType == "downvote" || reactionType == "angry") {
+                recordItemSwiped(item.id)
+                _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
+                return@launch
+            }
             repository.reactToFeedItemWithType(item, reactionType)
             if (reactionType == "like") repository.updateSavedState(item.id, true)
         }

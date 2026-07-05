@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -1232,16 +1233,53 @@ fun UnifiedFeedTab(
         )
     }
 
-    if (isResettingFeed) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(PrimaryBlack).zIndex(100f),
-            contentAlignment = Alignment.Center
+    Box(modifier = Modifier.fillMaxSize()) {
+        AnimatedVisibility(
+            visible = isResettingFeed,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { 50 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { 50 }),
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 80.dp).zIndex(100f)
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                CircularProgressIndicator(color = AccentGreen, modifier = Modifier.size(64.dp))
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("Rebuilding your feed...", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                Text("Fetching fresh content", color = TextMuted, fontSize = 14.sp)
+            val buildStatus by viewModel.feedBuildStatus.collectAsState()
+            androidx.compose.material3.Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = SurfaceDark.copy(alpha = 0.95f)),
+                border = BorderStroke(1.dp, BorderSubtle),
+                modifier = Modifier.padding(16.dp).wrapContentSize()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = AccentGreen,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    
+                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                    val pulseAlpha by infiniteTransition.animateFloat(
+                        initialValue = 0.5f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(800, easing = LinearEasing),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "pulseAlpha"
+                    )
+                    
+                    if (buildStatus.isNotBlank()) {
+                        Text(
+                            text = buildStatus,
+                            color = AccentGreen.copy(alpha = pulseAlpha),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text("Fetching fresh content...", color = TextMuted, fontSize = 13.sp)
+                    }
+                }
             }
         }
     }

@@ -21,7 +21,8 @@ import com.noslop.app.ui.PreloadManager
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-fun AudioPlayer(url: String, isVisible: Boolean = true) {
+fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = null) {
+    val actualKey = stableKey ?: url
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var progress by remember { mutableStateOf(0f) }
@@ -39,7 +40,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             val player = if (preloaded != null) {
                 preloaded.apply {
                     playWhenReady = true
-                    val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                    val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
                     if (resumeMs > 0L) {
                         Logger.info("AUDIO", "Resuming preloaded audio at ${resumeMs}ms: $url")
                         seekTo(resumeMs)
@@ -87,7 +88,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                         val mediaItem = androidx.media3.common.MediaItem.fromUri(url)
                         setMediaItem(mediaItem)
                         volume = 1f
-                        val resumeMs = PlaybackPositionStore.resumePositionFor(url)
+                        val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
                         if (resumeMs > 0L) {
                             Logger.info("AUDIO", "Resuming audio at ${resumeMs}ms: $url")
                             seekTo(resumeMs)
@@ -134,7 +135,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
             
             onDispose {
                 try {
-                    PlaybackPositionStore.save(url, player.currentPosition, player.duration)
+                    PlaybackPositionStore.save(actualKey, player.currentPosition, player.duration)
                 } catch (e: Exception) {
                     Logger.warn("AUDIO", "Failed to save playback position for $url: ${e.message}")
                 }
@@ -174,7 +175,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true) {
                 if (ticksSinceSave >= 25) {
                     ticksSinceSave = 0
                     try {
-                        PlaybackPositionStore.save(url, currentPos, duration)
+                        PlaybackPositionStore.save(actualKey, currentPos, duration)
                     } catch (e: Exception) { /* player may be mid-release; ignore */ }
                 }
                 kotlinx.coroutines.delay(200)
