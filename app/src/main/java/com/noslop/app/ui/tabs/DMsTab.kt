@@ -3,6 +3,7 @@ package com.noslop.app.ui.tabs
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,26 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.zIndex.zIndex
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -29,9 +50,18 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val activeChatMessages by viewModel.chatMessages.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
     val handle by viewModel.localHandle.collectAsState()
+    val dmStep by viewModel.dmTutorialStep.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.saveGroundZeroQrToGallery(context)
+    }
 
     var showShareSheet by remember { mutableStateOf(false) }
     var showScanScreen by remember { mutableStateOf(false) }
+
+    var myIdRect by remember { mutableStateOf(Rect.Zero) }
+    var addPeerRect by remember { mutableStateOf(Rect.Zero) }
 
     // Intercept hardware back button when viewing a chat thread —
     // return to contacts list instead of minimising the app.
@@ -85,6 +115,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 )
             }
 
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // Quick Actions Card
@@ -98,8 +129,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Button(
-                        onClick = { showShareSheet = true },
-                        modifier = Modifier.weight(1f),
+                        onClick = { 
+                            showShareSheet = true 
+                            if (dmStep == 0) viewModel.advanceDmTutorial()
+                        },
+                        modifier = Modifier.weight(1f).onGloballyPositioned { myIdRect = it.boundsInRoot() },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                         border = BorderStroke(1.dp, AccentGreen),
                         shape = RoundedCornerShape(8.dp),
@@ -111,8 +145,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     }
 
                     Button(
-                        onClick = { showScanScreen = true },
-                        modifier = Modifier.weight(1f),
+                        onClick = { 
+                            showScanScreen = true 
+                            if (dmStep == 2) viewModel.advanceDmTutorial()
+                        },
+                        modifier = Modifier.weight(1f).onGloballyPositioned { addPeerRect = it.boundsInRoot() },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(0.dp)
@@ -181,12 +218,23 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             }
         }
 
+        if (dmStep == 0) {
+            TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID", onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
+        } else if (dmStep == 2) {
+            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer", onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+        }
+
         // Render dialogs
         if (showShareSheet && localKeys != null) {
             QRShareSheet(
                 handle = handle ?: "anonymous",
                 localKeys = localKeys!!,
-                onDismiss = { showShareSheet = false }
+                dmStep = dmStep,
+                viewModel = viewModel,
+                onDismiss = { 
+                    showShareSheet = false
+                    if (dmStep == 1) viewModel.advanceDmTutorial()
+                }
             )
         }
 
@@ -201,6 +249,59 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     )
                 },
                 onDismiss = { showScanScreen = false }
+            )
+        }
+    }
+}
+
+
+@Composable
+fun TutorialSpotlight(
+    targetRect: Rect,
+    text: String,
+    onClickTarget: () -> Unit
+) {
+    Box(modifier = Modifier.fillMaxSize().zIndex(1000f)) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                .pointerInput(Unit) {
+                    detectTapGestures { offset ->
+                        if (targetRect.contains(offset)) {
+                            onClickTarget()
+                        }
+                    }
+                }
+        ) {
+            drawRect(Color.Black.copy(alpha = 0.85f))
+            if (targetRect != Rect.Zero) {
+                drawRoundRect(
+                    color = Color.Black,
+                    topLeft = targetRect.topLeft,
+                    size = targetRect.size,
+                    cornerRadius = CornerRadius(12.dp.toPx()),
+                    blendMode = BlendMode.Clear
+                )
+            }
+        }
+        
+        if (targetRect != Rect.Zero) {
+            val density = LocalDensity.current
+            val config = LocalConfiguration.current
+            val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
+            val yOffset = with(density) { if (targetRect.top > screenHeightPx / 2) targetRect.top.toDp() - 48.dp else targetRect.bottom.toDp() + 16.dp }
+            val xOffset = with(density) { maxOf(0.dp, targetRect.left.toDp() - 8.dp) }
+            
+            Text(
+                text = text,
+                color = PrimaryBlack,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .offset(x = xOffset, y = yOffset)
+                    .background(AccentGreen, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }
     }

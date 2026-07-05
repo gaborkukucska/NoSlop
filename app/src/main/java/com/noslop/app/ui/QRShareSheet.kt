@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,6 +18,16 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+
+
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,9 +54,12 @@ import java.io.FileOutputStream
 fun QRShareSheet(
     handle: String,
     localKeys: CryptoService.IdentityKeys,
+    dmStep: Int = 4,
+    viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    var shareRect by remember { mutableStateOf(Rect.Zero) }
 
     // Prepare JSON payload for the QR code
     val qrPayload = remember(localKeys) {
@@ -184,13 +198,14 @@ fun QRShareSheet(
 
                     Button(
                         onClick = {
+                            if (dmStep == 1) viewModel?.advanceDmTutorial()
                             if (qrBitmap != null) {
                                 shareQrImage(context, qrBitmap, handle)
                             } else {
                                 Toast.makeText(context, "QR code not available", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).onGloballyPositioned { shareRect = it.boundsInRoot() },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AccentGreen,
                             contentColor = PrimaryBlack
@@ -206,6 +221,17 @@ fun QRShareSheet(
                     }
                 }
             }
+        }
+        
+        if (dmStep == 1) {
+            com.noslop.app.ui.tabs.TutorialSpotlight(
+                targetRect = shareRect, 
+                text = "2. Share your ID", 
+                onClickTarget = { 
+                    viewModel?.advanceDmTutorial()
+                    if (qrBitmap != null) shareQrImage(context, qrBitmap, handle) 
+                }
+            )
         }
     }
 }

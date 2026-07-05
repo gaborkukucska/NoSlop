@@ -61,6 +61,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Anonymous")
 
+    private val _feedTutorialStep = MutableStateFlow<Int>(0)
+    val feedTutorialStep: StateFlow<Int> = _feedTutorialStep.asStateFlow()
+
+    private val _dmTutorialStep = MutableStateFlow<Int>(0)
+    val dmTutorialStep: StateFlow<Int> = _dmTutorialStep.asStateFlow()
+
     private val _isOnboardingComplete = MutableStateFlow(false)
     val isOnboardingComplete: StateFlow<Boolean> = _isOnboardingComplete.asStateFlow()
 
@@ -237,6 +243,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.updateOnionAddress(repository.getLocalIdentity()?.onionAddress ?: "")
         }
 
+        viewModelScope.launch {
+            val fStep = repository.getAppSetting("feed_tutorial_step")?.toIntOrNull() ?: 0
+            _feedTutorialStep.value = fStep
+            val dStep = repository.getAppSetting("dms_tutorial_step")?.toIntOrNull() ?: 0
+            _dmTutorialStep.value = dStep
+        }
         viewModelScope.launch {
             _isOnboardingComplete.value = repository.isOnboardingComplete()
             val recovered = repository.recoverSourcesAfterMigration()
@@ -952,6 +964,69 @@ fun toggleAggregator() {
                 currentFeed.add(0, UnifiedItem.Mesh(meshPost))
                 _unifiedFeed.value = currentFeed
                 _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
+
+    fun advanceFeedTutorial() {
+        val next = _feedTutorialStep.value + 1
+        _feedTutorialStep.value = next
+        viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", next.toString()) }
+    }
+
+    fun completeFeedTutorial() {
+        _feedTutorialStep.value = 5
+        viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", "5") }
+    }
+
+    fun advanceDmTutorial() {
+        val next = _dmTutorialStep.value + 1
+        _dmTutorialStep.value = next
+        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", next.toString()) }
+    }
+
+    fun completeDmTutorial() {
+        _dmTutorialStep.value = 4
+        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "4") }
+    }
+
+    fun saveGroundZeroQrToGallery(context: Context) {
+        viewModelScope.launch {
+            val hasSaved = repository.getAppSetting("ground_zero_qr_saved") == "true"
+            if (!hasSaved) {
+                try {
+                    val resId = context.resources.getIdentifier("ground_zero_qr", "drawable", context.packageName)
+                    if (resId == 0) {
+                        com.noslop.app.debug.Logger.warn("VM", "ground_zero_qr drawable not found, skipping gallery export.")
+                        return@launch
+                    }
+                    val bitmap = android.graphics.BitmapFactory.decodeResource(context.resources, resId)
+                    if (bitmap == null) return@launch
+                    
+                    val resolver = context.contentResolver
+                    val values = android.content.ContentValues().apply {
+                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "NoSlop_GroundZero.png")
+                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
+                        }
+                    }
+                    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                    if (uri != null) {
+                        resolver.openOutputStream(uri)?.use { out ->
+                            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
+                        }
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                            values.clear()
+                            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
+                            resolver.update(uri, values, null, null)
+                        }
+                        repository.putAppSetting("ground_zero_qr_saved", "true")
+                    }
+                } catch (e: Exception) {
+                    com.noslop.app.debug.Logger.error("VM", "Failed to save Ground Zero QR: ${e.message}")
+                }
             }
         }
     }

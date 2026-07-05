@@ -97,7 +97,7 @@ fun OnboardingScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(8) { index ->
+                    repeat(6) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -164,8 +164,7 @@ fun OnboardingScreen(
                         creatorKeywords = creatorKeywordsText,
                         onCreatorKeywordsChange = { creatorKeywordsText = it }
                     )
-                    7 -> Step7Connection(viewModel)
-                    8 -> Step8Finalize(viewModel, handleText, selectedSources, selectedInterests, selectedMusicGenres, selectedVideoGenres, mnemonic)
+
                 }
             }
 
@@ -175,7 +174,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 8) {
+                if (currentStep > 1 && currentStep < 6) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -203,24 +202,13 @@ fun OnboardingScreen(
                     4 -> true // Optional genre selection
                     5 -> selectedSources.isNotEmpty()
                     6 -> true // Creator keywords are optional
-                    7 -> true
-                    8 -> true
                     else -> false
                 }
 
-                if (currentStep < 8) {
+                if (currentStep < 6) {
                     Button(
                         onClick = {
                             currentStep++
-                            if (currentStep == 7) {
-                                viewModel.preloadFeedsDuringOnboarding(
-                                    selectedSources,
-                                    selectedInterests,
-                                    selectedMusicGenres,
-                                    selectedVideoGenres,
-                                    creatorKeywordsText
-                                )
-                            }
                         },
                         enabled = canProceed,
                         colors = ButtonDefaults.buttonColors(
@@ -926,350 +914,3 @@ fun Step6Creators(
     }
 }
 
-@Composable
-fun Step7Connection(viewModel: NoSlopViewModel) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        TorWarningPanel(viewModel)
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "Mesh Network Connectivity",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = "NoSlop routes all traffic through Tor. Scanning a QR code connects you directly to a peer.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(16.dp)
-        )
-        
-        var showScan by remember { mutableStateOf(false) }
-        Button(
-            onClick = { showScan = true },
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
-            border = BorderStroke(1.dp, AccentGreen)
-        ) {
-            Icon(Icons.Default.CameraAlt, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Scan Friend's QR")
-        }
-
-        if (showScan) {
-            QRScanScreen(
-                onPeerScannedAndAccepted = { h, p, o, e ->
-                    viewModel.requestConnection(h, p, o, e)
-                    showScan = false
-                },
-                onDismiss = { showScan = false }
-            )
-        }
-    }
-}
-
-@Composable
-fun Step8Finalize(
-    viewModel: NoSlopViewModel,
-    handle: String,
-    selectedSources: List<BuiltInSource>,
-    selectedInterests: List<String>,
-    selectedMusicGenres: List<String>,
-    selectedVideoGenres: List<String>,
-    mnemonic: String?
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(80.dp))
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Ready to Launch",
-            style = MaterialTheme.typography.headlineMedium,
-            color = TextLight,
-            fontWeight = FontWeight.Bold
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text(
-            text = "We're setting up your identity and pre-loading 50+ pieces of content from your chosen feeds.",
-            style = MaterialTheme.typography.bodyLarge,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 24.dp)
-        )
-        Spacer(modifier = Modifier.height(32.dp))
-        LinearProgressIndicator(color = AccentGreen, trackColor = SurfaceDark, modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp))
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun Step1Identity(
-    handle: String,
-    onHandleChange: (String) -> Unit,
-    localKeys: CryptoService.IdentityKeys?,
-    onGenerate: () -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Text(
-            text = "Generate Cryptographic Identity",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        Text(
-            text = "Your identity is self-generated and belongs only to you. No centralized accounts or algorithms.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
-        )
-
-        OutlinedTextField(
-            value = handle,
-            onValueChange = { if (it.length <= 20) onHandleChange(it) },
-            label = { Text("Choose Handle (e.g., alice)") },
-            singleLine = true,
-            shape = RoundedCornerShape(8.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AccentGreen,
-                unfocusedBorderColor = BorderSubtle,
-                focusedLabelColor = AccentGreen,
-                unfocusedLabelColor = TextMuted,
-                focusedTextColor = TextLight,
-                unfocusedTextColor = TextLight
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .testTag("handle_input")
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (localKeys == null) {
-            Button(
-                onClick = onGenerate,
-                enabled = handle.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentGreen,
-                    contentColor = PrimaryBlack,
-                    disabledContainerColor = SurfaceDark,
-                    disabledContentColor = TextMuted
-                ),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 16.dp)
-                    .testTag("generate_keys_button")
-            ) {
-                Icon(Icons.Default.Lock, contentDescription = "Generate Identity")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Generate Keypair", fontWeight = FontWeight.Bold)
-            }
-        } else {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                border = BorderStroke(1.dp, BorderSubtle),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.Start
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Identity Registered!",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = TextLight,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Display Handle:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TextMuted
-                    )
-                    Text(
-                        text = "${handle}.${localKeys.tripcode}",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontFamily = FontFamily.Monospace,
-                            color = AccentGreen,
-                            fontWeight = FontWeight.Bold
-                        )
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Text(
-                        text = "Derived Onion Address:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TextMuted
-                    )
-                    Text(
-                        text = localKeys.onionAddress,
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontFamily = FontFamily.Monospace,
-                            color = TextLight
-                        )
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun Step2Feeds(
-    selectedSources: List<BuiltInSource>,
-    onToggleSource: (BuiltInSource) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "What do you want to read?",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        Text(
-            text = "Select from NoSlop's built-in operational feeds library. Free of corporate feeds.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(1),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxHeight().padding(horizontal = 8.dp)
-        ) {
-            gridItems(SourceLibrary.sources) { src ->
-                val isSelected = selectedSources.contains(src)
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onToggleSource(src) },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) SurfaceDark else PrimaryBlack
-                    ),
-                    border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = src.title,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = TextLight,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = src.category,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AccentGreen
-                            )
-                        }
-                        Checkbox(
-                            checked = isSelected,
-                            onCheckedChange = { onToggleSource(src) },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = AccentGreen,
-                                checkmarkColor = PrimaryBlack,
-                                uncheckedColor = TextMuted
-                            )
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun Step3Connection(viewModel: NoSlopViewModel) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        TorWarningPanel(viewModel)
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Connect Securely over Tor",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        Text(
-            text = "NoSlop functions as a gossip node on the HAI-Net mesh network. Handshake directly to build your web of trust.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
-        )
-
-        Card(
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            border = BorderStroke(1.dp, BorderSubtle),
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text("No Algorithms or Central Servers", fontWeight = FontWeight.Bold, color = TextLight)
-                        Text("Your posts route strictly peer-to-peer using gossip encryption.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text("E2EE Messenger", fontWeight = FontWeight.Bold, color = TextLight)
-                        Text("Direct messages are signed and encrypted natively using Elliptic Curve exchange.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
-                    }
-                }
-            }
-        }
-    }
-}

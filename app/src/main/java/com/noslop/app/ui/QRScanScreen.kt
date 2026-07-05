@@ -23,6 +23,13 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +67,8 @@ data class QRScannedPeer(
 @Composable
 fun QRScanScreen(
     onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String) -> Unit,
+    dmStep: Int = 4,
+    viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -71,6 +80,7 @@ fun QRScanScreen(
     
     var showManualEntry by remember { mutableStateOf(false) }
     var manualEntryText by remember { mutableStateOf("") }
+    var galleryRect by remember { mutableStateOf(Rect.Zero) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -183,6 +193,7 @@ fun QRScanScreen(
                                     
                                     Spacer(modifier = Modifier.height(24.dp))
                                     
+
                                     // Bottom Controls Row (Padded beneath the grid to guarantee visibility)
                                     Row(
                                         modifier = Modifier
@@ -191,8 +202,11 @@ fun QRScanScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Button(
-                                            onClick = { imagePickerLauncher.launch("image/*") },
-                                            modifier = Modifier.weight(1f).height(50.dp),
+                                            onClick = { 
+                                                if (dmStep == 3) viewModel?.completeDmTutorial()
+                                                imagePickerLauncher.launch("image/*") 
+                                            },
+                                            modifier = Modifier.weight(1f).height(50.dp).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                             colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
                                             border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                             shape = RoundedCornerShape(12.dp)
@@ -249,8 +263,11 @@ fun QRScanScreen(
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                modifier = Modifier.weight(1f),
+                                onClick = { 
+                                    if (dmStep == 3) viewModel?.completeDmTutorial()
+                                    imagePickerLauncher.launch("image/*") 
+                                },
+                                modifier = Modifier.weight(1f).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                 border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
                             ) {
@@ -353,6 +370,17 @@ fun QRScanScreen(
                     )
                 }
             }
+        }
+
+        if (dmStep == 3) {
+            com.noslop.app.ui.tabs.TutorialSpotlight(
+                targetRect = galleryRect, 
+                text = "4. Pick GroundZero QR", 
+                onClickTarget = { 
+                    viewModel?.completeDmTutorial()
+                    imagePickerLauncher.launch("image/*") 
+                }
+            )
         }
     }
 }
