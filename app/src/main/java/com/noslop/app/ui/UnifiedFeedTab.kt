@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -468,8 +469,9 @@ fun UnifiedFeedTab(
         }
     }
 
+    val initialTutStep = remember { viewModel.feedTutorialStep.value }
     val unifiedItems = remember(unifiedFeed, filterMode, searchQuery) {
-        unifiedFeed.filter { item ->
+        val filtered = unifiedFeed.filter { item ->
             val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
             if (filterMode == "My Content") {
                 if (!isOwnPost) return@filter false
@@ -503,10 +505,17 @@ fun UnifiedFeedTab(
                         item.post.clearnetTitle?.lowercase()?.contains(q) == true || 
                         item.post.authorHandle.lowercase().contains(q)
                     }
+                    is UnifiedItem.Tutorial -> false
                 }
             } else true
 
             matchesMode && matchesQuery
+        }
+        if (filterMode == "Live Feed" && searchQuery.isBlank() && initialTutStep < 5) {
+            val tutorials = (initialTutStep..4).map { UnifiedItem.Tutorial(it) }
+            tutorials + filtered
+        } else {
+            filtered
         }
     }
 
@@ -567,16 +576,25 @@ fun UnifiedFeedTab(
     LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
         if (pagerState.settledPage in unifiedItems.indices) {
             val currentItem = unifiedItems[pagerState.settledPage]
-            if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
-                viewModel.saveFeedPosition(currentItem.id)
+            
+            if (currentItem is UnifiedItem.Tutorial) {
+                viewModel.setFeedTutorialStep(currentItem.step + 1)
+            } else if (initialTutStep < 5) {
+                viewModel.completeFeedTutorial()
             }
 
-            if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
-                viewModel.markItemReadState(currentItem.item.id, true)
-            }
+            if (currentItem !is UnifiedItem.Tutorial) {
+                if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                    viewModel.saveFeedPosition(currentItem.id)
+                }
 
-            kotlinx.coroutines.delay(5000L)
-            viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
+                if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
+                    viewModel.markItemReadState(currentItem.item.id, true)
+                }
+
+                kotlinx.coroutines.delay(5000L)
+                viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
+            }
         }
     }
 
@@ -678,6 +696,10 @@ fun UnifiedFeedTab(
                     contentAlignment = Alignment.Center
                 ) {
                     when (item) {
+                        is UnifiedItem.Tutorial -> FeedTutorialSlide(
+                            step = item.step,
+                            onComplete = { viewModel.completeFeedTutorial() }
+                        )
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
                             isVisible = isVisibleForPlayback,
@@ -1295,6 +1317,95 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
         is UnifiedItem.Mesh -> {
             val type = item.post.mediaType ?: item.post.clearnetMediaType
             if (type == "video" || type == "audio") resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl else null
+        }
+        is UnifiedItem.Tutorial -> null
+    }
+}
+
+@Composable
+fun FeedTutorialSlide(step: Int, onComplete: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        if (step == 2) {
+            OverlayInteractions(
+                isMesh = true,
+                onLike = { },
+                onReaction = { },
+                onShare = { },
+                onComment = { },
+                reactionSummary = mapOf("like" to 5, "fire" to 2),
+                commentCount = 3,
+                modifier = Modifier.align(Alignment.CenterEnd)
+            )
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+            when (step) {
+                0 -> {
+                    Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text("Welcome to your Feed!", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Swipe UP to move to the next item.", color = TextMuted, textAlign = TextAlign.Center)
+                }
+                1 -> {
+                    Text("Navigation Menu", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.", color = TextMuted, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(48.dp))
+                    Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                }
+                2 -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                            Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Like, Share, and Comment using the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
+                        }
+                        Spacer(modifier = Modifier.width(24.dp))
+                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                    }
+                }
+                3 -> {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        Spacer(modifier = Modifier.height(48.dp))
+                        Text("Top Controls", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Check your notifications (top-left) or search and filter your feed (top-right).", color = TextMuted, textAlign = TextAlign.Center)
+                    }
+                }
+                4 -> {
+                    Text("Broadcast to Mesh", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Tap the floating '+' button to broadcast your own posts to the mesh network!", color = TextMuted, textAlign = TextAlign.Center)
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text("Swipe up to start exploring.", color = AccentGreen, fontWeight = FontWeight.Bold)
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(40.dp))
+            Text("Swipe UP to continue", color = TextMuted, fontSize = 12.sp)
+            
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                horizontalArrangement = Arrangement.Center
+            ) {
+                repeat(5) { i ->
+                    Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) AccentGreen else TextMuted))
+                }
+            }
+        }
+        
+        TextButton(
+            onClick = onComplete,
+            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+        ) {
+            Text("Skip Tutorial", color = TextMuted)
         }
     }
 }

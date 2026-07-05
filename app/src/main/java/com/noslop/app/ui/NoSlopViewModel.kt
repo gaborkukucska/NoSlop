@@ -28,6 +28,9 @@ sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     data class Mesh(val post: MeshPost) : UnifiedItem(post.timestamp, true) {
         override val id: String get() = post.id
     }
+    data class Tutorial(val step: Int) : UnifiedItem(Long.MAX_VALUE - step, false) {
+        override val id: String = "tutorial_$step"
+    }
 }
 
 class NoSlopViewModel(application: Application) : AndroidViewModel(application) {
@@ -334,6 +337,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         when (currentItem) {
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
                             is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id }?.let { UnifiedItem.Mesh(it) } ?: currentItem
+                            is UnifiedItem.Tutorial -> currentItem
                         }
                     }.toList()
                     
@@ -710,6 +714,19 @@ fun toggleAggregator() {
         _mnemonic.value = com.noslop.app.crypto.MnemonicGenerator.generateMnemonic()
     }
 
+    fun triggerBackgroundCreatorPreFetch(keywords: String) {
+        viewModelScope.launch {
+            try {
+                repository.saveCreatorKeywords(keywords)
+                _creatorKeywords.value = keywords
+                // Triggering a background search cleanly uses existing code to cache results in the DB
+                repository.searchCustomFeed(keywords, "Videos")
+            } catch (e: Exception) {
+                Logger.error("VM", "Background creator fetch failed: ${e.message}")
+            }
+        }
+    }
+
     fun preloadFeedsDuringOnboarding(selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, creatorKeywords: String = "") {
         viewModelScope.launch {
             for (bs in selectedSources) {
@@ -973,6 +990,13 @@ fun toggleAggregator() {
         val next = _feedTutorialStep.value + 1
         _feedTutorialStep.value = next
         viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", next.toString()) }
+    }
+
+    fun setFeedTutorialStep(step: Int) {
+        if (step > _feedTutorialStep.value) {
+            _feedTutorialStep.value = step
+            viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", step.toString()) }
+        }
     }
 
     fun completeFeedTutorial() {

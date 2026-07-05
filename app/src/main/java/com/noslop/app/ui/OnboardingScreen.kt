@@ -131,14 +131,19 @@ fun OnboardingScreen(
                             Toast.makeText(context, "Mnemonic copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                     )
-                    3 -> Step3Interests(
+                    3 -> Step6Creators(
+                        selectedInterests = selectedInterests,
+                        creatorKeywords = creatorKeywordsText,
+                        onCreatorKeywordsChange = { creatorKeywordsText = it }
+                    )
+                    4 -> Step3Interests(
                         selectedInterests = selectedInterests,
                         onToggleInterest = { interest ->
                             if (selectedInterests.contains(interest)) selectedInterests.remove(interest)
                             else selectedInterests.add(interest)
                         }
                     )
-                    4 -> Step4Genres(
+                    5 -> Step4Genres(
                         interests = selectedInterests,
                         selectedMusicGenres = selectedMusicGenres,
                         selectedVideoGenres = selectedVideoGenres,
@@ -151,7 +156,7 @@ fun OnboardingScreen(
                             else selectedVideoGenres.add(genre)
                         }
                     )
-                    5 -> Step5Feeds(
+                    6 -> Step5Feeds(
                         interests = selectedInterests,
                         selectedSources = selectedSources,
                         onToggleSource = { src ->
@@ -159,12 +164,6 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
-                    6 -> Step6Creators(
-                        selectedInterests = selectedInterests,
-                        creatorKeywords = creatorKeywordsText,
-                        onCreatorKeywordsChange = { creatorKeywordsText = it }
-                    )
-
                 }
             }
 
@@ -198,16 +197,20 @@ fun OnboardingScreen(
                 val canProceed = when (currentStep) {
                     1 -> true
                     2 -> handleText.isNotBlank() && mnemonic != null
-                    3 -> selectedInterests.isNotEmpty()
-                    4 -> true // Optional genre selection
-                    5 -> selectedSources.isNotEmpty()
-                    6 -> true // Creator keywords are optional
+                    3 -> true // Creator keywords are optional
+                    4 -> selectedInterests.isNotEmpty()
+                    5 -> true // Optional genre selection
+                    6 -> selectedSources.isNotEmpty()
                     else -> false
                 }
 
                 if (currentStep < 6) {
                     Button(
                         onClick = {
+                            if (currentStep == 3 && creatorKeywordsText.isNotBlank()) {
+                                // Trigger background fetch for creators while user finishes onboarding
+                                viewModel.triggerBackgroundCreatorPreFetch(creatorKeywordsText)
+                            }
                             currentStep++
                         },
                         enabled = canProceed,

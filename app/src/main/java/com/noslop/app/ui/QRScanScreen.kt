@@ -375,7 +375,7 @@ fun QRScanScreen(
         if (dmStep == 3) {
             com.noslop.app.ui.tabs.TutorialSpotlight(
                 targetRect = galleryRect, 
-                text = "4. Pick GroundZero QR", 
+                text = "4. Scan or select from Gallery", 
                 onClickTarget = { 
                     viewModel?.completeDmTutorial()
                     imagePickerLauncher.launch("image/*") 

@@ -17,17 +17,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.zIndex.zIndex
+import androidx.compose.ui.zIndex
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.geometry.Rect
 
@@ -60,6 +62,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     var showShareSheet by remember { mutableStateOf(false) }
     var showScanScreen by remember { mutableStateOf(false) }
 
+    var tabCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var myIdRect by remember { mutableStateOf(Rect.Zero) }
     var addPeerRect by remember { mutableStateOf(Rect.Zero) }
 
@@ -69,6 +72,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         viewModel.selectChatPeer(null)
     }
 
+    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { tabCoordinates = it }) {
     if (selectedPeerPub != null) {
         // Individual thread screen
         val recipientPeer = peers.find { it.publicKeyB64 == selectedPeerPub }
@@ -133,7 +137,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             showShareSheet = true 
                             if (dmStep == 0) viewModel.advanceDmTutorial()
                         },
-                        modifier = Modifier.weight(1f).onGloballyPositioned { myIdRect = it.boundsInRoot() },
+                        modifier = Modifier.weight(1f).onGloballyPositioned { btnCoords -> 
+                            tabCoordinates?.let { myIdRect = it.localBoundingBoxOf(btnCoords, clipBounds = false) } 
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                         border = BorderStroke(1.dp, AccentGreen),
                         shape = RoundedCornerShape(8.dp),
@@ -149,7 +155,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             showScanScreen = true 
                             if (dmStep == 2) viewModel.advanceDmTutorial()
                         },
-                        modifier = Modifier.weight(1f).onGloballyPositioned { addPeerRect = it.boundsInRoot() },
+                        modifier = Modifier.weight(1f).onGloballyPositioned { btnCoords -> 
+                            tabCoordinates?.let { addPeerRect = it.localBoundingBoxOf(btnCoords, clipBounds = false) } 
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(0.dp)
@@ -248,10 +256,16 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         encPublicKeyB64 = encPub
                     )
                 },
-                onDismiss = { showScanScreen = false }
+                onDismiss = { 
+                    showScanScreen = false 
+                    if (dmStep == 3) viewModel.advanceDmTutorial()
+                },
+                dmStep = dmStep,
+                viewModel = viewModel
             )
         }
     }
+    } // Close Box
 }
 
 

@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                                                     val type = firstItem.post.mediaType ?: firstItem.post.clearnetMediaType
                                                     if (type == "video" || type == "audio") firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl else null
                                                 }
+                                                is com.noslop.app.ui.UnifiedItem.Tutorial -> null
                                             }
                                             
                                             // Safely resolve local mesh media proxies natively to avoid import issues
