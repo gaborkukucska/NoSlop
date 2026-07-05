@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -27,6 +28,7 @@ import java.util.*
 @Composable
 fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) -> Unit) {
     val notifications by viewModel.allNotifications.collectAsState()
+    var showClearConfirm by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack)) {
         // Header
@@ -45,10 +47,36 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
             )
             
             if (notifications.isNotEmpty()) {
-                TextButton(onClick = { viewModel.clearAllNotifications() }) {
-                    Text("Clear All", color = TextMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    IconButton(onClick = { viewModel.markAllNotificationsAsRead() }) {
+                        Icon(Icons.Default.DoneAll, contentDescription = "Mark all read", tint = AccentGreen)
+                    }
+                    IconButton(onClick = { showClearConfirm = true }) {
+                        Icon(Icons.Default.DeleteSweep, contentDescription = "Clear all", tint = DestructiveRed)
+                    }
                 }
             }
+        }
+
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                title = { Text("Clear All Notifications?", color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("Are you sure you want to permanently clear all notifications?", color = TextMuted) },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            viewModel.clearAllNotifications()
+                            showClearConfirm = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                    ) { Text("Clear All", color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearConfirm = false }) { Text("Cancel", color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
         }
 
         if (notifications.isEmpty()) {

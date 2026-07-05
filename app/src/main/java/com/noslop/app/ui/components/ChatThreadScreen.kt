@@ -32,6 +32,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -106,18 +107,33 @@ fun ChatThreadScreen(
                     }
                 }
 
-                val ext = when {
-                    resolvedMimeType.startsWith("video") -> ".mp4"
-                    resolvedMimeType.startsWith("audio") -> ".m4a"
-                    resolvedMimeType.startsWith("image/gif") -> ".gif"
-                    resolvedMimeType.startsWith("image") -> ".jpg"
-                    else -> ".bin"
-                }
-                val tempFile = java.io.File(context.cacheDir, "dm_attach_${System.currentTimeMillis()}$ext")
-                contentResolver.openInputStream(uri)?.use { input ->
-                    tempFile.outputStream().use { output -> input.copyTo(output) }
-                }
-                attachedFile = tempFile
+                var originalName: String? = null
+                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1) originalName = cursor.getString(nameIndex)
+                        }
+                    }
+                    
+                    var finalName = originalName
+                    if (finalName == null || !finalName.contains(".")) {
+                        val extension = when {
+                            resolvedMimeType?.startsWith("video") == true -> ".mp4"
+                            resolvedMimeType?.startsWith("audio") == true -> ".m4a"
+                            resolvedMimeType?.startsWith("image/gif") == true -> ".gif"
+                            resolvedMimeType?.startsWith("image") == true -> ".jpg"
+                            resolvedMimeType == "application/pdf" -> ".pdf"
+                            else -> ".bin"
+                        }
+                        finalName = (finalName ?: "dm_attach_${System.currentTimeMillis()}") + extension
+                    }
+                    
+                    val safeName = finalName!!.replace(" ", "_")
+                    val tempFile = java.io.File(context.cacheDir, safeName)
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        tempFile.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    attachedFile = tempFile
                 Logger.info("CHAT_UI", "File attached: ${tempFile.name} (${tempFile.length()} bytes)")
             } catch (e: Exception) {
                 Logger.error("CHAT_UI", "Failed to attach file", e.message)
@@ -159,7 +175,8 @@ fun ChatThreadScreen(
             chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
             originNode = localKeys?.onionAddress,
             ownerId = localKeys?.publicKeyB64,
-            thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
+            thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type),
+            filename = file.name
         )
     }
 
@@ -341,10 +358,21 @@ fun ChatThreadScreen(
                                 if (msg.replyToMessageId != null) {
                                     val replyMsg = messages.find { it.id == msg.replyToMessageId }
                                     if (replyMsg != null) {
-                                        val replyText = if (localKeys != null) {
+                                        val replyTextRaw = if (localKeys != null) {
                                             val oppPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
                                             CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, localKeys.encPrivateKeyB64)
-                                        } else { "" }
+                                        } else { null }
+                                        
+                                        var replyText = replyTextRaw
+                                        if (replyTextRaw != null) {
+                                            try {
+                                                val obj = com.google.gson.Gson().fromJson(replyTextRaw, com.google.gson.JsonObject::class.java)
+                                                replyText = if (obj.has("content")) obj.get("content").asString else replyTextRaw
+                                            } catch (e: Exception) {
+                                                replyText = replyTextRaw
+                                            }
+                                        }
+
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -378,9 +406,52 @@ fun ChatThreadScreen(
                                     val canRender = isDownloaded || msg.senderPub == localKeys?.publicKeyB64
                                     val resolvedUrl = "noslop://${peer.onionAddress}/${mid}"
 
-                                    if (canRender) {
-                                        val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
-                                        val isGif = mid.endsWith(".gif", ignoreCase = true) || mid.startsWith("noslop-gif://") || parsedMediaMetadata?.mimeType == "image/gif"
+                                    val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
+                                    val isGif = mid.endsWith(".gif", ignoreCase = true) || mid.startsWith("noslop-gif://") || parsedMediaMetadata?.mimeType == "image/gif"
+                                    val isFile = msg.mediaType == "file" || (!isVideo && !isGif && msg.mediaType != "image" && msg.mediaType != "audio")
+                                    
+                                    if (isFile) {
+                                        val progress = downloadProgress[mid] ?: 0
+                                        Box(
+                                            modifier = Modifier
+                                                .padding(top = 8.dp)
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(PrimaryBlack.copy(alpha = 0.5f))
+                                                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                                                .clickable {
+                                                    if (isDownloaded) {
+                                                        val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                        val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, mid, meta?.filename ?: mid)
+                                                        if (saved) android.widget.Toast.makeText(context, "Saved to Downloads", android.widget.Toast.LENGTH_SHORT).show()
+                                                        else android.widget.Toast.makeText(context, "Failed to save file", android.widget.Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                        if (meta != null) viewModel.startMediaDownload(meta, peer.onionAddress)
+                                                    }
+                                                }
+                                                .padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(Icons.Default.InsertDriveFile, contentDescription = "File", tint = AccentGreen, modifier = Modifier.size(32.dp))
+                                                Spacer(modifier = Modifier.width(12.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(parsedMediaMetadata?.filename ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    val isDownloading = downloadProgress.containsKey(mid)
+                                                    if (isDownloaded) {
+                                                        Text("Tap to save to device", color = AccentGreen, fontSize = 11.sp)
+                                                    } else if (isDownloading) {
+                                                        LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.fillMaxWidth())
+                                                        Text(if (progress > 0) "$progress%" else "Connecting...", color = TextMuted, fontSize = 10.sp)
+                                                    } else {
+                                                        Text("Tap to download", color = TextMuted, fontSize = 11.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } else if (canRender) {
                                         val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
                                         
                                         Box(

@@ -736,4 +736,53 @@ object MediaManager {
             null
         }
     }
+
+    fun exportToPublicDownloads(context: Context, mediaId: String, fileName: String): Boolean {
+        return try {
+            val srcFile = getLocalFile(mediaId) ?: return false
+            var safeName = fileName
+            if (!safeName.contains(".") || safeName.endsWith(".bin")) {
+                val meta = getMetadataSync(mediaId)
+                val ext = when (meta?.mimeType) {
+                    "video/mp4" -> ".mp4"
+                    "video/webm" -> ".webm"
+                    "audio/mp4" -> ".m4a"
+                    "audio/mpeg" -> ".mp3"
+                    "image/jpeg" -> ".jpg"
+                    "image/png" -> ".png"
+                    "image/gif" -> ".gif"
+                    "application/pdf" -> ".pdf"
+                    else -> if (mediaId.contains(".") && !mediaId.endsWith(".bin")) mediaId.substring(mediaId.lastIndexOf(".")) else ".bin"
+                }
+                safeName = if (safeName.endsWith(".bin")) safeName.replace(".bin", ext) else safeName + ext
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        srcFile.inputStream().use { input -> input.copyTo(out) }
+                    }
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    true
+                } else false
+            } else {
+                val publicDownloads = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (!publicDownloads.exists()) publicDownloads.mkdirs()
+                val destFile = java.io.File(publicDownloads, safeName)
+                srcFile.copyTo(destFile, overwrite = true)
+                true
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to export file to Downloads: ${e.message}")
+            false
+        }
+    }
 }

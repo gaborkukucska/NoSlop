@@ -1016,14 +1016,27 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    val ext = when {
-                        resolvedMimeType.startsWith("video") -> ".mp4"
-                        resolvedMimeType.startsWith("audio") -> ".m4a"
-                        resolvedMimeType.startsWith("image/gif") -> ".gif"
-                        resolvedMimeType.startsWith("image") -> ".jpg"
-                        else -> ".bin"
+                    var originalName: String? = null
+                    contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (nameIndex != -1) originalName = cursor.getString(nameIndex)
+                        }
                     }
-                    val tempFile = java.io.File(contextWrapper.cacheDir, "mesh_attach_${System.currentTimeMillis()}$ext")
+                    var finalName = originalName
+                    if (finalName == null || !finalName.contains(".")) {
+                        val extension = when {
+                            resolvedMimeType?.startsWith("video") == true -> ".mp4"
+                            resolvedMimeType?.startsWith("audio") == true -> ".m4a"
+                            resolvedMimeType?.startsWith("image/gif") == true -> ".gif"
+                            resolvedMimeType?.startsWith("image") == true -> ".jpg"
+                            resolvedMimeType == "application/pdf" -> ".pdf"
+                            else -> ".bin"
+                        }
+                        finalName = (finalName ?: "mesh_attach_${System.currentTimeMillis()}") + extension
+                    }
+                    val safeName = finalName.replace(" ", "_")
+                    val tempFile = java.io.File(contextWrapper.cacheDir, safeName)
                     contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                     attachedFile = tempFile
                 } catch (e: Exception) { Logger.error("MAIN", "Failed to copy attached file", e.message) }
@@ -1177,8 +1190,9 @@ fun UnifiedFeedTab(
                                     chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
                                     originNode = viewModel.localKeys.value?.onionAddress, 
                                     ownerId = viewModel.localKeys.value?.publicKeyB64, 
-                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
-                                )
+                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type),
+            filename = file.name
+        )
                             }
                             
                             val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }

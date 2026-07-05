@@ -957,6 +957,7 @@ fun toggleAggregator() {
     }
 
     fun markNotificationAsRead(id: String) { viewModelScope.launch { repository.markNotificationAsRead(id) } }
+    fun markAllNotificationsAsRead() { viewModelScope.launch { repository.markAllNotificationsAsRead() } }
     fun clearAllNotifications() { viewModelScope.launch { repository.clearAllNotifications() } }
 
     fun toggleItemSavedState(id: String, isSaved: Boolean) {

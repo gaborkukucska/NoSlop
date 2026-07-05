@@ -42,41 +42,51 @@ class HandshakePacketHandler(
         
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
+        
+        val existingPeer = peerDao.getPeerByPublicKey(connPay.fromUserId)
+        val isTrusted = existingPeer?.isTrusted ?: false
+        val handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
+        val encPubToUse = connPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: existingPeer?.encPublicKeyB64 ?: ""
+        val avatarToUse = connPay.authorAvatarB64 ?: existingPeer?.authorAvatarB64
+        
         val peer = Peer(
             publicKeyB64 = connPay.fromUserId,
-            handle = connPay.fromUsername,
+            handle = handleToUse,
             tripcode = tripcode,
             onionAddress = connPay.fromHomeNode,
-            encPublicKeyB64 = connPay.fromEncryptionPublicKey ?: "",
-            isTrusted = false,
+            encPublicKeyB64 = encPubToUse,
+            isTrusted = isTrusted, // Prevent duplicate requests from downgrading trust!
             lastSeenAt = System.currentTimeMillis(),
-            authorAvatarB64 = connPay.authorAvatarB64
+            authorAvatarB64 = avatarToUse
         )
         peerDao.insertPeer(peer)
-        repo.setIncomingRequest(peer)
-
-        val title = "New Connection Request"
-        val msg = "${peer.handle} wants to connect with you."
-        val route = "notifications"
         
-        notificationDao.insertNotification(
-            NotificationItem(
-                id = UUID.randomUUID().toString(),
-                type = "CONNECTION_REQUEST",
-                title = title,
-                body = msg,
-                targetRoute = route,
-                iconType = "handshake",
-                senderPub = peer.publicKeyB64
-            )
-        )
+        if (!isTrusted) {
+            repo.setIncomingRequest(peer)
 
-        com.noslop.app.util.NotificationHelper.showNotification(
-            context = repo.context,
-            title = title,
-            message = msg,
-            deepLinkRoute = route
-        )
+            val title = "New Connection Request"
+            val msg = "${peer.handle} wants to connect with you."
+            val route = "notifications"
+            
+            notificationDao.insertNotification(
+                NotificationItem(
+                    id = UUID.randomUUID().toString(),
+                    type = "CONNECTION_REQUEST",
+                    title = title,
+                    body = msg,
+                    targetRoute = route,
+                    iconType = "handshake",
+                    senderPub = peer.publicKeyB64
+                )
+            )
+
+            com.noslop.app.util.NotificationHelper.showNotification(
+                context = repo.context,
+                title = title,
+                message = msg,
+                deepLinkRoute = route
+            )
+        }
 
         return true
     }
@@ -101,7 +111,9 @@ class HandshakePacketHandler(
 
         val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer != null) {
+            val handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else peer.handle
             peerDao.insertPeer(peer.copy(
+                handle = handleToUse,
                 isTrusted = true,
                 lastSeenAt = System.currentTimeMillis(),
                 onionAddress = handPay.fromHomeNode,
@@ -109,11 +121,12 @@ class HandshakePacketHandler(
                 authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64
             ))
         } else {
+            val handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else "Unknown"
             val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
             val tripcode = CryptoService.deriveTripcode(pubBytes)
             val newPeer = Peer(
                 publicKeyB64 = handPay.fromUserId,
-                handle = handPay.fromUsername,
+                handle = handleToUse,
                 tripcode = tripcode,
                 onionAddress = handPay.fromHomeNode,
                 encPublicKeyB64 = handPay.fromEncryptionPublicKey ?: "",
@@ -238,8 +251,9 @@ class HandshakePacketHandler(
 
         val peer = peerDao.getPeerByPublicKey(identityPay.userId)
         if (peer != null) {
+            val handleToUse = if (identityPay.handle.isNotBlank()) identityPay.handle else peer.handle
             peerDao.insertPeer(peer.copy(
-                handle = identityPay.handle,
+                handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),
                 authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64
             ))

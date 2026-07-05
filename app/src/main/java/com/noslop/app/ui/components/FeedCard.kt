@@ -1,24 +1,14 @@
-package com.noslop.app.ui
+package com.noslop.app.ui.components
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -26,42 +16,23 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.ContextCompat
-import com.noslop.app.ui.components.*
-import com.noslop.app.ui.tabs.*
-import com.noslop.app.crypto.CryptoService
 import com.noslop.app.data.*
-import com.noslop.app.debug.Logger
-import com.noslop.app.feeds.SourceLibrary
+import com.noslop.app.ui.*
 import com.noslop.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.UUID
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.foundation.pager.VerticalPager
-import androidx.compose.ui.draw.blur
-import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.runtime.CompositionLocalProvider
-import coil.ImageLoader
-import coil.compose.LocalImageLoader
-import coil.intercept.Interceptor
-import com.noslop.app.net.HttpClientProvider
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import kotlinx.coroutines.Dispatchers
-import androidx.compose.ui.graphics.graphicsLayer
 
 private fun getSourceLabel(item: FeedItem): String {
     return when (item.apiSource) {
@@ -94,7 +65,7 @@ fun FullScreenImage(url: String) {
             model = url,
             contentDescription = null,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            contentScale = ContentScale.Fit
         )
     }
 }
@@ -458,6 +429,67 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".gif") -> {
                     BlurredImageBackground(url = resolvedUrl, thumbnailB64 = post.thumbnailB64)
                 }
+                effectiveMediaType == "file" -> {
+                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
+                    val isDownloaded = rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, "file")
+                    val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
+                    val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
+                    val isDownloading = rawMediaId != null && downloadProgress.containsKey(rawMediaId)
+
+                    Box(modifier = Modifier.fillMaxSize().padding(bottom = 120.dp), contentAlignment = Alignment.Center) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(SurfaceDark.copy(alpha = 0.9f))
+                                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                                .padding(32.dp)
+                        ) {
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = "File", tint = AccentGreen, modifier = Modifier.size(64.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(post.clearnetTitle ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            if (isDownloaded) {
+                                Button(
+                                    onClick = {
+                                        if (rawMediaId != null) {
+                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId)
+                                            val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, rawMediaId, meta?.filename ?: post.clearnetTitle ?: rawMediaId)
+                                            if (saved) Toast.makeText(context, "Saved to Downloads", Toast.LENGTH_SHORT).show()
+                                            else Toast.makeText(context, "Failed to save file", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                ) {
+                                    Text("Save to Device", fontWeight = FontWeight.Bold)
+                                }
+                            } else if (isDownloading) {
+                                LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(120.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(if (progress > 0) "Downloading $progress%" else "Connecting...", color = TextMuted, fontSize = 12.sp)
+                            } else {
+                                OutlinedButton(
+                                    onClick = {
+                                        if (rawMediaId != null) {
+                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId)
+                                            if (meta != null) {
+                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                                viewModel?.startMediaDownload(meta, origin)
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen), 
+                                    border = BorderStroke(1.dp, AccentGreen)
+                                ) {
+                                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Download File", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
                 else -> {
                     SegmentedArticleReader(
                         content = post.content,
@@ -514,7 +546,7 @@ fun FullScreenMeshCardV2(
                                     bitmap = bitmap,
                                     contentDescription = "Avatar",
                                     modifier = Modifier.size(24.dp).clip(CircleShape),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    contentScale = ContentScale.Crop
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
@@ -541,7 +573,7 @@ fun FullScreenMeshCardV2(
                                                     bitmap = bitmap,
                                                     contentDescription = "Avatar",
                                                     modifier = Modifier.size(80.dp).clip(CircleShape),
-                                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                                    contentScale = ContentScale.Crop
                                                 )
                                             }
                                             Spacer(modifier = Modifier.height(12.dp))

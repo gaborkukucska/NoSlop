@@ -1,5 +1,15 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-05)
+
+### 1. UI/UX Polish: Notifications, File Attachments & Contacts Fixes
+*   **Ghost Contacts & Handshake Race Condition**: Fixed a critical race condition in `HandshakePacketHandler.kt` where duplicate `CONNECTION_REQUEST`, `USER_HANDSHAKE`, or `IDENTITY_UPDATE` packets would overwrite an existing trusted peer, accidentally downgrading their `isTrusted` status or wiping their handle.
+*   **DM JSON Payload Fix**: Fixed an issue in `ChatThreadScreen.kt` where replying to an older message would display the raw JSON payload wrapper (`{"content": "..."}`) in the reply context preview instead of the cleanly extracted text.
+*   **Notification Management**: Added "Mark All Read" and "Clear All" features to the `NotificationsScreen`. The "Clear All" action is protected by an explicit "Are you sure?" confirmation dialog.
+*   **File Attachment Preservation**: Replaced naive `.bin` file extensions in `ChatThreadScreen` and `UnifiedFeedTab` by querying the Android `ContentResolver` for `OpenableColumns.DISPLAY_NAME`, preserving exact original filenames (e.g., `document.pdf`) during P2P transfers.
+*   **Native File Export & Broadcast Fixes**: Added `exportToPublicDownloads` in `MediaManager.kt` leveraging `MediaStore.Downloads` on Android Q+ to safely export downloaded mesh file attachments to the user's public Downloads directory. Fixed a Compose UI issue in `FeedCard.kt` where a parent `.clickable` modifier was swallowing touch events, re-enabling the "Save to Device" and "Download File" buttons on mesh broadcast attachments.
+
+
 ## Completed Changes (2026-07-04)
 
 ### 1. Invidious Network Latency & Fast-Failing
