@@ -392,11 +392,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 sessionLoadedIds.clear()
                 sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
                 
-                kotlinx.coroutines.delay(50)
-                if (savedFeedItemId != null) {
-                    _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                if (_unifiedFeed.value.isEmpty()) {
+                    loadMoreFeedItems()
                 } else {
-                    _scrollToTopEvent.emit(Unit)
+                    kotlinx.coroutines.delay(50)
+                    if (savedFeedItemId != null) {
+                        _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                    } else {
+                        _scrollToTopEvent.emit(Unit)
+                    }
                 }
             } catch (e: Exception) {
                 Logger.error("VM", "Clear search exception: ${e.message}")
@@ -843,15 +847,27 @@ fun toggleAggregator() {
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                _unifiedFeed.value = emptyList()
-                allFeeds = emptyList()
-                allMeshes = emptyList()
-                cachedDefaultFeed = emptyList()
-                sessionLoadedIds.clear()
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
+                
+                // Clear the DB items, but leave the UI intact behind the splash screen
                 repository.clearFeedData()
+                repository.clearAllHistory() // TEMP FIX to flush corrupted swipe data
+                
+                // Fetch new items (this takes 5-10 seconds)
                 repository.refreshFeeds()
+                
+                // Wait for the DB Flow to emit the full Phase 2 dataset to allFeeds
+                kotlinx.coroutines.delay(1000)
+                
+                // Now wipe the old feed state and build a fresh interleaved feed
+                _unifiedFeed.value = emptyList()
+                cachedDefaultFeed = emptyList()
+                sessionLoadedIds.clear()
+                
+                // Load the best items from the fully populated allFeeds array
+                loadMoreFeedItems()
+                
             } catch (e: Exception) {
                 Logger.error("VM", "Force reset exception: ${e.message}")
             } finally {

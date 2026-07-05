@@ -240,6 +240,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun getSwipeExcludedIds(): Set<String> =
         engagementRepository.getSwipeExcludedIds()
 
+    suspend fun clearAllHistory() = engagementRepository.clearAllHistory()
+
     // --- Feed pipeline & toggles (delegated to FeedRepository) ---
     suspend fun clearFeedData() = feedRepository.clearFeedData()
 

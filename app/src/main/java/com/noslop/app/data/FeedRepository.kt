@@ -258,13 +258,15 @@ class FeedRepository(
                     .map { it.id }
             }
 
-            if (categoryApiSourceIds.isEmpty()) return
+            // Combine category specific fallbacks with ALL other active API sources
+            // so cross-category plugins (like YouTube search) execute correctly
+            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds).distinct()
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                 category = category,
                 userKeywords = keywords,
                 apiKeyRepo = apiKeyRepo,
-                activeApiSourceIds = categoryApiSourceIds,
+                activeApiSourceIds = allActiveIds,
                 language = langPref
             )
             if (apiItems.isNotEmpty()) {

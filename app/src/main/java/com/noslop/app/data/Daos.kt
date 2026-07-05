@@ -293,6 +293,9 @@ interface ViewedHistoryDao {
 
     @Query("DELETE FROM viewed_history WHERE viewedAt < :timestamp")
     suspend fun deleteOlderThan(timestamp: Long)
+
+    @Query("DELETE FROM viewed_history")
+    suspend fun clearAllViewedHistory()
 }
 
 @Dao
@@ -308,4 +311,7 @@ interface SwipeTrackerDao {
 
     @Query("SELECT * FROM swipe_tracker WHERE itemId = :itemId LIMIT 1")
     suspend fun getSwipeForItem(itemId: String): SwipeTracker?
+
+    @Query("DELETE FROM swipe_tracker")
+    suspend fun clearAllSwipeHistory()
 }

@@ -89,4 +89,9 @@ class EngagementRepository(
         viewedHistoryDao.deleteOlderThan(ninetyDaysAgo)
         swipeTrackerDao.deleteOldSwipes(ninetyDaysAgo)
     }
+
+    suspend fun clearAllHistory() = withContext(Dispatchers.IO) {
+        viewedHistoryDao.clearAllViewedHistory()
+        swipeTrackerDao.clearAllSwipeHistory()
+    }
 }

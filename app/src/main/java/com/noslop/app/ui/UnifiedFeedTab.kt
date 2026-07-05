@@ -439,6 +439,8 @@ fun UnifiedFeedTab(
     var searchQuery by remember { mutableStateOf("") }
     var sharedItem by remember { mutableStateOf<UnifiedItem?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
+    var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var isResettingFeed by remember { mutableStateOf(false) }
     val isComposing = showComposeDialog || sharedItem != null
     val handleDismiss = {
         onComposeDismiss()
@@ -536,6 +538,12 @@ fun UnifiedFeedTab(
         }
     }
 
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing && isResettingFeed) {
+            isResettingFeed = false
+        }
+    }
+
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     
     LaunchedEffect(Unit) {
@@ -554,6 +562,54 @@ fun UnifiedFeedTab(
             }
         }
     }
+
+    LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
+        if (pagerState.settledPage in unifiedItems.indices) {
+            val currentItem = unifiedItems[pagerState.settledPage]
+            if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                viewModel.saveFeedPosition(currentItem.id)
+            }
+
+            if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
+                viewModel.markItemReadState(currentItem.item.id, true)
+            }
+
+            kotlinx.coroutines.delay(5000L)
+            viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
+        }
+    }
+
+    LaunchedEffect(pagerState.settledPage, filterMode) {
+        if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
+        val preloadAheadCount = 2
+        val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
+        for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
+            val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
+            if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
+            if (preWarmedUrls.add(preloadUrl)) {
+                // Launch in the broader scope so fast scrolling doesn't cancel the preload!
+                preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        var previousPage = -1
+        var pageEnteredAt = 0L
+        snapshotFlow { pagerState.settledPage }.collect { currentPage ->
+            val now = System.currentTimeMillis()
+            if (previousPage >= 0 && previousPage in unifiedItems.indices) {
+                val dwellMs = now - pageEnteredAt
+                if (dwellMs < 5000L) {
+                    val leftItem = unifiedItems[previousPage]
+                    viewModel.recordItemSwiped(leftItem.id)
+                }
+            }
+            previousPage = currentPage
+            pageEnteredAt = now
+        }
+    }
+
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,
@@ -604,52 +660,7 @@ fun UnifiedFeedTab(
                     }
                 }
 
-                LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
-                    if (pagerState.settledPage in unifiedItems.indices) {
-                        val currentItem = unifiedItems[pagerState.settledPage]
-                        if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
-                            viewModel.saveFeedPosition(currentItem.id)
-                        }
-
-                        if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
-                            viewModel.markItemReadState(currentItem.item.id, true)
-                        }
-
-                        kotlinx.coroutines.delay(5000L)
-                        viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
-                    }
-                }
-
-                LaunchedEffect(pagerState.settledPage, filterMode) {
-                    if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
-                    val preloadAheadCount = 2
-                    val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
-                    for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
-                        val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
-                        if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
-                        if (preWarmedUrls.add(preloadUrl)) {
-                            // Launch in the broader scope so fast scrolling doesn't cancel the preload!
-                            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
-                        }
-                    }
-                }
-
-                LaunchedEffect(Unit) {
-                    var previousPage = -1
-                    var pageEnteredAt = 0L
-                    snapshotFlow { pagerState.settledPage }.collect { currentPage ->
-                        val now = System.currentTimeMillis()
-                        if (previousPage >= 0 && previousPage in unifiedItems.indices) {
-                            val dwellMs = now - pageEnteredAt
-                            if (dwellMs < 5000L) {
-                                val leftItem = unifiedItems[previousPage]
-                                viewModel.recordItemSwiped(leftItem.id)
-                            }
-                        }
-                        previousPage = currentPage
-                        pageEnteredAt = now
-                    }
-                }
+                // (Moved global LaunchedEffects tracking pager state outside the VerticalPager to prevent N-fold duplicate execution)
 
                 val item = unifiedItems[index]
                 val isCurrentSlide = pagerState.currentPage == index
@@ -944,6 +955,18 @@ fun UnifiedFeedTab(
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Random Discover", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
+
+                    Button(
+                        onClick = { showResetConfirmDialog = true },
+                        modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 8.dp), 
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha = 0.15f), contentColor = DestructiveRed),
+                        border = BorderStroke(1.dp, DestructiveRed)
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Reset Feed", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
                 }
             },
             confirmButton = {
@@ -1180,6 +1203,46 @@ fun UnifiedFeedTab(
                 },
                 dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel", color = TextMuted) } }
             )
+        }
+    }
+
+    if (showResetConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Reset Feed?", color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to completely clear and rebuild your Live Feed from scratch? This will clear your current scroll history.", color = TextLight) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showResetConfirmDialog = false
+                        showSearchModal = false
+                        isResettingFeed = true
+                        searchQuery = ""
+                        filterMode = "Live Feed"
+                        searchResultsActive = false
+                        viewModel.forceResetFeed()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                ) { Text("Reset", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel", color = TextMuted) }
+            }
+        )
+    }
+
+    if (isResettingFeed) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(PrimaryBlack).zIndex(100f),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator(color = AccentGreen, modifier = Modifier.size(64.dp))
+                Spacer(modifier = Modifier.height(24.dp))
+                Text("Rebuilding your feed...", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Text("Fetching fresh content", color = TextMuted, fontSize = 14.sp)
+            }
         }
     }
 }
