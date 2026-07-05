@@ -190,7 +190,26 @@ data class ConnectionRejectedPayload(
 data class EditPostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class EditCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class DeleteCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
     val signature: String
 )
@@ -359,5 +378,13 @@ data class NetworkPacket(
 
     fun getDeletePostPayload(): DeletePostPayload? = if (type == "DELETE_POST" && payload != null) {
         Gson().fromJson(payload, DeletePostPayload::class.java)
+    } else null
+
+    fun getEditCommentPayload(): EditCommentPayload? = if (type == "EDIT_COMMENT" && payload != null) {
+        Gson().fromJson(payload, EditCommentPayload::class.java)
+    } else null
+
+    fun getDeleteCommentPayload(): DeleteCommentPayload? = if (type == "DELETE_COMMENT" && payload != null) {
+        Gson().fromJson(payload, DeleteCommentPayload::class.java)
     } else null
 }

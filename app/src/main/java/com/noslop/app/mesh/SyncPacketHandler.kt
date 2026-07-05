@@ -302,7 +302,8 @@ class SyncPacketHandler(
                 thumbnailB64 = postPay.mediaMetadata?.thumbnailB64,
                 clearnetUrl = postPay.clearnetUrl,
                 clearnetTitle = postPay.clearnetTitle,
-                clearnetThumbnailUrl = postPay.clearnetThumbnailUrl
+                clearnetThumbnailUrl = postPay.clearnetThumbnailUrl,
+                clearnetMediaType = postPay.clearnetMediaType
             )
             postDao.insertPost(post)
             

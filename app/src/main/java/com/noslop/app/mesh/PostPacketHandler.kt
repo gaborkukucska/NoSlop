@@ -90,7 +90,10 @@ class PostPacketHandler(
 
     suspend fun handleEditPost(packet: NetworkPacket): Boolean {
         val editPay = packet.getEditPostPayload() ?: return false
-        val payloadToVerify = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
+        var payloadToVerify = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
+        if (editPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${editPay.authorAvatarB64}"
+        }
         val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
         if (!isValid) return false
 
@@ -101,7 +104,7 @@ class PostPacketHandler(
                 return false
             }
             if (!existingPost.isOrphaned && editPay.timestamp >= existingPost.timestamp) {
-                postDao.updatePostContent(editPay.postId, editPay.content)
+                postDao.updatePostContent(editPay.postId, editPay.content, editPay.timestamp, editPay.signature)
                 Logger.info(TAG, "Applied EDIT_POST for ${editPay.postId}")
             }
         }

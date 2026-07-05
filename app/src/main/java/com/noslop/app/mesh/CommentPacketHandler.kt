@@ -99,4 +99,47 @@ class CommentPacketHandler(
         Logger.info(TAG, "Valid signed comment accepted and stored: from=${commPay.comment.authorName}")
         return true
     }
+
+    suspend fun handleEditComment(packet: NetworkPacket): Boolean {
+        val editPay = packet.getEditCommentPayload() ?: return false
+        var payloadToVerify = "${editPay.postId}|${editPay.commentId}|${editPay.content}|${editPay.timestamp}"
+        if (editPay.authorAvatarB64 != null) {
+            payloadToVerify += "|${editPay.authorAvatarB64}"
+        }
+        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
+        if (!isValid) return false
+
+        val existingComment = commentDao.getCommentById(editPay.commentId)
+        if (existingComment != null) {
+            if (existingComment.authorPublicKeyB64 != editPay.authorId) {
+                Logger.warn(TAG, "Rejected EDIT_COMMENT: Author mismatch")
+                return false
+            }
+            if (editPay.timestamp >= existingComment.timestamp) {
+                commentDao.updateCommentContent(editPay.commentId, editPay.content, editPay.timestamp, editPay.signature)
+                Logger.info(TAG, "Applied EDIT_COMMENT for ${editPay.commentId}")
+            }
+        }
+        return true
+    }
+
+    suspend fun handleDeleteComment(packet: NetworkPacket): Boolean {
+        val deletePay = packet.getDeleteCommentPayload() ?: return false
+        val payloadToVerify = "${deletePay.postId}|${deletePay.commentId}|${deletePay.authorId}|${deletePay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, deletePay.signature, deletePay.authorId)
+        if (!isValid) return false
+
+        val existingComment = commentDao.getCommentById(deletePay.commentId)
+        if (existingComment != null) {
+            if (existingComment.authorPublicKeyB64 != deletePay.authorId) {
+                Logger.warn(TAG, "Rejected DELETE_COMMENT: Author mismatch")
+                return false
+            }
+            if (deletePay.timestamp >= existingComment.timestamp) {
+                commentDao.markCommentDeleted(deletePay.commentId)
+                Logger.info(TAG, "Applied DELETE_COMMENT for ${deletePay.commentId}")
+            }
+        }
+        return true
+    }
 }

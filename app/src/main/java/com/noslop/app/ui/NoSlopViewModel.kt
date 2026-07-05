@@ -1082,6 +1082,12 @@ fun toggleAggregator() {
         }
     }
 
+    fun bridgeFeedItemToMesh(item: FeedItem) {
+        viewModelScope.launch {
+            repository.reactToFeedItemWithType(item, "bridge_only")
+        }
+    }
+
     fun reactToMeshPost(postId: String, reactionType: String = "like") {
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToMeshPost(postId, reactionType) }
         else viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }

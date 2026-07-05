@@ -288,7 +288,10 @@ fun FullScreenFeedCard(
                 onLike = { viewModel?.reactToFeedItem(item, "like") },
                 onReaction = { type -> viewModel?.reactToFeedItem(item, type) },
                 onShare = onShareToMesh,
-                onComment = { showComments = true },
+                onComment = { 
+                    viewModel?.bridgeFeedItemToMesh(item)
+                    showComments = true 
+                },
                 reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
                     .groupBy { it }.mapValues { it.value.size },
                 commentCount = comments.size,
@@ -366,7 +369,7 @@ fun FullScreenMeshCardV2(
                     val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = post.thumbnailB64, stableKey = stableKeyForRestore)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = if (post.mediaUrl != null) post.thumbnailB64 else null, stableKey = stableKeyForRestore)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -427,7 +430,8 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".png") || 
                 resolvedUrl.contains(".webp") ||
                 resolvedUrl.contains(".gif") -> {
-                    BlurredImageBackground(url = resolvedUrl, thumbnailB64 = post.thumbnailB64)
+                    val imageUrl = if (post.mediaUrl == null && post.clearnetThumbnailUrl != null) post.clearnetThumbnailUrl else resolvedUrl
+                    BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64)
                 }
                 effectiveMediaType == "file" -> {
                     val rawMediaId = post.mediaUrl?.substringAfterLast("/")

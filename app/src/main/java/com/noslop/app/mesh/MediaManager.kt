@@ -688,17 +688,7 @@ object MediaManager {
         val file = findLocalFile(repo, mediaId)
         val ext = mediaId.substringAfterLast('.', "").lowercase()
         
-        val mimeType = when (ext) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "webp" -> "image/webp"
-            "gif" -> "image/gif"
-            "mp4" -> "video/mp4"
-            "mkv" -> "video/x-matroska"
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            else -> "application/octet-stream"
-        }
+        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream" 
 
         return MediaMetadata(
             id = mediaId,
@@ -743,16 +733,9 @@ object MediaManager {
             var safeName = fileName
             if (!safeName.contains(".") || safeName.endsWith(".bin")) {
                 val meta = getMetadataSync(mediaId)
-                val ext = when (meta?.mimeType) {
-                    "video/mp4" -> ".mp4"
-                    "video/webm" -> ".webm"
-                    "audio/mp4" -> ".m4a"
-                    "audio/mpeg" -> ".mp3"
-                    "image/jpeg" -> ".jpg"
-                    "image/png" -> ".png"
-                    "image/gif" -> ".gif"
-                    "application/pdf" -> ".pdf"
-                    else -> if (mediaId.contains(".") && !mediaId.endsWith(".bin")) mediaId.substring(mediaId.lastIndexOf(".")) else ".bin"
+                val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(meta?.mimeType)
+                val ext = if (mimeExt != null) ".$mimeExt" else {
+                    if (mediaId.contains(".") && !mediaId.endsWith(".bin")) mediaId.substring(mediaId.lastIndexOf(".")) else ".bin"
                 }
                 safeName = if (safeName.endsWith(".bin")) safeName.replace(".bin", ext) else safeName + ext
             }

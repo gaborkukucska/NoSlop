@@ -117,14 +117,8 @@ fun ChatThreadScreen(
                     
                     var finalName = originalName
                     if (finalName == null || !finalName.contains(".")) {
-                        val extension = when {
-                            resolvedMimeType?.startsWith("video") == true -> ".mp4"
-                            resolvedMimeType?.startsWith("audio") == true -> ".m4a"
-                            resolvedMimeType?.startsWith("image/gif") == true -> ".gif"
-                            resolvedMimeType?.startsWith("image") == true -> ".jpg"
-                            resolvedMimeType == "application/pdf" -> ".pdf"
-                            else -> ".bin"
-                        }
+                        val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(resolvedMimeType)
+                        val extension = if (mimeExt != null) ".$mimeExt" else ".bin" 
                         finalName = (finalName ?: "dm_attach_${System.currentTimeMillis()}") + extension
                     }
                     
@@ -150,15 +144,8 @@ fun ChatThreadScreen(
 
     // ── Helper: build MediaMetadata from a File ──
     fun buildMediaMetadata(file: java.io.File): MediaMetadata {
-        val mimeType = when {
-            file.name.endsWith(".jpg") || file.name.endsWith(".jpeg") -> "image/jpeg"
-            file.name.endsWith(".png") -> "image/png"
-            file.name.endsWith(".gif") -> "image/gif"
-            file.name.endsWith(".mp4") -> "video/mp4"
-            file.name.endsWith(".m4a") -> "audio/mp4"
-            file.name.endsWith(".webm") -> "video/webm"
-            else -> "application/octet-stream"
-        }
+        val ext = file.extension.lowercase()
+        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
         val type = when {
             mimeType.startsWith("image") -> "image"
             mimeType.startsWith("video") -> "video"

@@ -10,6 +10,16 @@
 *   **Native File Export & Broadcast Fixes**: Added `exportToPublicDownloads` in `MediaManager.kt` leveraging `MediaStore.Downloads` on Android Q+ to safely export downloaded mesh file attachments to the user's public Downloads directory. Fixed a Compose UI issue in `FeedCard.kt` where a parent `.clickable` modifier was swallowing touch events, re-enabling the "Save to Device" and "Download File" buttons on mesh broadcast attachments.
 
 
+### 2. Mesh File Transfer & MIME Type Resolution
+*   **Native MIME Type Mapping**: Replaced the hardcoded media type `when` blocks in `MediaManager.kt`, `UnifiedFeedTab.kt`, and `ChatThreadScreen.kt` with Android's system-wide `MimeTypeMap.getSingleton()`. This allows NoSlop to natively recognize and preserve exact file extensions (e.g., `.pdf`, `.zip`, `.docx`, `.apk`) during both upload and download.
+*   **File Transfer Stall Fixed**: Fixed a critical bug where general file transfers over the mesh network stalled indefinitely at "Connecting..." (0% progress). Because uploads were previously defaulting to `application/octet-stream`, the sender's local storage mapping failed to match incoming `MEDIA_REQUEST` chunk requests. Accurately stamping the `MediaMetadata` with the correct MIME type allows peers to locate the file blocks and immediately resolves the transfer gridlock.
+
+*   **Historical Sync Media Type Loss**: Fixed a bug in `SyncPacketHandler.kt` where `clearnetMediaType` was omitted from the database insert during `SYNC_RESPONSE` handling. This caused historical clearnet audio/video shares to incorrectly render as plain articles for newly joined peers, while live peers received the correct type.
+
+*   **Mesh Edits & Signature Integrity**: Fixed a critical bug in `PostPacketHandler` and `Daos.kt` where editing a post updated the text string but retained the original cryptographic signature and timestamp. This caused historical syncs (`INVENTORY_SYNC_REQUEST`) to permanently fail signature verification (`CryptoService.verify`) for peers pulling the edited post. Edits now generate and store a fresh timestamp and signature. Added `EDIT_COMMENT` and `DELETE_COMMENT` packets to the network protocol with full repository support.
+
+*   **Clearnet-to-Mesh Sync & Media Fixes**: Fixed an issue where the initial reaction triggering a clearnet share was blocked by the outgoing filter, causing peers to see the share without the context. Fixed an issue where commenting on an unshared clearnet item failed to generate the anchor post. Fixed a bug where shared clearnet images rendered as black screens due to loading the webpage URL instead of the high-res thumbnail. Fixed an ExoPlayer bug where shared YouTube embeds failed to autoplay because the player was waiting for a native video frame to clear the Base64 thumbnail.
+
 ## Completed Changes (2026-07-04)
 
 ### 1. Invidious Network Latency & Fast-Failing

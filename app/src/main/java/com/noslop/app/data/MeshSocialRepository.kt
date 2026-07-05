@@ -645,9 +645,9 @@ class MeshSocialRepository(
         }
         
         val shouldBroadcast = if (isBridging) {
-            getMeshFilterSettings().allowOutgoingReactions
+            true // The reaction IS the share context. Must be sent.
         } else {
-            true // Already shared on the mesh
+            getMeshFilterSettings().allowOutgoingReactions // Respect the user's noise filter for normal reactions
         }
 
         if (shouldBroadcast) {
@@ -739,7 +739,9 @@ class MeshSocialRepository(
             )
         }
 
-        reactToMeshPost(anchorId, reactionType, existingCount == 0)
+        if (reactionType != "bridge_only") {
+            reactToMeshPost(anchorId, reactionType, existingCount == 0)
+        }
     }
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
@@ -958,5 +960,114 @@ class MeshSocialRepository(
                 Logger.error(TAG, "Failed to broadcast USER_EXIT: ${e.message}")
             }
         }
+    }
+
+    suspend fun editMeshPost(postId: String, newContent: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingPost = postDao.getPostById(postId) ?: return@withContext false
+        if (existingPost.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+
+        var payloadToSign = "$postId|${myKeys.publicKeyB64}|$newContent|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val editPay = com.noslop.app.mesh.EditPostPayload(
+            postId = postId,
+            authorId = myKeys.publicKeyB64,
+            authorAvatarB64 = avatarB64,
+            content = newContent,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "EDIT_POST",
+            payload = com.google.gson.Gson().toJsonTree(editPay),
+            signature = signature
+        )
+
+        postDao.updatePostContent(postId, newContent, timestamp, signature)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun editMeshComment(postId: String, commentId: String, newContent: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingComment = commentDao.getCommentById(commentId) ?: return@withContext false
+        if (existingComment.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+
+        var payloadToSign = "$postId|$commentId|$newContent|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val editPay = com.noslop.app.mesh.EditCommentPayload(
+            postId = postId,
+            commentId = commentId,
+            authorId = myKeys.publicKeyB64,
+            authorAvatarB64 = avatarB64,
+            content = newContent,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "EDIT_COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(editPay),
+            signature = signature
+        )
+
+        commentDao.updateCommentContent(commentId, newContent, timestamp, signature)
+        if (getMeshFilterSettings().allowOutgoingComments) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
+        true
+    }
+
+    suspend fun deleteMeshComment(postId: String, commentId: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingComment = commentDao.getCommentById(commentId) ?: return@withContext false
+        if (existingComment.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$postId|$commentId|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val deletePay = com.noslop.app.mesh.DeleteCommentPayload(
+            postId = postId,
+            commentId = commentId,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = 6,
+            senderId = myKeys.publicKeyB64,
+            type = "DELETE_COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(deletePay),
+            signature = signature
+        )
+
+        commentDao.markCommentDeleted(commentId)
+        if (getMeshFilterSettings().allowOutgoingComments) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
+        true
     }
 }

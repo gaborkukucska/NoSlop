@@ -96,8 +96,8 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
-    @Query("UPDATE mesh_posts SET content = :newContent WHERE id = :id")
-    suspend fun updatePostContent(id: String, newContent: String)
+    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature WHERE id = :id")
+    suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
 }
 
 @Dao
@@ -141,6 +141,15 @@ interface CommentDao {
 
     @Query("SELECT * FROM mesh_comments WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getCommentsSince(since: Long): List<MeshComment>
+
+    @Query("SELECT * FROM mesh_comments WHERE id = :id LIMIT 1")
+    suspend fun getCommentById(id: String): MeshComment?
+
+    @Query("UPDATE mesh_comments SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature WHERE id = :id")
+    suspend fun updateCommentContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
+
+    @Query("UPDATE mesh_comments SET content = '[Deleted]', mediaId = null, mediaType = null WHERE id = :id")
+    suspend fun markCommentDeleted(id: String)
 }
 
 @Dao
