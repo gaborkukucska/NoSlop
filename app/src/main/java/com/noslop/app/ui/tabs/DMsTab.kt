@@ -59,6 +59,14 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         viewModel.saveGroundZeroQrToGallery(context)
     }
 
+    // Auto-complete DM tutorial if the user already has connections (e.g. restored from backup)
+    // or if they successfully add a peer during the tutorial itself.
+    LaunchedEffect(peers.size, dmStep) {
+        if (peers.isNotEmpty() && dmStep in 0..3) {
+            viewModel.completeDmTutorial()
+        }
+    }
+
     var showShareSheet by remember { mutableStateOf(false) }
     var showScanScreen by remember { mutableStateOf(false) }
 

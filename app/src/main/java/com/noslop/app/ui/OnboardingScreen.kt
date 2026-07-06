@@ -131,17 +131,17 @@ fun OnboardingScreen(
                             Toast.makeText(context, "Mnemonic copied to clipboard", Toast.LENGTH_SHORT).show()
                         }
                     )
-                    3 -> Step6Creators(
-                        selectedInterests = selectedInterests,
-                        creatorKeywords = creatorKeywordsText,
-                        onCreatorKeywordsChange = { creatorKeywordsText = it }
-                    )
-                    4 -> Step3Interests(
+                    3 -> Step3Interests(
                         selectedInterests = selectedInterests,
                         onToggleInterest = { interest ->
                             if (selectedInterests.contains(interest)) selectedInterests.remove(interest)
                             else selectedInterests.add(interest)
                         }
+                    )
+                    4 -> Step6Creators(
+                        selectedInterests = selectedInterests,
+                        creatorKeywords = creatorKeywordsText,
+                        onCreatorKeywordsChange = { creatorKeywordsText = it }
                     )
                     5 -> Step4Genres(
                         interests = selectedInterests,
@@ -197,8 +197,8 @@ fun OnboardingScreen(
                 val canProceed = when (currentStep) {
                     1 -> true
                     2 -> handleText.isNotBlank() && mnemonic != null
-                    3 -> true // Creator keywords are optional
-                    4 -> selectedInterests.isNotEmpty()
+                    3 -> selectedInterests.isNotEmpty()
+                    4 -> true // Creator keywords are optional
                     5 -> true // Optional genre selection
                     6 -> selectedSources.isNotEmpty()
                     else -> false
@@ -207,7 +207,7 @@ fun OnboardingScreen(
                 if (currentStep < 6) {
                     Button(
                         onClick = {
-                            if (currentStep == 3 && creatorKeywordsText.isNotBlank()) {
+                            if (currentStep == 4 && creatorKeywordsText.isNotBlank()) {
                                 // Trigger background fetch for creators while user finishes onboarding
                                 viewModel.triggerBackgroundCreatorPreFetch(creatorKeywordsText)
                             }

@@ -33,9 +33,9 @@ object InvidiousApiClient {
     private val probeClient: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
             .dns(com.noslop.app.net.HttpClientProvider.cascadingDns)
-            .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
@@ -184,30 +184,12 @@ object InvidiousApiClient {
      * before the user ever attempts a search.
      */
     fun preWarmInstances() {
-        val instances = getInstances()
-        
-        // Ping top 3 instances in the background to proactively filter out dead ones
-        val topInstances = instances.take(3)
-        for (instance in topInstances) {
-            kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                try {
-                    val request = Request.Builder()
-                        .url("$instance/api/v1/stats")
-                        .header("User-Agent", BROWSER_USER_AGENT)
-                        .build()
-                    val response = probeClient.newCall(request).execute()
-                    if (!response.isSuccessful) {
-                        Logger.warn(TAG, "Pre-warm: Instance $instance returned HTTP ${response.code}")
-                        markInstanceFailed(instance)
-                    } else {
-                        markInstanceOk(instance)
-                    }
-                    response.close()
-                } catch (e: Exception) {
-                    Logger.warn(TAG, "Pre-warm: Instance $instance failed: ${e.message}")
-                    markInstanceFailed(instance)
-                }
-            }
+        // Just fetch the instances to warm the cache.
+        // We removed the aggressive /api/v1/stats pinging because many instances 
+        // disable the stats endpoint, which was causing us to incorrectly blacklist 
+        // perfectly healthy instances before the user even searched.
+        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            getInstances()
         }
     }
 

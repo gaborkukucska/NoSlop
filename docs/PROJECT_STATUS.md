@@ -1,5 +1,14 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-06)
+
+### 1. Onboarding & Tutorial Flow Polish
+*   **Creator Search Fix**: Split comma-separated creator keywords to perform concurrent background searches, fixing the `searchCustomFeed` failure.
+*   **Invidious API Tuning**: Removed aggressive `/api/v1/stats` background pinging that was incorrectly blacklisting healthy instances. Increased the probe client timeout from 5s to 10s to allow channel searches (autocomplete) to succeed reliably.
+*   **Feed Tutorial Race Condition**: Fixed an issue where the feed tutorial state locked into the UI before the DB could restore it. The view model now initializes tutorial states to `-1` (loading) and the UI waits before injecting the slides.
+*   **Native Tutorial UI**: Replaced the hacky background-content rendering with a solid, native-looking tutorial slide featuring mock author info and standard right-aligned action buttons. Removed the "Skip" button to force gesture learning.
+*   **DM Tutorial Auto-Completion**: Added a `LaunchedEffect` in `DMsTab` that instantly skips or auto-completes the DM tutorial if the user already has active connections (e.g., via a restored backup or manual QR scan).
+
 ## Completed Changes (2026-07-05)
 
 ### 1. UI/UX Polish: Notifications, File Attachments & Contacts Fixes

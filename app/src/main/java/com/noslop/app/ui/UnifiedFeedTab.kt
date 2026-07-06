@@ -469,8 +469,24 @@ fun UnifiedFeedTab(
         }
     }
 
-    val initialTutStep = remember { viewModel.feedTutorialStep.value }
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery) {
+    val currentTutStep by viewModel.feedTutorialStep.collectAsState()
+    var injectedTutStep by remember { mutableStateOf<Int?>(null) }
+
+    LaunchedEffect(currentTutStep) {
+        if (currentTutStep != -1 && injectedTutStep == null) {
+            injectedTutStep = currentTutStep
+        }
+    }
+
+    LaunchedEffect(isRefreshing, filterMode, searchQuery) {
+        if (currentTutStep != -1) {
+            injectedTutStep = currentTutStep
+        }
+    }
+
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep) {
+        if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
+        val step = injectedTutStep!!
         val filtered = unifiedFeed.filter { item ->
             val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
             if (filterMode == "My Content") {
@@ -511,8 +527,8 @@ fun UnifiedFeedTab(
 
             matchesMode && matchesQuery
         }
-        if (filterMode == "Live Feed" && searchQuery.isBlank() && initialTutStep < 5) {
-            val tutorials = (initialTutStep..4).map { UnifiedItem.Tutorial(it) }
+        if (filterMode == "Live Feed" && searchQuery.isBlank() && step < 5) {
+            val tutorials = (step..4).map { UnifiedItem.Tutorial(it) }
             tutorials + filtered
         } else {
             filtered
@@ -579,7 +595,7 @@ fun UnifiedFeedTab(
             
             if (currentItem is UnifiedItem.Tutorial) {
                 viewModel.setFeedTutorialStep(currentItem.step + 1)
-            } else if (initialTutStep < 5) {
+            } else if (currentTutStep != -1 && currentTutStep < 5) {
                 viewModel.completeFeedTutorial()
             }
 
@@ -698,7 +714,9 @@ fun UnifiedFeedTab(
                     when (item) {
                         is UnifiedItem.Tutorial -> FeedTutorialSlide(
                             step = item.step,
-                            onComplete = { viewModel.completeFeedTutorial() }
+                            onComplete = { viewModel.completeFeedTutorial() },
+                            bottomSlideOffset = bottomSlideOffset,
+                            rightSlideOffset = rightSlideOffset
                         )
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
@@ -1323,89 +1341,110 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
 }
 
 @Composable
-fun FeedTutorialSlide(step: Int, onComplete: () -> Unit) {
+fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Float = 0f, rightSlideOffset: Float = 0f) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
-        contentAlignment = Alignment.Center
+            .background(PrimaryBlack)
     ) {
-        if (step == 2) {
-            OverlayInteractions(
-                isMesh = true,
-                onLike = { },
-                onReaction = { },
-                onShare = { },
-                onComment = { },
-                reactionSummary = mapOf("like" to 5, "fire" to 2),
-                commentCount = 3,
-                modifier = Modifier.align(Alignment.CenterEnd)
-            )
+        // Mock Author Bar (Bottom Left)
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 12.dp, bottom = 24.dp)
+                .graphicsLayer { translationY = bottomSlideOffset },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier.size(40.dp).clip(CircleShape).background(SurfaceDark),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Settings, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column {
+                Text("NoSlop System", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Tutorial", color = AccentGreen, fontSize = 13.sp)
+            }
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
-            when (step) {
-                0 -> {
-                    Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text("Welcome to your Feed!", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Swipe UP to move to the next item.", color = TextMuted, textAlign = TextAlign.Center)
-                }
-                1 -> {
-                    Text("Navigation Menu", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.", color = TextMuted, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(48.dp))
-                    Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
-                }
-                2 -> {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                            Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(16.dp))
-                            Text("Like, Share, and Comment using the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
-                        }
-                        Spacer(modifier = Modifier.width(24.dp))
-                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
-                    }
-                }
-                3 -> {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
-                        Spacer(modifier = Modifier.height(48.dp))
-                        Text("Top Controls", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Check your notifications (top-left) or search and filter your feed (top-right).", color = TextMuted, textAlign = TextAlign.Center)
-                    }
-                }
-                4 -> {
-                    Text("Broadcast to Mesh", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text("Tap the floating '+' button to broadcast your own posts to the mesh network!", color = TextMuted, textAlign = TextAlign.Center)
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text("Swipe up to start exploring.", color = AccentGreen, fontWeight = FontWeight.Bold)
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(40.dp))
-            Text("Swipe UP to continue", color = TextMuted, fontSize = 12.sp)
-            
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                repeat(5) { i ->
-                    Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) AccentGreen else TextMuted))
-                }
-            }
-        }
-        
-        TextButton(
-            onClick = onComplete,
-            modifier = Modifier.align(Alignment.TopEnd).padding(16.dp)
+        // Mock Interaction Icons (Bottom Right)
+        OverlayInteractions(
+            isMesh = true,
+            onLike = { },
+            onReaction = { },
+            onShare = { },
+            onComment = { },
+            reactionSummary = emptyMap(),
+            commentCount = 0,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 80.dp, end = 8.dp)
+                .graphicsLayer { translationX = rightSlideOffset }
+        )
+
+        // Center Content
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
         ) {
-            Text("Skip Tutorial", color = TextMuted)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                when (step) {
+                    0 -> {
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Welcome to your Feed!", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Swipe UP to move to the next item.", color = TextMuted, textAlign = TextAlign.Center)
+                    }
+                    1 -> {
+                        Text("Navigation Menu", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.", color = TextMuted, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(48.dp))
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                    }
+                    2 -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                                Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text("Like, Share, and Comment using the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
+                            }
+                            Spacer(modifier = Modifier.width(24.dp))
+                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        }
+                    }
+                    3 -> {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                            Spacer(modifier = Modifier.height(48.dp))
+                            Text("Top Controls", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Check your notifications (top-left) or search and filter your feed (top-right).", color = TextMuted, textAlign = TextAlign.Center)
+                        }
+                    }
+                    4 -> {
+                        Text("Broadcast to Mesh", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Tap the floating '+' button to broadcast your own posts to the mesh network!", color = TextMuted, textAlign = TextAlign.Center)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Swipe up to start exploring.", color = AccentGreen, fontWeight = FontWeight.Bold)
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(40.dp))
+                Text("Swipe UP to continue", color = TextMuted, fontSize = 12.sp)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    repeat(5) { i ->
+                        Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) AccentGreen else TextMuted))
+                    }
+                }
+            }
         }
     }
 }

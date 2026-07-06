@@ -64,10 +64,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Anonymous")
 
-    private val _feedTutorialStep = MutableStateFlow<Int>(0)
+    private val _feedTutorialStep = MutableStateFlow<Int>(-1)
     val feedTutorialStep: StateFlow<Int> = _feedTutorialStep.asStateFlow()
 
-    private val _dmTutorialStep = MutableStateFlow<Int>(0)
+    private val _dmTutorialStep = MutableStateFlow<Int>(-1)
     val dmTutorialStep: StateFlow<Int> = _dmTutorialStep.asStateFlow()
 
     private val _isOnboardingComplete = MutableStateFlow(false)
@@ -247,9 +247,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
-            val fStep = repository.getAppSetting("feed_tutorial_step")?.toIntOrNull() ?: 0
+            val isComplete = repository.isOnboardingComplete()
+            
+            var fStep = repository.getAppSetting("feed_tutorial_step")?.toIntOrNull()
+            if (fStep == null) {
+                fStep = if (isComplete) 5 else 0
+                repository.putAppSetting("feed_tutorial_step", fStep.toString())
+            }
             _feedTutorialStep.value = fStep
-            val dStep = repository.getAppSetting("dms_tutorial_step")?.toIntOrNull() ?: 0
+
+            var dStep = repository.getAppSetting("dms_tutorial_step")?.toIntOrNull()
+            if (dStep == null) {
+                dStep = if (isComplete) 4 else 0
+                repository.putAppSetting("dms_tutorial_step", dStep.toString())
+            }
             _dmTutorialStep.value = dStep
         }
         viewModelScope.launch {
@@ -719,8 +730,13 @@ fun toggleAggregator() {
             try {
                 repository.saveCreatorKeywords(keywords)
                 _creatorKeywords.value = keywords
-                // Triggering a background search cleanly uses existing code to cache results in the DB
-                repository.searchCustomFeed(keywords, "Videos")
+                
+                val creatorList = keywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                for (creator in creatorList) {
+                    launch(Dispatchers.IO) {
+                        repository.searchCustomFeed(creator, "Videos")
+                    }
+                }
             } catch (e: Exception) {
                 Logger.error("VM", "Background creator fetch failed: ${e.message}")
             }
@@ -758,6 +774,10 @@ fun toggleAggregator() {
             preloadFeedsDuringOnboarding(selectedSources, selectedCategories, selectedMusicGenres, selectedVideoGenres, creatorKeywords)
             repository.setOnboardingComplete(true)
             _isOnboardingComplete.value = true
+            _feedTutorialStep.value = 0
+            _dmTutorialStep.value = 0
+            repository.putAppSetting("feed_tutorial_step", "0")
+            repository.putAppSetting("dms_tutorial_step", "0")
         }
     }
 
@@ -799,6 +819,8 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.factoryReset()
             _isOnboardingComplete.value = false
+            _feedTutorialStep.value = 0
+            _dmTutorialStep.value = 0
         }
     }
 
