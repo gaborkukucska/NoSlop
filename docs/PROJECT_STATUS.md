@@ -15,6 +15,11 @@
 *   **Empty Feed Bug Fix**: Added `rawImages` and `rawAudios` back into the feed generation `leftovers` pool. This fixes a critical bug that caused feeds to load entirely empty and block swiping if YouTube/Invidious video APIs failed or hit rate limits.
 *   **3-Tier Priority Sorting**: Upgraded the chronological sorting algorithm in `loadMoreFeedItems` to strictly prioritize content in three tiers: `Creators > Explicitly Chosen Categories > Trending/Fallback`. This guarantees the first items a user sees upon completing onboarding perfectly match their personal interests.
 
+### 3. Dynamic OTA Localization Framework
+*   **JSON-Based Language Manager**: Implemented `LanguageManager.kt` to load string dictionaries from `assets/languages/content_XX.json`. This replaces hardcoded UI strings with an English-anchored key-value system.
+*   **Reactive UI Translations**: Created a `@Composable` `.tr` String extension mapping directly to a `StateFlow` of the current language. The entire UI now instantly translates without requiring an Activity restart.
+*   **Community Translation Ready**: The app now supports drop-in JSON files for immediate multi-language support (starting with English and Hungarian).
+
 ## Completed Changes (2026-07-05)
 
 ### 1. UI/UX Polish: Notifications, File Attachments & Contacts Fixes

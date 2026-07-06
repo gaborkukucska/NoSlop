@@ -1292,7 +1292,7 @@ fun toggleAggregator() {
         viewModelScope.launch {
             val logsText = Logger.getLogs().joinToString("\n") { it.toString() }
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val clip = android.content.ClipData.newPlainText("NoSlop Logs".tr, logsText)
+            val clip = android.content.ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Logs"), logsText)
             clipboard.setPrimaryClip(clip)
         }
     }

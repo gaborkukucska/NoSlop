@@ -131,6 +131,7 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 ## Documentation
 
 - 🏗️ **[BUILD.md](docs/BUILD.md)** — how to compile and install NoSlop.
+- 🌍 **[TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — how to translate the app to your language.
 - 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
 - 📡 **[WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — the complete HAI-Net wire protocol reference (supersedes the old packet schema docs).
 - 🔬 **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — deep technical reference: crypto derivations, gossip pipeline internals, media/Tor internals, build config.

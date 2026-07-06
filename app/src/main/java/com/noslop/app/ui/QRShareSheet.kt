@@ -181,7 +181,7 @@ fun QRShareSheet(
                     OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("NoSlop Identity String".tr, qrPayload)
+                            val clip = ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Identity String"), qrPayload)
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Identity copied to clipboard!"), Toast.LENGTH_SHORT).show()
                         },

@@ -132,7 +132,7 @@ fun OnboardingScreen(
                         onGenerateMnemonic = { viewModel.generateMnemonic() },
                         onCopyMnemonic = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("NoSlop Mnemonic".tr, it)
+                            val clip = ClipData.newPlainText(com.noslop.app.util.LanguageManager.translate("NoSlop Mnemonic"), it)
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic copied to clipboard"), Toast.LENGTH_SHORT).show()
                         }
