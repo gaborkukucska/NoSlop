@@ -1359,12 +1359,12 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                 modifier = Modifier.size(40.dp).clip(CircleShape).background(SurfaceDark),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.Settings, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                Icon(Icons.Default.Settings, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(24.dp))
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text("NoSlop System", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("Tutorial", color = AccentGreen, fontSize = 13.sp)
+                Text("Tutorial", color = Color(0xFFFFCA28), fontSize = 13.sp)
             }
         }
 
@@ -1391,7 +1391,7 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                 when (step) {
                     0 -> {
-                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                        Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(24.dp))
                         Text("Welcome to your Feed!", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
@@ -1402,22 +1402,27 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.", color = TextMuted, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(48.dp))
-                        Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                     }
                     2 -> {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
-                                Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text("Like, Share, and Comment using the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
+                        Box(modifier = Modifier.fillMaxWidth().height(200.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 48.dp)
+                            ) {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text("Use the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
+                                }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                             }
-                            Spacer(modifier = Modifier.width(24.dp))
-                            Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
                         }
                     }
                     3 -> {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                            Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                             Spacer(modifier = Modifier.height(48.dp))
                             Text("Top Controls", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(16.dp))
@@ -1429,7 +1434,7 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Tap the floating '+' button to broadcast your own posts to the mesh network!", color = TextMuted, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Swipe up to start exploring.", color = AccentGreen, fontWeight = FontWeight.Bold)
+                        Text("Swipe up to start exploring.", color = Color(0xFFFFCA28), fontWeight = FontWeight.Bold)
                     }
                 }
                 
@@ -1441,7 +1446,7 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                     horizontalArrangement = Arrangement.Center
                 ) {
                     repeat(5) { i ->
-                        Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) AccentGreen else TextMuted))
+                        Box(modifier = Modifier.padding(4.dp).size(8.dp).clip(CircleShape).background(if (i == step) Color(0xFFFFCA28) else TextMuted))
                     }
                 }
             }

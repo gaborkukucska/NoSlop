@@ -41,7 +41,7 @@ A vertical feed purpose-built for signal-to-noise ratio.
 - **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
 - **Media playback** — seamless native audio and video streaming (HLS/m3u8, MP4, MP3, Archive.org, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
 - **Immersive landscape mode** — rotate your device horizontally to automatically hide the UI, allowing edge-to-edge viewing for video and image content.
-- **Interest-based curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) during onboarding. NoSlop pre-loads curated RSS/Atom feeds from sources like Hacker News, BBC World, NASA, EFF Deeplinks, and Krebs on Security — no account required.
+- **3-Tier Priority Curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) and specify your favorite creators during onboarding. NoSlop pre-loads curated RSS/Atom feeds and strictly prioritizes your feed chronologically in three tiers: `Creators > Chosen Categories > Trending Fallback`, guaranteeing a perfectly tailored experience from the first swipe.
 
 ### Serverless Social Mesh
 

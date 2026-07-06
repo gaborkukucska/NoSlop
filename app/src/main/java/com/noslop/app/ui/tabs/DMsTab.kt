@@ -296,7 +296,7 @@ fun TutorialSpotlight(
                     }
                 }
         ) {
-            drawRect(Color.Black.copy(alpha = 0.85f))
+            drawRect(Color.Black.copy(alpha = 0.65f))
             if (targetRect != Rect.Zero) {
                 drawRoundRect(
                     color = Color.Black,
@@ -322,7 +322,7 @@ fun TutorialSpotlight(
                 fontSize = 14.sp,
                 modifier = Modifier
                     .offset(x = xOffset, y = yOffset)
-                    .background(AccentGreen, RoundedCornerShape(8.dp))
+                    .background(Color(0xFFFFCA28), RoundedCornerShape(8.dp))
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             )
         }

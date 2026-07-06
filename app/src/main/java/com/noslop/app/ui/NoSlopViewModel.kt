@@ -594,11 +594,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // --- SMART INTERLEAVING ALGORITHM (Live Feed & Random) ---
         val needed = if (isInitialLoad) 3 else 10
 
+        val userInterests = _selectedInterests.value
+        val prioritySourceIds = sources.value.filter { 
+            it.category in userInterests || it.id.startsWith("custom_") 
+        }.map { it.id }.toSet()
+        val isPrioritySource = { item: FeedItem -> item.sourceId in prioritySourceIds }
+
         val recentFeeds = if (actualFilter == "Random") {
             unseenFeeds.shuffled()
         } else {
-            unseenFeeds.partition(isCreatorMatch).let { (c, o) ->
-                c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
+            unseenFeeds.partition(isCreatorMatch).let { (creators, rest1) ->
+                rest1.partition(isPrioritySource).let { (priority, others) ->
+                    // 1. Creators, 2. Explicitly Chosen Interests, 3. General/Trending Fallback
+                    creators.sortedByDescending { it.publishedAt } + 
+                    priority.sortedByDescending { it.publishedAt } + 
+                    others.sortedByDescending { it.publishedAt }
+                }
             }
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
@@ -628,7 +639,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         if (batch.size < needed) {
             val usedIds = batch.map { it.id }.toSet()
-            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + recentMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
+            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + rawAudios.map { UnifiedItem.Feed(it) } + rawImages.map { UnifiedItem.Feed(it) } + recentMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
                 .filter { it.id !in usedIds }
             batch.addAll(leftovers.take(needed - batch.size))
         }

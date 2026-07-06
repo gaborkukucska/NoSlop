@@ -3,11 +3,17 @@
 ## Completed Changes (2026-07-06)
 
 ### 1. Onboarding & Tutorial Flow Polish
-*   **Creator Search Fix**: Split comma-separated creator keywords to perform concurrent background searches, fixing the `searchCustomFeed` failure.
-*   **Invidious API Tuning**: Removed aggressive `/api/v1/stats` background pinging that was incorrectly blacklisting healthy instances. Increased the probe client timeout from 5s to 10s to allow channel searches (autocomplete) to succeed reliably.
-*   **Feed Tutorial Race Condition**: Fixed an issue where the feed tutorial state locked into the UI before the DB could restore it. The view model now initializes tutorial states to `-1` (loading) and the UI waits before injecting the slides.
-*   **Native Tutorial UI**: Replaced the hacky background-content rendering with a solid, native-looking tutorial slide featuring mock author info and standard right-aligned action buttons. Removed the "Skip" button to force gesture learning.
+*   **Onboarding Reordering**: Swapped the Interests and Creators steps. Moving Interests first ensures the Creator search word-cloud dynamically populates with relevant channel suggestions based on the user's chosen categories.
+*   **Creator Search Fix**: Split the comma-separated creator keywords string to perform concurrent background searches via `launch(Dispatchers.IO)`, fixing the `searchCustomFeed` failure.
+*   **Invidious API Tuning**: Removed aggressive `/api/v1/stats` background pinging that was incorrectly blacklisting healthy instances. Increased the probe client timeout from 5s to 10s to allow channel searches (autocomplete) to succeed reliably over Tor.
+*   **Feed Tutorial Race Condition**: Fixed an issue where the feed tutorial state locked into the UI before the DB could restore it. The ViewModel now initializes tutorial states to `-1` (loading) and the UI waits before injecting the slides.
+*   **Native Tutorial UI & Polish**: Replaced the hacky background-content rendering with a solid, native-looking tutorial slide featuring mock author info and standard right-aligned action buttons. Fixed the Step 2 UI arrow collision. Removed the "Skip" button to force gesture learning.
+*   **Tutorial Theming**: Changed tutorial highlight elements (text chips, arrows) from the app's native `AccentGreen` to Material Amber to clearly differentiate instructional overlays from interactive app UI. Softened the DM tutorial scrim from 85% to 65% opacity.
 *   **DM Tutorial Auto-Completion**: Added a `LaunchedEffect` in `DMsTab` that instantly skips or auto-completes the DM tutorial if the user already has active connections (e.g., via a restored backup or manual QR scan).
+
+### 2. Feed Generation & Priority Sorting
+*   **Empty Feed Bug Fix**: Added `rawImages` and `rawAudios` back into the feed generation `leftovers` pool. This fixes a critical bug that caused feeds to load entirely empty and block swiping if YouTube/Invidious video APIs failed or hit rate limits.
+*   **3-Tier Priority Sorting**: Upgraded the chronological sorting algorithm in `loadMoreFeedItems` to strictly prioritize content in three tiers: `Creators > Explicitly Chosen Categories > Trending/Fallback`. This guarantees the first items a user sees upon completing onboarding perfectly match their personal interests.
 
 ## Completed Changes (2026-07-05)
 
