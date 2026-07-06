@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -26,10 +28,10 @@ fun MeshFiltersScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
             Text(
-                text = "Mesh Filters",
+                text = "Mesh Filters".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -42,7 +44,7 @@ fun MeshFiltersScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
         ) {
             item {
                 Text(
-                    text = "Control what gets sent and received over the mesh. This helps save bandwidth and reduce noise.",
+                    text = "Control what gets sent and received over the mesh. This helps save bandwidth and reduce noise.".tr,
                     color = TextMuted,
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(bottom = 24.dp)
@@ -153,7 +155,7 @@ fun FilterCategory(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Allow Incoming", color = TextLight, style = MaterialTheme.typography.bodyMedium)
+                Text("Allow Incoming".tr, color = TextLight, style = MaterialTheme.typography.bodyMedium)
                 Switch(
                     checked = incomingChecked,
                     onCheckedChange = onIncomingChange,
@@ -174,7 +176,7 @@ fun FilterCategory(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Allow Outgoing", color = TextLight, style = MaterialTheme.typography.bodyMedium)
+                Text("Allow Outgoing".tr, color = TextLight, style = MaterialTheme.typography.bodyMedium)
                 Switch(
                     checked = outgoingChecked,
                     onCheckedChange = onOutgoingChange,

@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -52,7 +54,7 @@ fun SplashScreen(statusMessage: String = "") {
                 .scale(scaleAnim)
         ) {
             Text(
-                text = "NO_SLOP",
+                text = "NO_SLOP".tr,
                 style = MaterialTheme.typography.headlineLarge.copy(
                     color = AccentGreen,
                     fontWeight = FontWeight.Bold,
@@ -64,7 +66,7 @@ fun SplashScreen(statusMessage: String = "") {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Welcome Back",
+                text = "Welcome Back".tr,
                 style = MaterialTheme.typography.titleMedium.copy(
                     color = TextMuted,
                     letterSpacing = 2.sp

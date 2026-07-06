@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -143,7 +145,7 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
             val actualModel = if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
             AsyncImage(
                 model = actualModel,
-                contentDescription = "Zoomable View",
+                contentDescription = "Zoomable View".tr,
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
@@ -176,7 +178,7 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                     .padding(16.dp)
                     .background(Color.Black.copy(alpha = 0.5f), CircleShape)
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = Color.White)
             }
         }
     }
@@ -303,7 +305,7 @@ fun SegmentedArticleReader(
                             )
                         } else {
                             Text(
-                                text = "Preview not available.",
+                                text = "Preview not available.".tr,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextMuted,
                                 textAlign = TextAlign.Center,
@@ -322,7 +324,7 @@ fun SegmentedArticleReader(
                             ) {
                                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("Read Full Article".tr, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -380,7 +382,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                        Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = TextLight)
                     }
                     Text(
                         text = title,
@@ -397,7 +399,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                             context.startActivity(intent)
                         } catch (_: Exception) {}
                     }) {
-                        Icon(Icons.Default.Public, contentDescription = "Open in Browser", tint = AccentGreen)
+                        Icon(Icons.Default.Public, contentDescription = "Open in Browser".tr, tint = AccentGreen)
                     }
                 }
 
@@ -637,7 +639,7 @@ fun ClearnetAttachment(
             
             Icon(
                 Icons.Default.OpenInNew,
-                contentDescription = "Open",
+                contentDescription = "Open".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(18.dp).padding(horizontal = 4.dp)
             )
@@ -810,7 +812,7 @@ fun ContentHealthOverlay(
                     colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
                     border = BorderStroke(1.dp, BorderSubtle)
                 ) {
-                    Text("Temporarily View")
+                    Text("Temporarily View".tr)
                 }
             }
         }
@@ -843,7 +845,7 @@ fun LoadingShimmer(modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Loading...",
+                text = "Loading...".tr,
                 color = AccentGreen.copy(alpha = alpha),
                 style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
             )

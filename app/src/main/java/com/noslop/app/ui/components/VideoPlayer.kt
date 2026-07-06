@@ -1,6 +1,8 @@
 // FILE: app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -329,9 +331,9 @@ fun VideoPlayer(
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Video unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+                    Text("Video unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
                     Text(
-                        "Could not resolve a playable stream.",
+                        "Could not resolve a playable stream.".tr,
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
@@ -342,7 +344,7 @@ fun VideoPlayer(
                         onClick = { retryTrigger++ },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
                     ) {
-                        Text("Retry", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                        Text("Retry".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -375,7 +377,7 @@ fun VideoPlayer(
                 // Proper, uncropped thumbnail in front
                 AsyncImage(
                     model = thumbnailUrl ?: decodedB64,
-                    contentDescription = "Video Thumbnail",
+                    contentDescription = "Video Thumbnail".tr,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
@@ -573,7 +575,7 @@ private fun ExoVideoPlayer(
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Video unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+                Text("Video unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
                 Text(
                     errorMessage,
                     color = TextMuted,
@@ -586,7 +588,7 @@ private fun ExoVideoPlayer(
                     onClick = onRetry,
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
                 ) {
-                    Text("Retry Playback", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                    Text("Retry Playback".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -608,7 +610,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
         ) {
             Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Embed unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+            Text("Embed unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
             Text(
                 webError!!,
                 color = TextMuted,
@@ -621,7 +623,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                 onClick = onRetry,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
             ) {
-                Text("Retry Embed", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                Text("Retry Embed".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
             }
         }
     } else {

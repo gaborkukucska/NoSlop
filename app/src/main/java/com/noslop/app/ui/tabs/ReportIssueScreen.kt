@@ -1,5 +1,7 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -58,8 +60,8 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 submitSuccess = false
                 onBack()
             },
-            title = { Text("Success", color = TextLight, fontWeight = FontWeight.Bold) },
-            text = { Text("Your issue has been submitted successfully to GitHub! Thank you for your feedback.", color = TextMuted) },
+            title = { Text("Success".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+            text = { Text("Your issue has been submitted successfully to GitHub! Thank you for your feedback.".tr, color = TextMuted) },
             confirmButton = {
                 Button(
                     onClick = { 
@@ -68,7 +70,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) {
-                    Text("OK", fontWeight = FontWeight.Bold)
+                    Text("OK".tr, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = SurfaceDark
@@ -78,14 +80,14 @@ fun ReportIssueScreen(onBack: () -> Unit) {
     if (submitError != null) {
         AlertDialog(
             onDismissRequest = { submitError = null },
-            title = { Text("Error", color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            title = { Text("Error".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
             text = { Text(submitError ?: "Unknown error occurred.", color = TextMuted) },
             confirmButton = {
                 Button(
                     onClick = { submitError = null },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) {
-                    Text("Close", fontWeight = FontWeight.Bold)
+                    Text("Close".tr, fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = SurfaceDark
@@ -95,10 +97,10 @@ fun ReportIssueScreen(onBack: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 16.dp)) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextLight)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back".tr, tint = TextLight)
             }
             Text(
-                text = "File a Report",
+                text = "File a Report".tr,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = TextLight,
@@ -121,7 +123,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
             OutlinedTextField(
                 value = preferredName,
                 onValueChange = { preferredName = it },
-                label = { Text("Your Name / Handle (Optional)") },
+                label = { Text("Your Name / Handle (Optional)".tr) },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AccentGreen,
@@ -142,7 +144,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                     value = selectedIssueType,
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Issue Type") },
+                    label = { Text("Issue Type".tr) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedTypeDropdown) },
                     modifier = Modifier.menuAnchor().fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
@@ -172,7 +174,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
             OutlinedTextField(
                 value = title,
                 onValueChange = { title = it },
-                label = { Text("Title (e.g., 'Video player crashes on pause')") },
+                label = { Text("Title (e.g., 'Video player crashes on pause')".tr) },
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AccentGreen,
@@ -187,7 +189,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
             OutlinedTextField(
                 value = description,
                 onValueChange = { description = it },
-                label = { Text("Description (Steps to reproduce, expected behavior, etc.)") },
+                label = { Text("Description (Steps to reproduce, expected behavior, etc.)".tr) },
                 modifier = Modifier.fillMaxWidth().height(150.dp).padding(bottom = 16.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = AccentGreen,
@@ -205,7 +207,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 border = BorderStroke(1.dp, BorderSubtle)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Attachments", fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("Attachments".tr, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.padding(bottom = 8.dp))
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -213,8 +215,8 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                            Text("Include Device Information", color = TextLight, fontSize = 14.sp)
-                            Text("OS Version, Device Model, App Version", color = TextMuted, fontSize = 12.sp)
+                            Text("Include Device Information".tr, color = TextLight, fontSize = 14.sp)
+                            Text("OS Version, Device Model, App Version".tr, color = TextMuted, fontSize = 12.sp)
                         }
                         Switch(
                             checked = includeDeviceInfo,
@@ -231,8 +233,8 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                            Text("Include Recent Error Logs", color = TextLight, fontSize = 14.sp)
-                            Text("The last 25 warnings/errors from the local Logger", color = TextMuted, fontSize = 12.sp)
+                            Text("Include Recent Error Logs".tr, color = TextLight, fontSize = 14.sp)
+                            Text("The last 25 warnings/errors from the local Logger".tr, color = TextMuted, fontSize = 12.sp)
                         }
                         Switch(
                             checked = includeLogs,
@@ -342,7 +344,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 if (isSubmitting) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), color = PrimaryBlack, strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Submitting...", fontWeight = FontWeight.Bold)
+                    Text("Submitting...".tr, fontWeight = FontWeight.Bold)
                 } else {
                     Icon(Icons.Default.BugReport, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))

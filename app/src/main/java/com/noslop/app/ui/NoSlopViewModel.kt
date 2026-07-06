@@ -1,6 +1,8 @@
 // FILE: app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
@@ -231,6 +233,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
     val isUsingInsecureStorage = repository.isUsingInsecureStorage
 
+    private val _appLanguage = MutableStateFlow("en")
+    val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
+
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
@@ -281,6 +286,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            _appLanguage.value = repository.getAppLanguage()
             _userProfile.value = repository.getUserProfile()
             _selectedInterests.value = repository.getUserSelectedCategories()
             _selectedMusicGenres.value = repository.getSelectedMusicGenres()
@@ -804,6 +810,14 @@ fun toggleAggregator() {
         }
     }
 
+    fun updateAppLanguage(langCode: String) {
+        viewModelScope.launch {
+            repository.setAppLanguage(langCode)
+            _appLanguage.value = langCode
+            com.noslop.app.util.LanguageManager.loadLanguage(langCode)
+        }
+    }
+
     fun updateContentPreferences(selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, negativeKeywords: String? = null, languagePreference: String? = null, creatorKeywords: String? = null) {
         viewModelScope.launch {
             repository.saveSelectedCategories(selectedCategories)
@@ -1278,7 +1292,7 @@ fun toggleAggregator() {
         viewModelScope.launch {
             val logsText = Logger.getLogs().joinToString("\n") { it.toString() }
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val clip = android.content.ClipData.newPlainText("NoSlop Logs", logsText)
+            val clip = android.content.ClipData.newPlainText("NoSlop Logs".tr, logsText)
             clipboard.setPrimaryClip(clip)
         }
     }

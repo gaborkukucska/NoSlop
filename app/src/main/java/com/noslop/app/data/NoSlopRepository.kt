@@ -119,6 +119,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun putAppSetting(key: String, value: String) { appSettingDao.insertSetting(AppSetting(key, value)) }
     suspend fun getAppSetting(key: String): String? { return appSettingDao.getSetting(key) }
     
+    suspend fun getAppLanguage(): String = appSettingDao.getSetting("app_language") ?: "en"
+    suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))
+    
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)

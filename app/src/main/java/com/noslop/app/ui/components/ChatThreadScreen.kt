@@ -1,6 +1,8 @@
 // app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -219,7 +221,7 @@ fun ChatThreadScreen(
                     IconButton(onClick = { captureManager.takePhoto { file -> 
                     if (file != null) attachedFile = file
                     showCamera = false 
-                } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo".tr, tint = Color.White) }
                 }
                 
                 IconButton(
@@ -231,11 +233,11 @@ fun ChatThreadScreen(
                         else if (countdown == 0) { countdown = 3 }
                     },
                     modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
-                ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) DestructiveRed else Color.White) }
+                ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video".tr, tint = if (isRecordingVideo) DestructiveRed else Color.White) }
                 
                 if (!isRecordingVideo && countdown == 0) {
-                    IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
-                    IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
+                    IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip".tr, tint = TextLight) }
+                    IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = Color.White) }
                 }
             }
         }
@@ -253,7 +255,7 @@ fun ChatThreadScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Close chat thread", tint = AccentGreen)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Close chat thread".tr, tint = AccentGreen)
             }
 
             Icon(
@@ -272,7 +274,7 @@ fun ChatThreadScreen(
                     color = TextLight
                 )
                 Text(
-                    text = "Direct E2EE session with ECDH agreement active",
+                    text = "Direct E2EE session with ECDH agreement active".tr,
                     style = MaterialTheme.typography.labelSmall,
                     color = AccentGreen
                 )
@@ -410,8 +412,8 @@ fun ChatThreadScreen(
                                                     if (isDownloaded) {
                                                         val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                         val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, mid, meta?.filename ?: mid)
-                                                        if (saved) android.widget.Toast.makeText(context, "Saved to Downloads", android.widget.Toast.LENGTH_SHORT).show()
-                                                        else android.widget.Toast.makeText(context, "Failed to save file", android.widget.Toast.LENGTH_SHORT).show()
+                                                        if (saved) android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), android.widget.Toast.LENGTH_SHORT).show()
+                                                        else android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Failed to save file"), android.widget.Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                         if (meta != null) viewModel.startMediaDownload(meta, peer.onionAddress)
@@ -421,19 +423,19 @@ fun ChatThreadScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.InsertDriveFile, contentDescription = "File", tint = AccentGreen, modifier = Modifier.size(32.dp))
+                                                Icon(Icons.Default.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(32.dp))
                                                 Spacer(modifier = Modifier.width(12.dp))
                                                 Column(modifier = Modifier.weight(1f)) {
                                                     Text(parsedMediaMetadata?.filename ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                                     Spacer(modifier = Modifier.height(4.dp))
                                                     val isDownloading = downloadProgress.containsKey(mid)
                                                     if (isDownloaded) {
-                                                        Text("Tap to save to device", color = AccentGreen, fontSize = 11.sp)
+                                                        Text("Tap to save to device".tr, color = AccentGreen, fontSize = 11.sp)
                                                     } else if (isDownloading) {
                                                         LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.fillMaxWidth())
                                                         Text(if (progress > 0) "$progress%" else "Connecting...", color = TextMuted, fontSize = 10.sp)
                                                     } else {
-                                                        Text("Tap to download", color = TextMuted, fontSize = 11.sp)
+                                                        Text("Tap to download".tr, color = TextMuted, fontSize = 11.sp)
                                                     }
                                                 }
                                             }
@@ -469,7 +471,7 @@ fun ChatThreadScreen(
                                                 }
                                                 coil.compose.AsyncImage(
                                                     model = gifModel,
-                                                    contentDescription = "GIF",
+                                                    contentDescription = "GIF".tr,
                                                     contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                                                     imageLoader = gifImageLoader,
                                                     modifier = Modifier.fillMaxSize()
@@ -478,7 +480,7 @@ fun ChatThreadScreen(
                                                 val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
                                                 coil.compose.AsyncImage(
                                                     model = decoded,
-                                                    contentDescription = "Video Thumbnail",
+                                                    contentDescription = "Video Thumbnail".tr,
                                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                                     modifier = Modifier.fillMaxSize()
                                                 )
@@ -494,13 +496,13 @@ fun ChatThreadScreen(
                                                 }
                                                 coil.compose.AsyncImage(
                                                     model = model,
-                                                    contentDescription = "Media",
+                                                    contentDescription = "Media".tr,
                                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                                     modifier = Modifier.fillMaxSize()
                                                 )
                                             }
                                             if (isVideo) {
-                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video", modifier = Modifier.size(48.dp), tint = Color.White)
+                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video".tr, modifier = Modifier.size(48.dp), tint = Color.White)
                                             }
                                         }
                                     } else {
@@ -520,13 +522,13 @@ fun ChatThreadScreen(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Icon(Icons.Default.Download, contentDescription = "Download", tint = AccentGreen, modifier = Modifier.size(36.dp))
+                                                Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(36.dp))
                                                 Spacer(modifier = Modifier.height(8.dp))
                                                 if (progress > 0) {
                                                     LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
                                                     Text("Downloading $progress%", color = TextLight, fontSize = 10.sp)
                                                 } else {
-                                                    Text("Tap to Download", color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    Text("Tap to Download".tr, color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                 }
                                             }
                                         }
@@ -547,14 +549,14 @@ fun ChatThreadScreen(
                                     // Explicit Actions
                                     Icon(
                                         Icons.Default.AddReaction,
-                                        contentDescription = "React",
+                                        contentDescription = "React".tr,
                                         tint = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
                                         modifier = Modifier.size(12.dp).clickable { showReactionPicker = true }
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Icon(
                                         Icons.AutoMirrored.Filled.Reply,
-                                        contentDescription = "Reply",
+                                        contentDescription = "Reply".tr,
                                         tint = if (isSelf) PrimaryBlack.copy(alpha = 0.6f) else TextMuted,
                                         modifier = Modifier.size(12.dp).clickable { replyingToMessageId = msg.id }
                                     )
@@ -607,13 +609,13 @@ fun ChatThreadScreen(
                                 }
                                 Icon(
                                     Icons.Default.Close,
-                                    contentDescription = "Close",
+                                    contentDescription = "Close".tr,
                                     tint = TextMuted,
                                     modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
                                 )
                                 Icon(
                                     Icons.AutoMirrored.Filled.Reply,
-                                    contentDescription = "Reply",
+                                    contentDescription = "Reply".tr,
                                     tint = TextMuted,
                                     modifier = Modifier.size(20.dp).clickable {
                                         replyingToMessageId = msg.id
@@ -646,7 +648,7 @@ fun ChatThreadScreen(
                 )
                 Icon(
                     Icons.Default.Close,
-                    contentDescription = "Remove attachment",
+                    contentDescription = "Remove attachment".tr,
                     tint = TextMuted,
                     modifier = Modifier.size(16.dp).clickable { attachedFile = null }
                 )
@@ -664,8 +666,8 @@ fun ChatThreadScreen(
             ) {
                 Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Replying to message...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyingToMessageId = null })
+                Text("Replying to message...".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.Close, contentDescription = "Cancel reply".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyingToMessageId = null })
             }
         }
 
@@ -681,7 +683,7 @@ fun ChatThreadScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // File attach (system picker — like gChat's Paperclip icon)
                 IconButton(onClick = { filePickerLauncher.launch("*/*") }) {
-                    Icon(Icons.Default.AttachFile, contentDescription = "Attach File", tint = TextMuted)
+                    Icon(Icons.Default.AttachFile, contentDescription = "Attach File".tr, tint = TextMuted)
                 }
                 // Camera (with permission check — matches UnifiedFeedTab broadcast modal)
                 IconButton(onClick = {
@@ -691,7 +693,7 @@ fun ChatThreadScreen(
                         cameraPermissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
                     }
                 }) {
-                    Icon(Icons.Default.CameraAlt, contentDescription = "Camera", tint = TextMuted)
+                    Icon(Icons.Default.CameraAlt, contentDescription = "Camera".tr, tint = TextMuted)
                 }
                 
             }
@@ -715,7 +717,7 @@ fun ChatThreadScreen(
                     .clip(RoundedCornerShape(8.dp))
                     .background(AccentGreen)
             ) {
-                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = PrimaryBlack)
+                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send".tr, tint = PrimaryBlack)
             }
         }
 
@@ -735,7 +737,7 @@ fun ChatThreadScreen(
                         onClick = { fullscreenVideo = null }, 
                         modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color.Black.copy(alpha=0.5f), androidx.compose.foundation.shape.CircleShape)
                     ) {
-                        Icon(Icons.Default.Close, contentDescription="Close", tint=Color.White)
+                        Icon(Icons.Default.Close, contentDescription="Close".tr, tint=Color.White)
                     }
                 }
             }

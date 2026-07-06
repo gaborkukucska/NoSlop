@@ -1,6 +1,8 @@
 // app/src/main/java/com/noslop/app/ui/MainScreen.kt
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -145,7 +147,7 @@ fun FullScreenMeshCard(
                                 .padding(horizontal = 8.dp, vertical = 2.dp)
                         ) {
                             // Rebranding: Mesh -> MESH
-                            Text("MESH", color = Color(0xFFB388FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("MESH".tr, color = Color(0xFFB388FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         if (post.authorAvatarB64 != null) {
@@ -158,7 +160,7 @@ fun FullScreenMeshCard(
                             if (bitmap != null) {
                                 androidx.compose.foundation.Image(
                                     bitmap = bitmap,
-                                    contentDescription = "Avatar",
+                                    contentDescription = "Avatar".tr,
                                     modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -190,22 +192,22 @@ fun FullScreenMeshCard(
                                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                                 androidx.compose.foundation.Image(
                                                     bitmap = bitmap,
-                                                    contentDescription = "Avatar",
+                                                    contentDescription = "Avatar".tr,
                                                     modifier = Modifier.size(80.dp).clip(RoundedCornerShape(50))
                                                 )
                                             }
                                             Spacer(modifier = Modifier.height(12.dp))
                                         }
                                     }
-                                    Text("Tripcode", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Tripcode".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Text(".${post.authorTripcode}", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Public Key", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Public Key".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Text(post.authorPublicKeyB64.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                                 }
                             },
                             confirmButton = {
-                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close", color = AccentGreen) }
+                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close".tr, color = AccentGreen) }
                             },
                             containerColor = SurfaceDark
                         )
@@ -307,7 +309,7 @@ fun FullScreenMeshCard(
                     ) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Community Flagged", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Community Flagged".tr, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -317,8 +319,8 @@ fun FullScreenMeshCard(
     if (showDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirm = false },
-                title = { Text("Delete Broadcast", color = TextLight, fontWeight = FontWeight.Bold) },
-                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.", color = TextMuted) },
+                title = { Text("Delete Broadcast".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.".tr, color = TextMuted) },
                 confirmButton = {
                     Button(
                         onClick = { 
@@ -326,10 +328,10 @@ fun FullScreenMeshCard(
                             showDeleteConfirm = false 
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                    ) { Text("Delete", color = Color.White, fontWeight = FontWeight.Bold) }
+                    ) { Text("Delete".tr, color = Color.White, fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = AccentGreen) }
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel".tr, color = AccentGreen) }
                 },
                 containerColor = SurfaceDark
             )

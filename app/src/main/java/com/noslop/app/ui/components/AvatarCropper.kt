@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -173,7 +175,7 @@ fun AvatarCropper(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             IconButton(onClick = onCancel) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextLight)
+                Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
             }
             IconButton(onClick = {
                 coroutineScope.launch(Dispatchers.IO) {
@@ -238,7 +240,7 @@ fun AvatarCropper(
                     }
                 }
             }) {
-                Icon(Icons.Default.Check, contentDescription = "Crop", tint = AccentGreen)
+                Icon(Icons.Default.Check, contentDescription = "Crop".tr, tint = AccentGreen)
             }
         }
     }

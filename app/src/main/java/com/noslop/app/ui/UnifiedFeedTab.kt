@@ -1,6 +1,8 @@
 // app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -201,7 +203,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         .offset(y = 58.dp)
                         .graphicsLayer { translationY = bottomSlide }
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post")
+                    Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post".tr)
                 }
             }
         },
@@ -216,8 +218,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Feed", modifier = Modifier.size(20.dp)) },
-                    label = { Text("Feed", fontSize = 10.sp) },
+                    icon = { Icon(Icons.Default.PlayArrow, contentDescription = "Feed".tr, modifier = Modifier.size(20.dp)) },
+                    label = { Text("Feed".tr, fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -237,10 +239,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 }
                             }
                         ) {
-                            Icon(Icons.Default.Email, contentDescription = "DMs", modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Email, contentDescription = "DMs".tr, modifier = Modifier.size(20.dp))
                         }
                     },
-                    label = { Text("DMs", fontSize = 10.sp) },
+                    label = { Text("DMs".tr, fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -264,10 +266,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                     }
                                 }
                             ) {
-                                Icon(Icons.Default.Notifications, contentDescription = "Alerts", modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.Notifications, contentDescription = "Alerts".tr, modifier = Modifier.size(20.dp))
                             }
                         },
-                        label = { Text("Alerts", fontSize = 10.sp) },
+                        label = { Text("Alerts".tr, fontSize = 10.sp) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = AccentGreen,
                             selectedTextColor = AccentGreen,
@@ -281,8 +283,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    icon = { Icon(Icons.Default.Hub, contentDescription = "HUBs", modifier = Modifier.size(20.dp)) },
-                    label = { Text("HUBs", fontSize = 10.sp) },
+                    icon = { Icon(Icons.Default.Hub, contentDescription = "HUBs".tr, modifier = Modifier.size(20.dp)) },
+                    label = { Text("HUBs".tr, fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -294,8 +296,8 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings", modifier = Modifier.size(20.dp)) },
-                    label = { Text("Settings", fontSize = 10.sp) },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Settings".tr, modifier = Modifier.size(20.dp)) },
+                    label = { Text("Settings".tr, fontSize = 10.sp) },
                     colors = NavigationBarItemDefaults.colors(
                         selectedIconColor = AccentGreen,
                         selectedTextColor = AccentGreen,
@@ -391,11 +393,11 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             onDismissRequest = { viewModel.rejectHandshake() },
             containerColor = SurfaceDark,
             title = {
-                Text("Accept Handshake?", color = TextLight, fontWeight = FontWeight.Bold)
+                Text("Accept Handshake?".tr, color = TextLight, fontWeight = FontWeight.Bold)
             },
             text = {
                 Column {
-                    Text("Incoming mesh connection request from:", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Text("Incoming mesh connection request from:".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(peer.handle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                 }
@@ -404,10 +406,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 Button(
                     onClick = { viewModel.acceptHandshake(peer) },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) { Text("Accept", fontWeight = FontWeight.Bold) }
+                ) { Text("Accept".tr, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.rejectHandshake() }) { Text("Reject", color = DestructiveRed) }
+                TextButton(onClick = { viewModel.rejectHandshake() }) { Text("Reject".tr, color = DestructiveRed) }
             }
         )
     }
@@ -669,14 +671,14 @@ fun UnifiedFeedTab(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(color = AccentGreen)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Curating your feed...", color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
                     }
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Your feed is empty.", color = TextMuted, fontWeight = FontWeight.Bold)
-                        Text("Pull to refresh or post to the mesh!", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                        Text("Your feed is empty.".tr, color = TextMuted, fontWeight = FontWeight.Bold)
+                        Text("Pull to refresh or post to the mesh!".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -761,7 +763,7 @@ fun UnifiedFeedTab(
                             Spacer(modifier = Modifier.width(6.dp))
                             Icon(
                                 Icons.Default.Close,
-                                contentDescription = "Clear filters",
+                                contentDescription = "Clear filters".tr,
                                 tint = AccentGreen,
                                 modifier = Modifier
                                     .size(14.dp)
@@ -779,7 +781,7 @@ fun UnifiedFeedTab(
                     onClick = { showSearchModal = true },
                     modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
-                    Icon(Icons.Default.Search, contentDescription = "Search & Filter", tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Search, contentDescription = "Search & Filter".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
                 }
             }
         }
@@ -802,7 +804,7 @@ fun UnifiedFeedTab(
                             if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
                         }
                     ) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications", tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
                     }
                 }
 
@@ -821,7 +823,7 @@ fun UnifiedFeedTab(
         AlertDialog(
             onDismissRequest = { showSearchModal = false },
             containerColor = SurfaceDark,
-            title = { Text("Search & Filter", color = AccentGreen, fontWeight = FontWeight.Bold) },
+            title = { Text("Search & Filter".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -830,11 +832,11 @@ fun UnifiedFeedTab(
                     OutlinedTextField(
                         value = localSearchQuery,
                         onValueChange = { localSearchQuery = it },
-                        placeholder = { Text("Search keywords...", color = TextMuted) },
+                        placeholder = { Text("Search keywords...".tr, color = TextMuted) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                         trailingIcon = {
                             if (localSearchQuery.isNotBlank()) {
-                                IconButton(onClick = { localSearchQuery = "" }) { Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted) }
+                                IconButton(onClick = { localSearchQuery = "" }) { Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted) }
                             }
                         },
                         singleLine = true,
@@ -880,7 +882,7 @@ fun UnifiedFeedTab(
                         Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
-                    Text("Feeds", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     
                     val liveFeedSelected = localFilterMode == "Live Feed"
                     Box(
@@ -891,7 +893,7 @@ fun UnifiedFeedTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = if (liveFeedSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Live Feed", color = if (liveFeedSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (liveFeedSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text("Live Feed".tr, color = if (liveFeedSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (liveFeedSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
 
@@ -904,7 +906,7 @@ fun UnifiedFeedTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Person, contentDescription = null, tint = if (myContentSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Your Broadcasts", color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text("Your Broadcasts".tr, color = if (myContentSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (myContentSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
                     val meshSelected = localFilterMode == "Mesh"
@@ -916,10 +918,10 @@ fun UnifiedFeedTab(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Hub, contentDescription = null, tint = if (meshSelected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Mesh Network", color = if (meshSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (meshSelected) FontWeight.Bold else FontWeight.Normal)
+                            Text("Mesh Network".tr, color = if (meshSelected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (meshSelected) FontWeight.Bold else FontWeight.Normal)
                         }
                     }
-                    Text("Content Type" , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Text("Content Type".tr , color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     val contentTypes = listOf("Videos" to Icons.Default.PlayArrow, "Images" to Icons.Default.Image, "Audio" to Icons.Default.MusicNote, "Articles" to Icons.Default.Article)
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         contentTypes.chunked(2).forEach { row ->
@@ -943,7 +945,7 @@ fun UnifiedFeedTab(
                         }
                     }
 
-                    Text("Lists", color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Text("Lists".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("History" to Icons.Default.History, "Liked" to Icons.Default.Favorite).forEach { (mode, icon) ->
                             val selected = localFilterMode == mode
@@ -976,7 +978,7 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Refresh Feed", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Refresh Feed".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
                     Button(
@@ -994,7 +996,7 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Random Discover", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Random Discover".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
                     Button(
@@ -1006,7 +1008,7 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Reset Feed", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Reset Feed".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
                 }
             },
@@ -1014,17 +1016,17 @@ fun UnifiedFeedTab(
                 Button(
                     onClick = { applySearchQuery(localSearchQuery); filterMode = localFilterMode; showSearchModal = false },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack), shape = RoundedCornerShape(8.dp)
-                ) { Text("Apply", fontWeight = FontWeight.Bold) }
+                ) { Text("Apply".tr, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = { showSearchModal = false }) { Text("Close", color = TextMuted) }
+                    TextButton(onClick = { showSearchModal = false }) { Text("Close".tr, color = TextMuted) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = { applySearchQuery(""); filterMode = "Live Feed"; showSearchModal = false },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
                         shape = RoundedCornerShape(8.dp)
-                    ) { Text("Clear All", fontWeight = FontWeight.Bold) }
+                    ) { Text("Clear All".tr, fontWeight = FontWeight.Bold) }
                 }
             }
         )
@@ -1117,7 +1119,7 @@ fun UnifiedFeedTab(
                         IconButton(onClick = { captureManager.takePhoto { file -> 
                             if (file != null) attachedFile = file
                             showCamera = false 
-                        } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo", tint = Color.White) }
+                        } }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.CameraAlt, contentDescription = "Take Photo".tr, tint = Color.White) }
                     }
                     
                     IconButton(
@@ -1129,11 +1131,11 @@ fun UnifiedFeedTab(
                             else if (countdown == 0) { countdown = 3 }
                         },
                         modifier = Modifier.size(70.dp).background(if (isRecordingVideo) Color.White else DestructiveRed, RoundedCornerShape(50))
-                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video", tint = if (isRecordingVideo) DestructiveRed else Color.White) }
+                    ) { Icon(if (isRecordingVideo) Icons.Default.Stop else Icons.Default.Videocam, contentDescription = "Record Video".tr, tint = if (isRecordingVideo) DestructiveRed else Color.White) }
                     
                     if (!isRecordingVideo && countdown == 0) {
-                        IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip", tint = TextLight) }
-                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White) }
+                        IconButton(onClick = { captureManager.flipCamera(lifecycleOwner, previewView) {} }, modifier = Modifier.size(70.dp).background(SurfaceDark, RoundedCornerShape(50))) { Icon(Icons.Default.FlipCameraAndroid, contentDescription = "Flip".tr, tint = TextLight) }
+                        IconButton(onClick = { showCamera = false }, modifier = Modifier.size(70.dp).background(DestructiveRed, RoundedCornerShape(50))) { Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = Color.White) }
                     }
                 }
             }
@@ -1142,11 +1144,11 @@ fun UnifiedFeedTab(
         if (!showCamera) {
             AlertDialog(
                 onDismissRequest = handleDismiss, containerColor = SurfaceDark,
-                title = { Text("Broadcast to Mesh", color = TextLight, fontWeight = FontWeight.Bold) },
+                title = { Text("Broadcast to Mesh".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
                         OutlinedTextField(
-                            value = postContent, onValueChange = { postContent = it }, placeholder = { Text("What's on your mind?") },
+                            value = postContent, onValueChange = { postContent = it }, placeholder = { Text("What's on your mind?".tr) },
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, focusedTextColor = TextLight, unfocusedTextColor = TextLight),
                             modifier = Modifier.fillMaxWidth().height(120.dp)
                         )
@@ -1156,7 +1158,7 @@ fun UnifiedFeedTab(
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                IconButton(onClick = { attachedFile = null }) { Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed) }
+                                IconButton(onClick = { attachedFile = null }) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed) }
                             }
                         }
 
@@ -1176,18 +1178,18 @@ fun UnifiedFeedTab(
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Attachments", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                        Text("Attachments".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results -> if (results[Manifest.permission.CAMERA] == true) showCamera = true }
                             IconButton(onClick = { 
                                 val hasCamera = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 val hasAudio = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 if (hasCamera && hasAudio) showCamera = true else permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
-                            }) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo", tint = AccentGreen) }
-                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) { Icon(Icons.Default.Add, contentDescription = "File", tint = AccentGreen) }
+                            }) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo".tr, tint = AccentGreen) }
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) { Icon(Icons.Default.Add, contentDescription = "File".tr, tint = AccentGreen) }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Privacy", color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                        Text("Privacy".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("public", "friends").forEach { priv ->
                                 FilterChip(selected = selectedPrivacy == priv, onClick = { selectedPrivacy = priv }, label = { Text(priv.replaceFirstChar { it.uppercase() }) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted))
@@ -1241,9 +1243,9 @@ fun UnifiedFeedTab(
                             handleDismiss()
                         },
                         enabled = postContent.isNotBlank() || attachedFile != null || sharedItem != null, colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                    ) { Text("Sign & Gossip", fontWeight = FontWeight.Bold) }
+                    ) { Text("Sign & Gossip".tr, fontWeight = FontWeight.Bold) }
                 },
-                dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel", color = TextMuted) } }
+                dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel".tr, color = TextMuted) } }
             )
         }
     }
@@ -1252,8 +1254,8 @@ fun UnifiedFeedTab(
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
             containerColor = SurfaceDark,
-            title = { Text("Reset Feed?", color = DestructiveRed, fontWeight = FontWeight.Bold) },
-            text = { Text("Are you sure you want to completely clear and rebuild your Live Feed from scratch? This will clear your current scroll history.", color = TextLight) },
+            title = { Text("Reset Feed?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to completely clear and rebuild your Live Feed from scratch? This will clear your current scroll history.".tr, color = TextLight) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -1266,10 +1268,10 @@ fun UnifiedFeedTab(
                         viewModel.forceResetFeed()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
-                ) { Text("Reset", fontWeight = FontWeight.Bold) }
+                ) { Text("Reset".tr, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
-                TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel", color = TextMuted) }
+                TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel".tr, color = TextMuted) }
             }
         )
     }
@@ -1318,7 +1320,7 @@ fun UnifiedFeedTab(
                             fontWeight = FontWeight.Bold
                         )
                     } else {
-                        Text("Fetching fresh content...", color = TextMuted, fontSize = 13.sp)
+                        Text("Fetching fresh content...".tr, color = TextMuted, fontSize = 13.sp)
                     }
                 }
             }
@@ -1363,8 +1365,8 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
             }
             Spacer(modifier = Modifier.width(12.dp))
             Column {
-                Text("NoSlop System", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                Text("Tutorial", color = Color(0xFFFFCA28), fontSize = 13.sp)
+                Text("NoSlop System".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Tutorial".tr, color = Color(0xFFFFCA28), fontSize = 13.sp)
             }
         }
 
@@ -1393,14 +1395,14 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                     0 -> {
                         Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Welcome to your Feed!", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("Welcome to your Feed!".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Swipe UP to move to the next item.", color = TextMuted, textAlign = TextAlign.Center)
+                        Text("Swipe UP to move to the next item.".tr, color = TextMuted, textAlign = TextAlign.Center)
                     }
                     1 -> {
-                        Text("Navigation Menu", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("Navigation Menu".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.", color = TextMuted, textAlign = TextAlign.Center)
+                        Text("Use the bottom bar to switch between Feed, DMs, Alerts, HUBs, and Settings.".tr, color = TextMuted, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(48.dp))
                         Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                     }
@@ -1411,9 +1413,9 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 48.dp)
                             ) {
                                 Column(horizontalAlignment = Alignment.End) {
-                                    Text("Engage & React", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                                    Text("Engage & React".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                                     Spacer(modifier = Modifier.height(16.dp))
-                                    Text("Use the buttons on the right.", color = TextMuted, textAlign = TextAlign.End)
+                                    Text("Use the buttons on the right.".tr, color = TextMuted, textAlign = TextAlign.End)
                                 }
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Icon(Icons.Default.ArrowForward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
@@ -1424,22 +1426,22 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.ArrowUpward, contentDescription = null, tint = Color(0xFFFFCA28), modifier = Modifier.size(48.dp))
                             Spacer(modifier = Modifier.height(48.dp))
-                            Text("Top Controls", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            Text("Top Controls".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text("Check your notifications (top-left) or search and filter your feed (top-right).", color = TextMuted, textAlign = TextAlign.Center)
+                            Text("Check your notifications (top-left) or search and filter your feed (top-right).".tr, color = TextMuted, textAlign = TextAlign.Center)
                         }
                     }
                     4 -> {
-                        Text("Broadcast to Mesh", color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                        Text("Broadcast to Mesh".tr, color = TextLight, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Tap the floating '+' button to broadcast your own posts to the mesh network!", color = TextMuted, textAlign = TextAlign.Center)
+                        Text("Tap the floating '+' button to broadcast your own posts to the mesh network!".tr, color = TextMuted, textAlign = TextAlign.Center)
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Swipe up to start exploring.", color = Color(0xFFFFCA28), fontWeight = FontWeight.Bold)
+                        Text("Swipe up to start exploring.".tr, color = Color(0xFFFFCA28), fontWeight = FontWeight.Bold)
                     }
                 }
                 
                 Spacer(modifier = Modifier.height(40.dp))
-                Text("Swipe UP to continue", color = TextMuted, fontSize = 12.sp)
+                Text("Swipe UP to continue".tr, color = TextMuted, fontSize = 12.sp)
                 
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 32.dp),

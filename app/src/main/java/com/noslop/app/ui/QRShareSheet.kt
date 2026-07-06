@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -119,13 +121,13 @@ fun QRShareSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "My Contact Card",
+                        text = "My Contact Card".tr,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextLight
                     )
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted)
+                        Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = TextMuted)
                     }
                 }
 
@@ -141,12 +143,12 @@ fun QRShareSheet(
                     if (qrBitmap != null) {
                         Image(
                             bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "QR Code of local identity",
+                            contentDescription = "QR Code of local identity".tr,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Fit
                         )
                     } else {
-                        Text("Failed to generate QR Code", color = DestructiveRed)
+                        Text("Failed to generate QR Code".tr, color = DestructiveRed)
                     }
                 }
 
@@ -163,7 +165,7 @@ fun QRShareSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Companion nodes can scan this QR code or use your raw identity string to handshake and synchronize with you over Tor SOCKS5.",
+                    text = "Companion nodes can scan this QR code or use your raw identity string to handshake and synchronize with you over Tor SOCKS5.".tr,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted,
                     textAlign = TextAlign.Center,
@@ -179,9 +181,9 @@ fun QRShareSheet(
                     OutlinedButton(
                         onClick = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("NoSlop Identity String", qrPayload)
+                            val clip = ClipData.newPlainText("NoSlop Identity String".tr, qrPayload)
                             clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Identity copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Identity copied to clipboard!"), Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
                         border = BorderStroke(1.dp, AccentGreen),
@@ -193,7 +195,7 @@ fun QRShareSheet(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Copy Raw", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Copy Raw".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -202,7 +204,7 @@ fun QRShareSheet(
                             if (qrBitmap != null) {
                                 shareQrImage(context, qrBitmap, handle)
                             } else {
-                                Toast.makeText(context, "QR code not available", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("QR code not available"), Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.weight(1f).onGloballyPositioned { shareRect = it.boundsInRoot() },
@@ -217,7 +219,7 @@ fun QRShareSheet(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Share", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Share".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -263,6 +265,6 @@ private fun shareQrImage(context: Context, bitmap: Bitmap, handle: String) {
         }
         context.startActivity(Intent.createChooser(shareIntent, "Share Contact Card"))
     } catch (e: Exception) {
-        Toast.makeText(context, "Failed to share QR image", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Failed to share QR image"), Toast.LENGTH_SHORT).show()
     }
 }

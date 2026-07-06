@@ -1,5 +1,7 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -98,15 +100,15 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(64.dp))
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Contact Not Found", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    Text("Contact Not Found".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("You can only chat with trusted peers. Add this user by scanning their QR code to establish a P2P connection.", color = TextMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    Text("You can only chat with trusted peers. Add this user by scanning their QR code to establish a P2P connection.".tr, color = TextMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     Spacer(modifier = Modifier.height(24.dp))
                     Button(
                         onClick = { viewModel.selectChatPeer(null) },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) {
-                        Text("Back to Feed", fontWeight = FontWeight.Bold)
+                        Text("Back to Feed".tr, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -120,7 +122,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "DMs & Contacts",
+                    text = "DMs & Contacts".tr,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = TextLight
@@ -155,7 +157,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("My ID", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("My ID".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Button(
@@ -172,7 +174,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Peer", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Add Peer".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -189,7 +191,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 if (pendingRequests.isNotEmpty()) {
                     item {
                         Text(
-                            text = "PENDING REQUESTS",
+                            text = "PENDING REQUESTS".tr,
                             style = MaterialTheme.typography.labelSmall,
                             color = AccentGreen,
                             fontWeight = FontWeight.Bold,
@@ -204,7 +206,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 if (contacts.isNotEmpty()) {
                     item {
                         Text(
-                            text = "MY CONTACTS",
+                            text = "MY CONTACTS".tr,
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontWeight = FontWeight.Bold,
@@ -225,8 +227,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Icon(Icons.Default.AccountCircle, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
                                 Spacer(modifier = Modifier.height(16.dp))
-                                Text("No contacts yet.", color = TextMuted)
-                                Text("Scan a friend's QR card to connect.", color = AccentGreen, fontWeight = FontWeight.Bold)
+                                Text("No contacts yet.".tr, color = TextMuted)
+                                Text("Scan a friend's QR card to connect.".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

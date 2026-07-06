@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -41,7 +43,7 @@ fun HaiNetTab() {
     ) {
         Icon(
             imageVector = Icons.Default.Hub,
-            contentDescription = "HUBs",
+            contentDescription = "HUBs".tr,
             tint = AccentGreen,
             modifier = Modifier.size(100.dp)
         )
@@ -49,14 +51,14 @@ fun HaiNetTab() {
         Spacer(modifier = Modifier.height(32.dp))
         
         Text(
-            text = "HUBs",
+            text = "HUBs".tr,
             style = MaterialTheme.typography.headlineLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold
         )
         
         Text(
-            text = "HAI-Net (coming soon)",
+            text = "HAI-Net (coming soon)".tr,
             style = MaterialTheme.typography.titleMedium,
             color = AccentGreen.copy(alpha = 0.8f),
             fontWeight = FontWeight.Medium
@@ -65,7 +67,7 @@ fun HaiNetTab() {
         Spacer(modifier = Modifier.height(16.dp))
         
         Text(
-            text = "The automated multi device home lab back end, especially for creators that have lots of media to share!",
+            text = "The automated multi device home lab back end, especially for creators that have lots of media to share!".tr,
             style = MaterialTheme.typography.bodyLarge,
             color = TextMuted,
             textAlign = TextAlign.Center
@@ -81,7 +83,7 @@ fun HaiNetTab() {
             colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
             modifier = Modifier.fillMaxWidth().height(56.dp)
         ) {
-            Text("View Repository", fontWeight = FontWeight.Bold)
+            Text("View Repository".tr, fontWeight = FontWeight.Bold)
         }
     }
 }

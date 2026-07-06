@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -86,10 +88,10 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
             Text(
-                text = "Settings",
+                text = "Settings".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -108,12 +110,12 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         border = BorderStroke(1.dp, DestructiveRed)
                     ) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = DestructiveRed, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Default.Warning, contentDescription = "Warning".tr, tint = DestructiveRed, modifier = Modifier.size(32.dp))
                             Spacer(modifier = Modifier.width(16.dp))
                             Column {
-                                Text("SECURITY WARNING", color = DestructiveRed, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                Text("SECURITY WARNING".tr, color = DestructiveRed, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text("Hardware-backed Keystore is unavailable on this device. Your identity and private keys are currently stored in PLAINTEXT. Do not use this device for sensitive communication.", color = TextLight, style = MaterialTheme.typography.bodySmall)
+                                Text("Hardware-backed Keystore is unavailable on this device. Your identity and private keys are currently stored in PLAINTEXT. Do not use this device for sensitive communication.".tr, color = TextLight, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -147,7 +149,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         if (bitmap != null) {
                             androidx.compose.foundation.Image(
                                 bitmap = bitmap,
-                                contentDescription = "Profile Avatar",
+                                contentDescription = "Profile Avatar".tr,
                                 modifier = Modifier.fillMaxSize(),
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
                             )
@@ -162,13 +164,13 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             }
 
             item {
-                Text("PROFILE", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text("PROFILE".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = displayName,
                     onValueChange = { displayName = it },
-                    label = { Text("Display Name") },
+                    label = { Text("Display Name".tr) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                         focusedTextColor = TextLight, unfocusedTextColor = TextLight
@@ -180,7 +182,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 OutlinedTextField(
                     value = bio,
                     onValueChange = { bio = it },
-                    label = { Text("Bio") },
+                    label = { Text("Bio".tr) },
                     maxLines = 3,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
@@ -193,12 +195,12 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
             // ────────────────── CONTENT SOURCES ──────────────────
             item {
-                Text("CONTENT SOURCES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text("CONTENT SOURCES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val activeSources = sources.filter { it.isActive }
                 if (activeSources.isEmpty()) {
-                    Text("No active sources.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Text("No active sources.".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 } else {
                     Text(
                         text = activeSources.joinToString(", ") { it.title },
@@ -214,14 +216,14 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     border = BorderStroke(1.dp, BorderSubtle),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Manage Sources", fontWeight = FontWeight.Bold)
+                    Text("Manage Sources".tr, fontWeight = FontWeight.Bold)
                 }
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
             // ────────────────── CATEGORIES ──────────────────
             item {
-                Text("CATEGORIES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                Text("CATEGORIES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             }
 
             items(SourceLibrary.selectableCategories) { category ->
@@ -254,7 +256,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             if (localInterests.contains("Music")) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("MUSIC GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("MUSIC GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allMusicGenres) { genre ->
                     val isSelected = localMusicGenres.contains(genre)
@@ -288,7 +290,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             run {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("VIDEO GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("VIDEO GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allVideoGenres) { genre ->
                     val isSelected = localVideoGenres.contains(genre)
@@ -320,13 +322,13 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             // ────────────────── NEGATIVE KEYWORDS ──────────────────
             item {
                 Spacer(modifier = Modifier.height(24.dp))
-                Text("FILTERING", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text("FILTERING".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 OutlinedTextField(
                     value = negativeKeywords,
                     onValueChange = { negativeKeywords = it },
-                    label = { Text("Negative Keywords (comma separated)") },
+                    label = { Text("Negative Keywords (comma separated)".tr) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                         focusedTextColor = TextLight, unfocusedTextColor = TextLight
@@ -374,14 +376,14 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     OutlinedTextField(
                         value = channelSearchQuery,
                         onValueChange = { channelSearchQuery = it },
-                        label = { Text("Search channel names...") },
+                        label = { Text("Search channel names...".tr) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                         trailingIcon = {
                             if (isSearchingChannels) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
                             } else if (channelSearchQuery.isNotBlank()) {
                                 IconButton(onClick = { channelSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted)
+                                    Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted)
                                 }
                             }
                         },
@@ -401,7 +403,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
                     if (combinedSuggestions.isNotEmpty()) {
                         Text(
-                            "SUGGESTED CHANNELS & CREATORS",
+                            "SUGGESTED CHANNELS & CREATORS".tr,
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontWeight = FontWeight.Bold,
@@ -456,8 +458,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 OutlinedTextField(
                     value = creatorKeywords,
                     onValueChange = { creatorKeywords = it },
-                    label = { Text("Creators / channels (comma separated)") },
-                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
+                    label = { Text("Creators / channels (comma separated)".tr) },
+                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...".tr) },
                     minLines = 2,
                     maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -491,7 +493,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         value = displayLanguage,
                         onValueChange = { },
                         readOnly = true,
-                        label = { Text("Content Languages") },
+                        label = { Text("Content Languages".tr) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
@@ -585,7 +587,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
             modifier = Modifier.fillMaxWidth().padding(16.dp).height(50.dp)
         ) {
-            Text("Save Settings", fontWeight = FontWeight.Bold)
+            Text("Save Settings".tr, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -611,7 +613,7 @@ fun ManageSourcesDialog(
         onDismissRequest = onDismiss,
         containerColor = PrimaryBlack,
         title = {
-            Text("Manage Sources", color = AccentGreen, fontWeight = FontWeight.Bold)
+            Text("Manage Sources".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.8f)) {
@@ -680,7 +682,7 @@ fun ManageSourcesDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = AccentGreen)
+                Text("Done".tr, color = AccentGreen)
             }
         }
     )
@@ -688,11 +690,11 @@ fun ManageSourcesDialog(
     if (showApiWarningFor != null) {
         AlertDialog(
             onDismissRequest = { showApiWarningFor = null },
-            title = { Text("API Key Required", color = AccentGreen) },
+            title = { Text("API Key Required".tr, color = AccentGreen) },
             text = { Text("To enable ${showApiWarningFor}, you must first configure its API key in Settings -> API Keys.", color = TextLight) },
             confirmButton = {
                 TextButton(onClick = { showApiWarningFor = null }) {
-                    Text("OK", color = AccentGreen)
+                    Text("OK".tr, color = AccentGreen)
                 }
             },
             containerColor = SurfaceDark

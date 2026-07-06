@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
@@ -143,13 +145,13 @@ fun FullScreenFeedCard(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Default.Download, contentDescription = "Download", tint = AccentGreen, modifier = Modifier.size(48.dp))
+                                        Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
                                         if (progress > 0) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
                                             Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
                                         } else {
-                                            Text("Tap to Download Video", color = TextLight, fontWeight = FontWeight.Bold)
+                                            Text("Tap to Download Video".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -317,7 +319,7 @@ fun FullScreenFeedCard(
                     ) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Community Flagged", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Community Flagged".tr, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -398,13 +400,13 @@ fun FullScreenMeshCardV2(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Default.Download, contentDescription = "Download", tint = AccentGreen, modifier = Modifier.size(48.dp))
+                                        Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
                                         if (progress > 0) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
                                             Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
                                         } else {
-                                            Text("Tap to Download Video", color = TextLight, fontWeight = FontWeight.Bold)
+                                            Text("Tap to Download Video".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }
                                     }
                                 }
@@ -449,7 +451,7 @@ fun FullScreenMeshCardV2(
                                 .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
                                 .padding(32.dp)
                         ) {
-                            Icon(Icons.Default.InsertDriveFile, contentDescription = "File", tint = AccentGreen, modifier = Modifier.size(64.dp))
+                            Icon(Icons.Default.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(64.dp))
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(post.clearnetTitle ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(modifier = Modifier.height(16.dp))
@@ -460,13 +462,13 @@ fun FullScreenMeshCardV2(
                                         if (rawMediaId != null) {
                                             val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId)
                                             val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, rawMediaId, meta?.filename ?: post.clearnetTitle ?: rawMediaId)
-                                            if (saved) Toast.makeText(context, "Saved to Downloads", Toast.LENGTH_SHORT).show()
-                                            else Toast.makeText(context, "Failed to save file", Toast.LENGTH_SHORT).show()
+                                            if (saved) Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), Toast.LENGTH_SHORT).show()
+                                            else Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Failed to save file"), Toast.LENGTH_SHORT).show()
                                         }
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                 ) {
-                                    Text("Save to Device", fontWeight = FontWeight.Bold)
+                                    Text("Save to Device".tr, fontWeight = FontWeight.Bold)
                                 }
                             } else if (isDownloading) {
                                 LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(120.dp))
@@ -488,7 +490,7 @@ fun FullScreenMeshCardV2(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Download File", fontWeight = FontWeight.Bold)
+                                    Text("Download File".tr, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -548,7 +550,7 @@ fun FullScreenMeshCardV2(
                             if (bitmap != null) {
                                 androidx.compose.foundation.Image(
                                     bitmap = bitmap,
-                                    contentDescription = "Avatar",
+                                    contentDescription = "Avatar".tr,
                                     modifier = Modifier.size(24.dp).clip(CircleShape),
                                     contentScale = ContentScale.Crop
                                 )
@@ -575,7 +577,7 @@ fun FullScreenMeshCardV2(
                                             Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                                 androidx.compose.foundation.Image(
                                                     bitmap = bitmap,
-                                                    contentDescription = "Avatar",
+                                                    contentDescription = "Avatar".tr,
                                                     modifier = Modifier.size(80.dp).clip(CircleShape),
                                                     contentScale = ContentScale.Crop
                                                 )
@@ -583,15 +585,15 @@ fun FullScreenMeshCardV2(
                                             Spacer(modifier = Modifier.height(12.dp))
                                         }
                                     }
-                                    Text("Tripcode", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Tripcode".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Text(".${post.authorTripcode}", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
                                     Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Public Key", color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Public Key".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Text(post.authorPublicKeyB64.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
                                 }
                             },
                             confirmButton = {
-                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close", color = AccentGreen) }
+                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close".tr, color = AccentGreen) }
                             },
                             containerColor = SurfaceDark
                         )
@@ -670,7 +672,7 @@ fun FullScreenMeshCardV2(
                     ) {
                         Icon(Icons.Default.Warning, contentDescription = null, tint = Color.Yellow, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Community Flagged", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Community Flagged".tr, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -679,8 +681,8 @@ fun FullScreenMeshCardV2(
         if (showDeleteConfirm) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirm = false },
-                title = { Text("Delete Broadcast", color = TextLight, fontWeight = FontWeight.Bold) },
-                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.", color = TextMuted) },
+                title = { Text("Delete Broadcast".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = { Text("This will permanently delete this post from your device and broadcast a deletion signal to the mesh. This action cannot be undone.".tr, color = TextMuted) },
                 confirmButton = {
                     Button(
                         onClick = { 
@@ -688,10 +690,10 @@ fun FullScreenMeshCardV2(
                             showDeleteConfirm = false 
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                    ) { Text("Delete", color = Color.White, fontWeight = FontWeight.Bold) }
+                    ) { Text("Delete".tr, color = Color.White, fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = AccentGreen) }
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel".tr, color = AccentGreen) }
                 },
                 containerColor = SurfaceDark
             )

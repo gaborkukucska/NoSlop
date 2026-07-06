@@ -78,6 +78,11 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // the user left off, even after a cold start.
         com.noslop.app.ui.components.PlaybackPositionStore.init(this)
 
+        repositoryScope.launch {
+            val appLang = repository.getAppLanguage()
+            com.noslop.app.util.LanguageManager.init(this@NoSlopApp, appLang)
+        }
+
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
 

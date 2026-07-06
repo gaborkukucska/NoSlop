@@ -1,6 +1,8 @@
 // app/src/main/java/com/noslop/app/ui/components/CommentsBottomSheet.kt
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -66,7 +68,7 @@ fun CommentsBottomSheet(
                 .padding(bottom = 16.dp)
         ) {
             Text(
-                "Mesh Comments",
+                "Mesh Comments".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -82,7 +84,7 @@ fun CommentsBottomSheet(
                 if (comments.isEmpty()) {
                     item {
                         Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No comments yet. Be the first to gossip!", color = TextMuted)
+                            Text("No comments yet. Be the first to gossip!".tr, color = TextMuted)
                         }
                     }
                 }
@@ -100,8 +102,8 @@ fun CommentsBottomSheet(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Replying to comment...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                    Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
+                    Text("Replying to comment...".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.Close, contentDescription = "Cancel reply".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
                 }
             }
 
@@ -156,7 +158,7 @@ fun CommentsBottomSheet(
                     enabled = commentText.isNotBlank() || attachedGifFile != null,
                     modifier = Modifier.background(AccentGreen, CircleShape)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post".tr, tint = PrimaryBlack)
                 }
             }
 
@@ -170,14 +172,14 @@ fun CommentsBottomSheet(
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "Attachment Ready",
+                        "Attachment Ready".tr,
                         color = TextLight,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.weight(1f)
                     )
                     Icon(
                         Icons.Default.Close,
-                        contentDescription = "Remove attachment",
+                        contentDescription = "Remove attachment".tr,
                         tint = TextMuted,
                         modifier = Modifier.size(16.dp).clickable { attachedGifFile = null }
                     )
@@ -228,7 +230,7 @@ fun CommentItem(
                 if (bitmap != null) {
                     androidx.compose.foundation.Image(
                         bitmap = bitmap,
-                        contentDescription = "Avatar",
+                        contentDescription = "Avatar".tr,
                         modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -258,7 +260,7 @@ fun CommentItem(
                     .padding(4.dp)
             ) {
                 Text(
-                    text = "Replying to previous comment...",
+                    text = "Replying to previous comment...".tr,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )
@@ -298,7 +300,7 @@ fun CommentItem(
             if (canRender) {
                 coil.compose.AsyncImage(
                     model = resolvedMediaUrl,
-                    contentDescription = "Comment Media",
+                    contentDescription = "Comment Media".tr,
                     modifier = Modifier
                         .padding(top = 8.dp)
                         .fillMaxWidth()
@@ -330,14 +332,14 @@ fun CommentItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Gif, contentDescription = "Download GIF", tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        Icon(Icons.Default.Gif, contentDescription = "Download GIF".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         if (progress > 0) {
                             LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(100.dp))
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
                         } else {
-                            Text("Tap to Download GIF", color = TextLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Tap to Download GIF".tr, color = TextLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -352,14 +354,14 @@ fun CommentItem(
         ) {
             Icon(
                 Icons.Default.AddReaction,
-                contentDescription = "React",
+                contentDescription = "React".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(16.dp).clickable { showReactionPicker = true }
             )
             Spacer(modifier = Modifier.width(12.dp))
             Icon(
                 Icons.AutoMirrored.Filled.Reply,
-                contentDescription = "Reply",
+                contentDescription = "Reply".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(16.dp).clickable { onReply(comment.id) }
             )
@@ -425,13 +427,13 @@ fun CommentItem(
                 }
                 Icon(
                     Icons.Default.Close, 
-                    contentDescription = "Close", 
+                    contentDescription = "Close".tr, 
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
                 )
                 Icon(
                     Icons.AutoMirrored.Filled.Reply,
-                    contentDescription = "Reply",
+                    contentDescription = "Reply".tr,
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { 
                         onReply(comment.id)

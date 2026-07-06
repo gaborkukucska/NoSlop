@@ -23,8 +23,10 @@ import com.noslop.app.ui.theme.*
 import androidx.compose.ui.graphics.Color
 import com.noslop.app.ui.*
 import com.noslop.app.ui.components.*
+import com.noslop.app.util.tr // Added translation extension
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+
 @Composable
 fun SettingsTab(viewModel: NoSlopViewModel) {
     val torState by viewModel.torReadyState.collectAsState()
@@ -49,7 +51,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
-                text = "System Settings",
+                text = "System Settings".tr,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = TextLight,
@@ -69,7 +71,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Update Available", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
                                         "Version ${info.latestVersion} is out (you have ${info.currentVersion}). Tap to download the new APK.",
                                         style = MaterialTheme.typography.bodySmall,
@@ -87,7 +89,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
                                 ) {
-                                    Text("Download")
+                                    Text("Download".tr)
                                 }
                             }
                         }
@@ -105,8 +107,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Icon(Icons.Default.Security, contentDescription = null, tint = DestructiveRed)
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column {
-                                    Text("Security Warning", fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text("Hardware-backed encryption is unavailable. Your keys are stored in plaintext.", style = MaterialTheme.typography.bodySmall, color = TextLight)
+                                    Text("Security Warning".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Hardware-backed encryption is unavailable. Your keys are stored in plaintext.".tr, style = MaterialTheme.typography.bodySmall, color = TextLight)
                                 }
                             }
                         }
@@ -121,7 +123,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "TOR ROUTING STATUS",
+                                text = "TOR ROUTING STATUS".tr,
                                 style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                                 color = TextMuted,
                                 fontWeight = FontWeight.Bold
@@ -163,7 +165,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
                                     shape = RoundedCornerShape(4.dp)
                                 ) {
-                                    Text("Test Tor", fontWeight = FontWeight.Bold)
+                                    Text("Test Tor".tr, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -172,7 +174,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "ACCOUNT & PREFERENCES",
+                        text = "ACCOUNT & PREFERENCES".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -184,6 +186,57 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         border = BorderStroke(1.dp, BorderSubtle)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
+
+                            // APP LANGUAGE SELECTOR
+                            val appLanguage by viewModel.appLanguage.collectAsState()
+                            val availableLanguages = listOf("en" to "English", "hu" to "Magyar")
+                            var expandedLang by remember { mutableStateOf(false) }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("App Language".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Change the interface language.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { expandedLang = true },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                                        border = BorderStroke(1.dp, BorderSubtle),
+                                        contentPadding = PaddingValues(horizontal = 12.dp)
+                                    ) {
+                                        Text(availableLanguages.find { it.first == appLanguage }?.second ?: appLanguage)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = expandedLang,
+                                        onDismissRequest = { expandedLang = false },
+                                        modifier = Modifier.background(SurfaceDark)
+                                    ) {
+                                        availableLanguages.forEach { (code, name) ->
+                                            DropdownMenuItem(
+                                                text = { Text(name, color = TextLight) },
+                                                onClick = {
+                                                    viewModel.updateAppLanguage(code)
+                                                    expandedLang = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
                             Row(
                                 modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -192,7 +245,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Profile & Preferences", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Profile & Preferences".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
@@ -207,7 +260,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.FilterAlt, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Mesh Filters", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Mesh Filters".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
@@ -221,9 +274,9 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Send Chat on Enter", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Send Chat on Enter".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
-                                        "Pressing enter on the on-screen keyboard sends the message immediately.",
+                                        "Pressing enter on the on-screen keyboard sends the message immediately.".tr,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted
                                     )
@@ -245,7 +298,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "MEDIA & PRIVACY",
+                        text = "MEDIA & PRIVACY".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -262,7 +315,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Enable Media", color = TextLight, fontWeight = FontWeight.Bold)
+                                Text("Enable Media".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                 Switch(
                                     checked = mediaSettings.enabled,
                                     onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(enabled = it)) },
@@ -278,8 +331,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Background Playback", color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text("Keep audio/video playing while browsing other tabs.", color = TextMuted, fontSize = 12.sp)
+                                    Text("Background Playback".tr, color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Keep audio/video playing while browsing other tabs.".tr, color = TextMuted, fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = mediaSettings.backgroundPlayEnabled,
@@ -293,10 +346,10 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
-                                ) {
+                                    ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                        Text("Play Outside App", color = TextLight, fontSize = 14.sp)
-                                        Text("Continue playing when NoSlop is minimized.", color = TextMuted, fontSize = 12.sp)
+                                        Text("Play Outside App".tr, color = TextLight, fontSize = 14.sp)
+                                        Text("Continue playing when NoSlop is minimized.".tr, color = TextMuted, fontSize = 12.sp)
                                     }
                                     Switch(
                                         checked = mediaSettings.backgroundPlayOutsideApp,
@@ -327,7 +380,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Auto-download Friends", color = TextMuted, fontSize = 14.sp)
+                                    Text("Auto-download Friends".tr, color = TextMuted, fontSize = 14.sp)
                                     Switch(
                                         checked = mediaSettings.autoDownloadFriends,
                                         onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadFriends = it)) },
@@ -339,7 +392,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Auto-download Private", color = TextMuted, fontSize = 14.sp)
+                                    Text("Auto-download Private".tr, color = TextMuted, fontSize = 14.sp)
                                     Switch(
                                         checked = mediaSettings.autoDownloadPrivate,
                                         onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPrivate = it)) },
@@ -359,9 +412,9 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                        Text("Opt-in Transparency", fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text("Opt-in Transparency".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                         Text(
-                                            "When enabled, community-flagged content shows a warning badge instead of a blocking overlay, letting you decide what to view.",
+                                            "When enabled, community-flagged content shows a warning badge instead of a blocking overlay, letting you decide what to view.".tr,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = TextMuted
                                         )
@@ -384,7 +437,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "CONTENT AGGREGATOR",
+                        text = "CONTENT AGGREGATOR".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -404,9 +457,9 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Clearnet Aggregator", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Clearnet Aggregator".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
-                                        "Automatically fetch content from RSS feeds and public APIs to mix with your mesh timeline.",
+                                        "Automatically fetch content from RSS feeds and public APIs to mix with your mesh timeline.".tr,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted
                                     )
@@ -433,7 +486,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.VpnKey, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("API Keys", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("API Keys".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
@@ -443,7 +496,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "SYSTEM & NOTIFICATIONS",
+                        text = "SYSTEM & NOTIFICATIONS".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -462,9 +515,9 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Foreground Service", fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
-                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media playback.",
+                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media playback.".tr,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted
                                     )
@@ -485,14 +538,14 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                             val notificationSettings by viewModel.notificationSettings.collectAsState()
                             
-                            Text("Notifications", color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                            Text("Notifications".tr, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                             
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Direct Messages", color = TextLight, fontSize = 14.sp)
+                                Text("Direct Messages".tr, color = TextLight, fontSize = 14.sp)
                                 Switch(
                                     checked = notificationSettings.dms,
                                     onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(dms = it)) },
@@ -505,7 +558,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Comments & Replies", color = TextLight, fontSize = 14.sp)
+                                Text("Comments & Replies".tr, color = TextLight, fontSize = 14.sp)
                                 Switch(
                                     checked = notificationSettings.comments,
                                     onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(comments = it)) },
@@ -518,7 +571,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Mentions", color = TextLight, fontSize = 14.sp)
+                                Text("Mentions".tr, color = TextLight, fontSize = 14.sp)
                                 Switch(
                                     checked = notificationSettings.mentions,
                                     onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(mentions = it)) },
@@ -531,7 +584,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("System Alerts", color = TextLight, fontSize = 14.sp)
+                                Text("System Alerts".tr, color = TextLight, fontSize = 14.sp)
                                 Switch(
                                     checked = notificationSettings.system,
                                     onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(system = it)) },
@@ -544,7 +597,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "DEVELOPER",
+                        text = "DEVELOPER".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -566,8 +619,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Icon(Icons.Default.Build, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text("Structured Debug Logs", fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text("Examine packet drops, network, parser info.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                    Text("Structured Debug Logs".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Examine packet drops, network, parser info.".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
                                 }
                             }
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
@@ -591,8 +644,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Icon(Icons.Default.BugReport, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text("File a Bug Report", fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text("Report issues or request features via GitHub.", style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                    Text("File a Bug Report".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Report issues or request features via GitHub.".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
                                 }
                             }
                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = TextMuted)
@@ -602,7 +655,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                 item {
                     Text(
-                        text = "DATA & BACKUP",
+                        text = "DATA & BACKUP".tr,
                         style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
                         color = TextMuted,
                         fontWeight = FontWeight.Bold,
@@ -647,7 +700,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Export Profile (Zip)", fontWeight = FontWeight.Bold)
+                                Text("Export Profile (Zip)".tr, fontWeight = FontWeight.Bold)
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
@@ -663,7 +716,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Import Profile (Zip)", fontWeight = FontWeight.Bold)
+                                Text("Import Profile (Zip)".tr, fontWeight = FontWeight.Bold)
                             }
 
                             Spacer(modifier = Modifier.height(24.dp))
@@ -676,12 +729,12 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     title = { Text(if (isExporting) "Export Backup" else "Import Backup") },
                                     text = {
                                         Column {
-                                            Text("Please enter your Word Cloud password to encrypt/decrypt the backup.", color = TextMuted)
+                                            Text("Please enter your Word Cloud password to encrypt/decrypt the backup.".tr, color = TextMuted)
                                             Spacer(modifier = Modifier.height(8.dp))
                                             OutlinedTextField(
                                                 value = mnemonicInput,
                                                 onValueChange = { mnemonicInput = it },
-                                                label = { Text("Word Cloud (BIP39 Mnemonic)") },
+                                                label = { Text("Word Cloud (BIP39 Mnemonic)".tr) },
                                                 colors = OutlinedTextFieldDefaults.colors(
                                                     focusedBorderColor = AccentGreen,
                                                     unfocusedBorderColor = BorderSubtle,
@@ -708,7 +761,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     },
                                     dismissButton = {
                                         TextButton(onClick = { showMnemonicDialog = false }) {
-                                            Text("Cancel", color = TextMuted)
+                                            Text("Cancel".tr, color = TextMuted)
                                         }
                                     },
                                     containerColor = SurfaceDark,
@@ -724,19 +777,19 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(24.dp))
                                             Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Destructive Import", color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                            Text("Destructive Import".tr, color = DestructiveRed, fontWeight = FontWeight.Bold)
                                         }
                                     },
                                     text = {
                                         Column {
                                             Text(
-                                                "This will permanently wipe your current identity, keys, contacts, and all data. " +
+                                                "This will permanently wipe your current identity, keys, contacts, and all data. ".tr +
                                                 "The selected backup will be imported in its place.",
                                                 color = TextMuted
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
                                             Text(
-                                                "The app will restart automatically after import.",
+                                                "The app will restart automatically after import.".tr,
                                                 color = TextLight,
                                                 fontWeight = FontWeight.Bold
                                             )
@@ -751,19 +804,18 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                                     if (!success) {
                                                         importStatus = "Import failed. Check password and file."
                                                     }
-                                                    // On success the app restarts automatically
                                                 }
                                                 mnemonicInput = ""
                                                 pendingImportUri = null
                                             },
                                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
                                         ) {
-                                            Text("Wipe & Import", fontWeight = FontWeight.Bold)
+                                            Text("Wipe & Import".tr, fontWeight = FontWeight.Bold)
                                         }
                                     },
                                     dismissButton = {
                                         TextButton(onClick = { showImportWarning = false; pendingImportUri = null }) {
-                                            Text("Cancel", color = AccentGreen)
+                                            Text("Cancel".tr, color = AccentGreen)
                                         }
                                     },
                                     containerColor = SurfaceDark
@@ -782,14 +834,14 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             ) {
                                 Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("FACTORY RESET", fontWeight = FontWeight.Bold)
+                                Text("FACTORY RESET".tr, fontWeight = FontWeight.Bold)
                             }
 
                             if (showFactoryResetConfirm) {
                                 AlertDialog(
                                     onDismissRequest = { showFactoryResetConfirm = false },
-                                    title = { Text("Nuclear Option") },
-                                    text = { Text("This will wipe all your keys, contacts, settings, and feed data. It cannot be undone without a backup mnemonic. Are you sure?", color = TextMuted) },
+                                    title = { Text("Nuclear Option".tr) },
+                                    text = { Text("This will wipe all your keys, contacts, settings, and feed data. It cannot be undone without a backup mnemonic. Are you sure?".tr, color = TextMuted) },
                                     confirmButton = {
                                         TextButton(
                                             onClick = {
@@ -797,12 +849,12 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                                 viewModel.factoryReset()
                                             }
                                         ) {
-                                            Text("WIPE EVERYTHING", color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                            Text("WIPE EVERYTHING".tr, color = DestructiveRed, fontWeight = FontWeight.Bold)
                                         }
                                     },
                                     dismissButton = {
                                         TextButton(onClick = { showFactoryResetConfirm = false }) {
-                                            Text("Cancel", color = AccentGreen)
+                                            Text("Cancel".tr, color = AccentGreen)
                                         }
                                     },
                                     containerColor = SurfaceDark,

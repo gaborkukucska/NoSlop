@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -83,7 +85,7 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
                     )
                     if (peer.isTrusted) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted", tint = AccentGreen, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted".tr, tint = AccentGreen, modifier = Modifier.size(14.dp))
                     }
                 }
 
@@ -101,11 +103,11 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
             Row {
                 if (!peer.isTrusted) {
                     IconButton(onClick = { viewModel.togglePeerTrust(peer) }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer", tint = AccentGreen)
+                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer".tr, tint = AccentGreen)
                     }
                 }
                 IconButton(onClick = { showContactCard = true }) {
-                    Icon(Icons.Default.Info, contentDescription = "Contact Info", tint = TextMuted)
+                    Icon(Icons.Default.Info, contentDescription = "Contact Info".tr, tint = TextMuted)
                 }
             }
         }
@@ -247,7 +249,7 @@ private fun ContactCardDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Trusted Contact",
+                            text = "Trusted Contact".tr,
                             color = AccentGreen,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -269,7 +271,7 @@ private fun ContactCardDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Pending Trust",
+                            text = "Pending Trust".tr,
                             color = DestructiveRed,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -288,7 +290,7 @@ private fun ContactCardDialog(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "ONION ADDRESS",
+                        text = "ONION ADDRESS".tr,
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -320,7 +322,7 @@ private fun ContactCardDialog(
                         border = BorderStroke(1.dp, BorderSubtle),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                     ) {
-                        Text("Close", fontWeight = FontWeight.Bold)
+                        Text("Close".tr, fontWeight = FontWeight.Bold)
                     }
 
                     // Delete button
@@ -339,7 +341,7 @@ private fun ContactCardDialog(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Remove", fontWeight = FontWeight.Bold)
+                        Text("Remove".tr, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -362,7 +364,7 @@ private fun ContactCardDialog(
             },
             title = {
                 Text(
-                    "Are you sure?",
+                    "Are you sure?".tr,
                     fontWeight = FontWeight.Bold,
                     color = TextLight,
                     textAlign = TextAlign.Center
@@ -390,7 +392,7 @@ private fun ContactCardDialog(
                     ),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Yes, Remove", fontWeight = FontWeight.Bold)
+                    Text("Yes, Remove".tr, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -400,7 +402,7 @@ private fun ContactCardDialog(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                 ) {
-                    Text("Cancel", fontWeight = FontWeight.Bold)
+                    Text("Cancel".tr, fontWeight = FontWeight.Bold)
                 }
             }
         )

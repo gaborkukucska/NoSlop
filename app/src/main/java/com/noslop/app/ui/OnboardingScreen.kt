@@ -36,6 +36,7 @@ import com.noslop.app.crypto.CryptoService
 import com.noslop.app.feeds.BuiltInSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.ui.theme.*
+import com.noslop.app.util.tr // Added translation extension
 
 @Composable
 fun OnboardingScreen(
@@ -52,6 +53,7 @@ fun OnboardingScreen(
     
     val mnemonic by viewModel.mnemonic.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
+    val appLanguage by viewModel.appLanguage.collectAsState()
     val context = LocalContext.current
 
     Scaffold(
@@ -72,7 +74,7 @@ fun OnboardingScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "NO_SLOP",
+                    text = "NO_SLOP".tr,
                     style = MaterialTheme.typography.headlineLarge.copy(
                         color = AccentGreen,
                         fontWeight = FontWeight.Bold,
@@ -83,7 +85,7 @@ fun OnboardingScreen(
                 )
 
                 Text(
-                    text = "SERVERLESS HAI-NET NODE",
+                    text = "SERVERLESS HAI-NET NODE".tr,
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = TextMuted,
                         letterSpacing = 2.sp
@@ -91,13 +93,13 @@ fun OnboardingScreen(
                     modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                 )
 
-                // 8-dot step indicators
+                // 7-dot step indicators
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(6) { index ->
+                    repeat(7) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -119,31 +121,35 @@ fun OnboardingScreen(
             ) {
                 when (currentStep) {
                     1 -> Step1Welcome()
-                    2 -> Step2Identity(
+                    2 -> Step2Language(
+                        currentLanguage = appLanguage,
+                        onLanguageSelect = { code -> viewModel.updateAppLanguage(code) }
+                    )
+                    3 -> Step3Identity(
                         handle = handleText,
                         onHandleChange = { handleText = it },
                         mnemonic = mnemonic,
                         onGenerateMnemonic = { viewModel.generateMnemonic() },
                         onCopyMnemonic = {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("NoSlop Mnemonic", it)
+                            val clip = ClipData.newPlainText("NoSlop Mnemonic".tr, it)
                             clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Mnemonic copied to clipboard", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Mnemonic copied to clipboard"), Toast.LENGTH_SHORT).show()
                         }
                     )
-                    3 -> Step3Interests(
+                    4 -> Step4Interests(
                         selectedInterests = selectedInterests,
                         onToggleInterest = { interest ->
                             if (selectedInterests.contains(interest)) selectedInterests.remove(interest)
                             else selectedInterests.add(interest)
                         }
                     )
-                    4 -> Step6Creators(
+                    5 -> Step5Creators(
                         selectedInterests = selectedInterests,
                         creatorKeywords = creatorKeywordsText,
                         onCreatorKeywordsChange = { creatorKeywordsText = it }
                     )
-                    5 -> Step4Genres(
+                    6 -> Step6Genres(
                         interests = selectedInterests,
                         selectedMusicGenres = selectedMusicGenres,
                         selectedVideoGenres = selectedVideoGenres,
@@ -156,7 +162,7 @@ fun OnboardingScreen(
                             else selectedVideoGenres.add(genre)
                         }
                     )
-                    6 -> Step5Feeds(
+                    7 -> Step7Feeds(
                         interests = selectedInterests,
                         selectedSources = selectedSources,
                         onToggleSource = { src ->
@@ -173,7 +179,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 6) {
+                if (currentStep > 1 && currentStep < 7) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -186,9 +192,9 @@ fun OnboardingScreen(
                             .height(50.dp)
                             .testTag("onboarding_back_button")
                     ) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Back", fontWeight = FontWeight.Bold)
+                        Text("Back".tr, fontWeight = FontWeight.Bold)
                     }
                 } else {
                     Spacer(modifier = Modifier.width(1.dp))
@@ -196,18 +202,19 @@ fun OnboardingScreen(
 
                 val canProceed = when (currentStep) {
                     1 -> true
-                    2 -> handleText.isNotBlank() && mnemonic != null
-                    3 -> selectedInterests.isNotEmpty()
-                    4 -> true // Creator keywords are optional
-                    5 -> true // Optional genre selection
-                    6 -> selectedSources.isNotEmpty()
+                    2 -> true // Language selection always has a valid default
+                    3 -> handleText.isNotBlank() && mnemonic != null // Identity
+                    4 -> selectedInterests.isNotEmpty() // Interests
+                    5 -> true // Creator keywords are optional
+                    6 -> true // Optional genre selection
+                    7 -> selectedSources.isNotEmpty() // Feeds
                     else -> false
                 }
 
-                if (currentStep < 6) {
+                if (currentStep < 7) {
                     Button(
                         onClick = {
-                            if (currentStep == 4 && creatorKeywordsText.isNotBlank()) {
+                            if (currentStep == 5 && creatorKeywordsText.isNotBlank()) {
                                 // Trigger background fetch for creators while user finishes onboarding
                                 viewModel.triggerBackgroundCreatorPreFetch(creatorKeywordsText)
                             }
@@ -226,12 +233,12 @@ fun OnboardingScreen(
                             .testTag("onboarding_next_button")
                     ) {
                         Text(
-                            text = "Continue",
+                            text = "Continue".tr,
                             fontWeight = FontWeight.Bold,
                             color = if (canProceed) PrimaryBlack else TextMuted
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.Default.ArrowForward, contentDescription = "Next")
+                        Icon(Icons.Default.ArrowForward, contentDescription = "Next".tr)
                     }
                 } else {
                     Button(
@@ -256,9 +263,9 @@ fun OnboardingScreen(
                             .height(50.dp)
                             .testTag("onboarding_finish_button")
                     ) {
-                        Text("Enter NoSlop", fontWeight = FontWeight.Bold)
+                        Text("Enter NoSlop".tr, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.Default.Check, contentDescription = "Finish")
+                        Icon(Icons.Default.Check, contentDescription = "Finish".tr)
                     }
                 }
             }
@@ -281,7 +288,7 @@ fun Step1Welcome() {
         )
         Spacer(modifier = Modifier.height(24.dp))
         Text(
-            text = "Welcome to NoSlop",
+            text = "Welcome to NoSlop".tr,
             style = MaterialTheme.typography.headlineMedium,
             color = TextLight,
             fontWeight = FontWeight.Bold
@@ -301,9 +308,68 @@ fun Step1Welcome() {
     }
 }
 
+@Composable
+fun Step2Language(
+    currentLanguage: String,
+    onLanguageSelect: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "App Language".tr,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            text = "Change the interface language.".tr,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
+        )
+
+        val languages = listOf("en" to "English", "hu" to "Magyar")
+        
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+        ) {
+            items(languages) { (code, name) ->
+                val isSelected = currentLanguage == code
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clickable { onLanguageSelect(code) },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) SurfaceDark else PrimaryBlack
+                    ),
+                    border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(name, color = if (isSelected) AccentGreen else TextLight, fontWeight = FontWeight.Bold)
+                        if (isSelected) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = AccentGreen)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Step2Identity(
+fun Step3Identity(
     handle: String,
     onHandleChange: (String) -> Unit,
     mnemonic: String?,
@@ -316,7 +382,7 @@ fun Step2Identity(
         verticalArrangement = Arrangement.Center
     ) {
         Text(
-            text = "Your Identity Card",
+            text = "Your Identity Card".tr,
             style = MaterialTheme.typography.titleLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold,
@@ -324,7 +390,7 @@ fun Step2Identity(
         )
 
         Text(
-            text = "Choose a handle and generate your 'Word Cloud' password.",
+            text = "Choose a handle and generate your 'Word Cloud' password.".tr,
             style = MaterialTheme.typography.bodyMedium,
             color = TextMuted,
             textAlign = TextAlign.Center,
@@ -334,7 +400,7 @@ fun Step2Identity(
         OutlinedTextField(
             value = handle,
             onValueChange = { if (it.length <= 20) onHandleChange(it) },
-            label = { Text("Handle (e.g., satoshi)") },
+            label = { Text("Handle (e.g., satoshi)".tr) },
             singleLine = true,
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -356,7 +422,7 @@ fun Step2Identity(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
             ) {
-                Text("Generate Word Cloud", fontWeight = FontWeight.Bold)
+                Text("Generate Word Cloud".tr, fontWeight = FontWeight.Bold)
             }
         } else {
             Card(
@@ -369,7 +435,7 @@ fun Step2Identity(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Word Cloud Password (BIP39):",
+                        text = "Word Cloud Password (BIP39):".tr,
                         style = MaterialTheme.typography.labelMedium,
                         color = AccentGreen,
                         fontWeight = FontWeight.Bold
@@ -388,14 +454,14 @@ fun Step2Identity(
                         Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Tap to Copy",
+                            text = "Tap to Copy".tr,
                             style = MaterialTheme.typography.labelSmall,
                             color = AccentGreen
                         )
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "⚠ Write this down! It is the ONLY way to recover your account.",
+                        text = "⚠ Write this down! It is the ONLY way to recover your account.".tr,
                         style = MaterialTheme.typography.labelSmall,
                         color = DestructiveRed
                     )
@@ -406,7 +472,7 @@ fun Step2Identity(
 }
 
 @Composable
-fun Step3Interests(
+fun Step4Interests(
     selectedInterests: List<String>,
     onToggleInterest: (String) -> Unit
 ) {
@@ -415,7 +481,7 @@ fun Step3Interests(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "What interests you?",
+            text = "What interests you?".tr,
             style = MaterialTheme.typography.titleLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold,
@@ -423,7 +489,7 @@ fun Step3Interests(
         )
 
         Text(
-            text = "Select your favorite categories to help us suggest initial feeds.",
+            text = "Select your favorite categories to help us suggest initial feeds.".tr,
             style = MaterialTheme.typography.bodyMedium,
             color = TextMuted,
             textAlign = TextAlign.Center,
@@ -464,8 +530,187 @@ fun Step3Interests(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun Step4Genres(
+fun Step5Creators(
+    selectedInterests: List<String>,
+    creatorKeywords: String,
+    onCreatorKeywordsChange: (String) -> Unit
+) {
+    // Derive suggestions from selected categories using the SourceLibrary map
+    val suggestions = remember(selectedInterests) {
+        com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(selectedInterests)
+    }
+
+    // Parse the current keyword text into a set for chip highlighting
+    val currentKeywords = remember(creatorKeywords) {
+        creatorKeywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    var channelSearchQuery by remember { mutableStateOf("") }
+    var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isSearchingChannels by remember { mutableStateOf(false) }
+
+    // Pre-warm the Invidious instance cache so the first search is fast
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try { com.noslop.app.feeds.api.InvidiousApiClient.preWarmInstances() } catch (_: Exception) {}
+        }
+    }
+
+    LaunchedEffect(channelSearchQuery) {
+        if (channelSearchQuery.isBlank()) {
+            searchedChannels = emptyList()
+            isSearchingChannels = false
+            return@LaunchedEffect
+        }
+        isSearchingChannels = true
+        kotlinx.coroutines.delay(300) // Debounce typing
+        try {
+            searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.error("ONBOARDING", "Channel search failed: ${e.message}")
+        } finally {
+            isSearchingChannels = false
+        }
+    }
+    
+    val combinedSuggestions = remember(suggestions, searchedChannels) {
+        (searchedChannels + suggestions).distinct()
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Who do you follow?".tr,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        Text(
+            text = "Add creators, channels, or outlets you love. NoSlop will surface their content across all your feeds. Tap suggestions or type your own.".tr,
+            style = MaterialTheme.typography.bodySmall,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        // Word-cloud: show suggestions above the text field so users pick from the cloud first
+        OutlinedTextField(
+            value = channelSearchQuery,
+            onValueChange = { channelSearchQuery = it },
+            label = { Text("Search channel names...".tr) },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+            trailingIcon = {
+                if (isSearchingChannels) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
+                } else if (channelSearchQuery.isNotBlank()) {
+                    IconButton(onClick = { channelSearchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted)
+                    }
+                }
+            },
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentGreen,
+                unfocusedBorderColor = BorderSubtle,
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight,
+                focusedLabelColor = AccentGreen,
+                unfocusedLabelColor = TextMuted
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        if (combinedSuggestions.isNotEmpty()) {
+            Text(
+                text = "SUGGESTED CHANNELS & CREATORS".tr,
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, top = 8.dp, bottom = 6.dp)
+            )
+
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 12.dp)
+            ) {
+                item {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        combinedSuggestions.forEach { creator ->
+                            val isSelected = currentKeywords.contains(creator)
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = {
+                                    val updated = if (isSelected) {
+                                        currentKeywords - creator
+                                    } else {
+                                        currentKeywords + creator
+                                    }
+                                    onCreatorKeywordsChange(updated.joinToString(", "))
+                                },
+                                label = {
+                                    Text(
+                                        text = creator,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = PrimaryBlack,
+                                    labelColor = TextLight,
+                                    selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
+                                    selectedLabelColor = AccentGreen
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = isSelected,
+                                    borderColor = if (isSelected) AccentGreen else BorderSubtle,
+                                    selectedBorderColor = AccentGreen
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = creatorKeywords,
+            onValueChange = onCreatorKeywordsChange,
+            label = { Text("Creators, channels, outlets (comma separated)".tr) },
+            placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...".tr) },
+            minLines = 2,
+            maxLines = 4,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = AccentGreen,
+                unfocusedBorderColor = BorderSubtle,
+                focusedTextColor = TextLight,
+                unfocusedTextColor = TextLight,
+                focusedLabelColor = AccentGreen,
+                unfocusedLabelColor = TextMuted
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+    }
+}
+
+@Composable
+fun Step6Genres(
     interests: List<String>,
     selectedMusicGenres: MutableList<String>,
     selectedVideoGenres: MutableList<String>,
@@ -491,7 +736,7 @@ fun Step4Genres(
     ) {
         if (!showMusic && !showVideo) {
             Text(
-                text = "No genres to select based on your interests.",
+                text = "No genres to select based on your interests.".tr,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted,
                 textAlign = TextAlign.Center,
@@ -501,7 +746,7 @@ fun Step4Genres(
         }
 
         Text(
-            text = "Refine your taste",
+            text = "Refine your taste".tr,
             style = MaterialTheme.typography.titleLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold,
@@ -509,7 +754,7 @@ fun Step4Genres(
         )
 
         Text(
-            text = "Choose specific genres for your dynamic media streams.",
+            text = "Choose specific genres for your dynamic media streams.".tr,
             style = MaterialTheme.typography.bodyMedium,
             color = TextMuted,
             textAlign = TextAlign.Center,
@@ -521,7 +766,7 @@ fun Step4Genres(
         ) {
             if (showMusic) {
                 item {
-                    Text("Music Genres", style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(vertical = 8.dp))
+                    Text("Music Genres".tr, style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(vertical = 8.dp))
                 }
                 items(musicGenres) { genre ->
                     val isSelected = selectedMusicGenres.contains(genre)
@@ -553,7 +798,7 @@ fun Step4Genres(
             }
             if (showVideo) {
                 item {
-                    Text("Video Genres", style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
+                    Text("Video Genres".tr, style = MaterialTheme.typography.titleMedium, color = AccentGreen, modifier = Modifier.padding(top = 16.dp, bottom = 8.dp))
                 }
                 items(videoGenres) { genre ->
                     val isSelected = selectedVideoGenres.contains(genre)
@@ -588,7 +833,7 @@ fun Step4Genres(
 }
 
 @Composable
-fun Step5Feeds(
+fun Step7Feeds(
     interests: List<String>,
     selectedSources: List<BuiltInSource>,
     onToggleSource: (BuiltInSource) -> Unit
@@ -629,7 +874,7 @@ fun Step5Feeds(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Suggested Clearnet Feeds",
+            text = "Suggested Clearnet Feeds".tr,
             style = MaterialTheme.typography.titleLarge,
             color = TextLight,
             fontWeight = FontWeight.Bold,
@@ -637,7 +882,7 @@ fun Step5Feeds(
         )
 
         Text(
-            text = "Based on your interests, we recommend these sources.",
+            text = "Based on your interests, we recommend these sources.".tr,
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted,
             textAlign = TextAlign.Center,
@@ -717,203 +962,14 @@ fun Step5Feeds(
     if (showApiWarningFor != null) {
         AlertDialog(
             onDismissRequest = { showApiWarningFor = null },
-            title = { Text("API Key Required", color = AccentGreen) },
+            title = { Text("API Key Required".tr, color = AccentGreen) },
             text = { Text("To enable ${showApiWarningFor}, you must first configure its API key in Settings -> API Keys. Please skip it for now and come back later.", color = TextLight) },
             confirmButton = {
                 TextButton(onClick = { showApiWarningFor = null }) {
-                    Text("OK", color = AccentGreen)
+                    Text("OK".tr, color = AccentGreen)
                 }
             },
             containerColor = SurfaceDark
         )
     }
 }
-
-/**
- * Onboarding Step 6 — Creator & Channel Filters
- *
- * Shows a free-text entry area for creator/channel names and a "word cloud" of
- * curated suggestions derived from the user's selected interest categories and
- * chosen feeds. Tapping a suggestion chip toggles it into the text field.
- * The collected names are later passed as extra search keywords into the API
- * aggregation pipeline so content from those creators surfaces in the feed.
- */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun Step6Creators(
-    selectedInterests: List<String>,
-    creatorKeywords: String,
-    onCreatorKeywordsChange: (String) -> Unit
-) {
-    // Derive suggestions from selected categories using the SourceLibrary map
-    val suggestions = remember(selectedInterests) {
-        com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(selectedInterests)
-    }
-
-    // Parse the current keyword text into a set for chip highlighting
-    val currentKeywords = remember(creatorKeywords) {
-        creatorKeywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-    }
-
-    var channelSearchQuery by remember { mutableStateOf("") }
-    var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
-    var isSearchingChannels by remember { mutableStateOf(false) }
-
-    // Pre-warm the Invidious instance cache so the first search is fast
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try { com.noslop.app.feeds.api.InvidiousApiClient.preWarmInstances() } catch (_: Exception) {}
-        }
-    }
-
-    LaunchedEffect(channelSearchQuery) {
-        if (channelSearchQuery.isBlank()) {
-            searchedChannels = emptyList()
-            isSearchingChannels = false
-            return@LaunchedEffect
-        }
-        isSearchingChannels = true
-        kotlinx.coroutines.delay(300) // Debounce typing
-        try {
-            searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
-        } catch (e: Exception) {
-            com.noslop.app.debug.Logger.error("ONBOARDING", "Channel search failed: ${e.message}")
-        } finally {
-            isSearchingChannels = false
-        }
-    }
-    
-    val combinedSuggestions = remember(suggestions, searchedChannels) {
-        (searchedChannels + suggestions).distinct()
-    }
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Who do you follow?",
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        Text(
-            text = "Add creators, channels, or outlets you love. NoSlop will surface their content across all your feeds. Tap suggestions or type your own.",
-            style = MaterialTheme.typography.bodySmall,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
-
-        // Word-cloud: show suggestions above the text field so users pick from the cloud first
-        OutlinedTextField(
-            value = channelSearchQuery,
-            onValueChange = { channelSearchQuery = it },
-            label = { Text("Search channel names...") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-            trailingIcon = {
-                if (isSearchingChannels) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
-                } else if (channelSearchQuery.isNotBlank()) {
-                    IconButton(onClick = { channelSearchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted)
-                    }
-                }
-            },
-            singleLine = true,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AccentGreen,
-                unfocusedBorderColor = BorderSubtle,
-                focusedTextColor = TextLight,
-                unfocusedTextColor = TextLight,
-                focusedLabelColor = AccentGreen,
-                unfocusedLabelColor = TextMuted
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        )
-
-        if (combinedSuggestions.isNotEmpty()) {
-            Text(
-                text = "SUGGESTED CHANNELS & CREATORS",
-                style = MaterialTheme.typography.labelSmall,
-                color = AccentGreen,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, top = 8.dp, bottom = 6.dp)
-            )
-
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 12.dp)
-            ) {
-                item {
-                    FlowRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        combinedSuggestions.forEach { creator ->
-                            val isSelected = currentKeywords.contains(creator)
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = {
-                                    val updated = if (isSelected) {
-                                        currentKeywords - creator
-                                    } else {
-                                        currentKeywords + creator
-                                    }
-                                    onCreatorKeywordsChange(updated.joinToString(", "))
-                                },
-                                label = {
-                                    Text(
-                                        text = creator,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    containerColor = PrimaryBlack,
-                                    labelColor = TextLight,
-                                    selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
-                                    selectedLabelColor = AccentGreen
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = isSelected,
-                                    borderColor = if (isSelected) AccentGreen else BorderSubtle,
-                                    selectedBorderColor = AccentGreen
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        OutlinedTextField(
-            value = creatorKeywords,
-            onValueChange = onCreatorKeywordsChange,
-            label = { Text("Creators, channels, outlets (comma separated)") },
-            placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
-            minLines = 2,
-            maxLines = 4,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = AccentGreen,
-                unfocusedBorderColor = BorderSubtle,
-                focusedTextColor = TextLight,
-                unfocusedTextColor = TextLight,
-                focusedLabelColor = AccentGreen,
-                unfocusedLabelColor = TextMuted
-            ),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-        )
-    }
-}
-

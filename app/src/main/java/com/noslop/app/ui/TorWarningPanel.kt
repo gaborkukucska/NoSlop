@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -69,7 +71,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 )
                 if (daemonState == TorState.PROXY_READY) {
                     Text(
-                        text = "Proxy ready, waiting for consensus.",
+                        text = "Proxy ready, waiting for consensus.".tr,
                         color = TextMuted,
                         fontSize = 12.sp,
                         textAlign = TextAlign.Center
@@ -101,13 +103,13 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 ) {
                     Icon(
                         imageVector = Icons.Default.Info,
-                        contentDescription = "Tor Offline Warn",
+                        contentDescription = "Tor Offline Warn".tr,
                         tint = MaterialTheme.colorScheme.error,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Tor SOCKS5 Proxy Offline",
+                        text = "Tor SOCKS5 Proxy Offline".tr,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onErrorContainer,
                         fontSize = 16.sp
@@ -115,7 +117,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                 }
 
                 Text(
-                    text = "NoSlop requires the Tor daemon for mesh gossip and secure DMs. Embedded daemon failed to start or connect.",
+                    text = "NoSlop requires the Tor daemon for mesh gossip and secure DMs. Embedded daemon failed to start or connect.".tr,
                     color = TextMuted,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
@@ -141,7 +143,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                             .height(42.dp)
                             .testTag("retry_tor_btn")
                     ) {
-                        Text("Tor failed to start — Retry", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Text("Tor failed to start — Retry".tr, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
 
                     Button(
@@ -161,7 +163,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Retry Proxy", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("Retry Proxy".tr, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
 
