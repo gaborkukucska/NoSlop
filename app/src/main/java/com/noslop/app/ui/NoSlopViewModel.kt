@@ -1031,23 +1031,30 @@ fun toggleAggregator() {
 
     fun ensurePostInFeed(postId: String) {
         viewModelScope.launch {
-            if (allMeshes.isEmpty() && allFeeds.isEmpty()) {
-                kotlinx.coroutines.delay(1000) // Wait for feed to populate on cold start
+            if (isSearchModeActive) {
+                clearSearchAndRestoreFeed()
+                kotlinx.coroutines.delay(100)
             }
             
-            val index = _unifiedFeed.value.indexOfFirst { it.id == postId }
-            if (index >= 0) {
-                _restoreScrollPositionEvent.emit(postId)
+            val existingIndex = _unifiedFeed.value.indexOfFirst { 
+                it.id == postId || (it is UnifiedItem.Feed && getReactionAnchorIdForUrl(it.item.url ?: "") == postId) 
+            }
+            if (existingIndex >= 0) {
+                _restoreScrollPositionEvent.emit(_unifiedFeed.value[existingIndex].id)
                 return@launch
             }
             
-            val meshPost = allMeshes.find { it.id == postId }
+            val meshPost = repository.postDao.getPostById(postId)
             if (meshPost != null) {
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.add(0, UnifiedItem.Mesh(meshPost))
                 _unifiedFeed.value = currentFeed
                 _restoreScrollPositionEvent.emit(postId)
                 return@launch
+            }
+            
+            if (allFeeds.isEmpty()) {
+                kotlinx.coroutines.delay(800)
             }
             
             val feedItem = allFeeds.find { it.id == postId || getReactionAnchorIdForUrl(it.url ?: "") == postId }
