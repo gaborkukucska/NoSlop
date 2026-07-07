@@ -75,6 +75,11 @@ class FakeViewedHistoryDao : ViewedHistoryDao {
         toRemove.forEach { items.remove(it) }
         publish()
     }
+    
+    override suspend fun clearAllViewedHistory() {
+        items.clear()
+        publish()
+    }
 }
 
 /** Fake [SwipeTrackerDao] with REPLACE-on-conflict upsert and the >=2 exclusion query. */
@@ -88,6 +93,7 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
         val toRemove = swipes.values.filter { it.lastSwipedAt < timestamp }.map { it.itemId }
         toRemove.forEach { swipes.remove(it) }
     }
+    override suspend fun clearAllSwipeHistory() { swipes.clear() }
 }
 
 /** Fake [ReactionDao] with the get-by-id / insert / delete semantics the toggle logic relies on. */
@@ -136,7 +142,7 @@ class FakePostDao : PostDao {
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
     override suspend fun markPostOrphaned(id: String) {}
-    override suspend fun updatePostContent(id: String, newContent: String) {}
+    override suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String) {}
     override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
 }
 
@@ -144,6 +150,7 @@ class FakePostDao : PostDao {
 class FakeMessageDao : MessageDao {
     val messages = mutableListOf<ChatMessage>()
     override suspend fun insertMessage(message: ChatMessage) { messages.add(message) }
+    override suspend fun hasMessage(id: String): Int = if (messages.any { it.id == id }) 1 else 0
     override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         flowOf(messages.filter { it.chatWithPeerPub == peerPub })
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())

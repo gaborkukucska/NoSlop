@@ -16,7 +16,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
     val peerDao = db.peerDao()
-    private val postDao = db.postDao()
+    internal val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
     private val commentDao = db.commentDao()

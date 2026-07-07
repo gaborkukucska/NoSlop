@@ -113,6 +113,8 @@ object GossipService {
         val packetId = packet.id ?: "unknown"
         val senderId = packet.senderId
 
+        Logger.debug(TAG, "processIncoming: Analyzing ${packet.type} packet $packetId from ${senderId.take(16)}... (hops=${packet.hops ?: DEFAULT_MAX_HOPS})")
+
         // 1. TTL Check — drop if expired
         val hops = packet.hops ?: DEFAULT_MAX_HOPS
         if (hops <= 0) {

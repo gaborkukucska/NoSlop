@@ -43,7 +43,8 @@ class MeshPacketHandler(
             return@withContext false
         }
 
-        when (packet.type) {
+        Logger.debug(TAG, "Dispatching ${packet.type} packet ${packet.id} from ${packet.senderId.take(16)}... to handler")
+        val success = when (packet.type) {
             "SYNC_REQUEST" -> sync.handleSyncRequest(packet, localKeys)
             "INVENTORY_SYNC_REQUEST" -> sync.handleInventorySyncRequest(packet, localKeys)
             "SYNC_RESPONSE" -> sync.handleSyncResponse(packet)
@@ -77,5 +78,8 @@ class MeshPacketHandler(
                 false
             }
         }
+        
+        Logger.debug(TAG, "Finished processing ${packet.type} packet ${packet.id} (success=$success)")
+        success
     }
 }
