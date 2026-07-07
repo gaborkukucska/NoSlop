@@ -51,8 +51,7 @@ fun FullScreenMeshCard(
 ) {
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
-    var showComments by remember { mutableStateOf(false) }
-        var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Box(
         modifier = Modifier
@@ -282,7 +281,7 @@ fun FullScreenMeshCard(
                     viewModel?.reactToMeshPost(post.id, type)
                 },
                 onShare = onShareToMesh,
-                onComment = { showComments = true },
+                onComment = { viewModel?.openCommentsForPost(post.id) },
                 reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
                     .groupBy { it }.mapValues { it.value.size },
                 commentCount = comments.size,
@@ -337,13 +336,7 @@ fun FullScreenMeshCard(
             )
         }
 
-        if (showComments && viewModel != null) {
-            CommentsBottomSheet(
-            postId = post.id,
-            viewModel = viewModel,
-            onDismiss = { showComments = false }
-        )
-    }
+        
 }
 
 /**

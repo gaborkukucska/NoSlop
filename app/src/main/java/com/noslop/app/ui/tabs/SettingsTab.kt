@@ -584,6 +584,32 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                Text("Reactions".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.reactions,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(reactions = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Connection Requests".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.connectionRequests,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(connectionRequests = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text("System Alerts".tr, color = TextLight, fontSize = 14.sp)
                                 Switch(
                                     checked = notificationSettings.system,

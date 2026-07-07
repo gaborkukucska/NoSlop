@@ -257,7 +257,6 @@ fun FullScreenFeedCard(
             }
         }
 
-        var showComments by remember { mutableStateOf(false) }
         val anchorId = remember(item.url) { item.url?.let { viewModel?.getReactionAnchorIdForUrl(it) } ?: item.id }
         val reactions by (viewModel?.getReactionsForPost(anchorId) ?: emptyFlow()).collectAsState(initial = emptyList())
         val votes by (viewModel?.getVotesForPost(anchorId) ?: emptyFlow()).collectAsState(initial = emptyList())
@@ -292,7 +291,7 @@ fun FullScreenFeedCard(
                 onShare = onShareToMesh,
                 onComment = { 
                     viewModel?.bridgeFeedItemToMesh(item)
-                    showComments = true 
+                    viewModel?.openCommentsForPost(anchorId)
                 },
                 reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
                     .groupBy { it }.mapValues { it.value.size },
@@ -323,14 +322,6 @@ fun FullScreenFeedCard(
                     }
                 }
             }
-        }
-
-        if (showComments && viewModel != null) {
-            CommentsBottomSheet(
-                postId = anchorId,
-                viewModel = viewModel,
-                onDismiss = { showComments = false }
-            )
         }
     }
 }
@@ -612,7 +603,6 @@ fun FullScreenMeshCardV2(
             }
         }
 
-        var showComments by remember { mutableStateOf(false) }
         val reactions by (viewModel?.getReactionsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
         val votes by (viewModel?.getVotesForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
         val comments by (viewModel?.getCommentsForPost(post.id) ?: emptyFlow()).collectAsState(initial = emptyList())
@@ -645,7 +635,7 @@ fun FullScreenMeshCardV2(
                 onLike = { viewModel?.reactToMeshPost(post.id, "like") },
                 onReaction = { type -> viewModel?.reactToMeshPost(post.id, type) },
                 onShare = onShareToMesh,
-                onComment = { showComments = true },
+                onComment = { viewModel?.openCommentsForPost(post.id) },
                 reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
                     .groupBy { it }.mapValues { it.value.size },
                 commentCount = comments.size,
@@ -696,14 +686,6 @@ fun FullScreenMeshCardV2(
                     TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel".tr, color = AccentGreen) }
                 },
                 containerColor = SurfaceDark
-            )
-        }
-
-        if (showComments && viewModel != null) {
-            CommentsBottomSheet(
-                postId = post.id,
-                viewModel = viewModel,
-                onDismiss = { showComments = false }
             )
         }
     }

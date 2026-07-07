@@ -42,6 +42,7 @@ import com.noslop.app.ui.resolveMediaUrl
 fun CommentsBottomSheet(
     postId: String,
     viewModel: NoSlopViewModel,
+    highlightCommentId: String? = null,
     onDismiss: () -> Unit
 ) {
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
@@ -76,7 +77,19 @@ fun CommentsBottomSheet(
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+            LaunchedEffect(comments, highlightCommentId) {
+                if (highlightCommentId != null && comments.isNotEmpty()) {
+                    val index = comments.indexOfFirst { it.id == highlightCommentId }
+                    if (index >= 0) {
+                        listState.animateScrollToItem(index)
+                    }
+                }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)

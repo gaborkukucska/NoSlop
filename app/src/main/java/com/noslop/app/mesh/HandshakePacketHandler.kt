@@ -64,7 +64,9 @@ class HandshakePacketHandler(
         if (!isTrusted) {
             repo.setIncomingRequest(peer)
 
-            val title = "New Connection Request"
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.connectionRequests) {
+                val title = "New Connection Request"
             val msg = "${peer.handle} wants to connect with you."
             val route = "notifications"
             
@@ -81,11 +83,12 @@ class HandshakePacketHandler(
             )
 
             com.noslop.app.util.NotificationHelper.showNotification(
-                context = repo.context,
-                title = title,
-                message = msg,
-                deepLinkRoute = route
-            )
+                    context = repo.context,
+                    title = title,
+                    message = msg,
+                    deepLinkRoute = route
+                )
+            }
         }
 
         return true
@@ -138,7 +141,9 @@ class HandshakePacketHandler(
         }
 
         // Generate the accepted notification
-        val title = "Connection Accepted"
+        val notifSettings = repo.notificationSettingsFlow.value
+        if (notifSettings.system) {
+            val title = "Connection Accepted"
         val msg = "${handPay.fromUsername} accepted your connection request."
         val route = "chat/${handPay.fromUserId}"
 
@@ -155,11 +160,12 @@ class HandshakePacketHandler(
         )
 
         com.noslop.app.util.NotificationHelper.showNotification(
-            context = repo.context,
-            title = title,
-            message = msg,
-            deepLinkRoute = route
-        )
+                context = repo.context,
+                title = title,
+                message = msg,
+                deepLinkRoute = route
+            )
+        }
 
         // Signal the UI that our outgoing request was accepted
         val acceptedPeer = peerDao.getPeerByPublicKey(handPay.fromUserId)
@@ -189,7 +195,9 @@ class HandshakePacketHandler(
             // Remove the pending untrusted peer since they rejected us
             peerDao.deletePeer(peer)
 
-            val title = "Connection Declined"
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.system) {
+                val title = "Connection Declined"
             val msg = "${peer.handle} declined your connection request."
             val route = "notifications"
 
@@ -206,11 +214,12 @@ class HandshakePacketHandler(
             )
 
             com.noslop.app.util.NotificationHelper.showNotification(
-                context = repo.context,
-                title = title,
-                message = msg,
-                deepLinkRoute = route
-            )
+                    context = repo.context,
+                    title = title,
+                    message = msg,
+                    deepLinkRoute = route
+                )
+            }
         }
         return true
     }

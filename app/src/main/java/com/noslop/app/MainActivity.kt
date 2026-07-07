@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
         val factory = NoSlopViewModel.Factory(application)
         viewModel = ViewModelProvider(this, factory).get(NoSlopViewModel::class.java)
 
-        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it }
+        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it + "-" + System.currentTimeMillis() }
 
         setContent {
             MyApplicationTheme {

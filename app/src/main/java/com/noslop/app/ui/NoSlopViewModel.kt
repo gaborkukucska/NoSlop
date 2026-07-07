@@ -99,6 +99,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isContentTransparencyEnabled = MutableStateFlow(false)
     val isContentTransparencyEnabled: StateFlow<Boolean> = _isContentTransparencyEnabled.asStateFlow()
 
+    private val _openCommentsState = MutableStateFlow<Pair<String, String?>?>(null)
+    val openCommentsState: StateFlow<Pair<String, String?>?> = _openCommentsState.asStateFlow()
+
+    fun openCommentsForPost(postId: String, commentId: String? = null) {
+        _openCommentsState.value = Pair(postId, commentId)
+    }
+
+    fun consumeCommentsEvent() {
+        _openCommentsState.value = null
+    }
+
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
 

@@ -71,10 +71,11 @@ class CommentPacketHandler(
         // Notify if it's on our post (unless it's from ourselves)
         val post = postDao.getPostById(commPay.postId)
         val localKeys = repo.getLocalIdentity()
-        if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && commPay.comment.authorId != localKeys?.publicKeyB64) {
+        val notifSettings = repo.notificationSettingsFlow.value
+        if (notifSettings.comments && post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && commPay.comment.authorId != localKeys?.publicKeyB64) {
             val title = "New Comment"
             val msg = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}"
-            val route = "post/${commPay.postId}"
+            val route = "post/${commPay.postId}/comment/${commPay.comment.id}"
             
             notificationDao.insertNotification(
                 NotificationItem(

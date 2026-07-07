@@ -173,16 +173,21 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     LaunchedEffect(initialRoute) {
         if (initialRoute != null) {
-            if (initialRoute.startsWith("chat/")) {
+            val routeClean = initialRoute.substringBeforeLast("-")
+            if (routeClean.startsWith("chat/")) {
                 selectedTab = 1
-                viewModel.selectChatPeer(initialRoute.substringAfter("chat/"))
-            } else if (initialRoute.startsWith("post/")) {
+                viewModel.selectChatPeer(routeClean.substringAfter("chat/"))
+            } else if (routeClean.startsWith("post/")) {
                 selectedTab = 0
-                val postId = initialRoute.substringAfter("post/")
+                val routeData = routeClean.removePrefix("post/")
+                val postId = routeData.substringBefore("/")
+                val commentId = if (routeData.contains("comment/")) routeData.substringAfter("comment/") else null
+                
                 viewModel.ensurePostInFeed(postId)
-            } else if (initialRoute == "notifications") {
+                viewModel.openCommentsForPost(postId, commentId)
+            } else if (routeClean == "notifications") {
                 selectedTab = 4
-            } else if (initialRoute == "settings") {
+            } else if (routeClean == "settings") {
                 selectedTab = 3
             }
         }
@@ -385,6 +390,16 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 }
             }
         }
+    }
+
+    val openCommentsState by viewModel.openCommentsState.collectAsState()
+    if (openCommentsState != null) {
+        com.noslop.app.ui.components.CommentsBottomSheet(
+            postId = openCommentsState!!.first,
+            highlightCommentId = openCommentsState!!.second,
+            viewModel = viewModel,
+            onDismiss = { viewModel.consumeCommentsEvent() }
+        )
     }
 
     // Incoming Handshake Request Dialog

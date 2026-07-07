@@ -45,6 +45,35 @@ class ReactionPacketHandler(
             )
             reactionDao.insertReaction(localReaction)
             Logger.info(TAG, "Received and saved mesh reaction: ${payload.reactionType} on ${payload.postId}")
+            
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.reactions) {
+                val post = db.postDao().getPostById(payload.postId)
+                val localKeys = repo.getLocalIdentity()
+                if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && payload.authorId != localKeys?.publicKeyB64) {
+                    val peer = repo.peerDao.getPeerByPublicKey(payload.authorId)
+                    val authorName = peer?.handle ?: "Someone"
+                    val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
+                    val displayEmoji = emojiMap[payload.reactionType] ?: payload.reactionType
+                    
+                    val title = "New Reaction"
+                    val msg = "$authorName reacted $displayEmoji to your post."
+                    val route = "post/${payload.postId}"
+                    
+                    db.notificationDao().insertNotification(
+                        com.noslop.app.data.NotificationItem(
+                            id = java.util.UUID.randomUUID().toString(),
+                            type = "REACTION",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "reaction",
+                            senderPub = payload.authorId
+                        )
+                    )
+                    com.noslop.app.util.NotificationHelper.showNotification(repo.context, title, msg, route)
+                }
+            }
         }
         return true
     }
@@ -155,6 +184,35 @@ class ReactionPacketHandler(
                 signature = reactionPay.signature
             )
             reactionDao.insertReaction(localReaction)
+
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.reactions) {
+                val comment = db.commentDao().getCommentById(reactionPay.commentId)
+                val localKeys = repo.getLocalIdentity()
+                if (comment?.authorPublicKeyB64 == localKeys?.publicKeyB64 && reactionPay.authorId != localKeys?.publicKeyB64) {
+                    val peer = repo.peerDao.getPeerByPublicKey(reactionPay.authorId)
+                    val authorName = peer?.handle ?: "Someone"
+                    val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
+                    val displayEmoji = emojiMap[reactionPay.reactionType] ?: reactionPay.reactionType
+                    
+                    val title = "New Reaction"
+                    val msg = "$authorName reacted $displayEmoji to your comment."
+                    val route = "post/${comment?.postId}/comment/${comment?.id}"
+                    
+                    db.notificationDao().insertNotification(
+                        com.noslop.app.data.NotificationItem(
+                            id = java.util.UUID.randomUUID().toString(),
+                            type = "REACTION",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "reaction",
+                            senderPub = reactionPay.authorId
+                        )
+                    )
+                    com.noslop.app.util.NotificationHelper.showNotification(repo.context, title, msg, route)
+                }
+            }
         }
         return true
     }
