@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-07)
+
+### 1. Legacy Architecture Audit & Code Cleanup
+*   **MainScreen Cleanup**: Evaluated `MainScreen.kt` and identified that the large `FullScreenMeshCard` composable was dead code (replaced by V2). Removed the unused code entirely and renamed the file to `MediaUtils.kt` to accurately reflect its remaining utility (`resolveMediaUrl`).
+*   **Repository Facade Verification**: Analyzed `NoSlopRepository.kt` and confirmed it acts as a necessary facade for `NoSlopViewModel`, correctly delegating to domain-specific repositories. Safely exposed `postDao` internally to resolve visibility issues without breaking encapsulation.
+
+### 2. Mesh Network Observability & Stability
+*   **GossipService Tracing**: Injected precise trace logging in `GossipService.processIncoming` to monitor the mesh packet pipeline. We can now observe exactly where packets are dropped (e.g., TTL expiry, deduplication checks, rate limiting, firewall blocks, or mesh filter rejections).
+*   **MeshPacketHandler Telemetry**: Added detailed logging for packet dispatching to ensure we can trace incoming traffic as it is routed to domain-specific handlers after gossip validation.
+
+### 3. Comprehensive Unit Testing & Regression Guards
+*   **Firewall & Mesh Filters Assertions**: Implemented robust unit tests using `MockK` in `GossipServiceTest.kt` to assert the firewall dropping logic and mesh filter rules. Validated that untrusted senders are blocked correctly while system packets like `CONNECTION_REQUEST` bypass the block.
+*   **Test Isolation Fixed**: Resolved a critical state leak in `GossipServiceTest` where the singleton `GossipService` retained mock dependencies across tests, ensuring complete test isolation via reflection-based resets.
+*   **Test Doubles Updated**: Fixed several compilation errors in `FakeDaos.kt` (missing overrides in `FakePostDao`, `FakeEngagementDao`, and `FakeMessageDao`) caused by upstream interface changes, ensuring the pure-JVM tests compile successfully.
 ## Completed Changes (2026-07-06)
 
 ### 1. Onboarding & Tutorial Flow Polish

@@ -45,7 +45,7 @@ mnemonic, onion address).
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ UI Layer (Jetpack Compose, MainScreen.kt + tabs/*)                │
+│ UI Layer (Jetpack Compose, tabs/*)                                  │
 │  UnifiedFeedTab │ DMsTab │ SettingsTab │ ContentPreferencesScreen  │
 └───────────────────────────┬───────────────────────────────────────┘
                              │ NoSlopViewModel (StateFlow)
@@ -117,7 +117,7 @@ com.noslop.app
 │   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
 │   ├── HaiNetTab.kt                 Mesh feed / peers tab
 │   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
-│   ├── MainScreen.kt                Top-level Compose host (god file, 2,889 LOC pre-refactor)
+│   ├── MediaUtils.kt                Top-level media resolution utility (formerly MainScreen)
 │   ├── MediaComponents.kt           Shared media UI helpers
 │   ├── NoSlopViewModel.kt            ViewModel exposing repository as StateFlow
 │   ├── OnboardingScreen.kt           6-step onboarding flow
@@ -713,7 +713,7 @@ gossiped multiple times by different originating peers.
 
 ### 8.3 UI-Level Wiring
 
-- `MainScreen.kt`'s `FullScreenFeedCard` renders Like/Share/Comment overlays
+- `UnifiedFeedTab.kt`'s `FullScreenMeshCardV2` renders Like/Share/Comment overlays
   for both `UnifiedItem.Mesh` and `UnifiedItem.Feed` (clearnet) variants.
 - For clearnet items, `onShare = onShareToMesh` opens the "Share to Mesh"
   confirmation dialog (`showShareDialog` state), which calls
