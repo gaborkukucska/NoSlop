@@ -1031,14 +1031,31 @@ fun toggleAggregator() {
 
     fun ensurePostInFeed(postId: String) {
         viewModelScope.launch {
-            val alreadyInFeed = _unifiedFeed.value.any { it.id == postId }
-            if (alreadyInFeed) return@launch
+            if (allMeshes.isEmpty() && allFeeds.isEmpty()) {
+                kotlinx.coroutines.delay(1000) // Wait for feed to populate on cold start
+            }
+            
+            val index = _unifiedFeed.value.indexOfFirst { it.id == postId }
+            if (index >= 0) {
+                _restoreScrollPositionEvent.emit(postId)
+                return@launch
+            }
+            
             val meshPost = allMeshes.find { it.id == postId }
             if (meshPost != null) {
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.add(0, UnifiedItem.Mesh(meshPost))
                 _unifiedFeed.value = currentFeed
-                _scrollToTopEvent.emit(Unit)
+                _restoreScrollPositionEvent.emit(postId)
+                return@launch
+            }
+            
+            val feedItem = allFeeds.find { it.id == postId || getReactionAnchorIdForUrl(it.url ?: "") == postId }
+            if (feedItem != null) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                currentFeed.add(0, UnifiedItem.Feed(feedItem))
+                _unifiedFeed.value = currentFeed
+                _restoreScrollPositionEvent.emit(feedItem.id)
             }
         }
     }

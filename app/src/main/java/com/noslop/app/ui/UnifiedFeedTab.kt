@@ -184,7 +184,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 val commentId = if (routeData.contains("comment/")) routeData.substringAfter("comment/") else null
                 
                 viewModel.ensurePostInFeed(postId)
-                viewModel.openCommentsForPost(postId, commentId)
+                if (commentId != null || routeData.contains("comment")) {
+                    viewModel.openCommentsForPost(postId, commentId)
+                }
             } else if (routeClean == "notifications") {
                 selectedTab = 4
             } else if (routeClean == "settings") {
@@ -383,8 +385,15 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                                 selectedTab = 1
                                 viewModel.selectChatPeer(route.substringAfter("chat/"))
                             } else if (route.startsWith("post/")) {
-                                selectedTab = 0
+                            selectedTab = 0
+                            val routeData = route.removePrefix("post/")
+                            val postId = routeData.substringBefore("/")
+                            val commentId = if (routeData.contains("comment/")) routeData.substringAfter("comment/") else null
+                            viewModel.ensurePostInFeed(postId)
+                            if (commentId != null || routeData.contains("comment")) {
+                                viewModel.openCommentsForPost(postId, commentId)
                             }
+                        }
                         }
                     )
                 }
