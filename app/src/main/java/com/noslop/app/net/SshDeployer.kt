@@ -93,7 +93,7 @@ object SshDeployer {
                     
                     if command -v apt-get &> /dev/null; then
                         run_sudo apt-get update -qq
-                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake nodejs npm
+                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake nodejs npm python3-venv
                     elif command -v dnf &> /dev/null; then
                         run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake nodejs npm
                     elif command -v pacman &> /dev/null; then
@@ -186,6 +186,12 @@ object SshDeployer {
                     
                     echo '  Setting up systemd service for Portal...'
                     run_sudo rm -f /etc/systemd/system/hainet-portal.service
+                    run_sudo systemctl stop hainet-portal.service 2>/dev/null || true
+                    run_sudo systemctl disable hainet-portal.service 2>/dev/null || true
+                    run_sudo rm -f /etc/systemd/system/hainet-portal.service 2>/dev/null || true
+                    run_sudo rm -f /lib/systemd/system/hainet-portal.service 2>/dev/null || true
+                    run_sudo systemctl daemon-reload
+                    run_sudo systemctl unmask hainet-portal.service 2>/dev/null || true
                     cat << 'EOF' | run_sudo tee /etc/systemd/system/hainet-portal.service > /dev/null
 [Unit]
 Description=HAI-Net Portal Web UI
