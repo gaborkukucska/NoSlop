@@ -9,14 +9,14 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 object SshDeployer {
-    private const val TAG = "SSH_DEPLOYER"
+    private const val TAG = "SshDeployer"
 
     suspend fun deployHaiNetHub(
         ip: String,
         user: String,
         pass: String,
         sharedFolder: String,
-        identity: CryptoService.IdentityKeys? = null,
+        identity: CryptoService.IdentityKeys?,
         onLog: (String) -> Unit = {}
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -27,7 +27,7 @@ object SshDeployer {
             val session = jsch.getSession(user, ip, 22)
             session.setPassword(pass)
             session.setConfig("StrictHostKeyChecking", "no")
-            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods
+            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods (like model downloads)
             session.connect(15000)
 
             onLog("SSH connected. Preparing deployment...\n")
@@ -37,14 +37,15 @@ object SshDeployer {
             val configJson = JSONObject().apply {
                 put("shared_folder", sharedFolder)
                 if (identity != null) {
-                    put("identity", JSONObject().apply {
+                    val idJson = JSONObject().apply {
                         put("public_key", identity.publicKeyB64)
                         put("private_key", identity.privateKeyB64)
                         put("enc_public_key", identity.encPublicKeyB64)
                         put("enc_private_key", identity.encPrivateKeyB64)
                         put("onion_address", identity.onionAddress)
                         put("display_name", identity.displayName)
-                    })
+                    }
+                    put("identity", idJson)
                 }
             }
 
@@ -75,7 +76,7 @@ object SshDeployer {
                     if [ "${'$'}(id -u)" -eq 0 ]; then
                         "${'$'}@"
                     else
-                        echo "${'$'}SUDO_PASS" | sudo -S "${'$'}@"
+                        echo "${'$'}SUDO_PASS" | sudo -S -p "" "${'$'}@"
                     fi
                 }
 
@@ -89,15 +90,15 @@ object SshDeployer {
                 command -v npm &> /dev/null || NEED_INSTALL="yes"
                 
                 if [ -n "${'$'}NEED_INSTALL" ]; then
-                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, cmake, nodejs, npm...'
+                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, cmake, nodejs, npm, python3-venv...'
                     
                     if command -v apt-get &> /dev/null; then
                         run_sudo apt-get update -qq
                         run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake nodejs npm python3-venv
                     elif command -v dnf &> /dev/null; then
-                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake nodejs npm
+                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake nodejs npm python3
                     elif command -v pacman &> /dev/null; then
-                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake nodejs npm
+                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake nodejs npm python
                     else
                         echo '[ERROR] Unsupported package manager. Please install dependencies manually.'
                         exit 1
@@ -139,7 +140,6 @@ object SshDeployer {
                 run_sudo mkdir -p /etc/hainet /var/lib/hainet
                 run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet /var/lib/hainet
                 run_sudo chmod 777 /var/lib/hainet
-                
                 echo ""
                 
                 # Step 4: Run the seed installer
@@ -185,13 +185,14 @@ object SshDeployer {
                     cargo build --release --package hainet-portal
                     
                     echo '  Setting up systemd service for Portal...'
-                    run_sudo rm -f /etc/systemd/system/hainet-portal.service
+                    # Completely obliterate any existing or masked unit
                     run_sudo systemctl stop hainet-portal.service 2>/dev/null || true
                     run_sudo systemctl disable hainet-portal.service 2>/dev/null || true
                     run_sudo rm -f /etc/systemd/system/hainet-portal.service 2>/dev/null || true
                     run_sudo rm -f /lib/systemd/system/hainet-portal.service 2>/dev/null || true
                     run_sudo systemctl daemon-reload
                     run_sudo systemctl unmask hainet-portal.service 2>/dev/null || true
+                    
                     cat << 'EOF' | run_sudo tee /etc/systemd/system/hainet-portal.service > /dev/null
 [Unit]
 Description=HAI-Net Portal Web UI
@@ -210,7 +211,10 @@ EOF
                     run_sudo systemctl daemon-reload
                     run_sudo systemctl enable hainet-portal.service
                     run_sudo systemctl restart hainet-portal.service
+                    
+                    # And ensure core service is also restarted cleanly
                     run_sudo systemctl restart hainet-core.service || true
+                    
                     echo '  Portal Web UI is now running on port 3000.'
                 else
                     echo '  [WARNING] hainet-portal directory not found. Skipping Web UI setup.'
