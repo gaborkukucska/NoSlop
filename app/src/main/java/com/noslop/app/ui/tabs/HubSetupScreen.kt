@@ -54,6 +54,9 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var password by remember { mutableStateOf("") }
     var cloudflareToken by remember { mutableStateOf("") }
     
+    var hasStaticIp by remember { mutableStateOf(false) }
+    var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }
+    
     var isDeploying by remember { mutableStateOf(false) }
     var deployResult by remember { mutableStateOf<String?>(null) }
     var deployError by remember { mutableStateOf<String?>(null) }
@@ -78,26 +81,27 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(24.dp))
 
         // Cloudflare Warning
-        Card(
-            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.1f)),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(modifier = Modifier.padding(16.dp)) {
-                Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed)
-                Spacer(modifier = Modifier.width(16.dp))
-                Column {
-                    Text("Remote Access Requires Tunnel", color = DestructiveRed, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "Unless your home ISP provides a static IP and you configure port forwarding, a Cloudflare Tunnel token is strictly required for your mobile app to access this hub remotely.",
-                        color = TextLight,
-                        fontSize = 14.sp
-                    )
+        if (!hasStaticIp) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.1f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(modifier = Modifier.padding(16.dp)) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text("Remote Access Requires Tunnel", color = DestructiveRed, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Unless your home ISP provides a static IP and you configure port forwarding, a Cloudflare Tunnel token is strictly required for your mobile app to access this hub remotely.",
+                            color = TextLight,
+                            fontSize = 14.sp
+                        )
+                    }
                 }
             }
+            Spacer(modifier = Modifier.height(24.dp))
         }
-
-        Spacer(modifier = Modifier.height(24.dp))
 
         OutlinedTextField(
             value = ipAddress,
@@ -131,12 +135,37 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(12.dp))
 
         OutlinedTextField(
-            value = cloudflareToken,
-            onValueChange = { cloudflareToken = it },
-            label = { Text("Cloudflare Tunnel Token", color = TextMuted) },
+            value = sharedFolder,
+            onValueChange = { sharedFolder = it },
+            label = { Text("Shared Media Folder (Optional)", color = TextMuted) },
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
         )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = hasStaticIp,
+                onCheckedChange = { hasStaticIp = it },
+                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, uncheckedColor = TextMuted)
+            )
+            Text("I have a Static IP with Port Forwarding", color = TextLight, fontSize = 14.sp)
+        }
+
+        if (!hasStaticIp) {
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedTextField(
+                value = cloudflareToken,
+                onValueChange = { cloudflareToken = it },
+                label = { Text("Cloudflare Tunnel Token", color = TextMuted) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+            )
+        }
 
         Spacer(modifier = Modifier.height(32.dp))
 
@@ -146,7 +175,16 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 deployError = null
                 deployResult = null
                 coroutineScope.launch {
-                    val result = SshDeployer.deployHaiNetHub(ipAddress, username, password, cloudflareToken)
+                    val localIdentity = viewModel.localKeys.value
+                    val result = SshDeployer.deployHaiNetHub(
+                        ip = ipAddress,
+                        user = username,
+                        pass = password,
+                        cloudflareToken = cloudflareToken,
+                        hasStaticIp = hasStaticIp,
+                        sharedFolder = sharedFolder,
+                        identity = localIdentity
+                    )
                     if (result.isSuccess) {
                         viewModel.setHubDeploymentStatus("Active at $ipAddress")
                     } else {

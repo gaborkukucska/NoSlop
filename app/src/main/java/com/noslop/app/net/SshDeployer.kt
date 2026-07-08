@@ -1,9 +1,11 @@
 package com.noslop.app.net
 
 import com.jcraft.jsch.JSch
+import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 object SshDeployer {
     private const val TAG = "SSH_DEPLOYER"
@@ -12,7 +14,10 @@ object SshDeployer {
         ip: String,
         user: String,
         pass: String,
-        cloudflareToken: String
+        cloudflareToken: String,
+        hasStaticIp: Boolean,
+        sharedFolder: String,
+        identity: CryptoService.IdentityKeys? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             val jsch = JSch()
@@ -21,20 +26,39 @@ object SshDeployer {
             session.setConfig("StrictHostKeyChecking", "no")
             session.connect(10000)
 
+            // Build the hub_config.json payload using JSONObject for safe escaping
+            val configJson = JSONObject().apply {
+                put("cloudflare_token", cloudflareToken)
+                put("has_static_ip", hasStaticIp)
+                put("shared_folder", sharedFolder)
+                if (identity != null) {
+                    put("identity", JSONObject().apply {
+                        put("public_key", identity.publicKeyB64)
+                        put("private_key", identity.privateKeyB64)
+                        put("enc_public_key", identity.encPublicKeyB64)
+                        put("enc_private_key", identity.encPrivateKeyB64)
+                        put("onion_address", identity.onionAddress)
+                        put("display_name", identity.displayName)
+                    })
+                }
+            }
+
+            // Escape single quotes for safe shell echo
+            val escapedJson = configJson.toString().replace("'", "'\\''")
+
             val commands = listOf(
                 "echo 'Starting HAI-Net deployment...'",
-                "curl -sL https://github.com/gaborkukucska/hai/releases/latest/download/hainet-seed-linux-amd64 -o hainet-seed || echo 'Skipped download'",
-                "chmod +x hainet-seed",
-                "echo '{\"cloudflare_token\":\"$cloudflareToken\"}' > hub_config.json",
-                "./hainet-seed install --config hub_config.json",
-                "rm hub_config.json",
+                "git clone https://github.com/gaborkukucska/hai.git || (cd hai && git pull)",
+                "cd hai && echo '$escapedJson' > hub_config.json",
+                "cd hai && cargo run --package hainet-seed --bin hainet-seed install -- --config hub_config.json",
+                "cd hai && rm -f hub_config.json",
                 "echo 'Deployment complete!'"
             )
 
             val output = StringBuilder()
             
             for (cmd in commands) {
-                Logger.info(TAG, "Running: $cmd")
+                Logger.info(TAG, "Running: ${cmd.take(120)}...")
                 val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
                 channel.setCommand(cmd)
                 channel.inputStream = null

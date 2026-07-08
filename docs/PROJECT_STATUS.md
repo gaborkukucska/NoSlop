@@ -1,5 +1,14 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-08)
+
+### 1. HAI-Net Hub Integration (Phase 1) & Identity Clone
+*   **Zero-Terminal Deployment**: Implemented `SshDeployer.kt` using JSch to deploy the HAI-Net Hub directly from the NoSlop mobile app. It connects via SSH, clones the repository, and executes `hainet-seed install` non-interactively.
+*   **Identity Clone Architecture**: Replaced the previous public-key-only design with a full "Identity Clone" model. `HubSetupScreen.kt` now automatically injects the user's complete `CryptoService.IdentityKeys` (including Ed25519 and X25519 private keys) into the `hub_config.json` payload.
+*   **Secure Serialization**: Rewrote `SshDeployer` payload generation using `org.json.JSONObject` to prevent escaping errors and properly serialize the nested identity block for secure transport to the Hub.
+*   **Hub Setup UI**: Updated `HubSetupScreen` to include fields for a Shared Media Folder and a Static IP toggle (which conditionally hides the Cloudflare Token input), wiring them directly into the deployment payload.
+*   **Mesh Discoverability Fix**: Completed `broadcastDiscoverable()` in `NoSlopViewModel`, ensuring ephemeral "burnable" `.onion` addresses are correctly registered via `TorService` and announced to the mesh with cryptographic signatures.
+
 ## Completed Changes (2026-07-07)
 
 ### 1. Legacy Architecture Audit & Code Cleanup

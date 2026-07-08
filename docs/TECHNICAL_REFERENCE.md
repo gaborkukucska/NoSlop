@@ -110,12 +110,13 @@ com.noslop.app
 │   ├── MeshTransport.kt             SOCKS5 TCP transport, send retries
 │   └── Packets.kt                   NetworkPacket + all payload data classes
 ├── net/
-│   └── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   ├── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   └── SshDeployer.kt               HAI-Net Hub SSH deployment (JSch + JSONObject config injection)
 ├── tor/
 │   └── TorService.kt                Embedded Tor lifecycle, hidden service registration
 ├── ui/
 │   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
-│   ├── HaiNetTab.kt                 Mesh feed / peers tab
+│   ├── HaiNetTab.kt                 Home Hub deployment + control interface (delegates to HubSetupScreen)
 │   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
 │   ├── MediaUtils.kt                Top-level media resolution utility (formerly MainScreen)
 │   ├── MediaComponents.kt           Shared media UI helpers
@@ -127,7 +128,7 @@ com.noslop.app
 │   ├── UnifiedFeedTab.kt             VerticalPager feed (mesh + clearnet unified)
 │   ├── components/                  FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen,
 │   │                                 CommentsBottomSheet, PeerItem
-│   ├── tabs/                        ApiKeysScreen, DMsTab, LogsViewerScreen, ReportIssueScreen, SettingsTab
+│   ├── tabs/                        ApiKeysScreen, DMsTab, HubSetupScreen, LogsViewerScreen, ReportIssueScreen, SettingsTab
 │   └── theme/                       Color.kt, Theme.kt, Type.kt (Material3 + custom palette)
 └── util/
     └── Constants.kt                 MESH_PORT = 9999

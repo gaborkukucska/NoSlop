@@ -3,28 +3,60 @@
 ## Context & Architecture
 NoSlop is transitioning from a standalone mesh node into an **Active-Passive Client** for a user's HAI-Net Home Hub. 
 - **The Home Hub (Rust)** is the `MASTER` node. It runs 24/7, holds the canonical mesh database, processes AI tasks, and maintains the primary public Tor `.onion` address.
-- **NoSlop (Android)** is the `CLIENT`. It uses the *exact same Ed25519 Identity Key* as the Hub. It acts as a remote control, communicating with the Hub via a private API `.onion` or local IP.
+- **NoSlop (Android)** is the `CLIENT`. It uses the *exact same Ed25519 Identity Key* as the Hub (Identity Clone model). It acts as a remote control, communicating with the Hub via a private API `.onion` or local IP.
 - **Failover:** If the Hub goes offline, NoSlop automatically spins up its embedded `TorService.kt` to reclaim the public `.onion` address and keep the user online, later syncing data back to the Hub.
 
 **LLM INSTRUCTION:** When implementing these phases, do NOT leave placeholder, mock, or simulated code. All implementations must be fully functional. Ensure comments are added and `PROJECT_STATUS.md` is updated upon completion.
 
 ---
 
-### Phase 1: Mobile-Assisted Hub Installer (Zero-Terminal Setup)
+### Phase 1: Mobile-Assisted Hub Installer (Zero-Terminal Setup) ✅ IMPLEMENTED
+
 **Goal:** Allow users to deploy `hainet-seed` to their Home Hub hardware directly from NoSlop without using a terminal.
 
-1. **Setup UI (`ui/tabs/HubSetupScreen.kt`)**
-   - Create a wizard UI requesting target IP, Username, Password, and target Drive Path (e.g., `/media/hai-drive`).
-   - Include visual 3-step guides on how to enable OpenSSH for Windows, macOS, and Linux targets.
-2. **SSH Integration (`build.gradle.kts` & `net/SshDeployer.kt`)**
-   - Add a lightweight SSH client (e.g., `com.hierynomus:sshj` or equivalent).
-   - Establish an SSH connection to the target device.
-3. **Headless Configuration Injection**
-   - Generate a `hub_config.json` containing the user's setup parameters AND their exported `IdentityKeys` (Ed25519, X25519, Mnemonic).
-   - Upload this JSON via SCP.
-   - Execute the deployer via SSH: `hainet-seed --config /tmp/hub_config.json`.
-4. **State Update (`IdentityRepository.kt`)**
-   - Save the newly established Hub's local IP and private API `.onion` address to `AppSettingDao`.
+**Status:** Fully operational. The user can deploy HAI-Net from the NoSlop app's HUBs tab over SSH.
+
+1. **Setup UI (`ui/tabs/HubSetupScreen.kt`)** ✅
+   - Wizard UI requests target IP, SSH Username, SSH Password, Shared Media Folder path (defaults to `~/.hainet/storage`).
+   - "I have a Static IP with Port Forwarding" checkbox — when unchecked, shows a warning banner explaining Cloudflare Tunnel is required and reveals the Cloudflare Token input field.
+   - Deploy button pulls the user's local `IdentityKeys` from `NoSlopViewModel.localKeys` automatically — no manual identity export needed.
+   - Upon success, the UI transitions from Setup Wizard to a "Hub Deployed" control panel with status display and a "Reset Hub Connection" button.
+
+2. **SSH Integration (`net/SshDeployer.kt`)** ✅
+   - Uses JSch (`com.jcraft.jsch`) for SSH connectivity.
+   - Constructs a complete `hub_config.json` via `org.json.JSONObject` containing:
+     - `cloudflare_token` — Cloudflare Tunnel token (empty string if static IP)
+     - `has_static_ip` — boolean flag
+     - `shared_folder` — user-specified media folder path
+     - `identity` — full Identity Clone payload (see below)
+   - Deployment sequence:
+     ```
+     git clone https://github.com/gaborkukucska/hai.git || (cd hai && git pull)
+     cd hai && echo '<config_json>' > hub_config.json
+     cd hai && cargo run --package hainet-seed --bin hainet-seed install -- --config hub_config.json
+     cd hai && rm -f hub_config.json
+     ```
+
+3. **Identity Clone Injection** ✅
+   - The `identity` block in `hub_config.json` contains all 6 components of `CryptoService.IdentityKeys`:
+     ```json
+     {
+       "identity": {
+         "public_key": "<Ed25519 pub, Base64 X.509>",
+         "private_key": "<Ed25519 priv, Base64 PKCS#8>",
+         "enc_public_key": "<X25519 pub, Base64>",
+         "enc_private_key": "<X25519 priv, Base64>",
+         "onion_address": "<56-char .onion>",
+         "display_name": "<handle.tripcode>"
+       }
+     }
+     ```
+   - On the Hub side (`hainet-seed`), these are written to `~/.hainet/identity/` with `chmod 600` per file and `chmod 700` on the directory.
+   - The Hub derives the same `.onion` address, allowing it to maintain the user's mesh presence 24/7.
+
+4. **HUBs Tab (`ui/HaiNetTab.kt`)** ✅
+   - Now passes `viewModel` to `HubSetupScreen` and acts as the primary entry point for infrastructure management.
+   - Deployment state persisted via `AppSettingDao` key `hub_deployment_status`.
 
 ### Phase 2: Active-Passive Tor Identity & Synchronization
 **Goal:** Implement the "Double Setup" failover networking model.
