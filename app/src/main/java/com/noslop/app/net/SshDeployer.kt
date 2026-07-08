@@ -19,11 +19,18 @@ object SshDeployer {
         onLog: (String) -> Unit = {}
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
+            onLog("Connecting to $user@$ip:22...\n")
+            Logger.info(TAG, "Connecting to $user@$ip:22")
+
             val jsch = JSch()
             val session = jsch.getSession(user, ip, 22)
             session.setPassword(pass)
             session.setConfig("StrictHostKeyChecking", "no")
-            session.connect(10000)
+            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods (like model downloads)
+            session.connect(15000)
+
+            onLog("SSH connected. Preparing deployment...\n")
+            Logger.info(TAG, "SSH session established to $ip")
 
             // Build the hub_config.json payload using JSONObject for safe escaping
             val configJson = JSONObject().apply {
@@ -40,82 +47,185 @@ object SshDeployer {
                 }
             }
 
-            // Escape single quotes for safe shell echo
-            val escapedJson = configJson.toString().replace("'", "'\\''")
+            // Base64-encode the JSON to avoid all shell escaping issues
+            val configB64 = android.util.Base64.encodeToString(
+                configJson.toString().toByteArray(), 
+                android.util.Base64.NO_WRAP
+            )
+            
+            // Base64-encode the password to safely pass to sudo without escaping issues
+            val passB64 = android.util.Base64.encodeToString(
+                pass.toByteArray(), 
+                android.util.Base64.NO_WRAP
+            )
 
             val script = """
+                #!/bin/bash
                 set -e
                 exec 2>&1
-                echo 'Starting HAI-Net deployment...'
+                echo '=== HAI-Net Hub Deployment ==='
+                echo "Target: ${'$'}(hostname) (${'$'}(uname -m))"
+                echo ""
                 
-                if ! command -v cargo &> /dev/null; then
-                    echo 'Rust/Cargo not found. Installing Rust...'
-                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-                    source ${"$"}HOME/.cargo/env
+                # Setup sudo helper
+                SUDO_PASS=${'$'}(echo "$passB64" | base64 -d)
+                
+                run_sudo() {
+                    if [ "${'$'}(id -u)" -eq 0 ]; then
+                        "${'$'}@"
+                    else
+                        echo "${'$'}SUDO_PASS" | sudo -S "${'$'}@"
+                    fi
+                }
+
+                # Step 0: Ensure essential build tools are present
+                echo '[STEP 0/4] Checking build prerequisites...'
+                NEED_INSTALL=""
+                command -v cc &> /dev/null || NEED_INSTALL="yes"
+                command -v git &> /dev/null || NEED_INSTALL="yes"
+                command -v curl &> /dev/null || NEED_INSTALL="yes"
+                command -v cmake &> /dev/null || NEED_INSTALL="yes"
+                
+                if [ -n "${'$'}NEED_INSTALL" ]; then
+                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, protobuf-compiler, cmake...'
+                    
+                    if command -v apt-get &> /dev/null; then
+                        run_sudo apt-get update -qq
+                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake
+                    elif command -v dnf &> /dev/null; then
+                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake
+                    elif command -v pacman &> /dev/null; then
+                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake
+                    else
+                        echo '[ERROR] Unsupported package manager. Please install build-essential, git, curl, pkg-config, libssl-dev, cmake manually.'
+                        exit 1
+                    fi
+                    echo '  Build tools installed.'
                 else
-                    echo 'Rust/Cargo is already installed.'
-                    source ${"$"}HOME/.cargo/env || true
+                    echo '  Build tools already present.'
                 fi
+                echo ""
                 
-                echo 'Cloning or pulling repository...'
-                git clone https://github.com/gaborkukucska/hai.git || (cd hai && git pull)
+                # Step 1: Check for / install Rust
+                if ! command -v cargo &> /dev/null; then
+                    echo '[STEP 1/4] Rust/Cargo not found. Installing Rust...'
+                    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
+                    echo '  Rust installed successfully.'
+                else
+                    echo '[STEP 1/4] Rust/Cargo is already installed.'
+                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
+                fi
+                echo "  cargo: ${'$'}(cargo --version)"
+                echo ""
                 
-                echo 'Writing configuration...'
+                # Step 2: Clone or update the repository
+                echo '[STEP 2/4] Cloning/updating HAI-Net repository...'
+                if [ -d "hai" ]; then
+                    cd hai && git pull && cd ..
+                else
+                    git clone https://github.com/gaborkukucska/hai.git
+                fi
+                echo ""
+                
+                # Step 3: Write config from base64 payload
+                echo '[STEP 3/4] Writing hub configuration...'
+                echo "$configB64" | base64 -d > hai/hub_config.json
+                echo "  Config written (${'$'}(wc -c < hai/hub_config.json) bytes)"
+                
+                # Pre-create /etc/hainet so the installer doesn't fail with permissions/os error 2
+                run_sudo mkdir -p /etc/hainet
+                run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet
+                echo ""
+                
+                # Step 4: Run the seed installer
+                echo '[STEP 4/4] Running HAI-Net seed installer (this may take several minutes)...'
                 cd hai
-                echo '$escapedJson' > hub_config.json
                 
-                echo 'Running HAI-Net seed installer...'
-                cargo run --package hainet-seed --bin hainet-seed install -- --config hub_config.json
+                # Start a background keep-alive loop to prevent NAT idle timeouts during long silent builds
+                (while true; do echo -n "."; sleep 30; done) &
+                KEEPALIVE_PID=${'$'}!
                 
-                echo 'Cleaning up...'
+                # Run the installer
+                set +e # Disable exit on error temporarily so we can reliably kill the keepalive
+                cargo run --package hainet-seed --bin hainet-seed -- install --config hub_config.json
+                CARGO_EXIT=${'$'}?
+                set -e
+                
+                # Kill the keepalive process
+                kill ${'$'}KEEPALIVE_PID 2>/dev/null || true
+                echo ""
+                
+                # Cleanup
                 rm -f hub_config.json
-                echo 'Deployment complete!'
+                
+                if [ ${'$'}CARGO_EXIT -ne 0 ]; then
+                    echo "Installer failed with exit code ${'$'}CARGO_EXIT"
+                    exit ${'$'}CARGO_EXIT
+                fi
+                echo ""
+                echo '=== Deployment Complete ==='
             """.trimIndent()
 
-            onLog("Connecting to SSH at $user@$ip...")
-            
-            val output = StringBuilder()
             val channel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
-            channel.setCommand("bash -c '$script'")
-            channel.inputStream = null
-            // we use 2>&1 in the script, so stderr will go to stdout
-            channel.setErrStream(null) 
-            
+            // Pipe the script via stdin to avoid all quoting issues
+            channel.setCommand("bash -s")
+            channel.setErrStream(null)
+
+            val outputStream = channel.outputStream
             val inputStream = channel.inputStream
             channel.connect(10000)
-            
-            val reader = inputStream.bufferedReader()
-            val buffer = CharArray(1024)
-            var read: Int
-            
+
+            // Write the script to stdin and close it
+            outputStream.write(script.toByteArray())
+            outputStream.flush()
+            outputStream.close()
+
+            val output = StringBuilder()
+            val buf = ByteArray(4096)
+
             while (true) {
-                read = reader.read(buffer)
-                if (read > 0) {
-                    val chunk = String(buffer, 0, read)
-                    output.append(chunk)
-                    onLog(chunk)
+                while (inputStream.available() > 0) {
+                    val len = inputStream.read(buf)
+                    if (len > 0) {
+                        val chunk = String(buf, 0, len)
+                        output.append(chunk)
+                        Logger.info(TAG, chunk.trimEnd())
+                        withContext(Dispatchers.Main) { onLog(chunk) }
+                    }
                 }
                 if (channel.isClosed) {
-                    if (inputStream.available() > 0) continue
+                    // Drain any remaining bytes
+                    while (inputStream.available() > 0) {
+                        val len = inputStream.read(buf)
+                        if (len > 0) {
+                            val chunk = String(buf, 0, len)
+                            output.append(chunk)
+                            Logger.info(TAG, chunk.trimEnd())
+                            withContext(Dispatchers.Main) { onLog(chunk) }
+                        }
+                    }
                     break
                 }
-                kotlinx.coroutines.delay(100)
+                kotlinx.coroutines.delay(200)
             }
-            
+
             val exitStatus = channel.exitStatus
             channel.disconnect()
             session.disconnect()
-            
+
+            Logger.info(TAG, "Deployment finished with exit code: $exitStatus")
+
             if (exitStatus != 0) {
-                val errorMsg = "Deployment failed with exit code $exitStatus"
-                onLog("\n[ERROR] $errorMsg")
+                val errorMsg = "Deployment failed (exit code $exitStatus)"
+                withContext(Dispatchers.Main) { onLog("\n[ERROR] $errorMsg\n") }
                 return@withContext Result.failure(Exception(errorMsg))
             }
-            
+
             Result.success(output.toString())
         } catch (e: Exception) {
             Logger.error(TAG, "SSH Deployment failed: ${e.message}")
-            onLog("\n[CRITICAL ERROR] ${e.message}")
+            withContext(Dispatchers.Main) { onLog("\n[ERROR] ${e.message}\n") }
             Result.failure(e)
         }
     }

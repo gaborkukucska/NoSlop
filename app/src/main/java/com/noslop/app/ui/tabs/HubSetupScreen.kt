@@ -200,12 +200,13 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     }
 
     if (showSetupDialog) {
+        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
         AlertDialog(
-            onDismissRequest = { if (!isDeploying) showSetupDialog = false },
+            onDismissRequest = { if (!isDeploying) { showSetupDialog = false; deployError = null; deploymentLogs = "" } },
             containerColor = SurfaceDark,
             title = { Text(if (targetIp.isNotBlank()) "Deploy to $targetIp" else "Manual Deployment", color = TextLight) },
             text = {
-                if (isDeploying || deployError != null || deployResult != null) {
+                if (isDeploying || deployError != null || deploymentLogs.isNotBlank()) {
                     Column {
                         Text("Deployment Logs:", color = AccentGreen, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
@@ -221,14 +222,36 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                             }
                             Text(
                                 text = deploymentLogs, 
-                                color = AccentGreen, 
+                                color = if (deployError != null) DestructiveRed else AccentGreen, 
                                 fontSize = 10.sp, 
                                 modifier = Modifier.verticalScroll(scrollState)
                             )
                         }
                         if (deployError != null) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text(deployError!!, color = DestructiveRed, fontSize = 12.sp)
+                            Text(deployError!!, color = DestructiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    onClick = {
+                                        clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(deploymentLogs))
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                                ) {
+                                    Text("Copy Logs", fontSize = 12.sp)
+                                }
+                                Button(
+                                    onClick = {
+                                        deployError = null
+                                        deploymentLogs = ""
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                ) {
+                                    Text("Back to Settings", fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                 } else {
@@ -279,43 +302,45 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        isDeploying = true
-                        deployError = null
-                        deployResult = null
-                        deploymentLogs = ""
-                        coroutineScope.launch {
-                            val localIdentity = viewModel.localKeys.value
-                            val result = SshDeployer.deployHaiNetHub(
-                                ip = targetIp,
-                                user = username,
-                                pass = password,
-                                sharedFolder = sharedFolder,
-                                identity = localIdentity,
-                                onLog = { chunk -> deploymentLogs += chunk }
-                            )
-                            if (result.isSuccess) {
-                                showSetupDialog = false
-                                viewModel.setHubDeploymentStatus("Active at $targetIp")
-                            } else {
-                                deployError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                if (deployError == null) {
+                    Button(
+                        onClick = {
+                            isDeploying = true
+                            deployError = null
+                            deployResult = null
+                            deploymentLogs = ""
+                            coroutineScope.launch {
+                                val localIdentity = viewModel.localKeys.value
+                                val result = SshDeployer.deployHaiNetHub(
+                                    ip = targetIp,
+                                    user = username,
+                                    pass = password,
+                                    sharedFolder = sharedFolder,
+                                    identity = localIdentity,
+                                    onLog = { chunk -> deploymentLogs += chunk }
+                                )
+                                if (result.isSuccess) {
+                                    showSetupDialog = false
+                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                } else {
+                                    deployError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                                }
+                                isDeploying = false
                             }
-                            isDeploying = false
+                        },
+                        enabled = !isDeploying && targetIp.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        if (isDeploying) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                        } else {
+                            Text("Deploy")
                         }
-                    },
-                    enabled = !isDeploying && targetIp.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) {
-                    if (isDeploying) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
-                    } else {
-                        Text("Deploy")
                     }
                 }
             },
             dismissButton = {
-                if (!isDeploying) {
+                if (!isDeploying && deployError == null) {
                     TextButton(onClick = { showSetupDialog = false }) {
                         Text("Cancel", color = TextMuted)
                     }
