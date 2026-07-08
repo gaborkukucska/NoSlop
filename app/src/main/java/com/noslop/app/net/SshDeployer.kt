@@ -14,8 +14,6 @@ object SshDeployer {
         ip: String,
         user: String,
         pass: String,
-        cloudflareToken: String,
-        hasStaticIp: Boolean,
         sharedFolder: String,
         identity: CryptoService.IdentityKeys? = null
     ): Result<String> = withContext(Dispatchers.IO) {
@@ -28,8 +26,6 @@ object SshDeployer {
 
             // Build the hub_config.json payload using JSONObject for safe escaping
             val configJson = JSONObject().apply {
-                put("cloudflare_token", cloudflareToken)
-                put("has_static_ip", hasStaticIp)
                 put("shared_folder", sharedFolder)
                 if (identity != null) {
                     put("identity", JSONObject().apply {

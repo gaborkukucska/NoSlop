@@ -4,9 +4,11 @@
 
 ### 1. HAI-Net Hub Integration (Phase 1) & Identity Clone
 *   **Zero-Terminal Deployment**: Implemented `SshDeployer.kt` using JSch to deploy the HAI-Net Hub directly from the NoSlop mobile app. It connects via SSH, clones the repository, and executes `hainet-seed install` non-interactively.
+*   **Zero-Config mDNS Discovery**: Added `HubDiscoveryService.kt` utilizing Android's `NsdManager` to scan the local network for `_ssh._tcp` services. Discovered hubs appear instantly in the UI, auto-filling the IP Address field so users never have to manually type or find IPs.
+*   **Tor-Exclusive Remote Access**: Completely removed all Cloudflare Tunnel automation, UI inputs, and deployment configuration parameters (`cloudflareToken`, `hasStaticIp`). The Hub's remote accessibility now relies 100% on the embedded Tor Hidden Services architecture (`Phase 2`), simplifying the user experience drastically.
 *   **Identity Clone Architecture**: Replaced the previous public-key-only design with a full "Identity Clone" model. `HubSetupScreen.kt` now automatically injects the user's complete `CryptoService.IdentityKeys` (including Ed25519 and X25519 private keys) into the `hub_config.json` payload.
 *   **Secure Serialization**: Rewrote `SshDeployer` payload generation using `org.json.JSONObject` to prevent escaping errors and properly serialize the nested identity block for secure transport to the Hub.
-*   **Hub Setup UI**: Updated `HubSetupScreen` to include fields for a Shared Media Folder and a Static IP toggle (which conditionally hides the Cloudflare Token input), wiring them directly into the deployment payload.
+*   **Hub Setup UI**: Updated `HubSetupScreen` to dynamically handle mDNS results and standard inputs (Username, Password, Shared Media Folder).
 *   **Mesh Discoverability Fix**: Completed `broadcastDiscoverable()` in `NoSlopViewModel`, ensuring ephemeral "burnable" `.onion` addresses are correctly registered via `TorService` and announced to the mesh with cryptographic signatures.
 
 ## Completed Changes (2026-07-07)

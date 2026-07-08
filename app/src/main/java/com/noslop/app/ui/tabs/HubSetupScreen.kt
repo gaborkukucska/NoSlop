@@ -10,10 +10,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.noslop.app.net.HubDiscoveryService
 import com.noslop.app.net.SshDeployer
 import com.noslop.app.ui.theme.*
 import com.noslop.app.ui.NoSlopViewModel
@@ -52,9 +54,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var ipAddress by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var cloudflareToken by remember { mutableStateOf("") }
-    
-    var hasStaticIp by remember { mutableStateOf(false) }
     var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }
     
     var isDeploying by remember { mutableStateOf(false) }
@@ -62,6 +61,16 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var deployError by remember { mutableStateOf<String?>(null) }
 
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val discoveryService = remember { HubDiscoveryService(context) }
+    val discoveredHubs by discoveryService.discoveredHubs.collectAsState()
+
+    DisposableEffect(Unit) {
+        discoveryService.startDiscovery()
+        onDispose {
+            discoveryService.stopDiscovery()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -80,23 +89,26 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Cloudflare Warning
-        if (!hasStaticIp) {
+        if (discoveredHubs.isNotEmpty()) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.1f)),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Row(modifier = Modifier.padding(16.dp)) {
-                    Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed)
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Column {
-                        Text("Remote Access Requires Tunnel", color = DestructiveRed, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            "Unless your home ISP provides a static IP and you configure port forwarding, a Cloudflare Tunnel token is strictly required for your mobile app to access this hub remotely.",
-                            color = TextLight,
-                            fontSize = 14.sp
-                        )
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Discovered Hubs on Local Network", color = AccentGreen, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    discoveredHubs.forEach { hub ->
+                        Surface(
+                            onClick = { ipAddress = hub.ipAddress },
+                            color = PrimaryBlack,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(hub.hostName, color = TextLight, fontWeight = FontWeight.Bold)
+                                Text("${hub.ipAddress}:${hub.port}", color = TextMuted, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -142,31 +154,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Checkbox(
-                checked = hasStaticIp,
-                onCheckedChange = { hasStaticIp = it },
-                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, uncheckedColor = TextMuted)
-            )
-            Text("I have a Static IP with Port Forwarding", color = TextLight, fontSize = 14.sp)
-        }
-
-        if (!hasStaticIp) {
-            Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = cloudflareToken,
-                onValueChange = { cloudflareToken = it },
-                label = { Text("Cloudflare Tunnel Token", color = TextMuted) },
-                modifier = Modifier.fillMaxWidth(),
-                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-            )
-        }
-
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
@@ -180,8 +167,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         ip = ipAddress,
                         user = username,
                         pass = password,
-                        cloudflareToken = cloudflareToken,
-                        hasStaticIp = hasStaticIp,
                         sharedFolder = sharedFolder,
                         identity = localIdentity
                     )
