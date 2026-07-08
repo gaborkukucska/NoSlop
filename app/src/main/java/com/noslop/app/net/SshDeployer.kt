@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/net/SshDeployer.kt
 package com.noslop.app.net
 
 import com.jcraft.jsch.JSch
@@ -26,7 +27,7 @@ object SshDeployer {
             val session = jsch.getSession(user, ip, 22)
             session.setPassword(pass)
             session.setConfig("StrictHostKeyChecking", "no")
-            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods (like model downloads)
+            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods
             session.connect(15000)
 
             onLog("SSH connected. Preparing deployment...\n")
@@ -79,25 +80,26 @@ object SshDeployer {
                 }
 
                 # Step 0: Ensure essential build tools are present
-                echo '[STEP 0/4] Checking build prerequisites...'
+                echo '[STEP 0/5] Checking build prerequisites...'
                 NEED_INSTALL=""
                 command -v cc &> /dev/null || NEED_INSTALL="yes"
                 command -v git &> /dev/null || NEED_INSTALL="yes"
                 command -v curl &> /dev/null || NEED_INSTALL="yes"
                 command -v cmake &> /dev/null || NEED_INSTALL="yes"
+                command -v npm &> /dev/null || NEED_INSTALL="yes"
                 
                 if [ -n "${'$'}NEED_INSTALL" ]; then
-                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, protobuf-compiler, cmake...'
+                    echo '  Installing build-essential, git, curl, pkg-config, libssl-dev, cmake, nodejs, npm...'
                     
                     if command -v apt-get &> /dev/null; then
                         run_sudo apt-get update -qq
-                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake
+                        run_sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential git curl pkg-config libssl-dev protobuf-compiler cmake nodejs npm
                     elif command -v dnf &> /dev/null; then
-                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake
+                        run_sudo dnf install -y gcc gcc-c++ make git curl openssl-devel pkgconfig protobuf-compiler cmake nodejs npm
                     elif command -v pacman &> /dev/null; then
-                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake
+                        run_sudo pacman -Sy --noconfirm base-devel git curl openssl pkgconf protobuf cmake nodejs npm
                     else
-                        echo '[ERROR] Unsupported package manager. Please install build-essential, git, curl, pkg-config, libssl-dev, cmake manually.'
+                        echo '[ERROR] Unsupported package manager. Please install dependencies manually.'
                         exit 1
                     fi
                     echo '  Build tools installed.'
@@ -108,19 +110,19 @@ object SshDeployer {
                 
                 # Step 1: Check for / install Rust
                 if ! command -v cargo &> /dev/null; then
-                    echo '[STEP 1/4] Rust/Cargo not found. Installing Rust...'
+                    echo '[STEP 1/5] Rust/Cargo not found. Installing Rust...'
                     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
                     export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                     echo '  Rust installed successfully.'
                 else
-                    echo '[STEP 1/4] Rust/Cargo is already installed.'
+                    echo '[STEP 1/5] Rust/Cargo is already installed.'
                     export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                 fi
                 echo "  cargo: ${'$'}(cargo --version)"
                 echo ""
                 
                 # Step 2: Clone or update the repository
-                echo '[STEP 2/4] Cloning/updating HAI-Net repository...'
+                echo '[STEP 2/5] Cloning/updating HAI-Net repository...'
                 if [ -d "hai" ]; then
                     cd hai && git pull && cd ..
                 else
@@ -129,7 +131,7 @@ object SshDeployer {
                 echo ""
                 
                 # Step 3: Write config from base64 payload
-                echo '[STEP 3/4] Writing hub configuration...'
+                echo '[STEP 3/5] Writing hub configuration...'
                 echo "$configB64" | base64 -d > hai/hub_config.json
                 echo "  Config written (${'$'}(wc -c < hai/hub_config.json) bytes)"
                 
@@ -139,7 +141,7 @@ object SshDeployer {
                 echo ""
                 
                 # Step 4: Run the seed installer
-                echo '[STEP 4/4] Running HAI-Net seed installer (this may take several minutes)...'
+                echo '[STEP 4/5] Running HAI-Net seed installer (this may take several minutes)...'
                 cd hai
                 
                 # Start a background keep-alive loop to prevent NAT idle timeouts during long silent builds
@@ -148,6 +150,7 @@ object SshDeployer {
                 
                 # Run the installer
                 set +e # Disable exit on error temporarily so we can reliably kill the keepalive
+                export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                 cargo run --package hainet-seed --bin hainet-seed -- install --config hub_config.json
                 CARGO_EXIT=${'$'}?
                 set -e
@@ -163,6 +166,46 @@ object SshDeployer {
                     echo "Installer failed with exit code ${'$'}CARGO_EXIT"
                     exit ${'$'}CARGO_EXIT
                 fi
+                echo ""
+                
+                # Step 5: Build and Start Portal Web UI
+                echo '[STEP 5/5] Building and starting HAI-Net Portal Web UI...'
+                if [ -d "hainet-portal" ]; then
+                    cd hainet-portal
+                    echo '  Installing NPM dependencies...'
+                    npm install
+                    echo '  Building React frontend...'
+                    npm run build
+                    cd ..
+                    
+                    echo '  Building Portal backend...'
+                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
+                    cargo build --release --package hainet-portal
+                    
+                    echo '  Setting up systemd service for Portal...'
+                    cat << 'EOF' | run_sudo tee /etc/systemd/system/hainet-portal.service > /dev/null
+[Unit]
+Description=HAI-Net Portal Web UI
+After=network.target hainet-core.service
+
+[Service]
+Type=simple
+User=${'$'}(id -un)
+WorkingDirectory=${'$'}PWD
+ExecStart=${'$'}PWD/target/release/hainet-portal
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                    run_sudo systemctl daemon-reload
+                    run_sudo systemctl enable hainet-portal.service
+                    run_sudo systemctl restart hainet-portal.service
+                    echo '  Portal Web UI is now running on port 3000.'
+                else
+                    echo '  [WARNING] hainet-portal directory not found. Skipping Web UI setup.'
+                fi
+                
                 echo ""
                 echo '=== Deployment Complete ==='
             """.trimIndent()
