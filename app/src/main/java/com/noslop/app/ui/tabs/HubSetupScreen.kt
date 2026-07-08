@@ -17,6 +17,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.noslop.app.net.HubDiscoveryService
 import com.noslop.app.net.SshDeployer
 import com.noslop.app.ui.theme.*
@@ -64,6 +66,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }
+    var deploymentLogs by remember { mutableStateOf("") }
 
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -202,48 +205,76 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             containerColor = SurfaceDark,
             title = { Text(if (targetIp.isNotBlank()) "Deploy to $targetIp" else "Manual Deployment", color = TextLight) },
             text = {
-                Column {
-                    if (targetIp.isBlank()) {
+                if (isDeploying || deployError != null || deployResult != null) {
+                    Column {
+                        Text("Deployment Logs:", color = AccentGreen, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp)
+                            .background(PrimaryBlack, RoundedCornerShape(4.dp))
+                            .padding(8.dp)
+                        ) {
+                            val scrollState = rememberScrollState()
+                            LaunchedEffect(deploymentLogs) {
+                                scrollState.animateScrollTo(scrollState.maxValue)
+                            }
+                            Text(
+                                text = deploymentLogs, 
+                                color = AccentGreen, 
+                                fontSize = 10.sp, 
+                                modifier = Modifier.verticalScroll(scrollState)
+                            )
+                        }
+                        if (deployError != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(deployError!!, color = DestructiveRed, fontSize = 12.sp)
+                        }
+                    }
+                } else {
+                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                        if (targetIp.isBlank()) {
+                            OutlinedTextField(
+                                value = targetIp,
+                                onValueChange = { targetIp = it },
+                                label = { Text("Hub IP Address", color = TextMuted) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                        
                         OutlinedTextField(
-                            value = targetIp,
-                            onValueChange = { targetIp = it },
-                            label = { Text("Hub IP Address", color = TextMuted) },
+                            value = username,
+                            onValueChange = { username = it },
+                            label = { Text("SSH Username", color = TextMuted) },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                    }
-                    
-                    OutlinedTextField(
-                        value = username,
-                        onValueChange = { username = it },
-                        label = { Text("SSH Username", color = TextMuted) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
 
-                    OutlinedTextField(
-                        value = password,
-                        onValueChange = { password = it },
-                        label = { Text("SSH Password", color = TextMuted) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = sharedFolder,
-                        onValueChange = { sharedFolder = it },
-                        label = { Text("Shared Media Folder", color = TextMuted) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-                    )
-
-                    if (deployError != null) {
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text("SSH Password", color = TextMuted) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(deployError!!, color = DestructiveRed, fontSize = 12.sp)
+
+                        OutlinedTextField(
+                            value = sharedFolder,
+                            onValueChange = { sharedFolder = it },
+                            label = { Text("Shared Media Folder", color = TextMuted) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+
+                        if (deployError != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(deployError!!, color = DestructiveRed, fontSize = 12.sp)
+                        }
                     }
                 }
             },
@@ -253,6 +284,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         isDeploying = true
                         deployError = null
                         deployResult = null
+                        deploymentLogs = ""
                         coroutineScope.launch {
                             val localIdentity = viewModel.localKeys.value
                             val result = SshDeployer.deployHaiNetHub(
@@ -260,7 +292,8 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                 user = username,
                                 pass = password,
                                 sharedFolder = sharedFolder,
-                                identity = localIdentity
+                                identity = localIdentity,
+                                onLog = { chunk -> deploymentLogs += chunk }
                             )
                             if (result.isSuccess) {
                                 showSetupDialog = false
