@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.runtime.getValue
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -38,9 +39,14 @@ import androidx.compose.ui.geometry.Rect
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
 import com.noslop.app.ui.*
@@ -181,8 +187,87 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
             TorWarningPanel(viewModel)
 
-            val pendingRequests = peers.filter { !it.isTrusted }
-            val contacts = peers.filter { it.isTrusted }
+            val discoverablePeers by viewModel.discoverablePeers.collectAsState()
+            val pendingRequests = peers.filter { !it.isTrusted && !it.isTemporary }
+            val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
+            
+            val folders = listOf("All") + rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
+            var selectedFolder by remember { mutableStateOf("All") }
+            val contacts = if (selectedFolder == "All") rawContacts else rawContacts.filter { it.customFolder == selectedFolder }
+            
+            var peerToAssignFolder by remember { mutableStateOf<Peer?>(null) }
+            var selectedDiscoverableNode by remember { mutableStateOf<Peer?>(null) }
+            
+            if (peerToAssignFolder != null) {
+                var folderName by remember { mutableStateOf(peerToAssignFolder?.customFolder ?: "") }
+                AlertDialog(
+                    onDismissRequest = { peerToAssignFolder = null },
+                    title = { Text("Assign to Folder", color = TextLight) },
+                    text = {
+                        OutlinedTextField(
+                            value = folderName,
+                            onValueChange = { folderName = it },
+                            label = { Text("Folder Name", color = TextMuted) },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = TextLight,
+                                unfocusedTextColor = TextLight
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.updatePeerFolder(peerToAssignFolder!!.publicKeyB64, folderName.ifBlank { null })
+                                peerToAssignFolder = null
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) { Text("Save") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { peerToAssignFolder = null }) { Text("Cancel", color = TextMuted) }
+                    },
+                    containerColor = SurfaceDark
+                )
+            }
+            
+            if (selectedDiscoverableNode != null) {
+                @OptIn(ExperimentalMaterial3Api::class)
+                ModalBottomSheet(
+                    onDismissRequest = { selectedDiscoverableNode = null },
+                    containerColor = SurfaceDark
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp).fillMaxWidth().padding(bottom = 32.dp), 
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(selectedDiscoverableNode!!.handle, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextLight)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (selectedDiscoverableNode!!.isCreator) {
+                            Text("Creator Node", color = AccentGreen, fontWeight = FontWeight.Bold)
+                            if (selectedDiscoverableNode!!.fundMeLink != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Support: ${selectedDiscoverableNode!!.fundMeLink}", color = TextLight, fontSize = 14.sp)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = {
+                                viewModel.requestConnection(
+                                    handle = selectedDiscoverableNode!!.handle,
+                                    publicKeyB64 = selectedDiscoverableNode!!.publicKeyB64,
+                                    onionAddress = selectedDiscoverableNode!!.onionAddress,
+                                    encPublicKeyB64 = selectedDiscoverableNode!!.encPublicKeyB64
+                                )
+                                selectedDiscoverableNode = null
+                            }, 
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                            modifier = Modifier.fillMaxWidth(0.8f)
+                        ) {
+                            Text("Connect via Mesh", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
 
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -202,6 +287,63 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
                     }
                 }
+                
+                if (discoverablePeers.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "DISCOVERABLE NODES".tr,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    item {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
+                            items(discoverablePeers) { peer ->
+                                Card(
+                                    modifier = Modifier.width(140.dp).clickable { selectedDiscoverableNode = peer },
+                                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                                    border = BorderStroke(1.dp, if (peer.isCreator) AccentGreen else BorderSubtle)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                            Text(peer.handle.take(1).uppercase(), color = TextLight, fontWeight = FontWeight.Bold)
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(peer.handle, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (peer.isCreator) {
+                                            Text("Creator", color = AccentGreen, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (folders.size > 1) {
+                    item {
+                        ScrollableTabRow(
+                            selectedTabIndex = folders.indexOf(selectedFolder).coerceAtLeast(0),
+                            containerColor = Color.Transparent,
+                            contentColor = AccentGreen,
+                            edgePadding = 0.dp,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        ) {
+                            folders.forEach { folder ->
+                                Tab(
+                                    selected = selectedFolder == folder,
+                                    onClick = { selectedFolder = folder },
+                                    text = { Text(folder, fontWeight = FontWeight.Bold) }
+                                )
+                            }
+                        }
+                    }
+                }
 
                 if (contacts.isNotEmpty()) {
                     item {
@@ -214,7 +356,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         )
                     }
                     items(contacts) { peer ->
-                        PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
+                        PeerItem(
+                            peer = peer, 
+                            lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
+                            viewModel = viewModel,
+                            onLongPress = { peerToAssignFolder = peer }
+                        )
                     }
                 }
 

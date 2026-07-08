@@ -131,6 +131,9 @@ class FakePeerDao : PeerDao {
     override suspend fun getAllPeersList(): List<Peer> = peers.values.toList()
     override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
     override fun getTrustedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTrusted })
+    override fun getTemporaryPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTemporary })
+    override fun getPeersByFolder(folder: String): Flow<List<Peer>> = flowOf(peers.values.filter { it.customFolder == folder })
+    override fun getDiscoverablePeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isDiscoverable })
 }
 
 /** Fake [PostDao] keyed by id (REPLACE on insert). */

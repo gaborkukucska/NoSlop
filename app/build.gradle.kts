@@ -199,6 +199,9 @@ dependencies {
     implementation(libs.google.mlkit.barcode.scanning)
     implementation(libs.zxing.core)
 
+    // --- SSH Client ---
+    implementation("com.jcraft:jsch:0.1.55")
+
     // --- Testing ---
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

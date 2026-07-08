@@ -185,6 +185,57 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         Logger.info(TAG, "All identity data cleared from EncryptedSharedPreferences")
     }
 
+    suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
+        val burnableHandle = "Anon_${java.util.UUID.randomUUID().toString().take(6)}"
+        val burnableIdentity = CryptoService.generateIdentity(burnableHandle)
+        
+        prefs.edit()
+            .putString("burnable_ed25519_private_key", burnableIdentity.privateKeyB64)
+            .putString("burnable_enc_private_key", burnableIdentity.encPrivateKeyB64)
+            .putString("burnable_pub_ed25519", burnableIdentity.publicKeyB64)
+            .putString("burnable_pub_enc", burnableIdentity.encPublicKeyB64)
+            .putString("burnable_tripcode", burnableIdentity.tripcode)
+            .putString("burnable_onion", burnableIdentity.onionAddress)
+            .putString("burnable_display_name", burnableIdentity.displayName)
+            .apply()
+            
+        Logger.info(TAG, "Burnable identity generated: ${burnableIdentity.tripcode}")
+        return burnableIdentity
+    }
+
+    suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? {
+        val pubEd = prefs.getString("burnable_pub_ed25519", null) ?: return null
+        val pubEnc = prefs.getString("burnable_pub_enc", null) ?: return null
+        val tripcode = prefs.getString("burnable_tripcode", null) ?: return null
+        val onion = prefs.getString("burnable_onion", null) ?: return null
+        val displayName = prefs.getString("burnable_display_name", null) ?: return null
+        val privEd = prefs.getString("burnable_ed25519_private_key", null) ?: return null
+        val privEnc = prefs.getString("burnable_enc_private_key", null) ?: return null
+        
+        return CryptoService.IdentityKeys(
+            publicKeyB64 = pubEd,
+            privateKeyB64 = privEd,
+            tripcode = tripcode,
+            onionAddress = onion,
+            displayName = displayName,
+            encPublicKeyB64 = pubEnc,
+            encPrivateKeyB64 = privEnc
+        )
+    }
+
+    suspend fun clearBurnableIdentity() {
+        prefs.edit()
+            .remove("burnable_ed25519_private_key")
+            .remove("burnable_enc_private_key")
+            .remove("burnable_pub_ed25519")
+            .remove("burnable_pub_enc")
+            .remove("burnable_tripcode")
+            .remove("burnable_onion")
+            .remove("burnable_display_name")
+            .apply()
+        Logger.info(TAG, "Burnable identity cleared")
+    }
+
     /**
      * Checks if encryption is active.
      * Returns true if using EncryptedSharedPreferences, false if using fallback plaintext SharedPreferences.

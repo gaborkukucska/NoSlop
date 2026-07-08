@@ -122,6 +122,24 @@ data class AnnouncePeerPayload(
     val signature: String
 )
 
+data class AnnounceDiscoverablePayload(
+    @SerializedName("author_id") val authorId: String,
+    val handle: String,
+    @SerializedName("onion_address") val onionAddress: String,
+    @SerializedName("enc_public_key") val encPublicKey: String,
+    @SerializedName("is_creator") val isCreator: Boolean = false,
+    @SerializedName("fund_me_link") val fundMeLink: String? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class SubscribePayload(
+    @SerializedName("creator_id") val creatorId: String,
+    @SerializedName("subscriber_id") val subscriberId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class ReactionPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("reaction_type") val reactionType: String, // e.g., "like", "upvote", "downvote"
@@ -354,6 +372,14 @@ data class NetworkPacket(
 
     fun getAnnouncePeerPayload(): AnnouncePeerPayload? = if (type == "ANNOUNCE_PEER" && payload != null) {
         Gson().fromJson(payload, AnnouncePeerPayload::class.java)
+    } else null
+
+    fun getAnnounceDiscoverablePayload(): AnnounceDiscoverablePayload? = if (type == "ANNOUNCE_DISCOVERABLE" && payload != null) {
+        Gson().fromJson(payload, AnnounceDiscoverablePayload::class.java)
+    } else null
+
+    fun getSubscribePayload(): SubscribePayload? = if (type == "SUBSCRIBE" && payload != null) {
+        Gson().fromJson(payload, SubscribePayload::class.java)
     } else null
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {

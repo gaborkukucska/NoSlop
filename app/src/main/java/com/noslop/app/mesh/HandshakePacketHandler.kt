@@ -22,7 +22,7 @@ class HandshakePacketHandler(
     private val peerDao = db.peerDao()
     private val notificationDao = db.notificationDao()
 
-    suspend fun handleConnectionRequest(packet: NetworkPacket): Boolean {
+    suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
         
         val signature = packet.signature
@@ -62,32 +62,45 @@ class HandshakePacketHandler(
         peerDao.insertPeer(peer)
         
         if (!isTrusted) {
-            repo.setIncomingRequest(peer)
+            val isLocalCreator = db.appSettingDao().getSetting("is_creator") == "true"
+            if (isLocalCreator) {
+                // Auto-accept connection for creators
+                peerDao.insertPeer(peer.copy(isTrusted = true))
+                repo.setHandshakeAccepted(peer)
+                
+                // We also need to send a USER_HANDSHAKE back, which MeshPacketHandler or the caller
+                // should do. For now we will rely on the caller passing a sendResponse callback,
+                // or we handle it at the caller level.
+                // Assuming caller handles response if needed, but we mark it trusted here.
+                Logger.info(TAG, "Auto-accepted connection request from ${peer.handle} (Creator Mode)")
+            } else {
+                repo.setIncomingRequest(peer)
 
-            val notifSettings = repo.notificationSettingsFlow.value
-            if (notifSettings.connectionRequests) {
-                val title = "New Connection Request"
-            val msg = "${peer.handle} wants to connect with you."
-            val route = "notifications"
-            
-            notificationDao.insertNotification(
-                NotificationItem(
-                    id = UUID.randomUUID().toString(),
-                    type = "CONNECTION_REQUEST",
-                    title = title,
-                    body = msg,
-                    targetRoute = route,
-                    iconType = "handshake",
-                    senderPub = peer.publicKeyB64
-                )
-            )
+                val notifSettings = repo.notificationSettingsFlow.value
+                if (notifSettings.connectionRequests) {
+                    val title = "New Connection Request"
+                    val msg = "${peer.handle} wants to connect with you."
+                    val route = "notifications"
+                    
+                    notificationDao.insertNotification(
+                        NotificationItem(
+                            id = UUID.randomUUID().toString(),
+                            type = "CONNECTION_REQUEST",
+                            title = title,
+                            body = msg,
+                            targetRoute = route,
+                            iconType = "handshake",
+                            senderPub = peer.publicKeyB64
+                        )
+                    )
 
-            com.noslop.app.util.NotificationHelper.showNotification(
-                    context = repo.context,
-                    title = title,
-                    message = msg,
-                    deepLinkRoute = route
-                )
+                    com.noslop.app.util.NotificationHelper.showNotification(
+                        context = repo.context,
+                        title = title,
+                        message = msg,
+                        deepLinkRoute = route
+                    )
+                }
             }
         }
 
@@ -246,6 +259,67 @@ class HandshakePacketHandler(
                 repo.requestInventorySync(peer)
             }
         }
+        return true
+    }
+
+    suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
+        val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
+        val payloadToVerify = "${announcePay.authorId}|${announcePay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected ANNOUNCE_DISCOVERABLE: Signature verification failed")
+            return false
+        }
+        
+        val pubBytes = Base64.decode(announcePay.authorId, Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+        
+        val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
+        if (peer == null) {
+            // Add as temporary discoverable node
+            val newPeer = Peer(
+                publicKeyB64 = announcePay.authorId,
+                handle = announcePay.handle,
+                tripcode = tripcode,
+                onionAddress = announcePay.onionAddress,
+                encPublicKeyB64 = announcePay.encPublicKey,
+                isTrusted = false,
+                isTemporary = true,
+                isDiscoverable = true,
+                isCreator = announcePay.isCreator,
+                fundMeLink = announcePay.fundMeLink,
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis()
+            )
+            peerDao.insertPeer(newPeer)
+            Logger.debug(TAG, "ANNOUNCE_DISCOVERABLE received: Discovered node ${announcePay.handle}")
+        } else {
+            // Update existing
+            peerDao.insertPeer(peer.copy(
+                handle = announcePay.handle,
+                onionAddress = announcePay.onionAddress,
+                isTemporary = if (peer.isTrusted) false else true,
+                isDiscoverable = true,
+                isCreator = announcePay.isCreator,
+                fundMeLink = announcePay.fundMeLink,
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+        }
+        return true
+    }
+
+    suspend fun handleSubscribe(packet: NetworkPacket): Boolean {
+        val subscribePay = packet.getSubscribePayload() ?: return false
+        val payloadToVerify = "${subscribePay.creatorId}|${subscribePay.subscriberId}|${subscribePay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, subscribePay.signature, subscribePay.subscriberId)
+        if (!isValid) {
+            Logger.warn(TAG, "Rejected SUBSCRIBE: Signature verification failed")
+            return false
+        }
+
+        // Just acknowledge and optionally log it. In the future this can alter proxy limits.
+        Logger.info(TAG, "Received SUBSCRIBE from ${subscribePay.subscriberId}")
         return true
     }
 

@@ -150,8 +150,8 @@ object MediaManager {
             }
             
             for (file in sortedFiles) {
-                // Skip files protected by a .mine sentinel
-                if (File(file.parentFile, "${file.name}.mine").exists()) {
+                // Skip files protected by a .mine or .creator_locked sentinel
+                if (File(file.parentFile, "${file.name}.mine").exists() || File(file.parentFile, "${file.name}.creator_locked").exists()) {
                     currentSize += file.length()
                     continue
                 }
@@ -165,8 +165,8 @@ object MediaManager {
             
             for (file in sortedFiles) {
                 if (!file.exists()) continue
-                // Skip files protected by a .mine sentinel
-                if (File(file.parentFile, "${file.name}.mine").exists()) continue
+                // Skip files protected by a .mine or .creator_locked sentinel
+                if (File(file.parentFile, "${file.name}.mine").exists() || File(file.parentFile, "${file.name}.creator_locked").exists()) continue
                 
                 if (currentSize <= maxBytes) break
                 val len = file.length()
@@ -206,6 +206,26 @@ object MediaManager {
             destFile
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to copy local file", e.message)
+            null
+        }
+    }
+
+    fun cacheCreatorMedia(source: File, type: String?, id: String): File? {
+        val repo = repository ?: return null
+        return try {
+            val destDir = getMediaDirectory(type)
+            val destFile = File(destDir, id)
+            if (source.canonicalPath != destFile.canonicalPath) {
+                source.copyTo(destFile, overwrite = true)
+            }
+            // Update timestamp
+            destFile.setLastModified(System.currentTimeMillis())
+            // Drop a sentinel file to lock creator media
+            File(destDir, "$id.creator_locked").createNewFile()
+            Logger.info(TAG, "Cached and locked creator media: $id")
+            destFile
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to cache creator media", e.message)
             null
         }
     }

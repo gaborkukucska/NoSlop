@@ -34,14 +34,26 @@ import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
+fun PeerItem(
+    peer: Peer, 
+    lastMsg: ChatMessage?, 
+    viewModel: NoSlopViewModel,
+    onLongPress: (() -> Unit)? = null
+) {
     var showContactCard by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { viewModel.selectChatPeer(peer.publicKeyB64) },
+            .combinedClickable(
+                onClick = { viewModel.selectChatPeer(peer.publicKeyB64) },
+                onLongClick = onLongPress
+            ),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.3f) else DestructiveRed.copy(alpha = 0.3f))
     ) {

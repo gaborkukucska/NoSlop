@@ -83,6 +83,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val feedBuildStatus: Flow<String> = feedRepository.feedBuildStatus
     val allPeers: Flow<List<Peer>> = peerDao.getAllPeers()
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
+    val discoverablePeers: Flow<List<Peer>> = peerDao.getDiscoverablePeers()
+    val temporaryPeers: Flow<List<Peer>> = peerDao.getTemporaryPeers()
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()

@@ -173,6 +173,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val peers: StateFlow<List<Peer>> = repository.allPeers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val discoverablePeers: StateFlow<List<Peer>> = repository.discoverablePeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val temporaryPeers: StateFlow<List<Peer>> = repository.temporaryPeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -247,6 +253,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _appLanguage = MutableStateFlow("en")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
+    private val _isDiscoverableEnabled = MutableStateFlow(false)
+    val isDiscoverableEnabled: StateFlow<Boolean> = _isDiscoverableEnabled.asStateFlow()
+
+    private val _isCreatorEnabled = MutableStateFlow(false)
+    val isCreatorEnabled: StateFlow<Boolean> = _isCreatorEnabled.asStateFlow()
+
+    private val _creatorFundMeLink = MutableStateFlow("")
+    val creatorFundMeLink: StateFlow<String> = _creatorFundMeLink.asStateFlow()
+
+    private val _hubDeploymentStatus = MutableStateFlow<String?>(null)
+    val hubDeploymentStatus: StateFlow<String?> = _hubDeploymentStatus.asStateFlow()
+
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
@@ -316,6 +334,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { _isAggregatorEnabled.value = repository.isAggregatorEnabled() }
         viewModelScope.launch { _isContentTransparencyEnabled.value = repository.isContentTransparencyEnabled() }
         viewModelScope.launch { _isEncryptionActive.value = repository.isEncryptionActive() }
+        viewModelScope.launch { 
+            _isDiscoverableEnabled.value = repository.getAppSetting("is_discoverable_enabled") == "true"
+            _isCreatorEnabled.value = repository.getAppSetting("is_creator_enabled") == "true"
+            _creatorFundMeLink.value = repository.getAppSetting("creator_fundme_link") ?: ""
+            _hubDeploymentStatus.value = repository.getAppSetting("hub_deployment_status")
+        }
         viewModelScope.launch { refreshExclusionCaches() }
 
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
@@ -795,6 +819,15 @@ fun toggleAggregator() {
         }
     }
 
+    fun updatePeerFolder(pubKey: String, folder: String?) {
+        viewModelScope.launch {
+            val peer = repository.peerDao.getPeerByPublicKey(pubKey)
+            if (peer != null) {
+                repository.peerDao.insertPeer(peer.copy(customFolder = folder))
+            }
+        }
+    }
+
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
         viewModelScope.launch {
             val keys = CryptoService.generateIdentity(handle)
@@ -1239,6 +1272,90 @@ fun toggleAggregator() {
 
     fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "") {
         viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64) }
+    }
+
+    fun setDiscoverableEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.putAppSetting("is_discoverable_enabled", enabled.toString())
+            _isDiscoverableEnabled.value = enabled
+            if (enabled) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
+    fun setCreatorEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.putAppSetting("is_creator_enabled", enabled.toString())
+            _isCreatorEnabled.value = enabled
+            if (enabled && _isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
+    fun setCreatorFundMeLink(link: String) {
+        viewModelScope.launch {
+            repository.putAppSetting("creator_fundme_link", link)
+            _creatorFundMeLink.value = link
+            if (_isDiscoverableEnabled.value) {
+                broadcastDiscoverable()
+            }
+        }
+    }
+
+    fun setHubDeploymentStatus(status: String) {
+        viewModelScope.launch {
+            repository.putAppSetting("hub_deployment_status", status)
+            _hubDeploymentStatus.value = status
+        }
+    }
+
+    fun broadcastDiscoverable() {
+        viewModelScope.launch {
+            val handle = localHandle.value
+            val isCreator = _isCreatorEnabled.value
+            val link = _creatorFundMeLink.value.takeIf { it.isNotBlank() }
+            
+            // Get burnable address from TorService
+            val burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+            
+            if (burnableAddress == null) {
+                Logger.warn("DISCOVERABLE", "Cannot broadcast discoverable: burnable address not ready")
+                return@launch
+            }
+            
+            val identity = repository.getLocalIdentity() ?: return@launch
+            val localKeyB64 = identity.publicKeyB64
+            val encKeyB64 = identity.encPublicKeyB64
+            val timestamp = System.currentTimeMillis()
+            
+            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}:${timestamp}"
+            val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, identity.privateKeyB64)
+            
+            val payload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
+                authorId = localKeyB64,
+                handle = handle,
+                onionAddress = burnableAddress,
+                encPublicKey = encKeyB64,
+                isCreator = isCreator,
+                fundMeLink = link,
+                timestamp = timestamp,
+                signature = signature
+            )
+            
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                senderId = localKeyB64,
+                type = "ANNOUNCE_DISCOVERABLE",
+                payload = com.google.gson.Gson().toJsonTree(payload),
+                hops = 6 // Spread up to 6 hops
+            )
+            
+            // Use GossipService to broadcast this packet across the mesh
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+            Logger.info("DISCOVERABLE", "Broadcasted ANNOUNCE_DISCOVERABLE (creator=\$isCreator, hops=6)")
+        }
     }
 
     fun acceptHandshake(peer: Peer) { viewModelScope.launch { repository.acceptConnectionRequest(peer) } }

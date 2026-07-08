@@ -55,7 +55,12 @@ data class Peer(
     val isTrusted: Boolean = false,
     val isOnline: Boolean = false,
     val lastSeenAt: Long = System.currentTimeMillis(),
-    val authorAvatarB64: String? = null
+    val authorAvatarB64: String? = null,
+    val customFolder: String? = null,
+    val isTemporary: Boolean = false,
+    val isDiscoverable: Boolean = false,
+    val isCreator: Boolean = false,
+    val fundMeLink: String? = null
 )
 
 @Entity(tableName = "mesh_posts")

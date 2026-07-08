@@ -431,6 +431,96 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     )
                                 }
                             }
+                            }
+                        }
+                    }
+
+                item {
+                    Text(
+                        text = "MESH DISCOVERABILITY".tr,
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val isDiscoverableEnabled by viewModel.isDiscoverableEnabled.collectAsState()
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Discoverable Mode".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Broadcast your ephemeral identity to the mesh so others can find you without a direct connection code.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isDiscoverableEnabled,
+                                    onCheckedChange = { viewModel.setDiscoverableEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+                            
+                            if (isDiscoverableEnabled) {
+                                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                                
+                                val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Creator Node".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text(
+                                            "Automatically accept connections and lock your media from being purged by auto-cleanup.".tr,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextMuted
+                                        )
+                                    }
+                                    Switch(
+                                        checked = isCreatorEnabled,
+                                        onCheckedChange = { viewModel.setCreatorEnabled(it) },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = PrimaryBlack,
+                                            checkedTrackColor = AccentGreen,
+                                            uncheckedThumbColor = TextMuted,
+                                            uncheckedTrackColor = SurfaceDark
+                                        )
+                                    )
+                                }
+
+                                if (isCreatorEnabled) {
+                                    val creatorFundMeLink by viewModel.creatorFundMeLink.collectAsState()
+                                    OutlinedTextField(
+                                        value = creatorFundMeLink,
+                                        onValueChange = { viewModel.setCreatorFundMeLink(it) },
+                                        label = { Text("Donation Link (Optional)".tr) },
+                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = AccentGreen,
+                                            unfocusedBorderColor = BorderSubtle,
+                                            focusedTextColor = TextLight,
+                                            unfocusedTextColor = TextLight
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
                 }

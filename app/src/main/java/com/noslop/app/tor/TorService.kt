@@ -45,6 +45,9 @@ object TorService {
 
     private var bootstrapJob: kotlinx.coroutines.Job? = null
     private var currentPrivateKeyB64: String? = null
+    private var currentBurnablePrivateKeyB64: String? = null
+    var currentBurnableOnionAddress: String? = null
+    var onBurnableAddressCallback: ((String) -> Unit)? = null
 
     private val torStatusReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
@@ -78,19 +81,21 @@ object TorService {
      * true (user has external Orbot) — in that case the daemon may already
      * be running on 9050.
      */
-    fun startTor(context: Context, privateKeyB64: String? = null) {
+    fun startTor(context: Context, privateKeyB64: String? = null, burnablePrivateKeyB64: String? = null) {
         // FIX: Guard now excludes IDLE — IDLE means "not started yet" and must
         // always proceed. FAILED also now falls through so the Retry button works.
         if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
             // Still update the key in case it changed (e.g. after onboarding)
             currentPrivateKeyB64 = privateKeyB64
+            currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
             return
         }
 
         Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=${_torState.value})...")
         _torState.value = TorState.STARTING
         currentPrivateKeyB64 = privateKeyB64
+        currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
         
         bootstrapJob?.cancel()
 
@@ -159,6 +164,15 @@ object TorService {
             registerHiddenService(currentPrivateKeyB64) { onionAddress ->
                 onAddressCallback?.invoke(onionAddress)
             }
+            
+            if (currentBurnablePrivateKeyB64 != null) {
+                // Short delay between control port commands
+                delay(1000)
+                registerHiddenService(currentBurnablePrivateKeyB64) { onionAddress ->
+                    currentBurnableOnionAddress = onionAddress
+                    onBurnableAddressCallback?.invoke(onionAddress)
+                }
+            }
         }
     }
 
@@ -166,8 +180,9 @@ object TorService {
      * Updates the private key and re-registers the hidden service.
      * Used when transitioning from onboarding to an active identity.
      */
-    fun updateKeyAndRegister(privateKeyB64: String) {
+    fun updateKeyAndRegister(privateKeyB64: String, burnablePrivateKeyB64: String? = null) {
         currentPrivateKeyB64 = privateKeyB64
+        currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
         if (_torState.value == TorState.READY) {
             triggerRegistration()
         }

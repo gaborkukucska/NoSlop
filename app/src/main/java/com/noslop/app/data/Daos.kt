@@ -60,6 +60,15 @@ interface PeerDao {
     @Query("SELECT * FROM peers WHERE isTrusted = 1")
     fun getTrustedPeers(): Flow<List<Peer>>
 
+    @Query("SELECT * FROM peers WHERE isTemporary = 1 ORDER BY lastSeenAt DESC")
+    fun getTemporaryPeers(): Flow<List<Peer>>
+
+    @Query("SELECT * FROM peers WHERE customFolder = :folder AND isTrusted = 1 ORDER BY lastSeenAt DESC")
+    fun getPeersByFolder(folder: String): Flow<List<Peer>>
+
+    @Query("SELECT * FROM peers WHERE isDiscoverable = 1 ORDER BY lastSeenAt DESC")
+    fun getDiscoverablePeers(): Flow<List<Peer>>
+
     @Query("SELECT * FROM peers WHERE publicKeyB64 = :pubKey LIMIT 1")
     suspend fun getPeerByPublicKey(pubKey: String): Peer?
 
