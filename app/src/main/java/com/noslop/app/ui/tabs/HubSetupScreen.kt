@@ -51,14 +51,17 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
         return
     }
 
-    var ipAddress by remember { mutableStateOf("") }
-    var username by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }
-    
     var isDeploying by remember { mutableStateOf(false) }
     var deployResult by remember { mutableStateOf<String?>(null) }
     var deployError by remember { mutableStateOf<String?>(null) }
+
+    var showSetupDialog by remember { mutableStateOf(false) }
+    var targetIp by remember { mutableStateOf("") }
+    
+    // Dialog state
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }
 
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -89,113 +92,139 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (discoveredHubs.isNotEmpty()) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Discovered Hubs on Local Network", color = AccentGreen, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    discoveredHubs.forEach { hub ->
-                        Surface(
-                            onClick = { ipAddress = hub.ipAddress },
-                            color = PrimaryBlack,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(hub.hostName, color = TextLight, fontWeight = FontWeight.Bold)
-                                Text("${hub.ipAddress}:${hub.port}", color = TextMuted, fontSize = 12.sp)
-                            }
-                        }
+        if (discoveredHubs.isEmpty()) {
+            Text("Scanning local network for hubs...", color = TextMuted, fontSize = 14.sp)
+            Spacer(modifier = Modifier.height(16.dp))
+            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentGreen)
+            Spacer(modifier = Modifier.height(32.dp))
+        } else {
+            Text("Select a Discovered Hub", color = AccentGreen, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(16.dp))
+            discoveredHubs.forEach { hub ->
+                Surface(
+                    onClick = {
+                        targetIp = hub.ipAddress
+                        username = "pi" // Default common SSH user
+                        showSetupDialog = true
+                    },
+                    color = SurfaceDark,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(hub.hostName, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("${hub.ipAddress}:${hub.port}", color = TextMuted, fontSize = 14.sp)
                     }
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
 
-        OutlinedTextField(
-            value = ipAddress,
-            onValueChange = { ipAddress = it },
-            label = { Text("Hub IP Address", color = TextMuted) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-        )
-        
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = username,
-            onValueChange = { username = it },
-            label = { Text("SSH Username", color = TextMuted) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("SSH Password", color = TextMuted) },
-            visualTransformation = PasswordVisualTransformation(),
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = sharedFolder,
-            onValueChange = { sharedFolder = it },
-            label = { Text("Shared Media Folder (Optional)", color = TextMuted) },
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Button(
+        OutlinedButton(
             onClick = {
-                isDeploying = true
-                deployError = null
-                deployResult = null
-                coroutineScope.launch {
-                    val localIdentity = viewModel.localKeys.value
-                    val result = SshDeployer.deployHaiNetHub(
-                        ip = ipAddress,
-                        user = username,
-                        pass = password,
-                        sharedFolder = sharedFolder,
-                        identity = localIdentity
-                    )
-                    if (result.isSuccess) {
-                        viewModel.setHubDeploymentStatus("Active at $ipAddress")
-                    } else {
-                        deployError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                targetIp = ""
+                username = ""
+                showSetupDialog = true
+            },
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+        ) {
+            Text("Manual IP Entry")
+        }
+    }
+
+    if (showSetupDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isDeploying) showSetupDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text(if (targetIp.isNotBlank()) "Deploy to $targetIp" else "Manual Deployment", color = TextLight) },
+            text = {
+                Column {
+                    if (targetIp.isBlank()) {
+                        OutlinedTextField(
+                            value = targetIp,
+                            onValueChange = { targetIp = it },
+                            label = { Text("Hub IP Address", color = TextMuted) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
                     }
-                    isDeploying = false
+                    
+                    OutlinedTextField(
+                        value = username,
+                        onValueChange = { username = it },
+                        label = { Text("SSH Username", color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        label = { Text("SSH Password", color = TextMuted) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedTextField(
+                        value = sharedFolder,
+                        onValueChange = { sharedFolder = it },
+                        label = { Text("Shared Media Folder", color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                    )
+
+                    if (deployError != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(deployError!!, color = DestructiveRed, fontSize = 12.sp)
+                    }
                 }
             },
-            enabled = !isDeploying && ipAddress.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-        ) {
-            if (isDeploying) {
-                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = PrimaryBlack)
-            } else {
-                Text("Deploy HAI-Net Hub", fontWeight = FontWeight.Bold)
+            confirmButton = {
+                Button(
+                    onClick = {
+                        isDeploying = true
+                        deployError = null
+                        deployResult = null
+                        coroutineScope.launch {
+                            val localIdentity = viewModel.localKeys.value
+                            val result = SshDeployer.deployHaiNetHub(
+                                ip = targetIp,
+                                user = username,
+                                pass = password,
+                                sharedFolder = sharedFolder,
+                                identity = localIdentity
+                            )
+                            if (result.isSuccess) {
+                                showSetupDialog = false
+                                viewModel.setHubDeploymentStatus("Active at $targetIp")
+                            } else {
+                                deployError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                            }
+                            isDeploying = false
+                        }
+                    },
+                    enabled = !isDeploying && targetIp.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    if (isDeploying) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                    } else {
+                        Text("Deploy")
+                    }
+                }
+            },
+            dismissButton = {
+                if (!isDeploying) {
+                    TextButton(onClick = { showSetupDialog = false }) {
+                        Text("Cancel", color = TextMuted)
+                    }
+                }
             }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        if (deployResult != null) {
-            Text(deployResult!!, color = AccentGreen, fontSize = 14.sp)
-        }
-        if (deployError != null) {
-            Text(deployError!!, color = DestructiveRed, fontSize = 14.sp)
-        }
+        )
     }
 }

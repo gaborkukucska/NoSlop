@@ -933,6 +933,8 @@ fun toggleAggregator() {
                     val success = com.noslop.app.data.BackupManager.importData(context, mnemonic, inputStream)
                     onResult(success)
                     if (success) {
+                        // Set a flag to prompt for Hub connection if needed
+                        context.getSharedPreferences("noslop_system", Context.MODE_PRIVATE).edit().putBoolean("prompt_hub_after_restore", true).commit()
                         // Restart the app process to pick up the restored DB and prefs
                         kotlinx.coroutines.delay(500)
                         val pm = context.packageManager

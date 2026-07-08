@@ -36,7 +36,9 @@ import com.noslop.app.crypto.CryptoService
 import com.noslop.app.feeds.BuiltInSource
 import com.noslop.app.feeds.SourceLibrary
 import com.noslop.app.ui.theme.*
-import com.noslop.app.util.tr // Added translation extension
+import com.noslop.app.util.tr
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @Composable
 fun OnboardingScreen(
@@ -99,7 +101,7 @@ fun OnboardingScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(7) { index ->
+                    repeat(8) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -120,7 +122,7 @@ fun OnboardingScreen(
                 contentAlignment = Alignment.Center
             ) {
                 when (currentStep) {
-                    1 -> Step1Welcome()
+                    1 -> Step1Welcome(viewModel = viewModel, onComplete = onComplete)
                     2 -> Step2Language(
                         currentLanguage = appLanguage,
                         onLanguageSelect = { code -> viewModel.updateAppLanguage(code) }
@@ -170,6 +172,30 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
+                    8 -> Step8HubSetup(
+                        viewModel = viewModel,
+                        mnemonic = mnemonic,
+                        handle = handleText,
+                        onComplete = { goToHub ->
+                            viewModel.completeOnboarding(
+                                handleText, 
+                                selectedSources, 
+                                selectedInterests, 
+                                selectedMusicGenres,
+                                selectedVideoGenres,
+                                mnemonic!!,
+                                creatorKeywordsText
+                            )
+                            if (goToHub) {
+                                context.startActivity(android.content.Intent(context, com.noslop.app.MainActivity::class.java).apply {
+                                    putExtra("target_route", "hubs")
+                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                                })
+                            } else {
+                                onComplete()
+                            }
+                        }
+                    )
                 }
             }
 
@@ -179,7 +205,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 7) {
+                if (currentStep > 1 && currentStep < 8) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -208,10 +234,11 @@ fun OnboardingScreen(
                     5 -> true // Creator keywords are optional
                     6 -> true // Optional genre selection
                     7 -> selectedSources.isNotEmpty() // Feeds
+                    8 -> true // Hub Setup is optional
                     else -> false
                 }
 
-                if (currentStep < 7) {
+                if (currentStep < 8) {
                     Button(
                         onClick = {
                             if (currentStep == 5 && creatorKeywordsText.isNotBlank()) {
@@ -232,41 +259,14 @@ fun OnboardingScreen(
                             .height(50.dp)
                             .testTag("onboarding_next_button")
                     ) {
-                        Text(
-                            text = "Continue".tr,
+                        Text(if (currentStep == 7) "Continue to Hub Setup".tr else "Continue".tr,
                             fontWeight = FontWeight.Bold,
                             color = if (canProceed) PrimaryBlack else TextMuted
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Icon(Icons.Default.ArrowForward, contentDescription = "Next".tr)
                     }
-                } else {
-                    Button(
-                        onClick = {
-                            viewModel.completeOnboarding(
-                                handleText, 
-                                selectedSources, 
-                                selectedInterests, 
-                                selectedMusicGenres,
-                                selectedVideoGenres,
-                                mnemonic!!,
-                                creatorKeywordsText
-                            )
-                            onComplete()
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AccentGreen,
-                            contentColor = PrimaryBlack
-                        ),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier
-                            .height(50.dp)
-                            .testTag("onboarding_finish_button")
-                    ) {
-                        Text("Enter NoSlop".tr, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.Default.Check, contentDescription = "Finish".tr)
-                    }
+                    // Step 8 doesn't use the standard navigation buttons since it handles completion internally
                 }
             }
         }
@@ -274,7 +274,28 @@ fun OnboardingScreen(
 }
 
 @Composable
-fun Step1Welcome() {
+fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
+    val context = LocalContext.current
+    var showRestoreDialog by remember { mutableStateOf(false) }
+    var mnemonicInput by remember { mutableStateOf("") }
+    var isRestoring by remember { mutableStateOf(false) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
+    
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            viewModel.importBackupFromUri(context, mnemonicInput.trim(), uri) { success ->
+                if (!success) {
+                    isRestoring = false
+                    restoreError = "Failed to decrypt or import backup. Check your mnemonic."
+                } else {
+                    // importBackupFromUri restarts the process automatically on success.
+                }
+            }
+        } else {
+            isRestoring = false
+        }
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -287,6 +308,7 @@ fun Step1Welcome() {
             modifier = Modifier.size(80.dp)
         )
         Spacer(modifier = Modifier.height(24.dp))
+        
         Text(
             text = "Welcome to NoSlop".tr,
             style = MaterialTheme.typography.headlineMedium,
@@ -305,6 +327,65 @@ fun Step1Welcome() {
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 16.dp)
         )
+        
+        Spacer(modifier = Modifier.height(32.dp))
+        
+        OutlinedButton(
+            onClick = { showRestoreDialog = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp).height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+            border = BorderStroke(1.dp, AccentGreen)
+        ) {
+            Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Restore from Backup".tr, fontWeight = FontWeight.Bold)
+        }
+        
+        if (showRestoreDialog) {
+            AlertDialog(
+                onDismissRequest = { if (!isRestoring) showRestoreDialog = false },
+                containerColor = SurfaceDark,
+                title = { Text("Restore Profile Backup".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Enter your 24-word 'Word Cloud' to decrypt the backup file. The app will restart upon success.", color = TextMuted, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = mnemonicInput,
+                            onValueChange = { mnemonicInput = it },
+                            label = { Text("Mnemonic Word Cloud".tr) },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+                        if (restoreError != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(restoreError!!, color = DestructiveRed, fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            isRestoring = true
+                            restoreError = null
+                            filePickerLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                        },
+                        enabled = !isRestoring && mnemonicInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        if (isRestoring) CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                        else Text("Select Backup File".tr, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    if (!isRestoring) {
+                        TextButton(onClick = { showRestoreDialog = false }) {
+                            Text("Cancel".tr, color = TextMuted)
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -971,5 +1052,56 @@ fun Step7Feeds(
             },
             containerColor = SurfaceDark
         )
+    }
+}
+
+@Composable
+fun Step8HubSetup(
+    viewModel: NoSlopViewModel,
+    mnemonic: String?,
+    handle: String,
+    onComplete: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Connect a Home Hub".tr,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Text(
+            text = "Keep your Node online 24/7. Deploy HAI-Net to a device on your local network, or connect to an existing one.".tr,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(bottom = 24.dp, start = 16.dp, end = 16.dp)
+        )
+
+        Icon(
+            imageVector = Icons.Default.Router,
+            contentDescription = null,
+            tint = AccentGreen,
+            modifier = Modifier.size(80.dp).padding(bottom = 24.dp)
+        )
+
+        OutlinedButton(
+            onClick = { onComplete(true) },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp).height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlack, containerColor = AccentGreen),
+            border = BorderStroke(1.dp, AccentGreen)
+        ) {
+            Text("Set up Hub Now", fontWeight = FontWeight.Bold)
+        }
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        TextButton(onClick = { onComplete(false) }) {
+            Text("Skip for now", color = TextMuted)
+        }
     }
 }
