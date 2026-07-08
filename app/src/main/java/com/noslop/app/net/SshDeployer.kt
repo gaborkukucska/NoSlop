@@ -136,7 +136,7 @@ object SshDeployer {
                 echo "  Config written (${'$'}(wc -c < hai/hub_config.json) bytes)"
                 
                 # Pre-create /etc/hainet so the installer doesn't fail with permissions/os error 2
-                run_sudo mkdir -p /etc/hainet
+                run_sudo mkdir -p /etc/hainet /var/lib/hainet
                 run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet
                 echo ""
                 
@@ -183,6 +183,7 @@ object SshDeployer {
                     cargo build --release --package hainet-portal
                     
                     echo '  Setting up systemd service for Portal...'
+                    run_sudo rm -f /etc/systemd/system/hainet-portal.service
                     cat << 'EOF' | run_sudo tee /etc/systemd/system/hainet-portal.service > /dev/null
 [Unit]
 Description=HAI-Net Portal Web UI
@@ -199,8 +200,10 @@ Restart=always
 WantedBy=multi-user.target
 EOF
                     run_sudo systemctl daemon-reload
+                    run_sudo systemctl unmask hainet-portal.service
                     run_sudo systemctl enable hainet-portal.service
                     run_sudo systemctl restart hainet-portal.service
+                    run_sudo systemctl restart hainet-core.service || true
                     echo '  Portal Web UI is now running on port 3000.'
                 else
                     echo '  [WARNING] hainet-portal directory not found. Skipping Web UI setup.'
