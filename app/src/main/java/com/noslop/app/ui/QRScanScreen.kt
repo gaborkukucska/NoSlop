@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/ui/QRScanScreen.kt
 @file:kotlin.OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class)
 package com.noslop.app.ui
 
@@ -102,6 +103,24 @@ fun QRScanScreen(
         val raw = scannedRawData
         if (raw != null) {
             try {
+                // First, check if it's a HAI-Net Hub Web Login QR code
+                try {
+                    val authJson = org.json.JSONObject(raw)
+                    if (authJson.optString("type") == "hainet_auth") {
+                        val sessionId = authJson.optString("session")
+                        val ip = authJson.optString("ip")
+                        
+                        if (sessionId.isNotBlank() && ip.isNotBlank()) {
+                            viewModel?.handleQrLogin(sessionId, ip)
+                            Toast.makeText(context, "Authenticating with Hub...", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                            return@LaunchedEffect
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Not a JSON object or not a login QR, fall through to peer parsing
+                }
+
                 val peer = Gson().fromJson(raw, QRScannedPeer::class.java)
                 if (peer.handle.isNotBlank() && peer.publicKey.isNotBlank() && peer.onionAddress.isNotBlank()) {
                     parsedPeer = peer

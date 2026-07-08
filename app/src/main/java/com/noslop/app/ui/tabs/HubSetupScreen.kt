@@ -1,17 +1,22 @@
+// FILE: app/src/main/java/com/noslop/app/ui/tabs/HubSetupScreen.kt
 package com.noslop.app.ui.tabs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -23,33 +28,130 @@ import com.noslop.app.net.HubDiscoveryService
 import com.noslop.app.net.SshDeployer
 import com.noslop.app.ui.theme.*
 import com.noslop.app.ui.NoSlopViewModel
+import com.noslop.app.ui.QRScanScreen
 import kotlinx.coroutines.launch
+
+@Composable
+fun MetricCard(value: String, label: String, modifier: Modifier = Modifier) {
+    Surface(color = SurfaceDark, shape = RoundedCornerShape(8.dp), modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text(label, color = TextMuted, fontSize = 12.sp, textAlign = TextAlign.Center)
+        }
+    }
+}
 
 @Composable
 fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
+    var showQRScanner by remember { mutableStateOf(false) }
+
+    if (showQRScanner) {
+        QRScanScreen(
+            onPeerScannedAndAccepted = { handle, pub, onion, encPub ->
+                viewModel.requestConnection(handle, pub, onion, encPub)
+            },
+            viewModel = viewModel,
+            onDismiss = { showQRScanner = false }
+        )
+        return
+    }
 
     if (!hubDeploymentStatus.isNullOrBlank()) {
-        // Show Control Panel
+        val isLegacy = hubDeploymentStatus == "Active (Legacy Connection)"
+        val hubIp = if (isLegacy) "" else hubDeploymentStatus?.substringAfter("Active at ")?.trim() ?: ""
+
+        // Show Dashboard Control Panel
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .background(PrimaryBlack)
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(80.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("HAI-Net Home Hub", style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                IconButton(onClick = { viewModel.setHubDeploymentStatus("") }) {
+                    Icon(Icons.Default.Close, contentDescription = "Disconnect", tint = TextMuted)
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Status Card
+            Surface(
+                color = SurfaceDark,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Hub Online & Linked", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    }
+                    if (hubIp.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("IP Address: $hubIp", color = TextLight, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                        Text("Web UI: http://$hubIp:3000", color = TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Hub Deployed", style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Status: $hubDeploymentStatus", color = TextMuted, fontSize = 16.sp)
+
+            // Web Dashboard Access
+            if (hubIp.isNotBlank()) {
+                val context = LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("http://$hubIp:3000"))
+                        context.startActivity(intent)
+                    },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                    border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f))
+                ) {
+                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Open Web Dashboard")
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Button(
+                    onClick = { showQRScanner = true },
+                    modifier = Modifier.fillMaxWidth().height(50.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Scan to Login to Web UI", fontWeight = FontWeight.Bold)
+                }
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
+
+            Text("Sync Metrics", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricCard("Active", "Identity", Modifier.weight(1f))
+                MetricCard("Synced", "Mesh Data", Modifier.weight(1f))
+                MetricCard("Running", "Media AI", Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+
             Button(
                 onClick = { viewModel.setHubDeploymentStatus("") },
-                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = DestructiveRed)
+                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = DestructiveRed),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Reset Hub Connection")
+                Text("Disconnect Hub")
             }
         }
         return

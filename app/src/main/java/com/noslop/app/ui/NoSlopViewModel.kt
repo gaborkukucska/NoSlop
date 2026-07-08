@@ -1453,6 +1453,44 @@ fun toggleAggregator() {
 
     fun clearLogFile() { Logger.clearLog() }
 
+    fun handleQrLogin(sessionId: String, ip: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val identity = repository.getLocalIdentity() ?: return@launch
+                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+
+                val url = java.net.URL("http://$ip:3000/api/auth/qr/verify")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.doOutput = true
+
+                // Build a simple JSON string to avoid importing org.json if it isn't available
+                val payload = """
+                    {
+                        "session_id": "$sessionId",
+                        "public_key": "${identity.publicKeyB64}",
+                        "signature": "$signature"
+                    }
+                """.trimIndent()
+
+                connection.outputStream.use { os ->
+                    val input = payload.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+
+                val responseCode = connection.responseCode
+                if (responseCode == 200) {
+                    Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $ip")
+                } else {
+                    Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $ip. Code: $responseCode")
+                }
+            } catch (e: Exception) {
+                Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")
+            }
+        }
+    }
+
     class Factory(private val application: Application) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             if (modelClass.isAssignableFrom(NoSlopViewModel::class.java)) return NoSlopViewModel(application) as T
