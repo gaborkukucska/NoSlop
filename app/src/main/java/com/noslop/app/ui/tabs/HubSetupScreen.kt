@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Router
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.noslop.app.net.HubDiscoveryService
@@ -68,8 +70,21 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     val discoveryService = remember { HubDiscoveryService(context) }
     val discoveredHubs by discoveryService.discoveredHubs.collectAsState()
 
+    var isScanning by remember { mutableStateOf(false) }
+    var scanTimeoutReached by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isScanning) {
+        if (isScanning) {
+            scanTimeoutReached = false
+            discoveryService.startDiscovery()
+            kotlinx.coroutines.delay(10000L)
+            scanTimeoutReached = true
+        } else {
+            discoveryService.stopDiscovery()
+        }
+    }
+
     DisposableEffect(Unit) {
-        discoveryService.startDiscovery()
         onDispose {
             discoveryService.stopDiscovery()
         }
@@ -92,44 +107,92 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (discoveredHubs.isEmpty()) {
-            Text("Scanning local network for hubs...", color = TextMuted, fontSize = 14.sp)
+        if (!isScanning) {
+            Icon(
+                imageVector = Icons.Default.Router,
+                contentDescription = null,
+                tint = AccentGreen,
+                modifier = Modifier.size(64.dp)
+            )
             Spacer(modifier = Modifier.height(16.dp))
-            CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentGreen)
+            Text("No Home Hub Configured", color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "Deploy HAI-Net to a device on your local network to keep your node online 24/7.",
+                color = TextMuted,
+                textAlign = TextAlign.Center
+            )
             Spacer(modifier = Modifier.height(32.dp))
-        } else {
-            Text("Select a Discovered Hub", color = AccentGreen, fontWeight = FontWeight.Bold)
+            
+            Button(
+                onClick = { isScanning = true },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
+            ) {
+                Text("Deploy New Hub", fontWeight = FontWeight.Bold)
+            }
             Spacer(modifier = Modifier.height(16.dp))
-            discoveredHubs.forEach { hub ->
-                Surface(
-                    onClick = {
-                        targetIp = hub.ipAddress
-                        username = "pi" // Default common SSH user
-                        showSetupDialog = true
-                    },
-                    color = SurfaceDark,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(hub.hostName, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                        Text("${hub.ipAddress}:${hub.port}", color = TextMuted, fontSize = 14.sp)
+            TextButton(
+                onClick = { viewModel.setHubDeploymentStatus("Active (Legacy Connection)") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("I already have a Hub running", color = TextMuted)
+            }
+        } else {
+            if (discoveredHubs.isEmpty()) {
+                if (!scanTimeoutReached) {
+                    Text("Scanning local network for hubs...", color = TextMuted, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentGreen)
+                } else {
+                    Text("No hubs found on local network.", color = DestructiveRed, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("Ensure your device is connected to the same network.", color = TextMuted, fontSize = 12.sp)
+                }
+                Spacer(modifier = Modifier.height(32.dp))
+            } else {
+                Text("Select a Discovered Hub", color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+                discoveredHubs.forEach { hub ->
+                    Surface(
+                        onClick = {
+                            targetIp = hub.ipAddress
+                            username = "pi" // Default common SSH user
+                            showSetupDialog = true
+                        },
+                        color = SurfaceDark,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(hub.hostName, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("${hub.ipAddress}:${hub.port}", color = TextMuted, fontSize = 14.sp)
+                        }
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
             }
-            Spacer(modifier = Modifier.height(24.dp))
-        }
 
-        OutlinedButton(
-            onClick = {
-                targetIp = ""
-                username = ""
-                showSetupDialog = true
-            },
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
-        ) {
-            Text("Manual IP Entry")
+            OutlinedButton(
+                onClick = {
+                    targetIp = ""
+                    username = ""
+                    showSetupDialog = true
+                },
+                modifier = Modifier.fillMaxWidth().height(50.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
+            ) {
+                Text("Manual IP Entry")
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            TextButton(
+                onClick = { isScanning = false },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Cancel", color = TextMuted)
+            }
         }
     }
 

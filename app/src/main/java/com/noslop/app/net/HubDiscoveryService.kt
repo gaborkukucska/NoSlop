@@ -8,6 +8,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import java.net.InetAddress
 
 data class DiscoveredHub(
@@ -26,6 +29,10 @@ class HubDiscoveryService(context: Context) {
     private val TAG = "HubDiscovery"
 
     private var discoveryListener: NsdManager.DiscoveryListener? = null
+    
+    // Coroutine scope for active scanning
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private var scanJob: kotlinx.coroutines.Job? = null
 
     fun startDiscovery() {
         if (discoveryListener != null) return
@@ -96,6 +103,9 @@ class HubDiscoveryService(context: Context) {
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to start discovery: ${e.message}")
         }
+
+        // Simultaneously start active subnet scanning
+        startActiveSubnetScan()
     }
 
     fun stopDiscovery() {
@@ -107,6 +117,71 @@ class HubDiscoveryService(context: Context) {
             }
             discoveryListener = null
         }
+        scanJob?.cancel()
         _discoveredHubs.value = emptyList()
+    }
+
+    private fun startActiveSubnetScan() {
+        scanJob?.cancel()
+        scanJob = scope.launch {
+            val prefix = getLocalIpPrefix() ?: return@launch
+            Logger.info(TAG, "Starting active SSH scan on subnet: $prefix*")
+
+            val deferreds = (1..254).map { i ->
+                async {
+                    val targetIp = "$prefix$i"
+                    try {
+                        val socket = java.net.Socket()
+                        // 500ms timeout for the connection
+                        socket.connect(java.net.InetSocketAddress(targetIp, 22), 500)
+                        socket.close()
+                        
+                        // If we succeed, it has SSH open!
+                        val hub = DiscoveredHub(
+                            serviceName = "ActiveScan-$targetIp",
+                            hostName = "SSH Host ($targetIp)",
+                            ipAddress = targetIp,
+                            port = 22
+                        )
+                        
+                        // Deduplicate by IP
+                        _discoveredHubs.update { current ->
+                            if (current.any { it.ipAddress == targetIp }) {
+                                current
+                            } else {
+                                current + hub
+                            }
+                        }
+                        Logger.info(TAG, "Active scan found SSH at: $targetIp")
+                    } catch (e: Exception) {
+                        // Connection refused or timed out, ignore
+                    }
+                }
+            }
+            // Wait for all to finish
+            deferreds.awaitAll()
+            Logger.info(TAG, "Active SSH scan completed")
+        }
+    }
+
+    private fun getLocalIpPrefix(): String? {
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
+            for (intf in interfaces) {
+                val addrs = intf.inetAddresses
+                for (addr in addrs) {
+                    if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                        val ip = addr.hostAddress ?: continue
+                        val lastDot = ip.lastIndexOf('.')
+                        if (lastDot != -1) {
+                            return ip.substring(0, lastDot + 1)
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to get local IP prefix: ${e.message}")
+        }
+        return null
     }
 }
