@@ -1456,6 +1456,15 @@ fun toggleAggregator() {
     fun handleQrLogin(sessionId: String, ip: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                var targetIp = ip
+                // If scanned from a local browser, fallback to the known Hub IP
+                if (targetIp == "localhost" || targetIp == "127.0.0.1") {
+                    val hubStatus = hubDeploymentStatus.value
+                    if (hubStatus != null && hubStatus.contains("Active at ")) {
+                        targetIp = hubStatus.substringAfter("Active at ").trim()
+                    }
+                }
+                
                 val identity = repository.getLocalIdentity() ?: return@launch
                 val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
 
