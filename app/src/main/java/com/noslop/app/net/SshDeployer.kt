@@ -135,9 +135,11 @@ object SshDeployer {
                 echo "$configB64" | base64 -d > hai/hub_config.json
                 echo "  Config written (${'$'}(wc -c < hai/hub_config.json) bytes)"
                 
-                # Pre-create /etc/hainet so the installer doesn't fail with permissions/os error 2
+                # Pre-create /etc/hainet and /var/lib/hainet so the installer doesn't fail with permissions errors
                 run_sudo mkdir -p /etc/hainet /var/lib/hainet
-                run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet
+                run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" /etc/hainet /var/lib/hainet
+                run_sudo chmod 777 /var/lib/hainet
+                
                 echo ""
                 
                 # Step 4: Run the seed installer
@@ -200,7 +202,6 @@ Restart=always
 WantedBy=multi-user.target
 EOF
                     run_sudo systemctl daemon-reload
-                    run_sudo systemctl unmask hainet-portal.service
                     run_sudo systemctl enable hainet-portal.service
                     run_sudo systemctl restart hainet-portal.service
                     run_sudo systemctl restart hainet-core.service || true
