@@ -1,12 +1,16 @@
 // FILE: app/src/main/java/com/noslop/app/ui/tabs/HubSetupScreen.kt
 package com.noslop.app.ui.tabs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Router
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.QrCodeScanner
+import com.noslop.app.ui.QRScanScreen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +48,19 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     if (!hubDeploymentStatus.isNullOrBlank()) {
         val isLegacy = hubDeploymentStatus == "Active (Legacy Connection)"
         val hubIp = if (isLegacy) "" else hubDeploymentStatus?.substringAfter("Active at ")?.trim() ?: ""
+
+        var showQRScanner by remember { mutableStateOf(false) }
+
+        if (showQRScanner) {
+            QRScanScreen(
+                onPeerScannedAndAccepted = { handle, pub, onion, encPub ->
+                    viewModel.requestConnection(handle, pub, onion, encPub)
+                },
+                viewModel = viewModel,
+                onDismiss = { showQRScanner = false }
+            )
+            return
+        }
 
         Column(
             modifier = Modifier
@@ -84,7 +101,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "http://$hubIp:3000",
+                                text = "http://$hubIp:8080",
                                 color = AccentGreen,
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
@@ -92,6 +109,35 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                 modifier = Modifier.padding(16.dp),
                                 textAlign = TextAlign.Center
                             )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        val context = LocalContext.current
+                        OutlinedButton(
+                            onClick = {
+                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("http://$hubIp:8080"))
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                            border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f))
+                        ) {
+                            Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Web Dashboard")
+                        }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Button(
+                            onClick = { showQRScanner = true },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Scan to Login to Web UI", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

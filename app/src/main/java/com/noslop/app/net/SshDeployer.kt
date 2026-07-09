@@ -170,8 +170,8 @@ object SshDeployer {
                 fi
                 echo ""
                 
-                # Step 5: Build and Start Portal Web UI
-                echo '[STEP 5/5] Building and starting HAI-Net Portal Web UI...'
+                # Step 5: Build and Start Core Daemon (which includes Web UI)
+                echo '[STEP 5/5] Building React UI and HAI-Net Core...'
                 if [ -d "hainet-portal" ]; then
                     cd hainet-portal
                     echo '  Installing NPM dependencies...'
@@ -179,51 +179,65 @@ object SshDeployer {
                     echo '  Building React frontend...'
                     npm run build
                     cd ..
-                    
-                    echo '  Building Portal backend...'
-                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
-                    cargo build --release --package hainet-portal
-                    
-                    echo '  Setting up systemd service for Portal...'
-                    
-                    # Ensure existing service is cleanly stopped and deleted
-                    run_sudo systemctl stop hainet-portal.service 2>/dev/null || true
-                    run_sudo systemctl disable hainet-portal.service 2>/dev/null || true
-                    run_sudo rm -f /etc/systemd/system/hainet-portal.service 2>/dev/null || true
-                    run_sudo rm -f /lib/systemd/system/hainet-portal.service 2>/dev/null || true
-                    run_sudo systemctl daemon-reload
-                    
-                    # Create the unit file locally with variable expansion (unquoted EOF)
-                    cat << EOF > hainet-portal.service
+                fi
+                
+                echo '  Building Core daemon...'
+                export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
+                
+                # Start a keep-alive loop to prevent Android emulator NAT timeouts during linking
+                (while true; do echo -n "."; sleep 15; done) &
+                KEEPALIVE_PID=${'$'}!
+                
+                set +e
+                cargo build --release --package hainet-core
+                CARGO_EXIT=${'$'}?
+                set -e
+                
+                kill ${'$'}KEEPALIVE_PID 2>/dev/null || true
+                echo ""
+                
+                if [ ${'$'}CARGO_EXIT -ne 0 ]; then
+                    echo "Core build failed with exit code ${'$'}CARGO_EXIT"
+                    exit ${'$'}CARGO_EXIT
+                fi
+                
+                echo '  Setting up systemd service for Core...'
+                
+                # Ensure existing services are cleanly stopped
+                run_sudo systemctl stop hainet-portal.service 2>/dev/null || true
+                run_sudo systemctl disable hainet-portal.service 2>/dev/null || true
+                run_sudo systemctl stop hainet-core.service 2>/dev/null || true
+                run_sudo systemctl disable hainet-core.service 2>/dev/null || true
+                run_sudo rm -f /etc/systemd/system/hainet-core.service 2>/dev/null || true
+                
+                # Create the unit file locally with variable expansion (unquoted EOF)
+                cat << EOF > hainet-core.service
 [Unit]
-Description=HAI-Net Portal Web UI
-After=network.target hainet-core.service
+Description=HAI-Net Core Daemon
+After=network.target
 
 [Service]
 Type=simple
 User=${'$'}(id -un)
 WorkingDirectory=${'$'}PWD
 Environment="NODE_ENV=production"
-ExecStart=${'$'}PWD/target/release/hainet-portal
+Environment="RUST_LOG=info"
+ExecStart=${'$'}PWD/target/release/hainet-core
 Restart=always
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
-                    
-                    # Securely move it into systemd directory
-                    run_sudo mv hainet-portal.service /etc/systemd/system/hainet-portal.service
-                    run_sudo systemctl daemon-reload
-                    run_sudo systemctl enable hainet-portal.service
-                    run_sudo systemctl restart hainet-portal.service
-                    
-                    # And ensure core service is also restarted cleanly
-                    run_sudo systemctl restart hainet-core.service || true
-                    
-                    echo '  Portal Web UI is now running on port 3000.'
-                else
-                    echo '  [WARNING] hainet-portal directory not found. Skipping Web UI setup.'
-                fi
+                
+                # Securely move it into systemd directory
+                run_sudo mv hainet-core.service /etc/systemd/system/hainet-core.service
+                run_sudo systemctl daemon-reload
+                run_sudo systemctl enable hainet-core.service
+                run_sudo systemctl restart hainet-core.service
+                
+                echo '  Core Daemon is now running on port 8080.'
                 
                 echo ""
                 echo '=== Deployment Complete ==='
