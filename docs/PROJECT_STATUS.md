@@ -2,6 +2,12 @@
 
 ## Completed Changes (2026-07-09)
 
+### 2. Multi-Path Hub Discovery & Reliable Authentication
+*   **Robust Hotspot Discovery**: Upgraded `HubDiscoveryService.kt` with a concurrent multi-subnet scanner. It now extracts all active IPv4 prefixes (Cellular, Hotspot, WiFi) and scans them all for SSH (Port 22), bypassing mDNS/multicast isolation on tethered connections.
+*   **High-Fidelity QR Authentication**: Fixed a port mismatch (3000 -> 8080) and IP routing logic in `NoSlopViewModel.kt`. Scanned login attempts now correctly target the integrated Hub Portal.
+*   **Gallery QR Decoding Fallback**: Enhanced `QRScanScreen.kt` with a dual-engine decoder. If ML Kit fails to parse a screenshot (common with synthetic QR codes), it falls back to ZXing on a dedicated IO thread.
+*   **Headless Auth Handshake**: Implemented the "QR-Login-Only" state in the Hub backend. If a Hub is deployed via NoSlop, it automatically skips 24-word seed generation and prompts for the mobile-assisted signature verification immediately.
+
 ### 1. HAI-Net Hub Deployment Fixes & Dashboard Polish
 *   **Systemd Unit Deployment Fix**: Fixed a critical bug in `SshDeployer.kt` where pipelined `sudo tee` combined with quoted heredocs resulted in empty (masked) systemd unit files on the Hub. Re-wrote the installer script to write the unit file locally, expand dynamic variables, and `sudo mv` it into place.
 *   **Native Hub Dashboard**: Restored and polished the native Compose Hub Dashboard in `HubSetupScreen.kt`. Removed the heavy embedded WebView in favor of a clean, text-based UI providing the user with the direct LAN IP and Port (3000) to access the HAI-Net Portal Web UI from an external browser.
@@ -379,3 +385,9 @@
 *   **Interaction Jump Bugs**: Fixed a jarring bug where "Liking" a clearnet post caused the feed to jump to the next item by removing the strict `!isSaved` UI filter rule. Prevented the feed from forcefully scrolling to the top when broadcasting a mid-feed share.
 *   **Aggressive Splash Preloading**: Hijacked the app's initial `SplashScreen` to act as a 4-second buffer window. `MainActivity` now aggressively resolves and pre-warms the first media item in the feed via `PreloadManager` before the splash curtain drops, resulting in instant playback.
 *   **Filter Synchronization**: Introduced a strict `syncFilterMode()` flow to prevent the ViewModel from getting stuck in specific filters (like "Articles") when the UI clears them via the 'x' button, ensuring seamless return to the "Live Feed" regardless of list size.
+
+
+## Next Steps (Planned)
+*   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
+*   **Deep Data Sync**: Synchronize Contact lists, trusted peer statuses, and DM histories between Room (Mobile) and the Hub's master database.
+*   **Social Feed Mirroring**: Allow the Hub to serve the Mobile app's preferred RSS/Mesh feed content over the authenticated REST API.

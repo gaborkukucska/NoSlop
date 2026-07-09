@@ -47,6 +47,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -126,10 +128,12 @@ fun QRScanScreen(
                     parsedPeer = peer
                     showConfirmDialog = true
                 } else {
+                    Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
                     scannedRawData = null
                 }
             } catch (e: Exception) {
                 Logger.warn("QR_SCAN", "Scanned raw data is not a valid peer payload: $raw")
+                Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
                 scannedRawData = null
             }
         }
@@ -407,18 +411,61 @@ fun QRScanScreen(
 }
 
 private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> Unit) {
-    try {
-        val inputImage = InputImage.fromFilePath(context, uri)
-        val scanner = BarcodeScanning.getClient()
-        scanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                onResult(barcodes.firstOrNull()?.rawValue)
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        try {
+            val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                    decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = true
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
             }
-            .addOnFailureListener {
-                onResult(null)
+
+            if (bitmap == null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+                return@launch
             }
-    } catch (e: Exception) {
-        onResult(null)
+
+            val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+            val scanner = com.google.mlkit.vision.barcode.BarcodeScanning.getClient(
+                com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ALL_FORMATS)
+                    .build()
+            )
+            
+            scanner.process(inputImage)
+                .addOnSuccessListener { barcodes ->
+                    val value = barcodes.firstOrNull()?.rawValue
+                    if (value != null) {
+                        onResult(value)
+                    } else {
+                        tryZxingFallback(bitmap, onResult)
+                    }
+                }
+                .addOnFailureListener {
+                    tryZxingFallback(bitmap, onResult)
+                }
+        } catch (e: Exception) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+        }
+    }
+}
+
+private fun tryZxingFallback(bitmap: android.graphics.Bitmap, onResult: (String?) -> Unit) {
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        try {
+            val intArray = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val source = com.google.zxing.RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
+            val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
+            val reader = com.google.zxing.MultiFormatReader()
+            val result = reader.decode(binaryBitmap)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(result.text) }
+        } catch (e: Exception) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+        }
     }
 }
 

@@ -305,6 +305,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _isAggregatorEnabled.value = repository.isAggregatorEnabled()
                 refreshFeeds()
             }
+            
+            // Trigger Hub Sync on startup
+            if (_isOnboardingComplete.value) {
+                repository.syncWithHub()
+            }
         }
 
         viewModelScope.launch {
@@ -1468,7 +1473,7 @@ fun toggleAggregator() {
                 val identity = repository.getLocalIdentity() ?: return@launch
                 val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
 
-                val url = java.net.URL("http://$ip:3000/api/auth/qr/verify")
+                val url = java.net.URL("http://$targetIp:8080/api/auth/qr/verify")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -1490,9 +1495,9 @@ fun toggleAggregator() {
 
                 val responseCode = connection.responseCode
                 if (responseCode == 200) {
-                    Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $ip")
+                    Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
                 } else {
-                    Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $ip. Code: $responseCode")
+                    Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode")
                 }
             } catch (e: Exception) {
                 Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")

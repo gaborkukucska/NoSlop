@@ -10,7 +10,7 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
 
 ---
 
-### Phase 1: Mobile-Assisted Hub Installer (Zero-Terminal Setup) ✅ IMPLEMENTED
+### Phase 1: Mobile-Assisted Hub Installer & Authentication ✅ FULLY OPERATIONAL
 
 **Goal:** Allow users to deploy `hainet-seed` to their Home Hub hardware directly from NoSlop without using a terminal.
 
@@ -18,7 +18,7 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
 
 1. **Setup UI (`ui/tabs/HubSetupScreen.kt`)** ✅
    - Utilizes `HubDiscoveryService.kt` (Android `NsdManager`) to automatically scan the local network for SSH services (`_ssh._tcp`). Discovered hubs appear as tap-able cards that auto-fill the IP address.
-   - Wizard UI requests target IP, SSH Username, SSH Password, Shared Media Folder path (defaults to `~/.hainet/storage`).
+   - Wizard UI utilizes mDNS and Active Subnet Scanning to auto-detect SSH-enabled devices across all local interfaces., SSH Username, SSH Password, Shared Media Folder path (defaults to `~/.hainet/storage`).
    - Deploy button pulls the user's local `IdentityKeys` from `NoSlopViewModel.localKeys` automatically — no manual identity export needed.
    - Upon success, the UI transitions from Setup Wizard to a "Hub Deployed" control panel with status display and a "Reset Hub Connection" button.
 

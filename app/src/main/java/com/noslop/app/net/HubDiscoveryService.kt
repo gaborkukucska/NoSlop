@@ -124,37 +124,40 @@ class HubDiscoveryService(context: Context) {
     private fun startActiveSubnetScan() {
         scanJob?.cancel()
         scanJob = scope.launch {
-            val prefix = getLocalIpPrefix() ?: return@launch
-            Logger.info(TAG, "Starting active SSH scan on subnet: $prefix*")
+            val prefixes = getLocalIpPrefixes()
+            if (prefixes.isEmpty()) return@launch
+            Logger.info(TAG, "Starting active SSH scan on subnets: $prefixes")
 
-            val deferreds = (1..254).map { i ->
-                async {
-                    val targetIp = "$prefix$i"
-                    try {
-                        val socket = java.net.Socket()
-                        // 500ms timeout for the connection
-                        socket.connect(java.net.InetSocketAddress(targetIp, 22), 500)
-                        socket.close()
-                        
-                        // If we succeed, it has SSH open!
-                        val hub = DiscoveredHub(
-                            serviceName = "ActiveScan-$targetIp",
-                            hostName = "SSH Host ($targetIp)",
-                            ipAddress = targetIp,
-                            port = 22
-                        )
-                        
-                        // Deduplicate by IP
-                        _discoveredHubs.update { current ->
-                            if (current.any { it.ipAddress == targetIp }) {
-                                current
-                            } else {
-                                current + hub
+            val deferreds = prefixes.flatMap { prefix ->
+                (1..254).map { i ->
+                    async {
+                        val targetIp = "$prefix$i"
+                        try {
+                            val socket = java.net.Socket()
+                            // 500ms timeout for the connection
+                            socket.connect(java.net.InetSocketAddress(targetIp, 22), 500)
+                            socket.close()
+                            
+                            // If we succeed, it has SSH open!
+                            val hub = DiscoveredHub(
+                                serviceName = "ActiveScan-$targetIp",
+                                hostName = "SSH Host ($targetIp)",
+                                ipAddress = targetIp,
+                                port = 22
+                            )
+                            
+                            // Deduplicate by IP
+                            _discoveredHubs.update { current ->
+                                if (current.any { it.ipAddress == targetIp }) {
+                                    current
+                                } else {
+                                    current + hub
+                                }
                             }
+                            Logger.info(TAG, "Active scan found SSH at: $targetIp")
+                        } catch (e: Exception) {
+                            // Connection refused or timed out, ignore
                         }
-                        Logger.info(TAG, "Active scan found SSH at: $targetIp")
-                    } catch (e: Exception) {
-                        // Connection refused or timed out, ignore
                     }
                 }
             }
@@ -164,24 +167,26 @@ class HubDiscoveryService(context: Context) {
         }
     }
 
-    private fun getLocalIpPrefix(): String? {
+    private fun getLocalIpPrefixes(): List<String> {
+        val prefixes = mutableListOf<String>()
         try {
             val interfaces = java.net.NetworkInterface.getNetworkInterfaces()
             for (intf in interfaces) {
+                if (!intf.isUp || intf.isLoopback) continue
                 val addrs = intf.inetAddresses
                 for (addr in addrs) {
                     if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
                         val ip = addr.hostAddress ?: continue
                         val lastDot = ip.lastIndexOf('.')
                         if (lastDot != -1) {
-                            return ip.substring(0, lastDot + 1)
+                            prefixes.add(ip.substring(0, lastDot + 1))
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to get local IP prefix: ${e.message}")
+            Logger.error(TAG, "Failed to get local IP prefixes: ${e.message}")
         }
-        return null
+        return prefixes.distinct()
     }
 }

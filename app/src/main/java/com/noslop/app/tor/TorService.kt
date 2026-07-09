@@ -157,12 +157,18 @@ object TorService {
         }
     }
 
+    var skipHiddenServiceRegistration: Boolean = false
+
     private fun triggerRegistration() {
         scope.launch {
-            // Small delay to ensure ControlPort is fully receptive
-            delay(3000)
-            registerHiddenService(currentPrivateKeyB64) { onionAddress ->
-                onAddressCallback?.invoke(onionAddress)
+            if (skipHiddenServiceRegistration) {
+                Logger.info(TAG, "Skipping hidden service registration (Hub connected mode). Using Tor strictly as an outbound SOCKS5 proxy.")
+            } else {
+                // Small delay to ensure ControlPort is fully receptive
+                delay(3000)
+                registerHiddenService(currentPrivateKeyB64) { onionAddress ->
+                    onAddressCallback?.invoke(onionAddress)
+                }
             }
             
             if (currentBurnablePrivateKeyB64 != null) {
