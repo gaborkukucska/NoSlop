@@ -1,5 +1,14 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-09)
+
+### 1. HAI-Net Hub Deployment Fixes & Dashboard Polish
+*   **Systemd Unit Deployment Fix**: Fixed a critical bug in `SshDeployer.kt` where pipelined `sudo tee` combined with quoted heredocs resulted in empty (masked) systemd unit files on the Hub. Re-wrote the installer script to write the unit file locally, expand dynamic variables, and `sudo mv` it into place.
+*   **Native Hub Dashboard**: Restored and polished the native Compose Hub Dashboard in `HubSetupScreen.kt`. Removed the heavy embedded WebView in favor of a clean, text-based UI providing the user with the direct LAN IP and Port (3000) to access the HAI-Net Portal Web UI from an external browser.
+*   **Persistent Hub Connection**: Removed the immediate "Disconnect" button from the main Hubs tab to reinforce the persistence of the Home Hub connection. 
+*   **Safe Hub Unlinking**: Injected a secure "Disconnect HAI-Net Hub" option into `SettingsTab.kt` above the Developer logs, protected by a descriptive confirmation dialog to prevent accidental unlinking.
+
+
 ## Completed Changes (2026-07-08)
 
 ### 1. HAI-Net Hub Integration (Phase 1) & Identity Clone

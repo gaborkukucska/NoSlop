@@ -1,21 +1,16 @@
 // FILE: app/src/main/java/com/noslop/app/ui/tabs/HubSetupScreen.kt
 package com.noslop.app.ui.tabs
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -28,7 +23,7 @@ import com.noslop.app.net.HubDiscoveryService
 import com.noslop.app.net.SshDeployer
 import com.noslop.app.ui.theme.*
 import com.noslop.app.ui.NoSlopViewModel
-import com.noslop.app.ui.QRScanScreen
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 
 @Composable
@@ -44,24 +39,12 @@ fun MetricCard(value: String, label: String, modifier: Modifier = Modifier) {
 @Composable
 fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
-    var showQRScanner by remember { mutableStateOf(false) }
 
-    if (showQRScanner) {
-        QRScanScreen(
-            onPeerScannedAndAccepted = { handle, pub, onion, encPub ->
-                viewModel.requestConnection(handle, pub, onion, encPub)
-            },
-            viewModel = viewModel,
-            onDismiss = { showQRScanner = false }
-        )
-        return
-    }
-
+    // Active Dashboard View (Native Compose)
     if (!hubDeploymentStatus.isNullOrBlank()) {
         val isLegacy = hubDeploymentStatus == "Active (Legacy Connection)"
         val hubIp = if (isLegacy) "" else hubDeploymentStatus?.substringAfter("Active at ")?.trim() ?: ""
 
-        // Show Dashboard Control Panel
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -75,9 +58,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("HAI-Net Home Hub", style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { viewModel.setHubDeploymentStatus("") }) {
-                    Icon(Icons.Default.Close, contentDescription = "Disconnect", tint = TextMuted)
-                }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -95,42 +75,25 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         Text("Hub Online & Linked", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                     if (hubIp.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Text("Access your Hub's Web UI from any browser on your network:", color = TextLight, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("IP Address: $hubIp", color = TextLight, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
-                        Text("Web UI: http://$hubIp:3000", color = TextMuted, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+                        Surface(
+                            color = PrimaryBlack,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "http://$hubIp:3000",
+                                color = AccentGreen,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(16.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Web Dashboard Access
-            if (hubIp.isNotBlank()) {
-                val context = LocalContext.current
-                OutlinedButton(
-                    onClick = {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("http://$hubIp:3000"))
-                        context.startActivity(intent)
-                    },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
-                    border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f))
-                ) {
-                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Open Web Dashboard")
-                }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Button(
-                    onClick = { showQRScanner = true },
-                    modifier = Modifier.fillMaxWidth().height(50.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                ) {
-                    Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Scan to Login to Web UI", fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -145,18 +108,11 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             }
 
             Spacer(modifier = Modifier.weight(1f))
-
-            Button(
-                onClick = { viewModel.setHubDeploymentStatus("") },
-                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = DestructiveRed),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Disconnect Hub")
-            }
         }
         return
     }
 
+    // --- Setup Wizard UI (Below) ---
     var isDeploying by remember { mutableStateOf(false) }
     var deployResult by remember { mutableStateOf<String?>(null) }
     var deployError by remember { mutableStateOf<String?>(null) }
@@ -164,7 +120,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var showSetupDialog by remember { mutableStateOf(false) }
     var targetIp by remember { mutableStateOf("") }
     
-    // Dialog state
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var sharedFolder by remember { mutableStateOf("~/.hainet/storage") }

@@ -34,6 +34,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     val mediaSettings by viewModel.mediaSettings.collectAsState()
     val isEncryptionActive by viewModel.isEncryptionActive.collectAsState()
     val updateInfo by viewModel.updateInfo.collectAsState()
+    val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
@@ -706,6 +707,69 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(system = it)) },
                                     colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
                                 )
+                            }
+                        }
+                    }
+                }
+
+                if (!hubDeploymentStatus.isNullOrBlank()) {
+                    item {
+                        Text(
+                            text = "HAI-NET HUB".tr,
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                            color = TextMuted,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                            border = BorderStroke(1.dp, BorderSubtle)
+                        ) {
+                            var showUnlinkConfirm by remember { mutableStateOf(false) }
+
+                            if (showUnlinkConfirm) {
+                                AlertDialog(
+                                    onDismissRequest = { showUnlinkConfirm = false },
+                                    containerColor = SurfaceDark,
+                                    title = { Text("Disconnect Hub?".tr, color = TextLight) },
+                                    text = { Text("This will unlink your HAI-Net Hub from this app. You will need to re-deploy or configure it manually to reconnect.".tr, color = TextMuted) },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showUnlinkConfirm = false
+                                                viewModel.setHubDeploymentStatus("")
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                        ) {
+                                            Text("Disconnect".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showUnlinkConfirm = false }) {
+                                            Text("Cancel".tr, color = AccentGreen)
+                                        }
+                                    }
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { showUnlinkConfirm = true }
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.LinkOff, contentDescription = null, tint = DestructiveRed)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text("Disconnect HAI-Net Hub".tr, fontWeight = FontWeight.Bold, color = DestructiveRed)
+                                        Text("Unlink this device from your active Hub".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                    }
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                         }
                     }

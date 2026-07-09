@@ -185,15 +185,16 @@ object SshDeployer {
                     cargo build --release --package hainet-portal
                     
                     echo '  Setting up systemd service for Portal...'
-                    # Completely obliterate any existing or masked unit
+                    
+                    # Ensure existing service is cleanly stopped and deleted
                     run_sudo systemctl stop hainet-portal.service 2>/dev/null || true
                     run_sudo systemctl disable hainet-portal.service 2>/dev/null || true
                     run_sudo rm -f /etc/systemd/system/hainet-portal.service 2>/dev/null || true
                     run_sudo rm -f /lib/systemd/system/hainet-portal.service 2>/dev/null || true
                     run_sudo systemctl daemon-reload
-                    run_sudo systemctl unmask hainet-portal.service 2>/dev/null || true
                     
-                    cat << 'EOF' | run_sudo tee /etc/systemd/system/hainet-portal.service > /dev/null
+                    # Create the unit file locally with variable expansion (unquoted EOF)
+                    cat << EOF > hainet-portal.service
 [Unit]
 Description=HAI-Net Portal Web UI
 After=network.target hainet-core.service
@@ -202,12 +203,16 @@ After=network.target hainet-core.service
 Type=simple
 User=${'$'}(id -un)
 WorkingDirectory=${'$'}PWD
+Environment="NODE_ENV=production"
 ExecStart=${'$'}PWD/target/release/hainet-portal
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
 EOF
+                    
+                    # Securely move it into systemd directory
+                    run_sudo mv hainet-portal.service /etc/systemd/system/hainet-portal.service
                     run_sudo systemctl daemon-reload
                     run_sudo systemctl enable hainet-portal.service
                     run_sudo systemctl restart hainet-portal.service
