@@ -306,9 +306,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 refreshFeeds()
             }
             
-            // Trigger Hub Sync on startup
+            // Smart Hub Sync Loop
             if (_isOnboardingComplete.value) {
-                repository.syncWithHub()
+                viewModelScope.launch(Dispatchers.IO) {
+                    var lastPeerSync = 0L
+                    while (true) {
+                        if (!repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
+                            if (System.currentTimeMillis() - lastPeerSync > 60_000) {
+                                repository.syncPeersWithHub()
+                                lastPeerSync = System.currentTimeMillis()
+                            }
+                            repository.pullMeshPacketsFromHub()
+                        }
+                        kotlinx.coroutines.delay(5000)
+                    }
+                }
             }
         }
 
@@ -1379,11 +1391,36 @@ fun toggleAggregator() {
         }
     }
 
-    fun acceptHandshake(peer: Peer) { viewModelScope.launch { repository.acceptConnectionRequest(peer) } }
+    fun acceptHandshake(peer: Peer) { 
+        viewModelScope.launch { 
+            repository.acceptConnectionRequest(peer) 
+            
+            // Clear associated notifications to prevent ghost actions
+            allNotifications.value.forEach { notif ->
+                val notifStr = notif.toString()
+                if (notifStr.contains(peer.publicKeyB64) || notifStr.contains(peer.handle)) {
+                    repository.deleteNotification(notif.id)
+                }
+            }
+        } 
+    }
+    
     fun rejectHandshake() {
         viewModelScope.launch {
             val peer = incomingRequest.value
-            if (peer != null) repository.rejectConnectionRequest(peer) else repository.clearIncomingRequest()
+            if (peer != null) {
+                repository.rejectConnectionRequest(peer)
+                
+                // Clear associated notifications
+                allNotifications.value.forEach { notif ->
+                    val notifStr = notif.toString()
+                    if (notifStr.contains(peer.publicKeyB64) || notifStr.contains(peer.handle)) {
+                        repository.deleteNotification(notif.id)
+                    }
+                }
+            } else {
+                repository.clearIncomingRequest()
+            }
         }
     }
     fun togglePeerTrust(peer: Peer) { viewModelScope.launch { repository.togglePeerTrust(peer) } }

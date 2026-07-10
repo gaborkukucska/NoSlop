@@ -9,6 +9,8 @@
 *   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address.
 
 ### 2. Edge-Case Fixes (Hotspots & QR Decoding)
+*   **Ghost Notification Cleanup**: Fixed a UI bug in `NoSlopViewModel.kt` where accepting or rejecting a mesh handshake via the UI popup left a ghost notification in the drawer. The ViewModel now actively sweeps and deletes associated `NotificationItem` entries upon resolution.
+
 *   **Hotspot Subnet Discovery**: Upgraded `HubDiscoveryService.kt` to extract all active IPv4 prefixes (Cellular, Hotspot, WiFi) and concurrently scan them for SSH (Port 22), bypassing Android's mDNS/multicast isolation on tethered connections.
 *   **Gallery QR Decoding Fallback**: Enhanced `QRScanScreen.kt` with a dual-engine decoder. If ML Kit fails to parse a synthetic screenshot from the gallery, it falls back to a ZXing binarizer on a dedicated IO thread.
 *   **Port Alignment**: Fixed authentication port routing to target the unified `8080` port now handled by `hainet-core` instead of the legacy `3000` port.
