@@ -78,43 +78,6 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         }
                     }
                 }
-                if (updateInfo != null) {
-                    item {
-                        val info = updateInfo!!
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
-                            border = BorderStroke(1.dp, DestructiveRed)
-                        ) {
-                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text(
-                                        "Version ${info.latestVersion} is out (you have ${info.currentVersion}). Tap to download the new APK.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextLight
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        val intent = android.content.Intent(
-                                            android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse(info.downloadUrl)
-                                        )
-                                        context.startActivity(intent)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                                ) {
-                                    Text("Download".tr)
-                                }
-                            }
-                        }
-                    }
-                }
-
                 if (!isEncryptionActive) {
                     item {
                         Card(
@@ -1123,6 +1086,41 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                 Column {
                     Text("Version ".tr + versionName, color = AccentGreen, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
+                    
+                    if (updateInfo != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
+                            border = BorderStroke(1.dp, DestructiveRed)
+                        ) {
+                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Version ${updateInfo!!.latestVersion} is out (you have ${updateInfo!!.currentVersion}). Tap to download the new APK.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextLight
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(updateInfo!!.downloadUrl)
+                                        )
+                                        context.startActivity(intent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                ) {
+                                    Text("Download".tr)
+                                }
+                            }
+                        }
+                    }
+
                     Text("NoSlop is a privacy-first, serverless mesh network and content aggregator. It routes all communication over Tor by default and keeps your identity cryptographically secure on your device.".tr, color = TextMuted, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(16.dp))
 
