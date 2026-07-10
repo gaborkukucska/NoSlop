@@ -38,6 +38,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
+    var showDonationModal by remember { mutableStateOf(false) }
+    var showAboutModal by remember { mutableStateOf(false) }
 
     if (selectedSettingsScreen == 1) {
         LogsViewerScreen(viewModel, onBack = { selectedSettingsScreen = 0 })
@@ -60,6 +62,22 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
             )
 
             LazyColumn(modifier = Modifier.weight(1f)) {
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clickable { showDonationModal = true },
+                        colors = CardDefaults.cardColors(containerColor = AccentGreen.copy(alpha = 0.1f)),
+                        border = BorderStroke(1.dp, AccentGreen)
+                    ) {
+                        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Favorite, contentDescription = null, tint = AccentGreen)
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Help Development".tr, fontWeight = FontWeight.Bold, color = AccentGreen)
+                                Text("Support Gabby's work with a small donation".tr, style = MaterialTheme.typography.bodySmall, color = TextLight)
+                            }
+                        }
+                    }
+                }
                 if (updateInfo != null) {
                     item {
                         val info = updateInfo!!
@@ -1044,7 +1062,135 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         }
                     }
                 }
+                item {
+                    TextButton(
+                        onClick = { showAboutModal = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 32.dp)
+                    ) {
+                        Text("About NoSlop".tr, color = TextMuted)
+                    }
+                }
             }
         }
+    }
+
+    if (showDonationModal) {
+        AlertDialog(
+            onDismissRequest = { showDonationModal = false },
+            containerColor = SurfaceDark,
+            title = {
+                Text("Support NoSlop".tr, color = TextLight, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text("NoSlop is entirely free and open-source. If you enjoy using it, consider buying Gabby (the founder) a coffee! Your support helps cover development time.".tr, color = TextMuted, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text("Monthly Contribution".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    var selectedMonthly by remember { mutableStateOf(1) }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        listOf(1, 2, 5, 10).forEach { amount ->
+                            OutlinedButton(
+                                onClick = { selectedMonthly = amount },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (selectedMonthly == amount) AccentGreen.copy(alpha = 0.2f) else Color.Transparent,
+                                    contentColor = if (selectedMonthly == amount) AccentGreen else TextMuted
+                                ),
+                                border = BorderStroke(1.dp, if (selectedMonthly == amount) AccentGreen else BorderSubtle)
+                            ) {
+                                Text("$$amount")
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(
+                        onClick = {
+                            val url = "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                            showDonationModal = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Donate $".tr + selectedMonthly + " / month".tr, fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = BorderSubtle)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("One-Time Contribution".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00")))
+                            showDonationModal = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Text("Custom Amount".tr)
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDonationModal = false }) {
+                    Text("Close".tr, color = TextMuted)
+                }
+            }
+        )
+    }
+
+    if (showAboutModal) {
+        val versionName = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName } catch (e: Exception) { "Unknown" }
+        AlertDialog(
+            onDismissRequest = { showAboutModal = false },
+            containerColor = SurfaceDark,
+            title = {
+                Text("About NoSlop".tr, color = TextLight, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text("Version ".tr + versionName, color = AccentGreen, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("NoSlop is a privacy-first, serverless mesh network and content aggregator. It routes all communication over Tor by default and keeps your identity cryptographically secure on your device.".tr, color = TextMuted, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text("Resources".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "GitHub Repository".tr, 
+                        color = AccentGreen, 
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop"))) }.padding(vertical = 4.dp)
+                    )
+                    Text(
+                        "Privacy Policy".tr, 
+                        color = AccentGreen, 
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/gaborkukucska/NoSlop/blob/main/docs/PRIVACY_POLICY.md"))) }.padding(vertical = 4.dp)
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(color = BorderSubtle)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        "Imagined by Gabor Kukucska".tr, 
+                        color = TextLight, 
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://gaborkukucska.com"))) }.padding(vertical = 4.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showAboutModal = false }) {
+                    Text("Close".tr, color = TextMuted)
+                }
+            }
+        )
     }
 }

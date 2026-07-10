@@ -343,5 +343,21 @@
     "SSH Password": "SSH jelszó",
     "Shared Media Folder": "Megosztott médiamappa",
     "Unknown Error": "Ismeretlen hiba",
-    "Deploy": "Telepítés"
+    "Deploy": "Telepítés",
+    "Help Development": "Help Development",
+    "Support Gabby's work with a small donation": "Support Gabby's work with a small donation",
+    "About NoSlop": "About NoSlop",
+    "Support NoSlop": "Support NoSlop",
+    "NoSlop is entirely free and open-source. If you enjoy using it, consider buying Gabby (the founder) a coffee! Your support helps cover development time.": "NoSlop is entirely free and open-source. If you enjoy using it, consider buying Gabby (the founder) a coffee! Your support helps cover development time.",
+    "Monthly Contribution": "Monthly Contribution",
+    "Donate $": "Donate $",
+    " / month": " / month",
+    "One-Time Contribution": "One-Time Contribution",
+    "Custom Amount": "Custom Amount",
+    "Version ": "Version ",
+    "NoSlop is a privacy-first, serverless mesh network and content aggregator. It routes all communication over Tor by default and keeps your identity cryptographically secure on your device.": "NoSlop is a privacy-first, serverless mesh network and content aggregator. It routes all communication over Tor by default and keeps your identity cryptographically secure on your device.",
+    "Resources": "Resources",
+    "GitHub Repository": "GitHub Repository",
+    "Privacy Policy": "Privacy Policy",
+    "Imagined by Gabor Kukucska": "Imagined by Gabor Kukucska"
 }
