@@ -49,4 +49,27 @@ object NotificationHelper {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.notify(notificationId, builder.build())
     }
+
+    fun showOngoingUpdateNotification(context: Context, title: String, message: String, downloadUrl: String, version: String) {
+        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val intent = (launchIntent ?: Intent(context, MainActivity::class.java)).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("target_route", "settings")
+        }
+        val pendingIntent: PendingIntent = PendingIntent.getActivity(
+            context, 918274, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setAutoCancel(false)
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(918274, builder.build())
+    }
 }

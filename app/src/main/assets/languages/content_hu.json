@@ -303,5 +303,8 @@
     "ONION ADDRESS:": "ONION CÍM:",
     "Clear All": "Összes törlése",
     "Send Chat on Enter": "Üzenet küldése Enterrel",
-    "The automated multi device home lab back end, especially for creators that have lots of media to share!": "Az automatizált, több eszközös otthoni labor backend, kifejezetten olyan alkotóknak, akiknek sok médiát kell megosztaniuk!"
+    "The automated multi device home lab back end, especially for creators that have lots of media to share!": "Az automatizált, több eszközös otthoni labor backend, kifejezetten olyan alkotóknak, akiknek sok médiát kell megosztaniuk!",
+    "We strongly recommend updating to the latest version to ensure security and mesh stability.": "We strongly recommend updating to the latest version to ensure security and mesh stability.",
+    "Start Update": "Start Update",
+    "Later": "Later"
 }

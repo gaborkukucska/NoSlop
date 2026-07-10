@@ -437,6 +437,39 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             }
         )
     }
+
+    // Update Available Dialog
+    val updateInfo by viewModel.updateInfo.collectAsState()
+    var updatePopupDismissed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+
+    if (updateInfo != null && !updatePopupDismissed) {
+        AlertDialog(
+            onDismissRequest = { updatePopupDismissed = true },
+            containerColor = SurfaceDark,
+            title = {
+                Text("Update Available".tr, color = TextLight, fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Column {
+                    Text("Version ${updateInfo!!.latestVersion} is out! (You have ${updateInfo!!.currentVersion})", color = TextLight)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("We strongly recommend updating to the latest version to ensure security and mesh stability.".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        updatePopupDismissed = true
+                        com.noslop.app.util.UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) { Text("Start Update".tr, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { updatePopupDismissed = true }) { Text("Later".tr, color = TextMuted) }
+            }
+        )
+    }
 }
 
 

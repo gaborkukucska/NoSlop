@@ -303,5 +303,8 @@
     "ONION ADDRESS:": "ONION ADDRESS:",
     "Clear All": "Clear All",
     "Send Chat on Enter": "Send Chat on Enter",
-    "The automated multi device home lab back end, especially for creators that have lots of media to share!": "The automated multi device home lab back end, especially for creators that have lots of media to share!"
+    "The automated multi device home lab back end, especially for creators that have lots of media to share!": "The automated multi device home lab back end, especially for creators that have lots of media to share!",
+    "We strongly recommend updating to the latest version to ensure security and mesh stability.": "We strongly recommend updating to the latest version to ensure security and mesh stability.",
+    "Start Update": "Start Update",
+    "Later": "Later"
 }

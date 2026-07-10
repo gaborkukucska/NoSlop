@@ -11,6 +11,9 @@
 
     <!-- WorkManager background feed sync (required API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Automatic Updates -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Camera for QR code scanning -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -79,6 +82,13 @@
         <service android:name=".mesh.NoSlopForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver android:name=".util.UpdateManager$DownloadReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
