@@ -16,6 +16,17 @@
 *   **Port Alignment**: Fixed authentication port routing to target the unified `8080` port now handled by `hainet-core` instead of the legacy `3000` port.
 
 
+### 3. Monetization & Support Architecture
+*   **Stripe Integration**: Added a "Help Development" banner to the Settings page. This links directly to a Stripe Payment Link for seamless donations, avoiding the need for backend payment processing and keeping the app strictly peer-to-peer.
+*   **About NoSlop Modal**: Consolidated the legacy app information and update notifications into a unified "About NoSlop" modal, accessible from the bottom of the Settings page. This includes dynamic version rendering and links to project resources (GitHub, Privacy Policy) and the creator's portfolio.
+*   **Complete Localization Parity**: Ensured all new UI strings for the Donation and About modals are fully translatable, integrating them into the `.tr` extension and `content_en.json`/`content_hu.json` framework.
+
+### 4. Robust Auto-Update System
+*   **OTA Download Reliability**: Completely rewrote `UpdateManager.kt` to fix silent failures associated with Android's native `DownloadManager`.
+*   **Dynamic Permission Handling**: Integrated runtime checks for `REQUEST_INSTALL_PACKAGES` (required on Android 8.0+) to automatically redirect users to system settings if the permission is missing, ensuring the APK installer can actually launch.
+*   **Resilient Completion Detection**: Replaced the static manifest receiver with a dual-strategy approach: dynamic runtime `BroadcastReceiver` registration combined with a 3-second background polling loop via Coroutines. This guarantees the app detects when the update finishes downloading, even if the OS drops the broadcast.
+*   **State Recovery**: The active download ID is now persisted to `SharedPreferences`, allowing the fallback static receiver to resume the installation process even if NoSlop is killed in the background during the download.
+
 ## Completed Changes (2026-07-09)
 
 ### 2. Multi-Path Hub Discovery & Reliable Authentication

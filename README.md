@@ -33,6 +33,13 @@ It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok
 
 ## Features
 
+### In-App OTA Updates
+NoSlop bypasses centralized app stores entirely. It includes a robust over-the-air (OTA) auto-update system that:
+- Automatically detects new releases from GitHub.
+- Handles Android 8.0+ `REQUEST_INSTALL_PACKAGES` permissions natively.
+- Downloads the APK directly via Tor or clearnet with background polling and connection recovery.
+- Prompts the user to install the update seamlessly from within the app.
+
 ### Immersive Snapping Feed
 
 A vertical feed purpose-built for signal-to-noise ratio.
@@ -126,6 +133,13 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 - **Content Filtering** — While we do compile with some negative keywords to avoid certain content (see the repo), you should also set up your own negative keywords to avoid unwanted content in your feed.
 - **Bring Your Own Network** — NoSlop is much better with friends, HOWEVER, it holds no user directory whatsoever. You must manually add peers to build your mesh. It is entirely up to you.
 - **Installing the APK** — Android will likely show security warnings about installing apps from unknown sources since this is downloaded directly and not from the Play Store. You will likely need to search your phone's settings for `unknown` to find the 'Install unknown apps' section and allow installing from unknown sources to be able to install this app.
+
+---
+
+## Support Development
+
+NoSlop is entirely free, open-source, and devoid of trackers and advertisements. If you find value in a private, serverless communication tool, please consider supporting the sole developer, Gabor Kukucska. 
+You can donate via the **"Help Development"** banner in the app's Settings tab, which securely redirects to a [Stripe Payment Link](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00).
 
 ---
 
