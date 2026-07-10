@@ -29,6 +29,7 @@ import com.noslop.app.ui.theme.*
 import com.noslop.app.ui.NoSlopViewModel
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
+import com.noslop.app.util.tr
 
 @Composable
 fun MetricCard(value: String, label: String, modifier: Modifier = Modifier) {
@@ -74,7 +75,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("HAI-Net Home Hub", style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                Text("HAI-Net Home Hub".tr, style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(24.dp))
@@ -89,11 +90,11 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Hub Online & Linked", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        Text("Hub Online & Linked".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                     if (hubIp.isNotBlank()) {
                         Spacer(modifier = Modifier.height(24.dp))
-                        Text("Access your Hub's Web UI from any browser on your network:", color = TextLight, fontSize = 14.sp)
+                        Text("Access your Hub's Web UI from any browser on your network:".tr, color = TextLight, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(8.dp))
                         Surface(
                             color = PrimaryBlack,
@@ -125,7 +126,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         ) {
                             Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Open Web Dashboard")
+                            Text("Open Web Dashboard".tr)
                         }
                         
                         Spacer(modifier = Modifier.height(16.dp))
@@ -137,7 +138,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         ) {
                             Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Scan to Login to Web UI", fontWeight = FontWeight.Bold)
+                            Text("Scan to Login to Web UI".tr, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -145,12 +146,12 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            Text("Sync Metrics", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
+            Text("Sync Metrics".tr, color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
             Spacer(modifier = Modifier.height(8.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MetricCard("Active", "Identity", Modifier.weight(1f))
-                MetricCard("Synced", "Mesh Data", Modifier.weight(1f))
-                MetricCard("Running", "Media AI", Modifier.weight(1f))
+                MetricCard("Active".tr, "Identity".tr, Modifier.weight(1f))
+                MetricCard("Synced".tr, "Mesh Data".tr, Modifier.weight(1f))
+                MetricCard("Running".tr, "Media AI".tr, Modifier.weight(1f))
             }
 
             Spacer(modifier = Modifier.weight(1f))
@@ -208,7 +209,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("HAI-Net Hub Setup", style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
+            Text("HAI-Net Hub Setup".tr, style = MaterialTheme.typography.headlineMedium, color = TextLight, fontWeight = FontWeight.Bold)
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -221,10 +222,10 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 modifier = Modifier.size(64.dp)
             )
             Spacer(modifier = Modifier.height(16.dp))
-            Text("No Home Hub Configured", color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text("No Home Hub Configured".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Deploy HAI-Net to a device on your local network to keep your node online 24/7.",
+                "Deploy HAI-Net to a device on your local network to keep your node online 24/7.".tr,
                 color = TextMuted,
                 textAlign = TextAlign.Center
             )
@@ -235,29 +236,29 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
                 modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
-                Text("Deploy New Hub", fontWeight = FontWeight.Bold)
+                Text("Deploy New Hub".tr, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(16.dp))
             TextButton(
                 onClick = { viewModel.setHubDeploymentStatus("Active (Legacy Connection)") },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("I already have a Hub running", color = TextMuted)
+                Text("I already have a Hub running".tr, color = TextMuted)
             }
         } else {
             if (discoveredHubs.isEmpty()) {
                 if (!scanTimeoutReached) {
-                    Text("Scanning local network for hubs...", color = TextMuted, fontSize = 14.sp)
+                    Text("Scanning local network for hubs...".tr, color = TextMuted, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(16.dp))
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentGreen)
                 } else {
-                    Text("No hubs found on local network.", color = DestructiveRed, fontSize = 14.sp)
+                    Text("No hubs found on local network.".tr, color = DestructiveRed, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text("Ensure your device is connected to the same network.", color = TextMuted, fontSize = 12.sp)
+                    Text("Ensure your device is connected to the same network.".tr, color = TextMuted, fontSize = 12.sp)
                 }
                 Spacer(modifier = Modifier.height(32.dp))
             } else {
-                Text("Select a Discovered Hub", color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text("Select a Discovered Hub".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(16.dp))
                 discoveredHubs.forEach { hub ->
                     Surface(
@@ -288,7 +289,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
             ) {
-                Text("Manual IP Entry")
+                Text("Manual IP Entry".tr)
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -297,7 +298,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 onClick = { isScanning = false },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Cancel", color = TextMuted)
+                Text("Cancel".tr, color = TextMuted)
             }
         }
     }
@@ -307,11 +308,11 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
         AlertDialog(
             onDismissRequest = { if (!isDeploying) { showSetupDialog = false; deployError = null; deploymentLogs = "" } },
             containerColor = SurfaceDark,
-            title = { Text(if (targetIp.isNotBlank()) "Deploy to $targetIp" else "Manual Deployment", color = TextLight) },
+            title = { Text(if (targetIp.isNotBlank()) "Deploy to ".tr + targetIp else "Manual Deployment".tr, color = TextLight) },
             text = {
                 if (isDeploying || deployError != null || deploymentLogs.isNotBlank()) {
                     Column {
-                        Text("Deployment Logs:", color = AccentGreen, fontWeight = FontWeight.Bold)
+                        Text("Deployment Logs:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(modifier = Modifier
                             .fillMaxWidth()
@@ -342,7 +343,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                     modifier = Modifier.weight(1f),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
                                 ) {
-                                    Text("Copy Logs", fontSize = 12.sp)
+                                    Text("Copy Logs".tr, fontSize = 12.sp)
                                 }
                                 Button(
                                     onClick = {
@@ -352,7 +353,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                     modifier = Modifier.weight(1f),
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                 ) {
-                                    Text("Back to Settings", fontSize = 12.sp)
+                                    Text("Back to Settings".tr, fontSize = 12.sp)
                                 }
                             }
                         }
@@ -363,7 +364,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                             OutlinedTextField(
                                 value = targetIp,
                                 onValueChange = { targetIp = it },
-                                label = { Text("Hub IP Address", color = TextMuted) },
+                                label = { Text("Hub IP Address".tr, color = TextMuted) },
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
                             )
@@ -373,7 +374,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         OutlinedTextField(
                             value = username,
                             onValueChange = { username = it },
-                            label = { Text("SSH Username", color = TextMuted) },
+                            label = { Text("SSH Username".tr, color = TextMuted) },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
                         )
@@ -382,7 +383,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         OutlinedTextField(
                             value = password,
                             onValueChange = { password = it },
-                            label = { Text("SSH Password", color = TextMuted) },
+                            label = { Text("SSH Password".tr, color = TextMuted) },
                             visualTransformation = PasswordVisualTransformation(),
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
@@ -392,7 +393,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         OutlinedTextField(
                             value = sharedFolder,
                             onValueChange = { sharedFolder = it },
-                            label = { Text("Shared Media Folder", color = TextMuted) },
+                            label = { Text("Shared Media Folder".tr, color = TextMuted) },
                             modifier = Modifier.fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
                         )
@@ -426,7 +427,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                     showSetupDialog = false
                                     viewModel.setHubDeploymentStatus("Active at $targetIp")
                                 } else {
-                                    deployError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                                    deployError = result.exceptionOrNull()?.message ?: "Unknown Error".tr
                                 }
                                 isDeploying = false
                             }
@@ -437,7 +438,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                         if (isDeploying) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
                         } else {
-                            Text("Deploy")
+                            Text("Deploy".tr)
                         }
                     }
                 }
@@ -445,7 +446,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             dismissButton = {
                 if (!isDeploying && deployError == null) {
                     TextButton(onClick = { showSetupDialog = false }) {
-                        Text("Cancel", color = TextMuted)
+                        Text("Cancel".tr, color = TextMuted)
                     }
                 }
             }

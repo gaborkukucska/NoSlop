@@ -13,6 +13,7 @@ import com.noslop.app.ui.MainScreen
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
 import com.noslop.app.ui.theme.MyApplicationTheme
+import com.noslop.app.util.tr
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: NoSlopViewModel
@@ -119,8 +120,8 @@ class MainActivity : ComponentActivity() {
                                     showRestoreHubPrompt = false 
                                 },
                                 containerColor = com.noslop.app.ui.theme.SurfaceDark,
-                                title = { androidx.compose.material3.Text("Connect Home Hub?", color = com.noslop.app.ui.theme.TextLight, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
-                                text = { androidx.compose.material3.Text("Your profile was restored, but you don't have a Home Hub connected. Would you like to set one up now?", color = com.noslop.app.ui.theme.TextMuted) },
+                                title = { androidx.compose.material3.Text("Connect Home Hub?".tr, color = com.noslop.app.ui.theme.TextLight, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                                text = { androidx.compose.material3.Text("Your profile was restored, but you don't have a Home Hub connected. Would you like to set one up now?".tr, color = com.noslop.app.ui.theme.TextMuted) },
                                 confirmButton = {
                                     androidx.compose.material3.Button(
                                         onClick = {
@@ -130,7 +131,7 @@ class MainActivity : ComponentActivity() {
                                         },
                                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = com.noslop.app.ui.theme.AccentGreen, contentColor = com.noslop.app.ui.theme.PrimaryBlack)
                                     ) {
-                                        androidx.compose.material3.Text("Setup Hub")
+                                        androidx.compose.material3.Text("Setup Hub".tr)
                                     }
                                 },
                                 dismissButton = {
@@ -138,7 +139,7 @@ class MainActivity : ComponentActivity() {
                                         prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
                                         showRestoreHubPrompt = false 
                                     }) {
-                                        androidx.compose.material3.Text("Not Now", color = com.noslop.app.ui.theme.TextMuted)
+                                        androidx.compose.material3.Text("Not Now".tr, color = com.noslop.app.ui.theme.TextMuted)
                                     }
                                 }
                             )
