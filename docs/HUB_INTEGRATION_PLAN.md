@@ -56,8 +56,16 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
    - Now passes `viewModel` to `HubSetupScreen` and acts as the primary entry point for infrastructure management.
    - Deployment state persisted via `AppSettingDao` key `hub_deployment_status`.
 
-### Phase 2: Active-Passive Tor Identity & Synchronization ✅ OPERATIONAL (Routing & Tor)
-**Goal:** Implement the "Double Setup" failover networking model.
+### Phase 2: Active-Passive Tor Identity & Synchronization ✅ FULLY OPERATIONAL
+**Goal:** Implement the "Double Setup" failover networking model and Smart Firewall Relay.
+
+**Status:** NoSlop now dynamically toggles its embedded Tor Hidden Service off when a Hub is connected, using Tor purely as an outbound SOCKS5 proxy to hit the Hub's persistent `.onion` address. The Hub listens on Port 9999, processes mesh traffic through its native `GossipEngine` firewall, and buffers valid packets in memory for the mobile app to pull.
+
+1. **Smart Network State Machine (`NoSlopViewModel.kt` / `NoSlopRepository.kt`)** ✅
+   - `invokeHubApi` handles automatic LAN-to-Tor fallback routing.
+   - Polling loop introduced: Mobile pushes its `Trusted Peers` list to the Hub every 60s (`sync_push_peers`) and pulls validated mesh packets every 5s (`sync_pull_packets`).
+2. **Tor Daemon Toggling (`TorService.kt`)** ✅
+   - Added `skipHiddenServiceRegistration` flag. In `HUB_CONNECTED` mode, the public hidden service registration is skipped to prevent identity collisions on the mesh network.
 
 1. **Network State Machine (`NoSlopViewModel.kt` / `NoSlopRepository.kt`)**
    - Implemented `invokeHubApi` to handle automatic LAN-to-Tor fallback routing.
@@ -73,8 +81,18 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
    - NoSlop continues to fetch RSS/API feeds locally.
    - Create an API call to sync the "Saved" and "Liked" clearnet states with the Hub's parallel local database.
 
-### Phase 3: Sovereign Data Backup to Hub
-**Goal:** Treat the Hub as the permanent master vault, treating mobile storage as an ephemeral cache.
+### Phase 3: Deep Data Sync, Media Offloading & Sovereign Backup (NEXT)
+**Goal:** Evolve the Hub from an in-memory relay into a persistent master vault, populating the HAI-Net Web Portal and offloading heavy bandwidth tasks from the phone.
+
+1. **Rust SQLite Persistence (The Missing Link)**
+   - *Context:* The HAI-Net Web Portal is currently empty because the Hub only holds incoming packets in a temporary `RwLock<Vec<Value>>` buffer before passing them to the phone.
+   - *Action:* Implement a Rust SQLite schema in `hainet-social` mirroring NoSlop's Room database to permanently store Posts, Comments, Reactions, and DMs.
+2. **Heavy Media Offloading**
+   - Transfer the `MediaManager.kt` chunk-downloading logic to the Hub. The Hub should download 50MB video chunks over Tor 24/7. When complete, the mobile app pulls the entire MP4 file instantly over local Wi-Fi.
+3. **Background Sync Worker (`FeedSyncWorker.kt`)**
+   - Wire `syncWithHub()` into Android's WorkManager so the phone can wake up in the background, check the Hub for new DMs, and trigger native Android notifications while the app is closed.
+4. **Automated AES ZIP Export (`data/BackupManager.kt`)**
+   - Push silent, encrypted `noslop_backup.zip` archives to the Hub via `POST /api/backup/push`.
 
 1. **Automated Export (`data/BackupManager.kt`)**
    - Extend the AES-256-CBC backup logic to output a silent background zip archive.
