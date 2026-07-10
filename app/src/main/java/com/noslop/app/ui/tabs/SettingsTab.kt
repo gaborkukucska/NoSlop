@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +40,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     val context = LocalContext.current
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
+    var selectedTabIndex by remember { mutableStateOf(0) }
+    val tabTitles = listOf("General".tr, "Network".tr, "Content".tr, "System".tr)
     var showDonationModal by remember { mutableStateOf(false) }
     var showAboutModal by remember { mutableStateOf(false) }
 
@@ -61,7 +65,35 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            ScrollableTabRow(
+                selectedTabIndex = selectedTabIndex,
+                containerColor = SurfaceDark,
+                contentColor = AccentGreen,
+                edgePadding = 8.dp,
+                modifier = Modifier.padding(bottom = 16.dp),
+                divider = { HorizontalDivider(color = BorderSubtle) },
+                indicator = { tabPositions ->
+                    if (selectedTabIndex < tabPositions.size) {
+                        TabRowDefaults.SecondaryIndicator(
+                            Modifier.tabIndicatorOffset(tabPositions[selectedTabIndex]),
+                            color = AccentGreen
+                        )
+                    }
+                }
+            ) {
+                tabTitles.forEachIndexed { index, title ->
+                    Tab(
+                        selected = selectedTabIndex == index,
+                        onClick = { selectedTabIndex = index },
+                        text = { Text(title, fontWeight = FontWeight.Bold) },
+                        selectedContentColor = AccentGreen,
+                        unselectedContentColor = TextMuted
+                    )
+                }
+            }
+
             LazyColumn(modifier = Modifier.weight(1f)) {
+                if (selectedTabIndex == 0) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clickable { showDonationModal = true },
@@ -97,6 +129,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 1) {
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
@@ -154,6 +188,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 0) {
                 item {
                     Text(
                         text = "ACCOUNT & PREFERENCES".tr,
@@ -278,6 +314,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 2) {
                 item {
                     Text(
                         text = "MEDIA & PRIVACY".tr,
@@ -417,6 +455,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         }
                     }
 
+                }
+                if (selectedTabIndex == 1) {
                 item {
                     Text(
                         text = "MESH DISCOVERABILITY".tr,
@@ -507,6 +547,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 2) {
                 item {
                     Text(
                         text = "CONTENT AGGREGATOR".tr,
@@ -566,6 +608,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 0) {
                 item {
                     Text(
                         text = "SYSTEM & NOTIFICATIONS".tr,
@@ -693,6 +737,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 1) {
                 if (!hubDeploymentStatus.isNullOrBlank()) {
                     item {
                         Text(
@@ -756,6 +802,8 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
+                }
+                if (selectedTabIndex == 3) {
                 item {
                     Text(
                         text = "DEVELOPER".tr,
@@ -1033,6 +1081,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         Text("About NoSlop".tr, color = TextMuted)
                     }
                 }
+                } // End Tab 3
             }
         }
     }
