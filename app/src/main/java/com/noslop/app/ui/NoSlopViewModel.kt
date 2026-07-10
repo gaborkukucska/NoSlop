@@ -343,7 +343,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isDiscoverableEnabled.value = repository.getAppSetting("is_discoverable_enabled") == "true"
             _isCreatorEnabled.value = repository.getAppSetting("is_creator_enabled") == "true"
             _creatorFundMeLink.value = repository.getAppSetting("creator_fundme_link") ?: ""
-            _hubDeploymentStatus.value = repository.getAppSetting("hub_deployment_status")
+            
+            val hubStatus = repository.getAppSetting("hub_deployment_status")
+            _hubDeploymentStatus.value = hubStatus
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
         }
         viewModelScope.launch { refreshExclusionCaches() }
 
@@ -1315,6 +1318,17 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.putAppSetting("hub_deployment_status", status)
             _hubDeploymentStatus.value = status
+            
+            val hasHub = status.isNotBlank()
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
+            
+            if (!hasHub) {
+                // We just unlinked! Force Tor to re-register the hidden service for standalone mode.
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    com.noslop.app.tor.TorService.updateKeyAndRegister(identity.privateKeyB64)
+                }
+            }
         }
     }
 
@@ -1433,6 +1447,9 @@ fun toggleAggregator() {
     fun startTor() {
         viewModelScope.launch {
             val identity = repository.getLocalIdentity()
+            val hubStatus = repository.getAppSetting("hub_deployment_status")
+            com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+            
             com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
             TorService.startTor(getApplication(), identity?.privateKeyB64)
         }

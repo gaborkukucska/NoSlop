@@ -56,12 +56,15 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
    - Now passes `viewModel` to `HubSetupScreen` and acts as the primary entry point for infrastructure management.
    - Deployment state persisted via `AppSettingDao` key `hub_deployment_status`.
 
-### Phase 2: Active-Passive Tor Identity & Synchronization
+### Phase 2: Active-Passive Tor Identity & Synchronization ✅ OPERATIONAL (Routing & Tor)
 **Goal:** Implement the "Double Setup" failover networking model.
 
-1. **Network State Machine (`NoSlopViewModel.kt` / `MeshTransport.kt`)**
+1. **Network State Machine (`NoSlopViewModel.kt` / `NoSlopRepository.kt`)**
+   - Implemented `invokeHubApi` to handle automatic LAN-to-Tor fallback routing.
+   - NoSlop successfully hits the Hub's API locally and remotely.
    - Define states: `STANDALONE` (No Hub), `HUB_CONNECTED` (Hub reachable), `HUB_UNREACHABLE` (Fallback).
-2. **Tor Daemon Toggling (`TorService.kt`)**
+2. **Tor Daemon Toggling (`TorService.kt`)** ✅
+   - Added `skipHiddenServiceRegistration` flag. In `HUB_CONNECTED` mode, the embedded Tor service is only used as an outbound SOCKS5 proxy. The public hidden service registration is skipped.
    - In `HUB_CONNECTED` mode, the embedded Tor service is only used as a SOCKS5 proxy to hit the Hub's private API. The public hidden service registration is skipped.
    - If pinging the Hub fails (timeout), transition to `HUB_UNREACHABLE`. NoSlop immediately calls `TorService.registerHiddenService` to bind the user's primary `.onion` address to the phone.
 3. **Reconciliation Sync (`MeshPacketHandler.kt`)**

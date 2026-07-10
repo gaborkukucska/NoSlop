@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-10)
+
+### 1. Global Connectivity & Native Hub Tor Daemon
+*   **Smart Hub API Client**: Implemented `invokeHubApi` in `NoSlopRepository.kt`. The app securely bridges communication to the Home Hub by attempting a LAN IP request first (for speed), and gracefully falling back to the SOCKS5 `torClient` targeting the Hub's `.onion` address when off-network.
+*   **Active-Passive Identity**: Updated Mobile `TorService.kt` to dynamically disable its local Hidden Service broadcast when connected to a Hub. The mobile app pivots to using Tor purely as an outbound SOCKS5 proxy to conserve bandwidth and prevent identity collisions on the mesh.
+*   **Native Hub Tor Generation**: Upgraded `hainet-seed` to parse the PKCS#8 Mobile Identity Clone, apply SHA-512 expansion and bit-clamping natively in Rust, and generate a standard `/var/lib/tor/hainet/hs_ed25519_secret_key`.
+*   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address.
+
+### 2. Edge-Case Fixes (Hotspots & QR Decoding)
+*   **Hotspot Subnet Discovery**: Upgraded `HubDiscoveryService.kt` to extract all active IPv4 prefixes (Cellular, Hotspot, WiFi) and concurrently scan them for SSH (Port 22), bypassing Android's mDNS/multicast isolation on tethered connections.
+*   **Gallery QR Decoding Fallback**: Enhanced `QRScanScreen.kt` with a dual-engine decoder. If ML Kit fails to parse a synthetic screenshot from the gallery, it falls back to a ZXing binarizer on a dedicated IO thread.
+*   **Port Alignment**: Fixed authentication port routing to target the unified `8080` port now handled by `hainet-core` instead of the legacy `3000` port.
+
+
 ## Completed Changes (2026-07-09)
 
 ### 2. Multi-Path Hub Discovery & Reliable Authentication
@@ -386,6 +400,11 @@
 *   **Aggressive Splash Preloading**: Hijacked the app's initial `SplashScreen` to act as a 4-second buffer window. `MainActivity` now aggressively resolves and pre-warms the first media item in the feed via `PreloadManager` before the splash curtain drops, resulting in instant playback.
 *   **Filter Synchronization**: Introduced a strict `syncFilterMode()` flow to prevent the ViewModel from getting stuck in specific filters (like "Articles") when the UI clears them via the 'x' button, ensuring seamless return to the "Live Feed" regardless of list size.
 
+
+### 3. Global Connectivity & Native Hub Tor Daemon
+*   **Active-Passive Identity**: Updated Mobile `TorService.kt` to disable its local Hidden Service broadcast when connected to a Hub, pivoting purely to an outbound SOCKS5 proxy.
+*   **Native Hub Tor Generation**: Upgraded `hainet-seed` to dynamically generate a standard `/var/lib/tor/hainet/hs_ed25519_secret_key` from the PKCS#8 Mobile Identity Clone, clamping and hashing the seed natively in Rust.
+*   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address, allowing NoSlop to securely hit the API from anywhere in the world.
 
 ## Next Steps (Planned)
 *   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
