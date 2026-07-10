@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 
 class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
@@ -70,74 +71,71 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
-    // --- Hub API Client ---
+        // --- Hub API Client ---
     suspend fun invokeHubApi(cmd: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
         
-        // 1. Try LAN IP first if available
         if (lanIp != null) {
             try {
                 val url = "http://$lanIp:8080/api/invoke"
-                val payload = JSONObject().apply {
-                    put("cmd", cmd)
-                    put("args", args)
-                }.toString()
-                
-                val request = Request.Builder()
-                    .url(url)
-                    .post(payload.toRequestBody("application/json".toMediaType()))
-                    .build()
-                    
+                val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+                val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
                 com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        return@withContext JSONObject(response.body?.string() ?: "{}")
-                    }
+                    if (response.isSuccessful) return@withContext JSONObject(response.body?.string() ?: "{}")
                 }
             } catch (e: Exception) {
-                Logger.warn("HUB_API", "LAN request to $lanIp failed: ${e.message}. Falling back to Tor...")
+                Logger.warn("HUB_API", "LAN request failed: ${e.message}. Falling back to Tor...")
             }
         }
         
-        // 2. Fallback to Tor using the Hub's onion address
         val identity = getLocalIdentity() ?: return@withContext null
         val onionAddress = identity.onionAddress
-        
         try {
             val url = "http://$onionAddress:8080/api/invoke"
-            val payload = JSONObject().apply {
-                put("cmd", cmd)
-                put("args", args)
-            }.toString()
-            
-            val request = Request.Builder()
-                .url(url)
-                .post(payload.toRequestBody("application/json".toMediaType()))
-                .build()
-                
+            val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+            val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
             com.noslop.app.net.HttpClientProvider.torClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) {
-                    return@withContext JSONObject(response.body?.string() ?: "{}")
-                } else {
-                    Logger.error("HUB_API", "Tor request to $onionAddress failed with code: ${response.code}")
-                }
+                if (response.isSuccessful) return@withContext JSONObject(response.body?.string() ?: "{}")
             }
         } catch (e: Exception) {
-            Logger.error("HUB_API", "Tor fallback request to $onionAddress failed: ${e.message}")
+            Logger.error("HUB_API", "Tor fallback request failed: ${e.message}")
         }
-        
         return@withContext null
     }
 
-    suspend fun syncWithHub() = withContext(Dispatchers.IO) {
-        val dmsRes = invokeHubApi("sync_dms", JSONObject())
-        if (dmsRes != null) {
-            Logger.info("HUB_SYNC", "DM Sync successful: ${dmsRes.optString("status")}")
+    suspend fun syncPeersWithHub() = withContext(Dispatchers.IO) {
+        val peers = peerDao.getAllPeersList()
+        val peerArray = JSONArray()
+        peers.forEach { peer ->
+            val obj = JSONObject()
+            obj.put("public_key", peer.publicKeyB64)
+            obj.put("is_trusted", peer.isTrusted)
+            peerArray.put(obj)
         }
-        val contactsRes = invokeHubApi("sync_contacts", JSONObject())
-        if (contactsRes != null) {
-            Logger.info("HUB_SYNC", "Contacts Sync successful: ${contactsRes.optString("status")}")
+        val args = JSONObject().put("peers", peerArray)
+        val res = invokeHubApi("sync_push_peers", args)
+        if (res != null) Logger.info("HUB_SYNC", "Pushed ${peers.size} contacts to Hub Firewall.")
+    }
+
+    suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
+        val res = invokeHubApi("sync_pull_packets", JSONObject())
+        if (res != null && res.has("packets")) {
+            val packetsArray = res.optJSONArray("packets")
+            if (packetsArray != null && packetsArray.length() > 0) {
+                Logger.info("HUB_SYNC", "Pulled ${packetsArray.length()} valid mesh packets from Hub")
+                val gson = com.google.gson.Gson()
+                for (i in 0 until packetsArray.length()) {
+                    try {
+                        val packetJson = packetsArray.getJSONObject(i).toString()
+                        val packet = gson.fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
+                        handleIncomingPacket(packet)
+                    } catch (e: Exception) {
+                        Logger.error("HUB_SYNC", "Failed to parse synced packet: ${e.message}")
+                    }
+                }
+            }
         }
     }
 

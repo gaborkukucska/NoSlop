@@ -239,6 +239,50 @@ EOF
                 
                 echo '  Core Daemon is now running on port 8080.'
                 
+                # --- TOR SETUP INJECTION ---
+                echo '  Setting up Tor Hidden Service for Global Connectivity...'
+                run_sudo apt-get update -qq >/dev/null 2>&1 || true
+                run_sudo apt-get install -y -qq tor >/dev/null 2>&1 || true
+                
+                cat << 'PYEOF' > gen_tor.py
+import base64, hashlib, os
+try:
+    with open(os.path.expanduser("~/.hainet/identity/ed25519_priv.b64"), "r") as f:
+        b64_key = f.read().strip()
+    pkcs8 = base64.b64decode(b64_key)
+    seed = pkcs8[-32:]
+    expanded = bytearray(hashlib.sha512(seed).digest())
+    expanded[0] &= 248
+    expanded[31] &= 127
+    expanded[31] |= 64
+    header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
+    with open("hs_ed25519_secret_key", "wb") as f:
+        f.write(header + expanded)
+except Exception as e:
+    print("Error generating tor key:", e)
+PYEOF
+                python3 gen_tor.py
+                
+                run_sudo mkdir -p /var/lib/tor/hainet/
+                run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
+                TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
+                run_sudo chmod 700 /var/lib/tor/hainet/
+                run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+                rm -f gen_tor.py
+                
+                run_sudo grep -q "HAI-Net Hidden Service" /etc/tor/torrc || (
+                    echo "" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                    echo "# HAI-Net Hidden Service" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                    echo "HiddenServiceDir /var/lib/tor/hainet/" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                    echo "HiddenServicePort 8080 127.0.0.1:8080" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                    echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                )
+                
+                run_sudo systemctl restart tor || true
+                echo '  Tor Hidden Service configured!'
+                # --- END TOR SETUP ---
+                
                 echo ""
                 echo '=== Deployment Complete ==='
             """.trimIndent()
