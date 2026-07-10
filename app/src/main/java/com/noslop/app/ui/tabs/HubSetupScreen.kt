@@ -406,6 +406,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                 }
             },
             confirmButton = {
+                val unknownErrorMsg = "Unknown Error".tr
                 if (deployError == null) {
                     Button(
                         onClick = {
@@ -427,7 +428,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                                     showSetupDialog = false
                                     viewModel.setHubDeploymentStatus("Active at $targetIp")
                                 } else {
-                                    deployError = result.exceptionOrNull()?.message ?: "Unknown Error".tr
+                                    deployError = result.exceptionOrNull()?.message ?: unknownErrorMsg
                                 }
                                 isDeploying = false
                             }

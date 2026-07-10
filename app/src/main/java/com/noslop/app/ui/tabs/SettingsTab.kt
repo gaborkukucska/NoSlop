@@ -1084,56 +1084,21 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
             text = {
                 Column {
                     Text("NoSlop is entirely free and open-source. If you enjoy using it, consider buying Gabby (the founder) a coffee! Your support helps cover development time.".tr, color = TextMuted, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    Text("Monthly Contribution".tr, color = TextLight, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
-                    
-                    var selectedMonthly by remember { mutableStateOf(1) }
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        listOf(1, 2, 5, 10).forEach { amount ->
-                            OutlinedButton(
-                                onClick = { selectedMonthly = amount },
-                                colors = ButtonDefaults.outlinedButtonColors(
-                                    containerColor = if (selectedMonthly == amount) AccentGreen.copy(alpha = 0.2f) else Color.Transparent,
-                                    contentColor = if (selectedMonthly == amount) AccentGreen else TextMuted
-                                ),
-                                border = BorderStroke(1.dp, if (selectedMonthly == amount) AccentGreen else BorderSubtle)
-                            ) {
-                                Text("$$amount")
-                            }
-                        }
-                    }
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Even \$1 makes a difference!".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(24.dp))
+
                     Button(
-                        onClick = {
-                            val url = "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
-                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)))
-                            showDonationModal = false
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                    ) {
-                        Text("Donate $".tr + selectedMonthly + " / month".tr, fontWeight = FontWeight.Bold)
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-                    HorizontalDivider(color = BorderSubtle)
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text("One-Time Contribution".tr, color = TextLight, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
                         onClick = {
                             context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00")))
                             showDonationModal = false
                         },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
-                        border = BorderStroke(1.dp, BorderSubtle)
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) {
-                        Text("Custom Amount".tr)
+                        Icon(Icons.Default.Favorite, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Buy Gabby a Coffee".tr, fontWeight = FontWeight.Bold)
                     }
                 }
             },
