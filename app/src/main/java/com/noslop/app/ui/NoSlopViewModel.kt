@@ -1314,6 +1314,15 @@ fun toggleAggregator() {
             repository.putAppSetting("is_discoverable_enabled", enabled.toString())
             _isDiscoverableEnabled.value = enabled
             if (enabled) {
+                var burnableIdentity = repository.getBurnableIdentity()
+                if (burnableIdentity == null) {
+                    burnableIdentity = repository.generateBurnableIdentity()
+                    // Tell TorService to register the newly generated burnable identity
+                    val mainIdentity = repository.getLocalIdentity()
+                    if (mainIdentity != null) {
+                        com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, burnableIdentity.privateKeyB64)
+                    }
+                }
                 broadcastDiscoverable()
             }
         }
@@ -1501,11 +1510,12 @@ fun toggleAggregator() {
     fun startTor() {
         viewModelScope.launch {
             val identity = repository.getLocalIdentity()
+            val burnableIdentity = repository.getBurnableIdentity()
             val hubStatus = repository.getAppSetting("hub_deployment_status")
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
             
             com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
-            TorService.startTor(getApplication(), identity?.privateKeyB64)
+            com.noslop.app.tor.TorService.startTor(getApplication(), identity?.privateKeyB64, burnableIdentity?.privateKeyB64)
         }
     }
 

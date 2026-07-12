@@ -198,6 +198,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))
     
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
+    suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
+    suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)
         _identityUpdateFlow.emit(Unit)
