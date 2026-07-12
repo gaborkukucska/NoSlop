@@ -250,14 +250,17 @@ object GossipService {
             }
         } else if (packet.type == "MEDIA_RELAY_REQUEST") {
             handleRelayRequest(senderId, packet)
-            forwardPacket(packet) // Also forward to others
+            pushPacketToHub?.invoke(packet) // Also forward to others
+            forwardPacket(packet)
             return false
         } else if (packet.type == "MEDIA_RECOVERY_FOUND") {
             handleRecoveryFound(senderId, packet)
+            pushPacketToHub?.invoke(packet)
             // Do not automatically forward RECOVERY_FOUND, it follows the chain back
             return true
         } else {
             // Public message/post, process locally AND forward to other peers
+            pushPacketToHub?.invoke(packet)
             forwardPacket(packet)
         }
 
