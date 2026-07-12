@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.People
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.animation.core.animateFloat
@@ -193,6 +194,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             
             val folders = listOf("All") + rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
             var selectedFolder by remember { mutableStateOf("All") }
+            var isContactsCollapsed by remember { mutableStateOf(false) }
+            val existingFolders = rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
             val contacts = if (selectedFolder == "All") rawContacts else rawContacts.filter { it.customFolder == selectedFolder }
             
             var peerToAssignFolder by remember { mutableStateOf<Peer?>(null) }
@@ -200,19 +203,77 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             
             if (peerToAssignFolder != null) {
                 var folderName by remember { mutableStateOf(peerToAssignFolder?.customFolder ?: "") }
+                var dropdownExpanded by remember { mutableStateOf(false) }
                 AlertDialog(
                     onDismissRequest = { peerToAssignFolder = null },
                     title = { Text("Assign to Folder", color = TextLight) },
                     text = {
-                        OutlinedTextField(
-                            value = folderName,
-                            onValueChange = { folderName = it },
-                            label = { Text("Folder Name", color = TextMuted) },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = TextLight,
-                                unfocusedTextColor = TextLight
+                        Column {
+                            if (existingFolders.isNotEmpty()) {
+                                Text(
+                                    text = "Choose existing folder",
+                                    color = TextMuted,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                )
+                                @OptIn(ExperimentalMaterial3Api::class)
+                                ExposedDropdownMenuBox(
+                                    expanded = dropdownExpanded,
+                                    onExpandedChange = { dropdownExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = folderName,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                                        placeholder = { Text("Select a folder", color = TextMuted) },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = TextLight,
+                                            unfocusedTextColor = TextLight
+                                        ),
+                                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = dropdownExpanded,
+                                        onDismissRequest = { dropdownExpanded = false }
+                                    ) {
+                                        existingFolders.forEach { folder ->
+                                            DropdownMenuItem(
+                                                text = { Text(folder, color = TextLight) },
+                                                onClick = {
+                                                    folderName = folder
+                                                    dropdownExpanded = false
+                                                },
+                                                leadingIcon = {
+                                                    Icon(Icons.Default.Folder, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+                                    Text("  or create new  ", color = TextMuted, fontSize = 11.sp)
+                                    HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = folderName,
+                                onValueChange = { folderName = it },
+                                label = { Text(if (existingFolders.isNotEmpty()) "New Folder Name" else "Folder Name", color = TextMuted) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedTextColor = TextLight,
+                                    unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.fillMaxWidth()
                             )
-                        )
+                        }
                     },
                     confirmButton = {
                         Button(
@@ -337,15 +398,71 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             folders.forEach { folder ->
                                 Tab(
                                     selected = selectedFolder == folder,
-                                    onClick = { selectedFolder = folder },
-                                    text = { Text(folder, fontWeight = FontWeight.Bold) }
+                                    onClick = {
+                                        if (folder == "All" && selectedFolder == "All") {
+                                            isContactsCollapsed = !isContactsCollapsed
+                                        } else {
+                                            selectedFolder = folder
+                                            isContactsCollapsed = false
+                                        }
+                                    },
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(folder, fontWeight = FontWeight.Bold)
+                                            if (folder == "All") {
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Icon(
+                                                    imageVector = if (isContactsCollapsed && selectedFolder == "All") Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                                    contentDescription = if (isContactsCollapsed) "Expand" else "Collapse",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
+                                    }
                                 )
                             }
                         }
                     }
                 }
 
-                if (contacts.isNotEmpty()) {
+                if (isContactsCollapsed && selectedFolder == "All" && folders.size > 1) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { isContactsCollapsed = false },
+                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                            border = BorderStroke(1.dp, BorderSubtle)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.People,
+                                    contentDescription = "Contacts",
+                                    tint = AccentGreen,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "${rawContacts.size} contacts",
+                                    color = TextLight,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Icon(
+                                    imageVector = Icons.Default.ExpandMore,
+                                    contentDescription = "Expand",
+                                    tint = TextMuted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                } else if (contacts.isNotEmpty()) {
                     item {
                         Text(
                             text = "MY CONTACTS".tr,
