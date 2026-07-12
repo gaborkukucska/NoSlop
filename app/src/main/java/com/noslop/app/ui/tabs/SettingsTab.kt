@@ -30,7 +30,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
 @Composable
-fun SettingsTab(viewModel: NoSlopViewModel) {
+fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     val torState by viewModel.torReadyState.collectAsState()
     val isTorChecking by viewModel.isTorChecking.collectAsState()
     val mediaSettings by viewModel.mediaSettings.collectAsState()
@@ -183,6 +183,94 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 ) {
                                     Text("Test Tor".tr, fontWeight = FontWeight.Bold)
                                 }
+                            }
+                        }
+                    }
+                }
+                
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val isForegroundServiceEnabled by viewModel.isForegroundServiceEnabled.collectAsState()
+                            var showForegroundWarning by remember { mutableStateOf(false) }
+                            val hasHub = !hubDeploymentStatus.isNullOrBlank()
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = if (hasHub) TextMuted else TextLight)
+                                    Text(
+                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media auto-downloads.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isForegroundServiceEnabled && !hasHub,
+                                    enabled = !hasHub,
+                                    onCheckedChange = { 
+                                        if (it) {
+                                            showForegroundWarning = true
+                                        } else {
+                                            viewModel.setForegroundServiceEnabled(false)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark,
+                                        disabledCheckedThumbColor = PrimaryBlack,
+                                        disabledCheckedTrackColor = AccentGreen.copy(alpha = 0.5f),
+                                        disabledUncheckedThumbColor = TextMuted.copy(alpha = 0.5f),
+                                        disabledUncheckedTrackColor = SurfaceDark.copy(alpha = 0.5f)
+                                    )
+                                )
+                            }
+                            
+                            if (showForegroundWarning) {
+                                AlertDialog(
+                                    onDismissRequest = { showForegroundWarning = false },
+                                    containerColor = SurfaceDark,
+                                    title = { Text("Enable Background Mesh?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                                    text = { 
+                                        Text(
+                                            "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.".tr,
+                                            color = TextMuted
+                                        ) 
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showForegroundWarning = false
+                                                onNavigateToHubs()
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                        ) {
+                                            Text("Deploy HUB".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        Row {
+                                            TextButton(onClick = { showForegroundWarning = false }) {
+                                                Text("Cancel".tr, color = TextMuted)
+                                            }
+                                            TextButton(onClick = { 
+                                                showForegroundWarning = false
+                                                viewModel.setForegroundServiceEnabled(true)
+                                            }) {
+                                                Text("Enable Anyway".tr, color = DestructiveRed)
+                                            }
+                                        }
+                                    }
+                                )
                             }
                         }
                     }
@@ -682,34 +770,6 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                         border = BorderStroke(1.dp, BorderSubtle)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            val isForegroundServiceEnabled by viewModel.isForegroundServiceEnabled.collectAsState()
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text(
-                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media auto-downloads.".tr,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextMuted
-                                    )
-                                }
-                                Switch(
-                                    checked = isForegroundServiceEnabled,
-                                    onCheckedChange = { viewModel.setForegroundServiceEnabled(it) },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = PrimaryBlack,
-                                        checkedTrackColor = AccentGreen,
-                                        uncheckedThumbColor = TextMuted,
-                                        uncheckedTrackColor = SurfaceDark
-                                    )
-                                )
-                            }
-                            
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
-
                             val notificationSettings by viewModel.notificationSettings.collectAsState()
                             
                             Text("Notifications".tr, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))

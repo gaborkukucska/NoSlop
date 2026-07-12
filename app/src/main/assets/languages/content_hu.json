@@ -386,5 +386,9 @@
     "Public": "Nyilvános",
     "Also auto-download media from public broadcasts": "Nyilvános közvetítések médiájának automatikus letöltése is",
     "Enable Public Media?": "Nyilvános média engedélyezése?",
-    "You'll download 3rd party media!": "Harmadik féltől származó médiát fogsz letölteni!"
+    "You'll download 3rd party media!": "Harmadik féltől származó médiát fogsz letölteni!",
+    "Enable Background Mesh?": "Háttér Mesh engedélyezése?",
+    "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.": "A NoSlop folyamatos háttérben futtatása gyorsabban meríti az akkumulátort és extra adatforgalmat használ a mesh hálózat életben tartásához. Erősen javasoljuk egy HAI-Net Home HUB telepítését, amely 24/7-ben kezeli ezt anélkül, hogy merítené a telefonodat.",
+    "Deploy HUB": "HUB Telepítése",
+    "Enable Anyway": "Engedélyezés Mégis"
 }

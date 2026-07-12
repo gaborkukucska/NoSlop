@@ -1346,6 +1346,10 @@ fun toggleAggregator() {
             val hasHub = status.isNotBlank()
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
             
+            if (hasHub && isForegroundServiceEnabled.value) {
+                setForegroundServiceEnabled(false)
+            }
+            
             if (!hasHub) {
                 // We just unlinked! Force Tor to re-register the hidden service for standalone mode.
                 val identity = repository.getLocalIdentity()

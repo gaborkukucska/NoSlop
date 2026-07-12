@@ -376,7 +376,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 }
                 if (selectedTab == 1) DMsTab(viewModel)
                 if (selectedTab == 2) HaiNetTab(viewModel)
-                if (selectedTab == 3) SettingsTab(viewModel)
+                if (selectedTab == 3) SettingsTab(viewModel, onNavigateToHubs = { selectedTab = 2 })
                 if (selectedTab == 4) {
                     com.noslop.app.ui.tabs.NotificationsScreen(
                         viewModel = viewModel,

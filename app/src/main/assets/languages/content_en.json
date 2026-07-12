@@ -386,5 +386,9 @@
     "Public": "Public",
     "Also auto-download media from public broadcasts": "Also auto-download media from public broadcasts",
     "Enable Public Media?": "Enable Public Media?",
-    "You'll download 3rd party media!": "You'll download 3rd party media!"
+    "You'll download 3rd party media!": "You'll download 3rd party media!",
+    "Enable Background Mesh?": "Enable Background Mesh?",
+    "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.": "Running NoSlop permanently in the background will drain your battery and use extra data to keep the mesh network alive. We strongly recommend deploying a HAI-Net Home HUB instead, which handles this 24/7 without draining your phone.",
+    "Deploy HUB": "Deploy HUB",
+    "Enable Anyway": "Enable Anyway"
 }
