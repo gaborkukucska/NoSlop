@@ -1,5 +1,27 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-12)
+
+### 1. DM Contacts Organization — Collapsible "All" List & Folder Assignment
+*   **Collapsible "All" Contacts Tab**: The "All" contacts list on the DMs page can now be hidden by tapping the "All" tab header. When collapsed, only a compact icon is shown, and the page defaults to displaying the first custom folder. The collapsed state is persisted to `app_settings["dm_all_tab_hidden"]` so it survives navigation and app restarts.
+*   **Contact Folder Assignment**: The "Assign to Folder" modal now includes a dropdown of existing folders (populated from previously created folders) alongside the text field for creating new folders. Users can either select an existing folder or type a new name.
+
+### 2. Complete Settings Page Localization
+*   **Full `.tr` Extension Audit**: Conducted a comprehensive audit of `SettingsTab.kt` and applied the `.tr` translation extension to all remaining hardcoded user-facing strings, including: Tor proxy status labels (`"Active Tor Proxy"`, `"Tor Disconnected"`), media file limit label (`"Max File Size: "`), data & backup workflow strings (`"Export Backup"`, `"Import Backup"`, `"Save File"`, `"Select File"`, `"Importing..."`, `"Nuclear Option"`), and app update notification strings (`"Version "`, `"is out (you have "`, `"Unknown"`).
+*   **Hungarian (Magyar) Translation Completion**: Updated `content_hu.json` with proper Hungarian translations for all newly localized strings. Also translated the previously untranslated "About NoSlop" and "Help Development" modal strings (`"Help Development"`, `"Support Gabby's work..."`, `"About NoSlop"`, `"Buy Gabby a Coffee"`, `"Version "`, `"Resources"`, `"GitHub Repository"`, `"Privacy Policy"`, `"Imagined by Gabor Kukucska"`), which had been left in English.
+*   **DM Folder UI Strings**: Added localization keys for the new folder assignment UI (`"Choose existing folder"`, `"Select a folder"`, `"or create new"`, `"New Folder Name"`, `"Folder Name"`, `"Assign to Folder"`) to both `content_en.json` and `content_hu.json`.
+
+### 3. Media Settings Restructure & Trust-Based Auto-Download
+*   **"Automatic Media Download" Rename**: Renamed the "Enable Media" toggle to "Automatic Media Download" for clarity.
+*   **Background Playback Decoupled**: Moved the "Background Playback" and "Play Outside App" toggles out of the media download card into their own dedicated `Card` container, making it clear these settings are independent of auto-download behavior.
+*   **Trust-Based Auto-Download Toggles**: Replaced the confusing "Auto-download Friends" / "Auto-download Private" toggles with a clearer trust-based hierarchy:
+    *   **Friends** — "only auto-download media from contacts" (respects `isTrusted` peer status).
+    *   **Public** — "Also auto-download media from public broadcasts" (covers non-contact mesh peers).
+*   **Public Media Warning Dialog**: Toggling "Public" auto-download ON now triggers a confirmation `AlertDialog` warning: *"You'll download 3rd party media!"*. The setting is only applied if the user taps "Accept".
+*   **File Attachment Exclusion**: `MediaManager.checkAndAutoDownload()` now explicitly skips media with `metadata.type == "file"`, ensuring file attachments are never auto-downloaded and must be manually tapped to sync.
+*   **Data Model Migration**: Renamed `MediaSettings.autoDownloadPrivate` to `autoDownloadPublic` in `MediaSettings.kt` and updated all downstream consumers (`MediaManager.kt`, `SettingsTab.kt`).
+*   **Files**: Modified: `MediaSettings.kt`, `MediaManager.kt`, `SettingsTab.kt`, `content_en.json`, `content_hu.json`.
+
 ## Completed Changes (2026-07-10)
 
 ### 1. Global Connectivity & Native Hub Tor Daemon

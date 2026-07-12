@@ -88,7 +88,7 @@ com.noslop.app
 │   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, Vote, AppSetting)
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
-│   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
+│   ├── MediaSettings.kt           Auto-download policy: trust-based (friends/public), file exclusion (JSON in app_settings)
 │   ├── MeshFilterSettings.kt      Mesh broadcast filter toggles (JSON in app_settings)
 │   ├── NoSlopDatabase.kt          Room database, version 23
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
@@ -537,10 +537,18 @@ unavailable.
 ### 6.3 Auto-Download Policy (`MediaManager.checkAndAutoDownload`)
 
 Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
-- `settings.enabled` — global kill switch.
-- Context `"friends"`: requires `settings.autoDownloadFriends` **and** the
-  author must be a `peerDao`-known, `isTrusted == true` peer.
-- Context `"private"` (DMs): requires `settings.autoDownloadPrivate`.
+- `settings.enabled` — global kill switch (UI label: "Automatic Media Download").
+- `metadata.type == "file"` — **file attachments are never auto-downloaded**.
+  They must be manually tapped by the user to initiate sync. This guard runs
+  before any trust or size checks.
+- **Trust-based hierarchy** (replaces the earlier context-string approach):
+  1. Look up `repo.peerDao.getPeerByPublicKey(authorId)` to determine trust.
+  2. If `peer?.isTrusted == true` (a contact): requires
+     `settings.autoDownloadFriends` to be enabled.
+  3. If the peer is unknown or untrusted (a public broadcast): requires
+     `settings.autoDownloadPublic` to be enabled. Toggling this ON in the
+     Settings UI triggers a confirmation dialog warning the user that they
+     will download 3rd-party media.
 - `settings.maxFileSizeMB` — if `metadata.size > maxBytes && size > 0`, skip
   (a `size == 0` placeholder, as used by `MediaProxyService`'s synthetic
   metadata, bypasses this check).
@@ -812,7 +820,9 @@ the ephemeral onion with the identity-derived one.
 `mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
-`language_preference`, `enable_aggregator`, `user_profile` (JSON).
+`language_preference`, `enable_aggregator`, `user_profile` (JSON),
+`dm_all_tab_hidden` (`"true"`/`"false"` — persists collapsed state of the
+"All" contacts list on the DMs tab).
 
 Database is opened with `JournalMode.WRITE_AHEAD_LOGGING` and
 `fallbackToDestructiveMigration()` — any schema version bump destroys and

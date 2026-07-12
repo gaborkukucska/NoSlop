@@ -3,7 +3,7 @@
 NoSlop uses a simple, community-friendly JSON file system for translations. You don't need to be a developer to translate the app!
 
 > [!IMPORTANT]
-> **DEVELOPER NOTE:** ALWAYS add ALL new user-facing text strings to `content_en.json` (and `content_hu.json` as a baseline) as you go during development! Use the `.tr` extension in Kotlin Compose files (`"My String".tr`) to ensure the text routes through the `LanguageManager`.
+> **DEVELOPER NOTE:** ALWAYS add ALL new user-facing text strings to `content_en.json` (and `content_hu.json` as a baseline) as you go during development! Use the `.tr` extension in Kotlin Compose files (`"My String".tr`) to ensure the text routes through the `LanguageManager`. As of 2026-07-12, the English file contains **390+** translation keys. Run a diff against Hungarian to check for missing entries.
 
 If you want to add your language to NoSlop, follow these simple steps:
 
