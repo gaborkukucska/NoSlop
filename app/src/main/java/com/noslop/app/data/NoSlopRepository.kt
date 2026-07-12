@@ -64,6 +64,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val meshSocialRepository = MeshSocialRepository(
         db, meshTransport, repositoryScope,
         getLocalIdentity = { getLocalIdentity() },
+        getBurnableIdentity = { getBurnableIdentity() },
         getLocalHandle = { getLocalHandle() },
         getUserProfile = { getUserProfile() },
         getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() }
@@ -72,6 +73,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
         // --- Hub API Client ---
+
+    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val jsonStr = packet.toJson()
+            val jsonObj = org.json.JSONObject(jsonStr)
+            val arr = org.json.JSONArray().put(jsonObj)
+            val args = org.json.JSONObject().put("packets", arr)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
+        }
+    }
+
     suspend fun invokeHubApi(cmd: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
         val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
         val isLegacy = hubStatus == "Active (Legacy Connection)"
@@ -214,6 +229,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
             checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) }
         )
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         

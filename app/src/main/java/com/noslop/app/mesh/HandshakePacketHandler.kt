@@ -21,6 +21,7 @@ class HandshakePacketHandler(
     private val TAG = "MESH_HANDLER"
     private val peerDao = db.peerDao()
     private val notificationDao = db.notificationDao()
+    private val autoAcceptRateLimits = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
 
     suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
@@ -64,15 +65,27 @@ class HandshakePacketHandler(
         if (!isTrusted) {
             val isLocalCreator = db.appSettingDao().getSetting("is_creator") == "true"
             if (isLocalCreator) {
-                // Auto-accept connection for creators
-                peerDao.insertPeer(peer.copy(isTrusted = true))
-                repo.setHandshakeAccepted(peer)
+                // Rate limit check
+                val now = System.currentTimeMillis()
+                val limits = autoAcceptRateLimits.getOrPut("auto_accept") { mutableListOf() }
+                var allowed = false
+                synchronized(limits) {
+                    limits.removeAll { now - it > 3600_000 } // 1 hour window
+                    if (limits.size < 10) {
+                        limits.add(now)
+                        allowed = true
+                    }
+                }
                 
-                // We also need to send a USER_HANDSHAKE back, which MeshPacketHandler or the caller
-                // should do. For now we will rely on the caller passing a sendResponse callback,
-                // or we handle it at the caller level.
-                // Assuming caller handles response if needed, but we mark it trusted here.
-                Logger.info(TAG, "Auto-accepted connection request from ${peer.handle} (Creator Mode)")
+                if (allowed) {
+                    // Auto-accept connection for creators, restrict permissions by marking as temporary
+                    peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = true))
+                    repo.setHandshakeAccepted(peer)
+                    Logger.info(TAG, "Auto-accepted connection request from ${peer.handle} (Creator Mode)")
+                } else {
+                    Logger.warn(TAG, "Auto-accept rate limit exceeded. Falling back to manual request.")
+                    repo.setIncomingRequest(peer)
+                }
             } else {
                 repo.setIncomingRequest(peer)
 

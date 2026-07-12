@@ -1305,8 +1305,8 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.composeAndBroadcastComment(postId, content, parentCommentId, mediaMetadata) }
     }
 
-    fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "") {
-        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64) }
+    fun requestConnection(handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String = "", useBurnableIdentity: Boolean = false) {
+        viewModelScope.launch { repository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity) }
     }
 
     fun setDiscoverableEnabled(enabled: Boolean) {

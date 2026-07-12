@@ -33,6 +33,7 @@ object GossipService {
     private var localPublicKeyB64: String = ""
     private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
     private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
+    var pushPacketToHub: (suspend (NetworkPacket) -> Unit)? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun initialize(
@@ -160,8 +161,9 @@ object GossipService {
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
         val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND"
+        val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         
-        if (!isConnectionPacket && !isMediaRelayPacket) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
@@ -391,6 +393,7 @@ object GossipService {
      * Outbound broadcast originating from us
      */
     suspend fun broadcast(packet: NetworkPacket) {
+        pushPacketToHub?.invoke(packet)
         val tx = transport ?: return
         val dao = peerDao ?: return
         val activePeers = dao.getAllPeersList()

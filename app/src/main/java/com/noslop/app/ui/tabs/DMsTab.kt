@@ -312,6 +312,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 Text("Support: ${selectedDiscoverableNode!!.fundMeLink}", color = TextLight, fontSize = 14.sp)
                             }
                         }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("This connection will be established using a temporary, burnable identity to protect your privacy. You can upgrade to a permanent connection later.", color = TextMuted, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
                         Spacer(modifier = Modifier.height(24.dp))
                         Button(
                             onClick = {
@@ -319,7 +321,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     handle = selectedDiscoverableNode!!.handle,
                                     publicKeyB64 = selectedDiscoverableNode!!.publicKeyB64,
                                     onionAddress = selectedDiscoverableNode!!.onionAddress,
-                                    encPublicKeyB64 = selectedDiscoverableNode!!.encPublicKeyB64
+                                    encPublicKeyB64 = selectedDiscoverableNode!!.encPublicKeyB64,
+                                    useBurnableIdentity = true
                                 )
                                 selectedDiscoverableNode = null
                             }, 

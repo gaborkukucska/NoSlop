@@ -267,17 +267,39 @@ fun ChatThreadScreen(
             Spacer(modifier = Modifier.width(8.dp))
 
             Column {
-                Text(
-                    text = peer.handle,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    color = TextLight
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = peer.handle,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        color = TextLight
+                    )
+                    if (peer.isTemporary) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(modifier = Modifier.background(DestructiveRed.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
+                            Text("Temporary", color = DestructiveRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 Text(
                     text = "Direct E2EE session with ECDH agreement active".tr,
                     style = MaterialTheme.typography.labelSmall,
                     color = AccentGreen
                 )
+            }
+        }
+
+        if (peer.isTemporary) {
+            Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
+                Button(
+                    onClick = {
+                        viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                    border = BorderStroke(1.dp, AccentGreen)
+                ) {
+                    Text("Share Permanent Identity")
+                }
             }
         }
 

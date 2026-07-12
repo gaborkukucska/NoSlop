@@ -36,6 +36,7 @@ class MeshSocialRepository(
     private val meshTransport: MeshTransport,
     private val repositoryScope: CoroutineScope,
     private val getLocalIdentity: suspend () -> CryptoService.IdentityKeys?,
+    private val getBurnableIdentity: suspend () -> CryptoService.IdentityKeys? = { null },
     private val getLocalHandle: suspend () -> String,
     private val getUserProfile: suspend () -> UserProfile,
     private val getMeshFilterSettings: suspend () -> com.noslop.app.data.MeshFilterSettings = { com.noslop.app.data.MeshFilterSettings() }
@@ -282,7 +283,8 @@ class MeshSocialRepository(
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        encPublicKeyB64: String = ""
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
         val cleanHandle = handle
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
@@ -299,7 +301,7 @@ class MeshSocialRepository(
         )
         peerDao.insertPeer(newPeer)
 
-        val myKeys = getLocalIdentity()
+        val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
             val userProfile = getUserProfile()
             val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
@@ -414,7 +416,7 @@ class MeshSocialRepository(
         peerDao.deletePeer(peer)
         _incomingRequestFlow.value = null
 
-        val myKeys = getLocalIdentity()
+        val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
