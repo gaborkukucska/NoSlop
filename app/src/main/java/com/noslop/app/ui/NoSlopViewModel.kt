@@ -325,6 +325,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         if (!repository.getAppSetting("hub_deployment_status").isNullOrBlank()) {
                             if (System.currentTimeMillis() - lastPeerSync > 60_000) {
                                 repository.syncPeersWithHub()
+                                repository.syncPostsWithHub()
+                                repository.syncDmsWithHub()
                                 lastPeerSync = System.currentTimeMillis()
                             }
                             repository.pullMeshPacketsFromHub()

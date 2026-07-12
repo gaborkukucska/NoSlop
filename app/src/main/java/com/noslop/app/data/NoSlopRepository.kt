@@ -7,6 +7,7 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.mesh.MeshPacketHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -174,6 +175,46 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val args = JSONObject().put("peers", peerArray)
         val res = invokeHubApi("sync_push_peers", args)
         if (res != null) Logger.info("HUB_SYNC", "Pushed ${peers.size} contacts to Hub Firewall.")
+    }
+
+        suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
+        val identity = getLocalIdentity() ?: return@withContext
+        val peers = peerDao.getAllPeersList()
+        val dmArray = JSONArray()
+        
+        peers.forEach { peer ->
+            try {
+                // Room flows emit the initial list immediately, so we can grab the first snapshot
+                val messages = kotlinx.coroutines.flow.first(messageDao.getMessagesWithPeer(peer.publicKeyB64))
+                messages.forEach { msg ->
+                    val plaintextBytes = com.noslop.app.crypto.CryptoService.decryptDM(
+                        msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
+                    )
+                    var content = plaintextBytes?.let { String(it, Charsets.UTF_8) } ?: "..."
+                    try {
+                        val json = JSONObject(content)
+                        if (json.has("content")) {
+                            content = json.getString("content")
+                        }
+                    } catch (e: Exception) {}
+                    
+                    val obj = JSONObject()
+                    obj.put("id", msg.id)
+                    obj.put("peer", peer.publicKeyB64)
+                    obj.put("sender", msg.senderPub)
+                    obj.put("content", content)
+                    obj.put("timestamp", msg.timestamp)
+                    dmArray.put(obj)
+                }
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to sync DMs for ${peer.handle}: ${e.message}")
+            }
+        }
+        if (dmArray.length() > 0) {
+            val args = JSONObject().put("dms", dmArray)
+            val res = invokeHubApi("sync_push_dms", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${dmArray.length()} DMs to Hub.")
+        }
     }
 
     suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
