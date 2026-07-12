@@ -376,6 +376,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (!hubStatus.isNullOrBlank()) {
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
+                    repository.peerDao.deletePeer(identity.publicKeyB64) // Clean up legacy duplicate
                     val adminPeer = com.noslop.app.data.Peer(
                         publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
@@ -1381,6 +1382,7 @@ fun toggleAggregator() {
             if (hasHub) {
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
+                    repository.peerDao.deletePeer(identity.publicKeyB64) // Clean up legacy duplicate
                     val adminPeer = com.noslop.app.data.Peer(
                         publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
