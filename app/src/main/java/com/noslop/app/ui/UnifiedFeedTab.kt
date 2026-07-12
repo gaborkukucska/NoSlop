@@ -119,6 +119,7 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
 fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     var selectedTab by remember { mutableStateOf(0) }
     var showComposeDialog by remember { mutableStateOf(false) }
+    var initialScanMode by remember { mutableStateOf<String?>(null) }
 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
@@ -191,6 +192,9 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 selectedTab = 4
             } else if (routeClean == "settings") {
                 selectedTab = 3
+            } else if (routeClean == "hubs-deploy") {
+                selectedTab = 2
+                initialScanMode = "deploy"
             }
         }
     }
@@ -375,7 +379,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     )
                 }
                 if (selectedTab == 1) DMsTab(viewModel)
-                if (selectedTab == 2) HaiNetTab(viewModel)
+                if (selectedTab == 2) HaiNetTab(viewModel, initialScanMode)
                 if (selectedTab == 3) SettingsTab(viewModel, onNavigateToHubs = { selectedTab = 2 })
                 if (selectedTab == 4) {
                     com.noslop.app.ui.tabs.NotificationsScreen(

@@ -42,7 +42,7 @@ fun MetricCard(value: String, label: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
+fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialScanMode: String? = null) {
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
 
     // Active Dashboard View (Native Compose)
@@ -165,6 +165,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     var deployError by remember { mutableStateOf<String?>(null) }
 
     var showSetupDialog by remember { mutableStateOf(false) }
+    var showLinkDialog by remember { mutableStateOf(false) }
     var targetIp by remember { mutableStateOf("") }
     
     var username by remember { mutableStateOf("") }
@@ -177,11 +178,11 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
     val discoveryService = remember { HubDiscoveryService(context) }
     val discoveredHubs by discoveryService.discoveredHubs.collectAsState()
 
-    var isScanning by remember { mutableStateOf(false) }
+    var scanMode by remember { mutableStateOf<String?>(initialScanMode) }
     var scanTimeoutReached by remember { mutableStateOf(false) }
 
-    LaunchedEffect(isScanning) {
-        if (isScanning) {
+    LaunchedEffect(scanMode) {
+        if (scanMode != null) {
             scanTimeoutReached = false
             discoveryService.startDiscovery()
             kotlinx.coroutines.delay(10000L)
@@ -214,7 +215,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        if (!isScanning) {
+        if (scanMode == null) {
             Icon(
                 imageVector = Icons.Default.Router,
                 contentDescription = null,
@@ -232,7 +233,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             Spacer(modifier = Modifier.height(32.dp))
             
             Button(
-                onClick = { isScanning = true },
+                onClick = { scanMode = "deploy" },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
                 modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
@@ -240,7 +241,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             }
             Spacer(modifier = Modifier.height(16.dp))
             TextButton(
-                onClick = { viewModel.setHubDeploymentStatus("Active (Legacy Connection)") },
+                onClick = { scanMode = "link" },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("I already have a Hub running".tr, color = TextMuted)
@@ -264,8 +265,12 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
                     Surface(
                         onClick = {
                             targetIp = hub.ipAddress
-                            username = "pi" // Default common SSH user
-                            showSetupDialog = true
+                            if (scanMode == "deploy") {
+                                username = "pi" // Default common SSH user
+                                showSetupDialog = true
+                            } else {
+                                viewModel.setHubDeploymentStatus("Active at $targetIp")
+                            }
                         },
                         color = SurfaceDark,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -283,8 +288,12 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             OutlinedButton(
                 onClick = {
                     targetIp = ""
-                    username = ""
-                    showSetupDialog = true
+                    if (scanMode == "deploy") {
+                        username = ""
+                        showSetupDialog = true
+                    } else {
+                        showLinkDialog = true
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
@@ -295,12 +304,50 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}) {
             Spacer(modifier = Modifier.height(16.dp))
 
             TextButton(
-                onClick = { isScanning = false },
+                onClick = { scanMode = null },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Cancel".tr, color = TextMuted)
             }
         }
+    }
+
+    if (showLinkDialog) {
+        AlertDialog(
+            onDismissRequest = { showLinkDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Link Existing Hub".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Enter the local IP address of your existing HAI-Net Hub to connect to it.".tr, color = TextMuted, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = targetIp,
+                        onValueChange = { targetIp = it },
+                        label = { Text("Hub IP Address".tr, color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLinkDialog = false
+                        viewModel.setHubDeploymentStatus("Active at $targetIp")
+                    },
+                    enabled = targetIp.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Text("Link Hub".tr, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLinkDialog = false }) {
+                    Text("Cancel".tr, color = TextMuted)
+                }
+            }
+        )
     }
 
     if (showSetupDialog) {

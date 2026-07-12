@@ -22,6 +22,15 @@
 *   **Data Model Migration**: Renamed `MediaSettings.autoDownloadPrivate` to `autoDownloadPublic` in `MediaSettings.kt` and updated all downstream consumers (`MediaManager.kt`, `SettingsTab.kt`).
 *   **Files**: Modified: `MediaSettings.kt`, `MediaManager.kt`, `SettingsTab.kt`, `content_en.json`, `content_hu.json`.
 
+### 4. Background Sync & HAI-Net Hub Onboarding Refactor
+*   **Foreground Service Relocation**: Moved the "Foreground Service" toggle out of the General settings tab into the Network tab to align with architecture.
+*   **Battery Warning Dialog**: Adding manual foreground mesh sync now triggers an aggressive battery warning dialog with a direct "Deploy HUB" call-to-action that securely routes the user to the HUBs tab.
+*   **Automated Hub-Aware Gating**: The foreground service toggle is automatically disabled (grayed out) when a Home Hub is connected. Furthermore, the `NoSlopViewModel` dynamically halts the local foreground service upon successful Hub linkage to preserve mobile battery.
+*   **Onboarding Routing Fix**: Corrected the "Set up Hub Now" button in the `OnboardingScreen` so it successfully navigates to the Hubs tab via the new `hubs-deploy` route and triggers an immediate local network scan.
+*   **Deploy vs. Link Separation**: Refactored the network discovery UI (`HubSetupScreen.kt`) to support two distinct workflows: 
+    *   **Deploy**: Finds a device, prompts for SSH credentials, and executes a full `SshDeployer` remote installation.
+    *   **Link**: Resolves the broken "I already have a Hub running" option. It scans the network, bypasses SSH logic entirely, and instantly pairs the app to the selected existing node. Also introduced a secure "Manual IP Entry" modal exclusively for linking off-subnet Hubs.
+
 ## Completed Changes (2026-07-10)
 
 ### 1. Global Connectivity & Native Hub Tor Daemon
