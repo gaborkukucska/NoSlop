@@ -192,10 +192,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val pendingRequests = peers.filter { !it.isTrusted && !it.isTemporary }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             
-            val folders = listOf("All") + rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
-            var selectedFolder by remember { mutableStateOf("All") }
-            var isContactsCollapsed by remember { mutableStateOf(false) }
+            val isContactsCollapsed by viewModel.isContactsCollapsed.collectAsState()
             val existingFolders = rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
+            val folders = listOf("All") + existingFolders
+            var selectedFolder by remember { 
+                mutableStateOf(if (isContactsCollapsed && folders.size > 1) folders[1] else "All") 
+            }
             val contacts = if (selectedFolder == "All") rawContacts else rawContacts.filter { it.customFolder == selectedFolder }
             
             var peerToAssignFolder by remember { mutableStateOf<Peer?>(null) }
@@ -400,10 +402,15 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     selected = selectedFolder == folder,
                                     onClick = {
                                         if (folder == "All" && selectedFolder == "All") {
-                                            isContactsCollapsed = !isContactsCollapsed
+                                            viewModel.setContactsCollapsed(true)
+                                            if (folders.size > 1) {
+                                                selectedFolder = folders[1]
+                                            }
                                         } else {
                                             selectedFolder = folder
-                                            isContactsCollapsed = false
+                                            if (folder == "All") {
+                                                viewModel.setContactsCollapsed(false)
+                                            }
                                         }
                                     },
                                     text = {
@@ -412,7 +419,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                             if (folder == "All") {
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Icon(
-                                                    imageVector = if (isContactsCollapsed && selectedFolder == "All") Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                                    imageVector = if (isContactsCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
                                                     contentDescription = if (isContactsCollapsed) "Expand" else "Collapse",
                                                     modifier = Modifier.size(16.dp)
                                                 )
@@ -425,44 +432,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     }
                 }
 
-                if (isContactsCollapsed && selectedFolder == "All" && folders.size > 1) {
-                    item {
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { isContactsCollapsed = false },
-                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                            border = BorderStroke(1.dp, BorderSubtle)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Outlined.People,
-                                    contentDescription = "Contacts",
-                                    tint = AccentGreen,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "${rawContacts.size} contacts",
-                                    color = TextLight,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.Default.ExpandMore,
-                                    contentDescription = "Expand",
-                                    tint = TextMuted,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                    }
-                } else if (contacts.isNotEmpty()) {
+                if (contacts.isNotEmpty()) {
                     item {
                         Text(
                             text = "MY CONTACTS".tr,

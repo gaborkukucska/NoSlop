@@ -113,6 +113,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _unifiedFeed = MutableStateFlow<List<UnifiedItem>>(emptyList())
     val unifiedFeed: StateFlow<List<UnifiedItem>> = _unifiedFeed.asStateFlow()
 
+    private val _isContactsCollapsed = MutableStateFlow(false)
+    val isContactsCollapsed: StateFlow<Boolean> = _isContactsCollapsed.asStateFlow()
+
+    fun setContactsCollapsed(collapsed: Boolean) {
+        _isContactsCollapsed.value = collapsed
+        viewModelScope.launch {
+            repository.putAppSetting("dms_contacts_collapsed", collapsed.toString())
+        }
+    }
+
     private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
@@ -359,6 +369,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val hubStatus = repository.getAppSetting("hub_deployment_status")
             _hubDeploymentStatus.value = hubStatus
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+
+            _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
         }
         viewModelScope.launch { refreshExclusionCaches() }
 
