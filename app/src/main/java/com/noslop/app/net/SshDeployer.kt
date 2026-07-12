@@ -139,6 +139,10 @@ EOF
                     python3 reset_ident.py
                     rm -f reset_ident.py
                     
+                    # Remove the stale auth state so the Web UI auto-initializes QR login
+                    # for the new identity instead of showing a passphrase form
+                    rm -f ~/.hainet/auth.json
+                    
                     cat << 'PYEOF' > gen_tor.py
 import base64, hashlib, os
 try:

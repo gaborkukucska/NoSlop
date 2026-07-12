@@ -1533,31 +1533,41 @@ fun toggleAggregator() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 var targetIp = ip
-                // If scanned from a local browser, fallback to the known Hub IP
-                if (targetIp == "localhost" || targetIp == "127.0.0.1") {
+                // If scanned from a local browser or the hub binds to 0.0.0.0,
+                // resolve to the known Hub IP from deployment status
+                if (targetIp == "localhost" || targetIp == "127.0.0.1" || targetIp == "0.0.0.0") {
                     val hubStatus = hubDeploymentStatus.value
                     if (hubStatus != null && hubStatus.contains("Active at ")) {
                         targetIp = hubStatus.substringAfter("Active at ").trim()
                     }
                 }
                 
-                val identity = repository.getLocalIdentity() ?: return@launch
+                Logger.info("QR_LOGIN", "Attempting QR auth → $targetIp (session=${sessionId.take(8)}…)")
+                
+                val identity = repository.getLocalIdentity()
+                if (identity == null) {
+                    Logger.error("QR_LOGIN", "No local identity found, aborting QR login")
+                    withContext(Dispatchers.Main) {
+                        android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("No local identity found"), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    return@launch
+                }
                 val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+                Logger.info("QR_LOGIN", "Signature generated (pubkey=${identity.publicKeyB64.take(12)}…)")
 
                 val url = java.net.URL("http://$targetIp:8080/api/auth/qr/verify")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
                 connection.doOutput = true
 
-                // Build a simple JSON string to avoid importing org.json if it isn't available
-                val payload = """
-                    {
-                        "session_id": "$sessionId",
-                        "public_key": "${identity.publicKeyB64}",
-                        "signature": "$signature"
-                    }
-                """.trimIndent()
+                val payload = org.json.JSONObject().apply {
+                    put("session_id", sessionId)
+                    put("public_key", identity.publicKeyB64)
+                    put("signature", signature)
+                }.toString()
 
                 connection.outputStream.use { os ->
                     val input = payload.toByteArray(Charsets.UTF_8)
@@ -1565,12 +1575,14 @@ fun toggleAggregator() {
                 }
 
                 val responseCode = connection.responseCode
+                Logger.info("QR_LOGIN", "Hub responded with HTTP $responseCode")
                 withContext(Dispatchers.Main) {
                     if (responseCode == 200) {
                         Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
                         android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Successfully authenticated with Hub!"), android.widget.Toast.LENGTH_LONG).show()
                     } else {
-                        Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode")
+                        val errorBody = try { connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "" } catch (_: Exception) { "" }
+                        Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode, Body: $errorBody")
                         if (responseCode == 401) {
                             android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate: Identity mismatch."), android.widget.Toast.LENGTH_LONG).show()
                         } else {
@@ -1581,7 +1593,7 @@ fun toggleAggregator() {
             } catch (e: Exception) {
                 Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(getApplication(), "Error during Hub authentication: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Error during Hub authentication: ${e.message}"), android.widget.Toast.LENGTH_LONG).show()
                 }
             }
         }

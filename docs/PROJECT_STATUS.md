@@ -68,9 +68,12 @@
 
 ### 1. HAI-Net Hub Deployment Fixes & Dashboard Polish
 *   **Systemd Unit Deployment Fix**: Fixed a critical bug in `SshDeployer.kt` where pipelined `sudo tee` combined with quoted heredocs resulted in empty (masked) systemd unit files on the Hub. Re-wrote the installer script to write the unit file locally, expand dynamic variables, and `sudo mv` it into place.
+*   **Deployment Overwrite Strategies**: Replaced blind overwrites with a secure collision detection mechanism during deployment. If an existing `hainet-core` install is detected, NoSlop halts and provides a Tripartite Resolution Dialog: "Sign In", "Reset Identity (Keep Media)", or "Full Re-deploy (Wipe All)".
+*   **Lightning Fast Identity Reset**: The "Reset Identity" option completely bypasses the standard heavy `hainet-seed` build process. Instead, it securely injects the user's Ed25519/X25519 identity JSON directly, safely regenerates Tor hidden service keys via embedded Python scripts, deletes stale `auth.json` files, and restarts services in seconds, guaranteeing immediate QR login readiness.
 *   **Native Hub Dashboard**: Restored and polished the native Compose Hub Dashboard in `HubSetupScreen.kt`. Removed the heavy embedded WebView in favor of a clean, text-based UI providing the user with the direct LAN IP and Port (3000) to access the HAI-Net Portal Web UI from an external browser.
 *   **Persistent Hub Connection**: Removed the immediate "Disconnect" button from the main Hubs tab to reinforce the persistence of the Home Hub connection. 
 *   **Safe Hub Unlinking**: Injected a secure "Disconnect HAI-Net Hub" option into `SettingsTab.kt` above the Developer logs, protected by a descriptive confirmation dialog to prevent accidental unlinking.
+*   **Hardened QR Authentication**: Integrated connection and read timeouts into `handleQrLogin` to prevent silent hanging when a Hub is unreachable. Additionally, NoSlop now dynamically intercepts unroutable `0.0.0.0` target IPs originating from the Hub's QR code and automatically resolves them to the Hub's known active LAN IP from the deployment state.
 
 
 ## Completed Changes (2026-07-08)
