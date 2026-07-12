@@ -521,6 +521,8 @@ class MeshSocialRepository(
             payload = payloadJson
         )
 
+        com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+
         repositoryScope.launch {
             meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
         }

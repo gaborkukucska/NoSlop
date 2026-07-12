@@ -185,12 +185,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         peers.forEach { peer ->
             try {
                 // Room flows emit the initial list immediately, so we can grab the first snapshot
-                val messages = kotlinx.coroutines.flow.first(messageDao.getMessagesWithPeer(peer.publicKeyB64))
+                val messages = messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
                 messages.forEach { msg ->
-                    val plaintextBytes = com.noslop.app.crypto.CryptoService.decryptDM(
+                    val plaintext = com.noslop.app.crypto.CryptoService.decryptDM(
                         msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
                     )
-                    var content = plaintextBytes?.let { String(it, Charsets.UTF_8) } ?: "..."
+                    var content = plaintext ?: "..."
                     try {
                         val json = JSONObject(content)
                         if (json.has("content")) {

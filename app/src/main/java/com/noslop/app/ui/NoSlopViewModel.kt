@@ -1274,7 +1274,10 @@ fun toggleAggregator() {
 
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
-        viewModelScope.launch { repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId) }
+        viewModelScope.launch { 
+            repository.sendDirectMessage(recipientPubB64, messageText, mediaMetadata, replyToMessageId) 
+            repository.syncDmsWithHub()
+        }
     }
 
     fun deleteMeshPost(postId: String) {

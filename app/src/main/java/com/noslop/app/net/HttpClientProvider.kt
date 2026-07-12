@@ -147,7 +147,7 @@ object HttpClientProvider {
      */
     val torClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
-            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", 9050)))
+            .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
             .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s
             .writeTimeout(60, TimeUnit.SECONDS)   // FIX: Bumped to 60s
