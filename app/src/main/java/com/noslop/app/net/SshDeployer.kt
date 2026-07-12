@@ -11,7 +11,8 @@ import org.json.JSONObject
 enum class OverwriteStrategy {
     PROMPT,
     RESET_IDENTITY,
-    FULL_WIPE
+    FULL_WIPE,
+    UPDATE_HUB
 }
 
 class ExistingDeploymentException(message: String = "Existing HAI-Net deployment found") : Exception(message)
@@ -173,6 +174,48 @@ PYEOF
                     run_sudo systemctl restart hainet-core.service || true
                     
                     echo "Identity reset complete!"
+                    exit 0
+                fi
+
+                if [ "${'$'}STRATEGY" == "UPDATE_HUB" ]; then
+                    echo "Updating existing deployment..."
+                    if [ ! -d "hai" ]; then
+                        echo "No deployment found to update in ${'$'}PWD/hai!"
+                        exit 1
+                    fi
+                    cd hai
+                    
+                    echo "Pulling latest changes from Git..."
+                    git pull
+                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
+                    
+                    echo "Building React UI..."
+                    if [ -d "hainet-portal" ]; then
+                        cd hainet-portal
+                        npm install
+                        npm run build
+                        cd ..
+                    fi
+                    
+                    echo "Building HAI-Net Core..."
+                    (while true; do echo -n "."; sleep 15; done) &
+                    KEEPALIVE_PID=${'$'}!
+                    
+                    set +e
+                    cargo build --release --package hainet-core
+                    CARGO_EXIT=${'$'}?
+                    set -e
+                    
+                    kill ${'$'}KEEPALIVE_PID 2>/dev/null || true
+                    echo ""
+                    
+                    if [ ${'$'}CARGO_EXIT -ne 0 ]; then
+                        echo "Core build failed with exit code ${'$'}CARGO_EXIT"
+                        exit ${'$'}CARGO_EXIT
+                    fi
+                    
+                    run_sudo systemctl restart hainet-core.service
+                    echo "Hub Update Complete!"
                     exit 0
                 fi
 

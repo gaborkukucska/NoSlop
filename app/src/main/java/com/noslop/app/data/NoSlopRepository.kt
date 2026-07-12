@@ -453,8 +453,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        encPublicKeyB64: String = ""
-    ): Boolean = meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64)
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false
+    ): Boolean = meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.acceptConnectionRequest(peer)

@@ -416,7 +416,7 @@ class MeshSocialRepository(
         peerDao.deletePeer(peer)
         _incomingRequestFlow.value = null
 
-        val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
+        val myKeys = getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"

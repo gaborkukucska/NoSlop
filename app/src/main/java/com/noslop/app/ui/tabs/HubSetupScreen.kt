@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Router
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Refresh
 import com.noslop.app.ui.QRScanScreen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -51,6 +52,13 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
         val hubIp = if (isLegacy) "" else hubDeploymentStatus?.substringAfter("Active at ")?.trim() ?: ""
 
         var showQRScanner by remember { mutableStateOf(false) }
+        var showUpdateDialog by remember { mutableStateOf(false) }
+        var isUpdating by remember { mutableStateOf(false) }
+        var updateLogs by remember { mutableStateOf("") }
+        var updateError by remember { mutableStateOf<String?>(null) }
+        var sshUser by remember { mutableStateOf("pi") }
+        var sshPass by remember { mutableStateOf("") }
+        val dashScope = rememberCoroutineScope()
 
         if (showQRScanner) {
             QRScanScreen(
@@ -140,6 +148,19 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("Scan to Login to Web UI".tr, fontWeight = FontWeight.Bold)
                         }
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        OutlinedButton(
+                            onClick = { showUpdateDialog = true },
+                            modifier = Modifier.fillMaxWidth().height(50.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                            border = BorderStroke(1.dp, TextMuted)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp), tint = TextMuted)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Update Hub Software".tr, color = TextMuted)
+                        }
                     }
                 }
             }
@@ -156,6 +177,123 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
 
             Spacer(modifier = Modifier.weight(1f))
         }
+
+        if (showUpdateDialog) {
+            val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+            AlertDialog(
+                onDismissRequest = { if (!isUpdating) { showUpdateDialog = false; updateError = null; updateLogs = "" } },
+                containerColor = SurfaceDark,
+                title = { Text("Update Hub".tr, color = TextLight) },
+                text = {
+                    if (isUpdating || updateError != null || updateLogs.isNotBlank()) {
+                        Column {
+                            Text("Update Logs:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(modifier = Modifier
+                                .fillMaxWidth()
+                                .height(200.dp)
+                                .background(PrimaryBlack, RoundedCornerShape(4.dp))
+                                .padding(8.dp)
+                            ) {
+                                val scrollState = rememberScrollState()
+                                LaunchedEffect(updateLogs) {
+                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                }
+                                Text(
+                                    text = updateLogs, 
+                                    color = if (updateError != null) DestructiveRed else AccentGreen, 
+                                    fontSize = 10.sp, 
+                                    modifier = Modifier.verticalScroll(scrollState)
+                                )
+                            }
+                            if (updateError != null) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(updateError!!, color = DestructiveRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(
+                                        onClick = { clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(updateLogs)) },
+                                        modifier = Modifier.weight(1f),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted)
+                                    ) { Text("Copy Logs".tr, fontSize = 12.sp) }
+                                }
+                            }
+                        }
+                    } else {
+                        Column {
+                            Text("Enter the SSH credentials for your Hub to pull the latest code and recompile.", color = TextMuted, fontSize = 14.sp)
+                            Spacer(modifier = Modifier.height(16.dp))
+                            OutlinedTextField(
+                                value = sshUser,
+                                onValueChange = { sshUser = it },
+                                label = { Text("SSH Username".tr, color = TextMuted) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = sshPass,
+                                onValueChange = { sshPass = it },
+                                label = { Text("SSH Password".tr, color = TextMuted) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    if (updateError == null && (!isUpdating || updateLogs.contains("Hub Update Complete!"))) {
+                        Button(
+                            onClick = {
+                                if (updateLogs.contains("Hub Update Complete!")) {
+                                    showUpdateDialog = false
+                                    updateError = null
+                                    updateLogs = ""
+                                } else {
+                                    isUpdating = true
+                                    updateError = null
+                                    updateLogs = ""
+                                    dashScope.launch {
+                                        val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
+                                            ip = hubIp,
+                                            user = sshUser,
+                                            pass = sshPass,
+                                            sharedFolder = "",
+                                            identity = null,
+                                            strategy = com.noslop.app.net.OverwriteStrategy.UPDATE_HUB,
+                                            onLog = { chunk -> updateLogs += chunk }
+                                        )
+                                        if (result.isSuccess) {
+                                            updateError = null
+                                        } else {
+                                            updateError = result.exceptionOrNull()?.message ?: "Unknown Error"
+                                        }
+                                        isUpdating = false
+                                    }
+                                }
+                            },
+                            enabled = (!isUpdating && sshUser.isNotBlank() && sshPass.isNotBlank()) || updateLogs.contains("Hub Update Complete!"),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            if (isUpdating && !updateLogs.contains("Hub Update Complete!")) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                            } else {
+                                Text(if (updateLogs.contains("Hub Update Complete!")) "Done".tr else "Update".tr)
+                            }
+                        }
+                    }
+                },
+                dismissButton = {
+                    if (!isUpdating) {
+                        TextButton(onClick = { showUpdateDialog = false }) {
+                            Text("Close".tr, color = TextMuted)
+                        }
+                    }
+                }
+            )
+        }
+
         return
     }
 
