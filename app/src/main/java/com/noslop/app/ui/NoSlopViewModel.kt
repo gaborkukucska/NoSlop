@@ -21,6 +21,7 @@ import com.noslop.app.tor.TorState
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.UUID
+import kotlinx.coroutines.withContext
 
 sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     abstract val id: String
@@ -1564,13 +1565,85 @@ fun toggleAggregator() {
                 }
 
                 val responseCode = connection.responseCode
-                if (responseCode == 200) {
-                    Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
-                } else {
-                    Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode")
+                withContext(Dispatchers.Main) {
+                    if (responseCode == 200) {
+                        Logger.info("QR_LOGIN", "Successfully authenticated with Hub at $targetIp")
+                        android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Successfully authenticated with Hub!"), android.widget.Toast.LENGTH_LONG).show()
+                    } else {
+                        Logger.error("QR_LOGIN", "Failed to authenticate with Hub at $targetIp. Code: $responseCode")
+                        if (responseCode == 401) {
+                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate: Identity mismatch."), android.widget.Toast.LENGTH_LONG).show()
+                        } else {
+                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate with Hub (HTTP $responseCode)."), android.widget.Toast.LENGTH_LONG).show()
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), "Error during Hub authentication: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    fun verifyAndLinkHub(ip: String, onResult: (Boolean, String?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val identity = repository.getLocalIdentity()
+                if (identity == null) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("No local identity found")) }
+                    return@launch
+                }
+                
+                val initUrl = java.net.URL("http://$ip:8080/api/auth/qr/init")
+                val initConn = initUrl.openConnection() as java.net.HttpURLConnection
+                initConn.requestMethod = "POST"
+                initConn.connectTimeout = 5000
+                if (initConn.responseCode != 200) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Hub is unreachable or not running HAI-Net.")) }
+                    return@launch
+                }
+                
+                val initResponse = initConn.inputStream.bufferedReader().use { it.readText() }
+                val sessionId = org.json.JSONObject(initResponse).optString("session_id")
+                if (sessionId.isBlank()) {
+                    withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Invalid Hub response (No session ID)")) }
+                    return@launch
+                }
+                
+                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+                val payload = """
+                    {
+                        "session_id": "$sessionId",
+                        "public_key": "${identity.publicKeyB64}",
+                        "signature": "$signature"
+                    }
+                """.trimIndent()
+                
+                val verifyUrl = java.net.URL("http://$ip:8080/api/auth/qr/verify")
+                val verifyConn = verifyUrl.openConnection() as java.net.HttpURLConnection
+                verifyConn.requestMethod = "POST"
+                verifyConn.setRequestProperty("Content-Type", "application/json")
+                verifyConn.connectTimeout = 5000
+                verifyConn.doOutput = true
+                verifyConn.outputStream.use { os ->
+                    val input = payload.toByteArray(Charsets.UTF_8)
+                    os.write(input, 0, input.size)
+                }
+                
+                val code = verifyConn.responseCode
+                withContext(Dispatchers.Main) {
+                    if (code == 200 || code == 404) {
+                        onResult(true, null)
+                    } else if (code == 401) {
+                        onResult(false, com.noslop.app.util.LanguageManager.translate("Identity mismatch. This Hub is owned by another user."))
+                    } else {
+                        onResult(false, com.noslop.app.util.LanguageManager.translate("Verification failed (HTTP $code)"))
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Connection error: ${e.message}")) }
             }
         }
     }

@@ -167,6 +167,9 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
     var showSetupDialog by remember { mutableStateOf(false) }
     var showLinkDialog by remember { mutableStateOf(false) }
     var targetIp by remember { mutableStateOf("") }
+    var isVerifyingLink by remember { mutableStateOf(false) }
+    var linkError by remember { mutableStateOf<String?>(null) }
+    var showExistingHubDialog by remember { mutableStateOf(false) }
     
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -269,7 +272,15 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                                 username = "pi" // Default common SSH user
                                 showSetupDialog = true
                             } else {
-                                viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                isVerifyingLink = true
+                                viewModel.verifyAndLinkHub(targetIp) { success, error ->
+                                    isVerifyingLink = false
+                                    if (success) {
+                                        viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                    } else {
+                                        linkError = error
+                                    }
+                                }
                             }
                         },
                         color = SurfaceDark,
@@ -333,13 +344,25 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
             confirmButton = {
                 Button(
                     onClick = {
-                        showLinkDialog = false
-                        viewModel.setHubDeploymentStatus("Active at $targetIp")
+                        isVerifyingLink = true
+                        viewModel.verifyAndLinkHub(targetIp) { success, error ->
+                            isVerifyingLink = false
+                            if (success) {
+                                showLinkDialog = false
+                                viewModel.setHubDeploymentStatus("Active at $targetIp")
+                            } else {
+                                linkError = error
+                            }
+                        }
                     },
-                    enabled = targetIp.isNotBlank(),
+                    enabled = targetIp.isNotBlank() && !isVerifyingLink,
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) {
-                    Text("Link Hub".tr, fontWeight = FontWeight.Bold)
+                    if (isVerifyingLink) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                    } else {
+                        Text("Link Hub".tr, fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
@@ -463,19 +486,25 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                             deploymentLogs = ""
                             coroutineScope.launch {
                                 val localIdentity = viewModel.localKeys.value
-                                val result = SshDeployer.deployHaiNetHub(
+                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
                                     ip = targetIp,
                                     user = username,
                                     pass = password,
                                     sharedFolder = sharedFolder,
                                     identity = localIdentity,
+                                    strategy = com.noslop.app.net.OverwriteStrategy.PROMPT,
                                     onLog = { chunk -> deploymentLogs += chunk }
                                 )
                                 if (result.isSuccess) {
                                     showSetupDialog = false
                                     viewModel.setHubDeploymentStatus("Active at $targetIp")
                                 } else {
-                                    deployError = result.exceptionOrNull()?.message ?: unknownErrorMsg
+                                    if (result.exceptionOrNull() is com.noslop.app.net.ExistingDeploymentException) {
+                                        showExistingHubDialog = true
+                                        showSetupDialog = false
+                                    } else {
+                                        deployError = result.exceptionOrNull()?.message ?: unknownErrorMsg
+                                    }
                                 }
                                 isDeploying = false
                             }
@@ -496,6 +525,129 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                     TextButton(onClick = { showSetupDialog = false }) {
                         Text("Cancel".tr, color = TextMuted)
                     }
+                }
+            }
+        )
+    }
+    
+    if (linkError != null) {
+        AlertDialog(
+            onDismissRequest = { linkError = null },
+            containerColor = SurfaceDark,
+            title = { Text("Link Error".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = { Text(linkError ?: "", color = TextLight) },
+            confirmButton = {
+                Button(
+                    onClick = { linkError = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                ) {
+                    Text("OK".tr)
+                }
+            }
+        )
+    }
+
+    if (showExistingHubDialog) {
+        AlertDialog(
+            onDismissRequest = { showExistingHubDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Existing Deployment Found".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("An existing HAI-Net deployment was found on this device. What would you like to do?".tr, color = TextMuted)
+                }
+            },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(
+                        onClick = {
+                            showExistingHubDialog = false
+                            isVerifyingLink = true
+                            viewModel.verifyAndLinkHub(targetIp) { success, error ->
+                                isVerifyingLink = false
+                                if (success) {
+                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                } else {
+                                    linkError = error
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        Text("Sign In (Link to Hub)".tr, fontWeight = FontWeight.Bold)
+                    }
+                    Button(
+                        onClick = {
+                            showExistingHubDialog = false
+                            showSetupDialog = true
+                            isDeploying = true
+                            deployError = null
+                            deployResult = null
+                            deploymentLogs = ""
+                            coroutineScope.launch {
+                                val localIdentity = viewModel.localKeys.value
+                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
+                                    ip = targetIp,
+                                    user = username,
+                                    pass = password,
+                                    sharedFolder = sharedFolder,
+                                    identity = localIdentity,
+                                    strategy = com.noslop.app.net.OverwriteStrategy.RESET_IDENTITY,
+                                    onLog = { chunk -> deploymentLogs += chunk }
+                                )
+                                if (result.isSuccess) {
+                                    showSetupDialog = false
+                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                } else {
+                                    deployError = result.exceptionOrNull()?.message ?: com.noslop.app.util.LanguageManager.translate("Unknown Error")
+                                }
+                                isDeploying = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen)
+                    ) {
+                        Text("Reset Identity (Keep Media)".tr)
+                    }
+                    Button(
+                        onClick = {
+                            showExistingHubDialog = false
+                            showSetupDialog = true
+                            isDeploying = true
+                            deployError = null
+                            deployResult = null
+                            deploymentLogs = ""
+                            coroutineScope.launch {
+                                val localIdentity = viewModel.localKeys.value
+                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
+                                    ip = targetIp,
+                                    user = username,
+                                    pass = password,
+                                    sharedFolder = sharedFolder,
+                                    identity = localIdentity,
+                                    strategy = com.noslop.app.net.OverwriteStrategy.FULL_WIPE,
+                                    onLog = { chunk -> deploymentLogs += chunk }
+                                )
+                                if (result.isSuccess) {
+                                    showSetupDialog = false
+                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
+                                } else {
+                                    deployError = result.exceptionOrNull()?.message ?: com.noslop.app.util.LanguageManager.translate("Unknown Error")
+                                }
+                                isDeploying = false
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha=0.2f), contentColor = DestructiveRed)
+                    ) {
+                        Text("Full Re-deploy (Wipe All)".tr)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showExistingHubDialog = false }) {
+                    Text("Cancel".tr, color = TextMuted)
                 }
             }
         )

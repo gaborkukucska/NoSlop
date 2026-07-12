@@ -8,6 +8,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+enum class OverwriteStrategy {
+    PROMPT,
+    RESET_IDENTITY,
+    FULL_WIPE
+}
+
+class ExistingDeploymentException(message: String = "Existing HAI-Net deployment found") : Exception(message)
+
 object SshDeployer {
     private const val TAG = "SshDeployer"
 
@@ -17,6 +25,7 @@ object SshDeployer {
         pass: String,
         sharedFolder: String,
         identity: CryptoService.IdentityKeys?,
+        strategy: OverwriteStrategy = OverwriteStrategy.PROMPT,
         onLog: (String) -> Unit = {}
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -79,6 +88,89 @@ object SshDeployer {
                         echo "${'$'}SUDO_PASS" | sudo -S -p "" "${'$'}@"
                     fi
                 }
+                
+                STRATEGY="${strategy.name}"
+                if [ "${'$'}STRATEGY" == "PROMPT" ]; then
+                    if [ -f "/etc/systemd/system/hainet-core.service" ] || [ -d "hai" ] || [ -d "${'$'}HOME/.hainet" ]; then
+                        echo "EXISTING_DEPLOYMENT_FOUND"
+                        exit 99
+                    fi
+                fi
+                
+                if [ "${'$'}STRATEGY" == "FULL_WIPE" ]; then
+                    echo "Wiping existing deployment..."
+                    run_sudo systemctl stop hainet-core.service 2>/dev/null || true
+                    run_sudo systemctl disable hainet-core.service 2>/dev/null || true
+                    run_sudo rm -f /etc/systemd/system/hainet-core.service
+                    rm -rf hai
+                    run_sudo rm -rf ~/.hainet /var/lib/hainet /etc/hainet
+                fi
+
+                if [ "${'$'}STRATEGY" == "RESET_IDENTITY" ]; then
+                    echo "Resetting identity for existing deployment..."
+                    cat << EOF > reset_ident.py
+import json, base64, os, sys
+try:
+    config_b64 = "$configB64"
+    config_json = json.loads(base64.b64decode(config_b64).decode('utf-8'))
+    identity = config_json.get('identity')
+    if not identity:
+        print("No identity found in config")
+        sys.exit(0)
+    ident_dir = os.path.expanduser('~/.hainet/identity')
+    os.makedirs(ident_dir, exist_ok=True)
+    
+    with open(os.path.join(ident_dir, 'ed25519_pub.b64'), 'w') as f:
+        f.write(identity['public_key'])
+    with open(os.path.join(ident_dir, 'ed25519_priv.b64'), 'w') as f:
+        f.write(identity['private_key'])
+    with open(os.path.join(ident_dir, 'x25519_pub.b64'), 'w') as f:
+        f.write(identity['enc_public_key'])
+    with open(os.path.join(ident_dir, 'x25519_priv.b64'), 'w') as f:
+        f.write(identity['enc_private_key'])
+    with open(os.path.join(ident_dir, 'onion_address'), 'w') as f:
+        f.write(identity['onion_address'])
+    with open(os.path.join(ident_dir, 'display_name'), 'w') as f:
+        f.write(identity['display_name'])
+except Exception as e:
+    print("Error resetting identity:", e)
+    sys.exit(1)
+EOF
+                    python3 reset_ident.py
+                    rm -f reset_ident.py
+                    
+                    cat << 'PYEOF' > gen_tor.py
+import base64, hashlib, os
+try:
+    with open(os.path.expanduser("~/.hainet/identity/ed25519_priv.b64"), "r") as f:
+        b64_key = f.read().strip()
+    pkcs8 = base64.b64decode(b64_key)
+    seed = pkcs8[-32:]
+    expanded = bytearray(hashlib.sha512(seed).digest())
+    expanded[0] &= 248
+    expanded[31] &= 127
+    expanded[31] |= 64
+    header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
+    with open("hs_ed25519_secret_key", "wb") as f:
+        f.write(header + expanded)
+except Exception as e:
+    print("Error generating tor key:", e)
+PYEOF
+                    python3 gen_tor.py
+                    run_sudo mkdir -p /var/lib/tor/hainet/
+                    run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
+                    TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                    run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
+                    run_sudo chmod 700 /var/lib/tor/hainet/
+                    run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+                    rm -f gen_tor.py
+                    
+                    run_sudo systemctl restart tor || true
+                    run_sudo systemctl restart hainet-core.service || true
+                    
+                    echo "Identity reset complete!"
+                    exit 0
+                fi
 
                 # Step 0: Ensure essential build tools are present
                 echo '[STEP 0/5] Checking build prerequisites...'
@@ -337,6 +429,11 @@ PYEOF
             Logger.info(TAG, "Deployment finished with exit code: $exitStatus")
 
             if (exitStatus != 0) {
+                if (exitStatus == 99) {
+                    val errorMsg = "Existing deployment found. Please resolve via UI."
+                    withContext(Dispatchers.Main) { onLog("\n[ERROR] $errorMsg\n") }
+                    return@withContext Result.failure(ExistingDeploymentException())
+                }
                 val errorMsg = "Deployment failed (exit code $exitStatus)"
                 withContext(Dispatchers.Main) { onLog("\n[ERROR] $errorMsg\n") }
                 return@withContext Result.failure(Exception(errorMsg))
