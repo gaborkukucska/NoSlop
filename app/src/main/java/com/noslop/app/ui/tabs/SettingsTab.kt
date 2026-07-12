@@ -162,7 +162,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = if (torState.first) "Active Tor Proxy" else "Tor Disconnected",
+                                            text = if (torState.first) "Active Tor Proxy".tr else "Tor Disconnected".tr,
                                             fontWeight = FontWeight.Bold,
                                             color = TextLight
                                         )
@@ -383,7 +383,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
                                 
                                 Text(
-                                    "Max File Size: ${mediaSettings.maxFileSizeMB} MB",
+                                    text = "Max File Size: ".tr + "${mediaSettings.maxFileSizeMB} MB",
                                     color = TextLight,
                                     fontSize = 14.sp
                                 )
@@ -935,7 +935,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                             if (showMnemonicDialog) {
                                 AlertDialog(
                                     onDismissRequest = { showMnemonicDialog = false },
-                                    title = { Text(if (isExporting) "Export Backup" else "Import Backup") },
+                                    title = { Text(if (isExporting) "Export Backup".tr else "Import Backup".tr) },
                                     text = {
                                         Column {
                                             Text("Please enter your Word Cloud password to encrypt/decrypt the backup.".tr, color = TextMuted)
@@ -965,7 +965,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                             },
                                             enabled = mnemonicInput.isNotBlank()
                                         ) {
-                                            Text(if (isExporting) "Save File" else "Select File", color = AccentGreen, fontWeight = FontWeight.Bold)
+                                            Text(if (isExporting) "Save File".tr else "Select File".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
                                         }
                                     },
                                     dismissButton = {
@@ -993,7 +993,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                         Column {
                                             Text(
                                                 "This will permanently wipe your current identity, keys, contacts, and all data. ".tr +
-                                                "The selected backup will be imported in its place.",
+                                                "The selected backup will be imported in its place.".tr,
                                                 color = TextMuted
                                             )
                                             Spacer(modifier = Modifier.height(8.dp))
@@ -1033,7 +1033,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
 
                             if (importStatus != null) {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text(importStatus!!, color = if (importStatus!!.contains("failed")) DestructiveRed else AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(importStatus!!.tr, color = if (importStatus!!.contains("failed")) DestructiveRed else AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
 
                             Button(
@@ -1124,7 +1124,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
     }
 
     if (showAboutModal) {
-        val versionName = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName } catch (e: Exception) { "Unknown" }
+        val versionName = try { context.packageManager.getPackageInfo(context.packageName, 0).versionName } catch (e: Exception) { "Unknown".tr }
         AlertDialog(
             onDismissRequest = { showAboutModal = false },
             containerColor = SurfaceDark,
@@ -1148,7 +1148,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
-                                        "Version ${updateInfo!!.latestVersion} is out (you have ${updateInfo!!.currentVersion}). Tap to download the new APK.",
+                                        "Version ".tr + "${updateInfo!!.latestVersion} " + "is out (you have ".tr + "${updateInfo!!.currentVersion}). " + "Tap to download the new APK.".tr,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextLight
                                     )
