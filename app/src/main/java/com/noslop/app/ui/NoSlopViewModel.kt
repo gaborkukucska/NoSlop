@@ -371,6 +371,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _hubDeploymentStatus.value = hubStatus
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
 
+            if (!hubStatus.isNullOrBlank()) {
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    val adminPeer = com.noslop.app.data.Peer(
+                        publicKeyB64 = identity.publicKeyB64,
+                        handle = "Admin AI",
+                        tripcode = identity.tripcode,
+                        onionAddress = identity.onionAddress,
+                        encPublicKeyB64 = identity.encPublicKeyB64,
+                        isTrusted = true,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                    repository.peerDao.insertPeer(adminPeer)
+                }
+            }
+
             _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
         }
         viewModelScope.launch { refreshExclusionCaches() }
@@ -1356,6 +1372,23 @@ fun toggleAggregator() {
             val hasHub = status.isNotBlank()
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
             
+            
+            if (hasHub) {
+                val identity = repository.getLocalIdentity()
+                if (identity != null) {
+                    val adminPeer = com.noslop.app.data.Peer(
+                        publicKeyB64 = identity.publicKeyB64,
+                        handle = "Admin AI",
+                        tripcode = identity.tripcode,
+                        onionAddress = identity.onionAddress,
+                        encPublicKeyB64 = identity.encPublicKeyB64,
+                        isTrusted = true,
+                        lastSeenAt = System.currentTimeMillis()
+                    )
+                    repository.peerDao.insertPeer(adminPeer)
+                }
+            }
+
             if (hasHub && isForegroundServiceEnabled.value) {
                 setForegroundServiceEnabled(false)
             }

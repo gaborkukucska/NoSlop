@@ -120,6 +120,47 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         return@withContext null
     }
 
+    
+    suspend fun syncPostsWithHub() = withContext(Dispatchers.IO) {
+        val posts = postDao.getPostsSince(0).take(50)
+        val packetArray = JSONArray()
+        val gson = com.google.gson.Gson()
+        posts.forEach { post ->
+            val payload = com.noslop.app.mesh.PostPayload(
+                id = post.id,
+                authorId = post.authorPublicKeyB64,
+                authorName = post.authorHandle,
+                authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
+                originNode = "",
+                content = post.content,
+                timestamp = post.timestamp,
+                signature = post.signature,
+                privacy = post.privacy,
+                mediaId = null,
+                mediaMetadata = null,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 1,
+                senderId = post.authorPublicKeyB64,
+                type = "POST",
+                payload = gson.toJsonTree(payload),
+                signature = post.signature
+            )
+            packetArray.put(JSONObject(packet.toJson()))
+        }
+        if (packetArray.length() > 0) {
+            val args = JSONObject().put("packets", packetArray)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${packetArray.length()} local posts to Hub.")
+        }
+    }
+
     suspend fun syncPeersWithHub() = withContext(Dispatchers.IO) {
         val peers = peerDao.getAllPeersList()
         val peerArray = JSONArray()
@@ -127,6 +168,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val obj = JSONObject()
             obj.put("public_key", peer.publicKeyB64)
             obj.put("is_trusted", peer.isTrusted)
+            obj.put("handle", peer.handle)
             peerArray.put(obj)
         }
         val args = JSONObject().put("peers", peerArray)
