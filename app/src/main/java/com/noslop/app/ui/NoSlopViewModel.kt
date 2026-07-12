@@ -377,7 +377,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
                     val adminPeer = com.noslop.app.data.Peer(
-                        publicKeyB64 = identity.publicKeyB64,
+                        publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
                         tripcode = identity.tripcode,
                         onionAddress = identity.onionAddress,
@@ -1382,7 +1382,7 @@ fun toggleAggregator() {
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
                     val adminPeer = com.noslop.app.data.Peer(
-                        publicKeyB64 = identity.publicKeyB64,
+                        publicKeyB64 = "admin_${identity.publicKeyB64}",
                         handle = "Admin AI",
                         tripcode = identity.tripcode,
                         onionAddress = identity.onionAddress,
