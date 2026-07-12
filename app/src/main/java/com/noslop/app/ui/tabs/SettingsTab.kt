@@ -691,7 +691,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
                                     Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                     Text(
-                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media playback.".tr,
+                                        "Keep NoSlop running in the background for uninterrupted mesh sync and media auto-downloads.".tr,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = TextMuted
                                     )

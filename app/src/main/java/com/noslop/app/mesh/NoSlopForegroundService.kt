@@ -61,6 +61,7 @@ class NoSlopForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        stopForeground(Service.STOP_FOREGROUND_REMOVE)
         super.onDestroy()
         Logger.info(TAG, "NoSlopForegroundService destroyed")
 
