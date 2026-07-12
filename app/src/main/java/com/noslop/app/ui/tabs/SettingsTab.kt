@@ -335,48 +335,12 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Enable Media".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                Text("Automatic Media Download".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                 Switch(
                                     checked = mediaSettings.enabled,
                                     onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(enabled = it)) },
                                     colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
                                 )
-                            }
-                            
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Background Playback".tr, color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                    Text("Keep audio/video playing while browsing other tabs.".tr, color = TextMuted, fontSize = 12.sp)
-                                }
-                                Switch(
-                                    checked = mediaSettings.backgroundPlayEnabled,
-                                    onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayEnabled = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                            
-                            if (mediaSettings.backgroundPlayEnabled) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                        Text("Play Outside App".tr, color = TextLight, fontSize = 14.sp)
-                                        Text("Continue playing when NoSlop is minimized.".tr, color = TextMuted, fontSize = 12.sp)
-                                    }
-                                    Switch(
-                                        checked = mediaSettings.backgroundPlayOutsideApp,
-                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayOutsideApp = it)) },
-                                        colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                    )
-                                }
                             }
                             
                             if (mediaSettings.enabled) {
@@ -400,29 +364,122 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Auto-download Friends".tr, color = TextMuted, fontSize = 14.sp)
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Friends".tr, color = TextLight, fontSize = 14.sp)
+                                        Text("only auto-download media from contacts".tr, color = TextMuted, fontSize = 12.sp)
+                                    }
                                     Switch(
                                         checked = mediaSettings.autoDownloadFriends,
                                         onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadFriends = it)) },
                                         colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
                                     )
                                 }
+                                
+                                var showPublicMediaWarning by remember { mutableStateOf(false) }
+                                
+                                if (showPublicMediaWarning) {
+                                    AlertDialog(
+                                        onDismissRequest = { showPublicMediaWarning = false },
+                                        containerColor = SurfaceDark,
+                                        title = { Text("Enable Public Media?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                                        text = { Text("You'll download 3rd party media!".tr, color = TextMuted) },
+                                        confirmButton = {
+                                            Button(
+                                                onClick = {
+                                                    showPublicMediaWarning = false
+                                                    viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPublic = true))
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack)
+                                            ) {
+                                                Text("Accept".tr, color = AccentGreen)
+                                            }
+                                        },
+                                        dismissButton = {
+                                            Button(
+                                                onClick = { showPublicMediaWarning = false },
+                                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+                                            ) {
+                                                Text("Cancel".tr, color = TextMuted)
+                                            }
+                                        }
+                                    )
+                                }
+                                
+                                Spacer(modifier = Modifier.height(8.dp))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Auto-download Private".tr, color = TextMuted, fontSize = 14.sp)
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Public".tr, color = TextLight, fontSize = 14.sp)
+                                        Text("Also auto-download media from public broadcasts".tr, color = TextMuted, fontSize = 12.sp)
+                                    }
                                     Switch(
-                                        checked = mediaSettings.autoDownloadPrivate,
-                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPrivate = it)) },
+                                        checked = mediaSettings.autoDownloadPublic,
+                                        onCheckedChange = { 
+                                            if (it) {
+                                                showPublicMediaWarning = true
+                                            } else {
+                                                viewModel.updateMediaSettings(mediaSettings.copy(autoDownloadPublic = false))
+                                            }
+                                        },
                                         colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
                                     )
                                 }
                             }
+                        }
+                    }
 
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Background Playback".tr, color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Keep audio/video playing while browsing other tabs.".tr, color = TextMuted, fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = mediaSettings.backgroundPlayEnabled,
+                                    onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayEnabled = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            if (mediaSettings.backgroundPlayEnabled) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                        Text("Play Outside App".tr, color = TextLight, fontSize = 14.sp)
+                                        Text("Continue playing when NoSlop is minimized.".tr, color = TextMuted, fontSize = 12.sp)
+                                    }
+                                    Switch(
+                                        checked = mediaSettings.backgroundPlayOutsideApp,
+                                        onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(backgroundPlayOutsideApp = it)) },
+                                        colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                    )
+                                }
+                            }
+                        }
+                    }
 
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
                             // Content Transparency Toggle
                             val isContentTransparencyEnabled by viewModel.isContentTransparencyEnabled.collectAsState()
                             Column {
@@ -448,6 +505,7 @@ fun SettingsTab(viewModel: NoSlopViewModel) {
                                             uncheckedThumbColor = TextMuted,
                                             uncheckedTrackColor = SurfaceDark
                                         )
+
                                     )
                                 }
                             }

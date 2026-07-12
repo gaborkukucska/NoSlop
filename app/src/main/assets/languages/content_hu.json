@@ -379,5 +379,12 @@
     "  or create new  ": "  vagy hozz létre újat  ",
     "New Folder Name": "Új mappa neve",
     "Folder Name": "Mappa neve",
-    "Assign to Folder": "Hozzárendelés mappához"
+    "Assign to Folder": "Hozzárendelés mappához",
+    "Automatic Media Download": "Automatikus média letöltés",
+    "Friends": "Barátok",
+    "only auto-download media from contacts": "csak a kapcsolatoktól származó média automatikus letöltése",
+    "Public": "Nyilvános",
+    "Also auto-download media from public broadcasts": "Nyilvános közvetítések médiájának automatikus letöltése is",
+    "Enable Public Media?": "Nyilvános média engedélyezése?",
+    "You'll download 3rd party media!": "Harmadik féltől származó médiát fogsz letölteni!"
 }

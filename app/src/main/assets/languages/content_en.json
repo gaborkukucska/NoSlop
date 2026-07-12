@@ -379,5 +379,12 @@
     "  or create new  ": "  or create new  ",
     "New Folder Name": "New Folder Name",
     "Folder Name": "Folder Name",
-    "Assign to Folder": "Assign to Folder"
+    "Assign to Folder": "Assign to Folder",
+    "Automatic Media Download": "Automatic Media Download",
+    "Friends": "Friends",
+    "only auto-download media from contacts": "only auto-download media from contacts",
+    "Public": "Public",
+    "Also auto-download media from public broadcasts": "Also auto-download media from public broadcasts",
+    "Enable Public Media?": "Enable Public Media?",
+    "You'll download 3rd party media!": "You'll download 3rd party media!"
 }

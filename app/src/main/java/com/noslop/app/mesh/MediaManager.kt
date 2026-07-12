@@ -247,19 +247,24 @@ object MediaManager {
             return
         }
 
-        if (context == "friends") {
+        if (metadata.type == "file") {
+            Logger.info(TAG, "Skipping auto-download for ${metadata.id}: attachments must be manually synced")
+            return
+        }
+
+        val peer = repo.peerDao.getPeerByPublicKey(authorId)
+        val isTrusted = peer?.isTrusted == true
+
+        if (isTrusted) {
             if (!settings.autoDownloadFriends) {
                 Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadFriends is disabled")
                 return
             }
-            val peer = repo.peerDao.getPeerByPublicKey(authorId)
-            if (peer == null || !peer.isTrusted) {
-                Logger.info(TAG, "Skipping auto-download for ${metadata.id}: peer not trusted or unknown")
+        } else {
+            if (!settings.autoDownloadPublic) {
+                Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadPublic is disabled for non-contacts")
                 return
             }
-        } else if (context == "private" && !settings.autoDownloadPrivate) {
-            Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadPrivate is disabled")
-            return
         }
 
         val maxBytes = settings.maxFileSizeMB.toLong() * 1024 * 1024
