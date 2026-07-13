@@ -2,6 +2,15 @@
 
 ## Completed Changes (2026-07-13)
 
+### 4. Bulletproof OTA Downloader (HttpURLConnection)
+*   **Parse Error Resolution**: Fixed the "There was a problem parsing the package" error which occurred when OkHttp silently downloaded HTML login/404 pages (due to GitHub Draft/Private release states) instead of binary APKs.
+*   **Native Progress Tracking**: `UpdateManager.kt` now uses a pure, interceptor-free `HttpURLConnection` pipeline. It manually negotiates redirects, strictly verifies the `Content-Type` to reject `text/html` payloads, enforces a >2MB minimum file size, and provides live UI Toasts (e.g., "Downloading update: 14MB...") every 3 seconds so the user is never left guessing the background state.
+
+### 3. OTA Update Manager Rewrite (OkHttp)
+*   **DownloadManager Bypass**: Completely removed reliance on Android's unreliable system `DownloadManager` which was hanging silently in `STATUS_PENDING` due to GitHub redirect chains.
+*   **Native Coroutine Download**: `UpdateManager.kt` now streams the APK directly to disk via `HttpClientProvider.clearnetClient` in a Coroutine, ensuring 100% reliability, DNS-over-HTTPS fallback, and immediate installer launching upon completion.
+*   **Settings Banner Polish**: Integrated a permanent Update Banner at the top of the Settings page that intelligently handles `REQUEST_INSTALL_PACKAGES` permission states, offering "Give Permission" and "Just Download APK" distinct workflows.
+
 ### 1. Admin AI Integration & ASN.1 Crypto Fixes
 *   **Admin AI Auto-Peer**: Fixed an issue where DMs to the Hub's Admin AI failed because the app lacked a local peer record for it. `NoSlopRepository.ensureAdminPeerExists()` now automatically injects the `Admin AI (Hub)` contact upon linking.
 *   **ASN.1 X25519 Decryption**: Resolved a critical crash where Android's BouncyCastle wrapped X25519 keys in 83-byte ASN.1 structures instead of raw 32-byte arrays. The Hub now mathematically extracts the raw scalars (`0x04, 0x20` and `0x03, 0x21, 0x00`), allowing seamless DM decryption and responses from the Admin AI.

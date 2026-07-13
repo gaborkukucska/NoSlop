@@ -36,9 +36,10 @@ It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok
 ### In-App OTA Updates
 NoSlop bypasses centralized app stores entirely. It includes a robust over-the-air (OTA) auto-update system that:
 - Automatically detects new releases from GitHub.
-- Handles Android 8.0+ `REQUEST_INSTALL_PACKAGES` permissions natively.
-- Downloads the APK directly via Tor or clearnet with background polling and connection recovery.
-- Prompts the user to install the update seamlessly from within the app.
+- Prominently alerts you via a dedicated banner in the Settings tab, persisting until updated.
+- Handles Android 8.0+ `REQUEST_INSTALL_PACKAGES` permissions natively, with fallback options to "Just Download APK" if system permission dialogs fail.
+- Downloads the APK directly via a pure, native `HttpURLConnection` pipeline with live progress toasts, bypassing the unreliable Android `DownloadManager` and DoH CDN redirect issues.
+- Prompts the user to install the update seamlessly from within the app, equipped with anti-corruption file size and content-type verification.
 
 ### Immersive Snapping Feed
 

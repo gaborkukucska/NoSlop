@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import com.noslop.app.ui.*
 import com.noslop.app.ui.components.*
 import com.noslop.app.util.tr // Added translation extension
+import com.noslop.app.util.UpdateManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -94,6 +95,57 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
             LazyColumn(modifier = Modifier.weight(1f)) {
                 if (selectedTabIndex == 0) {
+                if (updateInfo != null) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
+                            border = BorderStroke(1.dp, DestructiveRed)
+                        ) {
+                            Column(modifier = Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text(
+                                            "Version ".tr + "${updateInfo!!.latestVersion} " + "is out (you have ".tr + "${updateInfo!!.currentVersion}).",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = TextLight
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                                
+                                val canInstall = UpdateManager.canInstallPackages(context)
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    if (!canInstall) {
+                                        Button(
+                                            onClick = { UpdateManager.requestInstallPermission(context) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
+                                            modifier = Modifier.padding(end = 8.dp)
+                                        ) {
+                                            Text("Give Permission".tr, color = TextLight)
+                                        }
+                                        Button(
+                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = true) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                        ) {
+                                            Text("Just Download APK".tr, color = TextLight)
+                                        }
+                                    } else {
+                                        Button(
+                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = false) },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
+                                        ) {
+                                            Text("Download Update".tr, color = TextLight)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 item {
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).clickable { showDonationModal = true },
@@ -1254,40 +1306,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     Text("Version ".tr + versionName, color = AccentGreen, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    if (updateInfo != null) {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                            colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
-                            border = BorderStroke(1.dp, DestructiveRed)
-                        ) {
-                            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.SystemUpdate, contentDescription = null, tint = DestructiveRed)
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
-                                    Text(
-                                        "Version ".tr + "${updateInfo!!.latestVersion} " + "is out (you have ".tr + "${updateInfo!!.currentVersion}). " + "Tap to download the new APK.".tr,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextLight
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Button(
-                                    onClick = {
-                                        val intent = android.content.Intent(
-                                            android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse(updateInfo!!.downloadUrl)
-                                        )
-                                        context.startActivity(intent)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
-                                ) {
-                                    Text("Download".tr)
-                                }
-                            }
-                        }
-                    }
-
                     Text("NoSlop is a privacy-first, serverless mesh network and content aggregator. It routes all communication over Tor by default and keeps your identity cryptographically secure on your device.".tr, color = TextMuted, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(16.dp))
 
