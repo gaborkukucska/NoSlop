@@ -152,6 +152,15 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val packetArray = JSONArray()
         val gson = com.google.gson.Gson()
         posts.forEach { post ->
+            val meta = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
+                id = post.mediaUrl,
+                type = post.mediaType ?: "file",
+                mimeType = "application/octet-stream", 
+                size = 0,
+                chunkCount = 999,
+                thumbnailB64 = post.thumbnailB64
+            ) else null
+
             val payload = com.noslop.app.mesh.PostPayload(
                 id = post.id,
                 authorId = post.authorPublicKeyB64,
@@ -163,8 +172,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 timestamp = post.timestamp,
                 signature = post.signature,
                 privacy = post.privacy,
-                mediaId = null,
-                mediaMetadata = null,
+                mediaId = post.mediaUrl,
+                mediaMetadata = meta,
                 clearnetUrl = post.clearnetUrl,
                 clearnetTitle = post.clearnetTitle,
                 clearnetThumbnailUrl = post.clearnetThumbnailUrl,
@@ -220,20 +229,34 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val plaintext = com.noslop.app.crypto.CryptoService.decryptDM(
                         msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
                     )
-                    var content = plaintext ?: "..."
+                    var contentStr = plaintext ?: "..."
+                    val obj = JSONObject()
+                    var hasMedia = false
                     try {
-                        val json = JSONObject(content)
+                        val json = JSONObject(contentStr)
                         if (json.has("content")) {
-                            content = json.getString("content")
+                            contentStr = json.getString("content")
+                        }
+                        if (json.has("media")) {
+                            val mediaJson = json.getJSONObject("media")
+                            obj.put("mediaId", mediaJson.optString("id"))
+                            obj.put("mediaType", mediaJson.optString("type"))
+                            obj.put("media", mediaJson)
+                            hasMedia = true
                         }
                     } catch (e: Exception) {}
                     
-                    val obj = JSONObject()
                     obj.put("id", msg.id)
                     obj.put("peer", peer.publicKeyB64)
                     obj.put("sender", msg.senderPub)
-                    obj.put("content", content)
+                    obj.put("content", contentStr)
                     obj.put("timestamp", msg.timestamp)
+                    
+                    if (!hasMedia && msg.mediaId != null) {
+                        obj.put("mediaId", msg.mediaId)
+                        obj.put("mediaType", msg.mediaType)
+                    }
+                    
                     dmArray.put(obj)
                 }
             } catch (e: Exception) {

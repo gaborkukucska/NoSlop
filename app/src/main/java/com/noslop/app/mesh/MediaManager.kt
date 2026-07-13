@@ -415,6 +415,7 @@ object MediaManager {
             }
         }
 
+        val targetPubKey = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }?.publicKeyB64
         for (req in requestsToSend) {
             val offset = req.first
             val length = req.second
@@ -431,8 +432,9 @@ object MediaManager {
             scope.launch {
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 2, // 2 hops allows successful pass-through if delegated to Hub
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
                     payload = com.google.gson.Gson().toJsonTree(payload)
                 )
@@ -549,10 +551,12 @@ object MediaManager {
             val peer = dl.peerOnion
             if (peer != null) {
                 scope.launch {
+                    val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 1,
+                        hops = 2,
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        targetUserId = targetPeer?.publicKeyB64,
                         type = "MEDIA_TRANSFER_ACK",
                         payload = com.google.gson.Gson().toJsonTree(ack)
                     )
@@ -614,8 +618,9 @@ object MediaManager {
                     val metadata = getMetadataSync(payload.mediaId)
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 1,
+                        hops = 2,
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        targetUserId = senderId,
                         type = "MEDIA_METADATA_RESPONSE", 
                         payload = com.google.gson.Gson().toJsonTree(metadata)
                     )
@@ -658,8 +663,9 @@ object MediaManager {
 
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 2,
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    targetUserId = senderId,
                     type = "MEDIA_CHUNK",
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)
                 )
