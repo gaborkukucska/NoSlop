@@ -186,7 +186,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             try {
                 // Room flows emit the initial list immediately, so we can grab the first snapshot
                 // Take only the last 30 messages to save battery on decryption overhead!
-                val messages = messageDao.getMessagesWithPeer(peer.publicKeyB64).first().takeLast(30)
+                val messages = kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                    messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
+                }?.takeLast(30) ?: emptyList()
                 messages.forEach { msg ->
                     val plaintext = com.noslop.app.crypto.CryptoService.decryptDM(
                         msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
