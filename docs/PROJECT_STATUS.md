@@ -1,5 +1,17 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-13)
+
+### 1. Admin AI Integration & ASN.1 Crypto Fixes
+*   **Admin AI Auto-Peer**: Fixed an issue where DMs to the Hub's Admin AI failed because the app lacked a local peer record for it. `NoSlopRepository.ensureAdminPeerExists()` now automatically injects the `Admin AI (Hub)` contact upon linking.
+*   **ASN.1 X25519 Decryption**: Resolved a critical crash where Android's BouncyCastle wrapped X25519 keys in 83-byte ASN.1 structures instead of raw 32-byte arrays. The Hub now mathematically extracts the raw scalars (`0x04, 0x20` and `0x03, 0x21, 0x00`), allowing seamless DM decryption and responses from the Admin AI.
+*   **Newline Stripping**: Fixed hidden `\n` characters in Android JSON payloads breaking exact-match target interception.
+
+### 2. Historical Hub Sync & SQLite Migration
+*   **SQLite Persistence**: The Hub transitioned from volatile JSON arrays to a persistent SQLite database (`social.db`) for storing DMs, Posts, and Peers.
+*   **Historical Pull Sync**: When linking to a Hub, NoSlop now dynamically pulls historical data (`get_dms`, `get_social_feed`, `get_mesh_peers`) to populate the local app state.
+*   **Media Metadata Retention**: Fixed an issue where syncing DMs and Posts from the Hub to the mobile app dropped the associated media metadata, ensuring image and video UI elements render correctly.
+
 ## Completed Changes (2026-07-12)
 
 ### 1. DM Contacts Organization — Collapsible "All" List & Folder Assignment

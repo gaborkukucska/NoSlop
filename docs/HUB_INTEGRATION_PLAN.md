@@ -81,12 +81,12 @@ NoSlop is transitioning from a standalone mesh node into an **Active-Passive Cli
    - NoSlop continues to fetch RSS/API feeds locally.
    - Create an API call to sync the "Saved" and "Liked" clearnet states with the Hub's parallel local database.
 
-### Phase 3: Deep Data Sync, Media Offloading & Sovereign Backup (NEXT)
+### Phase 3: Deep Data Sync, Media Offloading & Sovereign Backup (ACTIVE)
 **Goal:** Evolve the Hub from an in-memory relay into a persistent master vault, populating the HAI-Net Web Portal and offloading heavy bandwidth tasks from the phone.
 
-1. **Rust SQLite Persistence (The Missing Link)**
+1. **Rust SQLite Persistence (The Missing Link)** ✅
    - *Context:* The HAI-Net Web Portal is currently empty because the Hub only holds incoming packets in a temporary `RwLock<Vec<Value>>` buffer before passing them to the phone.
-   - *Action:* Implement a Rust SQLite schema in `hainet-social` mirroring NoSlop's Room database to permanently store Posts, Comments, Reactions, and DMs.
+   - *Action:* Implement a Rust SQLite schema in `hainet-social` mirroring NoSlop's Room database to permanently store Posts, Comments, Reactions, and DMs. (Completed: `social.db` implemented, Hub UI updated, NoSlop bi-directional sync operational).
 2. **Heavy Media Offloading**
    - Transfer the `MediaManager.kt` chunk-downloading logic to the Hub. The Hub should download 50MB video chunks over Tor 24/7. When complete, the mobile app pulls the entire MP4 file instantly over local Wi-Fi.
 3. **Background Sync Worker (`FeedSyncWorker.kt`)**
