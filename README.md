@@ -54,7 +54,7 @@ A vertical feed purpose-built for signal-to-noise ratio.
 
 Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No central server is ever involved.
 
-- **Home HUBs** — Your dedicated local home lab serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline. Deploy a new Home Hub directly from the NoSlop app's HUBs tab over SSH, or seamlessly auto-discover and cryptographically link to an existing one on your local network. Once linked, the Hub serves as your master SQLite database, bi-directionally syncing historical DMs, mesh broadcasts, and contacts to your device, and allows you to chat securely with your Hub's local Admin AI via E2EE DMs. NoSlop safely detects deployment collisions and provides options to sign in, reset identity, or wipe.
+- **Home HUBs** — Your dedicated local home lab serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline. Deploy a new Home Hub directly from the NoSlop app's HUBs tab over SSH, or seamlessly auto-discover and cryptographically link to an existing one on your local network. **Deploying via the NoSlop app is currently the recommended way to set up a single-device HAI-Net system** *(multi-device deployment support is coming later)*. Once linked, the Hub serves as your master SQLite database, bi-directionally syncing historical DMs, mesh broadcasts, and contacts to your device. **If your hardware permits, the Hub also provides a completely private LLM assistant (Admin AI) equipped with an almost working project and LLM management harness!** You can converse with this AI securely from NoSlop using standard End-to-End Encrypted DMs. NoSlop safely detects deployment collisions and provides options to sign in, reset identity, or wipe.
 - **Discoverable Mode & Creator Nodes** — Toggle Discoverable Mode in Settings to broadcast your ephemeral identity (burnable onion address) across the mesh up to 6 hops away, allowing anyone to find you without a QR code. Enable Creator Node to automatically accept incoming connections, permanently lock your media from local cache purging, and optionally broadcast your donation link.
 - **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key. The network rejects forgeries.
 - **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key (see [TECHNICAL_REFERENCE.md §3.5](docs/TECHNICAL_REFERENCE.md#35-direct-message-encryption) for the exact derivation). Only you and your contact can read them.
@@ -136,10 +136,11 @@ All outbound traffic — feed fetches, mesh messages, media requests — is rout
 
 ---
 
-## Support Development
+## 💖 Support the Vision
 
-NoSlop is entirely free, open-source, and devoid of trackers and advertisements. If you find value in a private, serverless communication tool, please consider supporting the sole developer, Gabor Kukucska. 
-You can donate via the **"Help Development"** banner in the app's Settings tab, which securely redirects to a [Stripe Payment Link](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00).
+NoSlop is entirely free, open-source, and devoid of trackers and advertisements. If you find value in a private, serverless communication tool, please consider supporting the sole developer!
+
+🪙 ☕ 🍱 [Toss me a coin, buy me a chai or even a meal](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00)
 
 ---
 
@@ -164,3 +165,7 @@ You can donate via the **"Help Development"** banner in the app's Settings tab, 
 NoSlop is part of the [HAI-Net Initiative](https://hai-net.com) — building tools where AI and open networks work for people, not corporations.
 
 Licensed under **AGPL-3.0**. Fork it. Run it. Own it.
+
+<p align="center">
+  ✨ <em><a href="https://gaborkukucska.com">Dreamed up by Gabby</a></em>
+</p>
