@@ -270,7 +270,151 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    suspend fun ensureAdminPeerExists() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val adminPubKey = "admin_${myKeys.publicKeyB64}"
+        val existing = peerDao.getPeerByPublicKey(adminPubKey)
+        if (existing == null) {
+            peerDao.insertPeer(com.noslop.app.data.Peer(
+                publicKeyB64 = adminPubKey,
+                handle = "Admin AI (Hub)",
+                tripcode = "admin",
+                onionAddress = myKeys.onionAddress,
+                encPublicKeyB64 = myKeys.encPublicKeyB64,
+                isTrusted = true,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+        }
+    }
+
+    @Volatile
+    private var hasPulledHistoricalData = false
+
+    suspend fun syncPullHistoricalDataFromHub() = withContext(Dispatchers.IO) {
+        val hubStatus = getAppSetting("hub_deployment_status")
+        if (hubStatus.isNullOrBlank()) return@withContext
+        if (hasPulledHistoricalData) return@withContext
+        hasPulledHistoricalData = true
+
+        ensureAdminPeerExists()
+
+        val myKeys = getLocalIdentity() ?: return@withContext
+
+        // 1. Pull DMs
+        val resDms = invokeHubApi("get_dms", JSONObject())
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64 ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        val metadata = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                        map["media"] = metadata
+                    }
+                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = dm.optLong("timestamp", System.currentTimeMillis()),
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                    }
+                }
+            }
+        }
+        
+        // 2. Pull Posts
+        val resPosts = invokeHubApi("get_social_feed", JSONObject())
+        if (resPosts != null && resPosts.has("posts")) {
+            val postsArray = resPosts.getJSONArray("posts")
+            for (i in 0 until postsArray.length()) {
+                val postObj = postsArray.getJSONObject(i)
+                val id = postObj.optString("id")
+                if (!checkEntityExistsLocally("POST", id)) {
+                    val author = postObj.optString("author")
+                    val content = postObj.optString("content")
+                    val timestampStr = postObj.optString("timestamp")
+                    val timestamp = try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(timestampStr)?.time ?: System.currentTimeMillis()
+                    } catch (e: Exception) { System.currentTimeMillis() }
+                    
+                    val mediaId = postObj.optString("media_id").takeIf { it.isNotBlank() }
+                    val mediaType = postObj.optString("media_type").takeIf { it.isNotBlank() }
+                    
+                    val localPost = com.noslop.app.data.MeshPost(
+                        id = id,
+                        authorPublicKeyB64 = "unknown",
+                        authorHandle = author,
+                        authorTripcode = "hub",
+                        authorAvatarB64 = null,
+                        content = content,
+                        timestamp = timestamp,
+                        signature = "synced_from_hub",
+                        mediaUrl = mediaId?.let { "noslop://${myKeys.onionAddress}/$it" },
+                        mediaType = mediaType,
+                        privacy = "public",
+                        thumbnailB64 = null,
+                        clearnetUrl = null,
+                        clearnetTitle = null,
+                        clearnetThumbnailUrl = null,
+                        clearnetMediaType = null
+                    )
+                    postDao.insertPost(localPost)
+                }
+            }
+        }
+        
+        // 3. Pull Peers
+        val resPeers = invokeHubApi("get_mesh_peers", JSONObject())
+        if (resPeers != null && resPeers.has("peers")) {
+            val peersArray = resPeers.getJSONArray("peers")
+            for (i in 0 until peersArray.length()) {
+                val peerObj = peersArray.getJSONObject(i)
+                val pubKey = peerObj.optString("public_key")
+                if (pubKey.isNotBlank() && peerDao.getPeerByPublicKey(pubKey) == null) {
+                    peerDao.insertPeer(com.noslop.app.data.Peer(
+                        publicKeyB64 = pubKey,
+                        handle = peerObj.optString("handle"),
+                        tripcode = "sync",
+                        onionAddress = "",
+                        encPublicKeyB64 = pubKey,
+                        isTrusted = peerObj.optBoolean("is_trusted", false),
+                        lastSeenAt = System.currentTimeMillis()
+                    ))
+                }
+            }
+        }
+    }
+
     suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
+        syncPullHistoricalDataFromHub()
         val res = invokeHubApi("sync_pull_packets", JSONObject())
         if (res != null && res.has("packets")) {
             val packetsArray = res.optJSONArray("packets")
