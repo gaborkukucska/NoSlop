@@ -53,6 +53,18 @@ class MeshSocialRepository(
     private val voteDao = db.voteDao()
     private val commentVoteDao = db.commentVoteDao()
 
+    private fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        repositoryScope.launch {
+            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+            val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
+            if (hubStatus.isNullOrBlank()) {
+                meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+            } else {
+                Logger.info(TAG, "Hub is linked. Delegating packet ${packet.id} to Hub.")
+            }
+        }
+    }
+
     private var presenceJob: kotlinx.coroutines.Job? = null
 
     private val _incomingRequestFlow = MutableStateFlow<Peer?>(null)
@@ -332,9 +344,7 @@ class MeshSocialRepository(
                 payload = gson.toJsonTree(reqPay),
                 signature = reqSig
             )
-            repositoryScope.launch {
-                meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
-            }
+            dispatchPacket(onionAddress, packet)
         }
         true
     }
@@ -373,9 +383,7 @@ class MeshSocialRepository(
                 payload = gson.toJsonTree(handshakePay),
                 signature = handshakeSig
             )
-            repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-            }
+            dispatchPacket(peer.onionAddress, packet)
 
             // Also send INVENTORY_SYNC_REQUEST
             requestInventorySync(peer)
@@ -407,9 +415,7 @@ class MeshSocialRepository(
             type = "INVENTORY_SYNC_REQUEST",
             payload = gson.toJsonTree(syncReqPay)
         )
-        repositoryScope.launch {
-            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
-        }
+        dispatchPacket(peer.onionAddress, syncPacket)
     }
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
@@ -502,6 +508,7 @@ class MeshSocialRepository(
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
+        meshTransport.repository.triggerDmSync()
 
         // Send to peer onion address if we have it
         val msgPay = com.noslop.app.mesh.EncryptedPayload(
@@ -521,11 +528,7 @@ class MeshSocialRepository(
             payload = payloadJson
         )
 
-        com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
-
-        repositoryScope.launch {
-            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-        }
+        dispatchPacket(peer.onionAddress, packet)
 
         true
     }

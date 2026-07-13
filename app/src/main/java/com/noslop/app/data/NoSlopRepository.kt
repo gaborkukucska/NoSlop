@@ -57,6 +57,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
     val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
 
+    @Volatile
+    var shouldSyncDms = true
+
+    fun triggerDmSync() {
+        shouldSyncDms = true
+    }
+
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
     // WHY: all social/mesh write+broadcast actions and the presence heartbeat live in
@@ -178,6 +185,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
         suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
+        if (!shouldSyncDms) return@withContext
+        shouldSyncDms = false
         val identity = getLocalIdentity() ?: return@withContext
         val peers = peerDao.getAllPeersList()
         val dmArray = JSONArray()

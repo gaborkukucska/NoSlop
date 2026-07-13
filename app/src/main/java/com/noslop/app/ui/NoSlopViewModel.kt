@@ -326,9 +326,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             if (System.currentTimeMillis() - lastPeerSync > 60_000) {
                                 repository.syncPeersWithHub()
                                 repository.syncPostsWithHub()
-                                repository.syncDmsWithHub()
                                 lastPeerSync = System.currentTimeMillis()
                             }
+                            repository.syncDmsWithHub()
                             repository.pullMeshPacketsFromHub()
                         }
                         kotlinx.coroutines.delay(5000)

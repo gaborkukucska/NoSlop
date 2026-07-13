@@ -80,6 +80,9 @@ object GossipService {
         state.lastActivity = System.currentTimeMillis()
         
         val tx = transport ?: return false
+        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) return true // Hub handles chunk forwarding
+
         var forwarded = false
         
         // Forward the exact chunk packet to all listeners
@@ -346,7 +349,10 @@ object GossipService {
                     // This assumes listeners are our connected peers.
                     val peer = peerDao?.getPeerByPublicKey(listenerId)
                     if (peer != null) {
-                        transport?.sendPacket(peer.onionAddress, Constants.MESH_PORT, foundPacket)
+                        val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
+                        if (hubStatus.isNullOrBlank()) {
+                            transport?.sendPacket(peer.onionAddress, Constants.MESH_PORT, foundPacket)
+                        }
                     }
                 }
             }
@@ -360,6 +366,10 @@ object GossipService {
     private suspend fun forwardPacket(packet: NetworkPacket) {
         val tx = transport ?: return
         val dao = peerDao ?: return
+        
+        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) return // Hub handles gossip relaying natively
+        
         val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
         if (currentHops <= 1) {
             return // Will expire on next hop
@@ -398,6 +408,13 @@ object GossipService {
     suspend fun broadcast(packet: NetworkPacket) {
         pushPacketToHub?.invoke(packet)
         val tx = transport ?: return
+        
+        val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) {
+            Logger.info(TAG, "Hub is linked. Delegating broadcast of packet ${packet.id} to Hub.")
+            return
+        }
+        
         val dao = peerDao ?: return
         val activePeers = dao.getAllPeersList()
         val trustedPeers = activePeers.filter { it.isTrusted && it.publicKeyB64 != localPublicKeyB64 }

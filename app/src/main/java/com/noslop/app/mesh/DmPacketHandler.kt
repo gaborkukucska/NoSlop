@@ -72,6 +72,7 @@ class DmPacketHandler(
                 replyToMessageId = replyToMessageId
             )
             messageDao.insertMessage(msg)
+            repo.triggerDmSync()
             
             val title = "New Direct Message"
             val msgBody = "Message from ${peer?.handle ?: "Anonymous"}"
