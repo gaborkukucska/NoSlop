@@ -91,6 +91,12 @@ class MeshTransport(
     }
 
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+        val hubStatus = repository.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) {
+            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+            com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked. Delegating packet ${packet.id} to Hub.")
+            return@withContext true
+        }
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
         // Ensure Tor proxy is ready before attempting send

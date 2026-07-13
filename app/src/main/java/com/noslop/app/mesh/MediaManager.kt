@@ -415,7 +415,6 @@ object MediaManager {
             }
         }
 
-        val targetPubKey = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }?.publicKeyB64
         for (req in requestsToSend) {
             val offset = req.first
             val length = req.second
@@ -430,6 +429,7 @@ object MediaManager {
             )
 
             scope.launch {
+                val targetPubKey = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }?.publicKeyB64
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 2, // 2 hops allows successful pass-through if delegated to Hub
