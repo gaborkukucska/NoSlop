@@ -57,6 +57,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
     val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
 
+    init {
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+    }
+
     @Volatile
     var shouldSyncDms = true
 
@@ -89,7 +93,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val arr = org.json.JSONArray().put(jsonObj)
             val args = org.json.JSONObject().put("packets", arr)
             val res = invokeHubApi("sync_push_packets", args)
-            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+            if (res != null) {
+                com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+            } else {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to push packet ${packet.id} to Hub (API returned null).")
+            }
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
         }
@@ -106,7 +114,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
                 val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
                 com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute().use { response ->
-                    if (response.isSuccessful) return@withContext JSONObject(response.body?.string() ?: "{}")
+                    val respBody = response.body?.string() ?: "{}"
+                    if (response.isSuccessful) {
+                        return@withContext JSONObject(respBody)
+                    } else {
+                        com.noslop.app.debug.Logger.warn("HUB_API", "LAN request failed with code ${response.code} for cmd $cmd: $respBody")
+                    }
                 }
             } catch (e: Exception) {
                 Logger.warn("HUB_API", "LAN request failed: ${e.message}. Falling back to Tor...")
@@ -120,7 +133,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
             val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
             com.noslop.app.net.HttpClientProvider.torClient.newCall(request).execute().use { response ->
-                if (response.isSuccessful) return@withContext JSONObject(response.body?.string() ?: "{}")
+                val respBody = response.body?.string() ?: "{}"
+                if (response.isSuccessful) {
+                    return@withContext JSONObject(respBody)
+                } else {
+                    com.noslop.app.debug.Logger.warn("HUB_API", "Tor request failed with code ${response.code} for cmd $cmd: $respBody")
+                }
             }
         } catch (e: Exception) {
             Logger.error("HUB_API", "Tor fallback request failed: ${e.message}")
