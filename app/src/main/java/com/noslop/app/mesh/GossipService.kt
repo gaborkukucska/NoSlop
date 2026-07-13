@@ -163,7 +163,7 @@ object GossipService {
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
-        val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND"
+        val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND" || packet.type == "MEDIA_CHUNK"
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         
         if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable) {
