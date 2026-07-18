@@ -48,6 +48,11 @@ object TorService {
     private var currentBurnablePrivateKeyB64: String? = null
     var currentBurnableOnionAddress: String? = null
     var onBurnableAddressCallback: ((String) -> Unit)? = null
+    
+    // Store active service IDs to allow unregistering
+    private var activeMainServiceId: String? = null
+    private var activeBurnableServiceId: String? = null
+
 
     private val torStatusReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
@@ -179,6 +184,55 @@ object TorService {
                     onBurnableAddressCallback?.invoke(onionAddress)
                 }
             }
+        }
+    }
+
+    /**
+     * Unregisters the currently active hidden services.
+     * This is critical when transitioning to a Hub, to prevent descriptor flapping
+     * where both the Hub and the mobile app publish the same .onion address.
+     */
+    fun unregisterHiddenServices() {
+        scope.launch {
+            if (activeMainServiceId != null) {
+                unregisterHiddenService(activeMainServiceId!!)
+                activeMainServiceId = null
+            }
+            if (activeBurnableServiceId != null) {
+                unregisterHiddenService(activeBurnableServiceId!!)
+                activeBurnableServiceId = null
+            }
+        }
+    }
+
+    private suspend fun unregisterHiddenService(serviceId: String) = withContext(Dispatchers.IO) {
+        Logger.info(TAG, "Unregistering hidden service $serviceId...")
+        try {
+            val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
+            val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
+
+            writer.print("AUTHENTICATE\r\n")
+            writer.flush()
+            val authResp = reader.readLine()
+            if (authResp == null || !authResp.startsWith("250")) {
+                controlSocket.close()
+                return@withContext
+            }
+
+            val cmd = "DEL_ONION $serviceId"
+            writer.print("$cmd\r\n")
+            writer.flush()
+            
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                Logger.debug(TAG, "DEL_ONION response: $line")
+                if (line!!.startsWith("250 ") || line!!.startsWith("5")) break
+            }
+            controlSocket.close()
+            Logger.info(TAG, "Successfully unregistered hidden service $serviceId")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to unregister hidden service $serviceId: ${e.message}")
         }
     }
 
@@ -360,6 +414,11 @@ object TorService {
 
                 if (serviceId != null) {
                     val onionAddress = "$serviceId.onion"
+                    if (privateKeyB64 != null) {
+                        activeMainServiceId = serviceId
+                    } else {
+                        activeBurnableServiceId = serviceId
+                    }
                     Logger.info(TAG, "Hidden service registered: $onionAddress")
                     onAddressReady(onionAddress)
                 } else if (responseLines.any { it.contains("550 Onion address collision") }) {

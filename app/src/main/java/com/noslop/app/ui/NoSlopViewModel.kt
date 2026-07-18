@@ -1390,8 +1390,11 @@ fun toggleAggregator() {
             val hasHub = status.isNotBlank()
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = hasHub
             
-            
             if (hasHub) {
+                // Instantly tear down the local Tor hidden service to prevent
+                // "descriptor flapping" with the newly deployed Hub which shares the same key.
+                com.noslop.app.tor.TorService.unregisterHiddenServices()
+                
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
                     val oldPeer = repository.peerDao.getPeerByPublicKey(identity.publicKeyB64)
