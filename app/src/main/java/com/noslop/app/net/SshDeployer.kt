@@ -461,6 +461,11 @@ PYEOF
                     echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
                 )
                 
+                # Check for missing port 9999 in existing deployments
+                if ! run_sudo grep -q "HiddenServicePort 9999" /etc/tor/torrc; then
+                    run_sudo sed -i '/HiddenServicePort 8080/a HiddenServicePort 9999 127.0.0.1:9999' /etc/tor/torrc
+                fi
+                
                 run_sudo systemctl restart tor || true
                 echo '  Tor Hidden Service configured!'
                 # --- END TOR SETUP ---

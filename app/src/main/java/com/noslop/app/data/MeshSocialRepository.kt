@@ -68,7 +68,45 @@ class MeshSocialRepository(
             val isDirected = !packet.targetUserId.isNullOrBlank()
             if (isDirected || !hasHub) {
                 if (onionAddress.isNotBlank()) {
-                    meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                    val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                    if (!success && isDirected) {
+                        Logger.warn(TAG, "Direct send to $onionAddress failed. Marking peer offline and requesting updated identity from mesh.")
+                        // Goal 4: Eliminate redundant SOCKS connection attempts to dead addresses
+                        val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
+                        if (peer != null) {
+                            // Clear the stale onion address and mark offline so we don't keep trying it
+                            peerDao.insertPeer(peer.copy(onionAddress = "", isOnline = false))
+                            
+                            // Goal 3: Fallback mechanism - re-broadcast a connection/sync request to the mesh
+                            // to discover their new Hub onion address
+                            val myKeys = getLocalIdentity()
+                            if (myKeys != null) {
+                                val timestamp = System.currentTimeMillis()
+                                val payload = "${myKeys.publicKeyB64}|${myKeys.displayName}|${myKeys.onionAddress}|$timestamp"
+                                val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
+                                val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
+                                    id = UUID.randomUUID().toString(),
+                                    fromUserId = myKeys.publicKeyB64,
+                                    fromUsername = myKeys.displayName,
+                                    fromDisplayName = myKeys.displayName,
+                                    fromHomeNode = myKeys.onionAddress,
+                                    fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                                    timestamp = timestamp,
+                                    signature = signature
+                                )
+                                val syncPacket = com.noslop.app.mesh.NetworkPacket(
+                                    id = UUID.randomUUID().toString(),
+                                    hops = 1,
+                                    senderId = myKeys.publicKeyB64,
+                                    targetUserId = peer.publicKeyB64,
+                                    type = "USER_HANDSHAKE", // Handshake re-broadcast will update their identity locally when they reply
+                                    payload = com.google.gson.Gson().toJsonTree(syncReq),
+                                    signature = signature
+                                )
+                                com.noslop.app.mesh.GossipService.broadcast(syncPacket)
+                            }
+                        }
+                    }
                 } else {
                     Logger.warn(TAG, "Cannot send directed packet ${packet.id}: recipient onion address is blank")
                 }
