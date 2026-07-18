@@ -375,8 +375,13 @@ object GossipService {
         val tx = transport ?: return
         val dao = peerDao ?: return
         
+        // Hub handles gossip relaying for BROADCAST packets, but NOT for directed
+        // messages (those with a targetUserId). The Hub only buffers packets for its
+        // own mobile app — it does not relay directed DMs to other peers in the mesh.
+        // We must always forward directed packets ourselves.
+        val isDirected = !packet.targetUserId.isNullOrBlank()
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
-        if (!hubStatus.isNullOrBlank()) return // Hub handles gossip relaying natively
+        if (!hubStatus.isNullOrBlank() && !isDirected) return
         
         val currentHops = packet.hops ?: DEFAULT_MAX_HOPS
         if (currentHops <= 1) {
@@ -425,7 +430,7 @@ object GossipService {
         
         val dao = peerDao ?: return
         val activePeers = dao.getAllPeersList()
-        val trustedPeers = activePeers.filter { it.isTrusted && it.publicKeyB64 != localPublicKeyB64 }
+        val trustedPeers = activePeers.filter { it.isTrusted && it.publicKeyB64 != localPublicKeyB64 && it.onionAddress.isNotBlank() }
 
         if (trustedPeers.isEmpty()) {
             Logger.debug(TAG, "No trusted peers connected to broadcast packet ${packet.id}")

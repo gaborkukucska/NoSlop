@@ -70,15 +70,23 @@ class MeshSocialRepository(
                 if (onionAddress.isNotBlank()) {
                     val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                     if (!success && isDirected) {
-                        Logger.warn(TAG, "Direct send to $onionAddress failed. Marking peer offline and requesting updated identity from mesh.")
-                        // Goal 4: Eliminate redundant SOCKS connection attempts to dead addresses
+                        Logger.warn(TAG, "Direct send to $onionAddress failed. Falling back to gossip relay for DM ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
-                            // Clear the stale onion address and mark offline so we don't keep trying it
-                            peerDao.insertPeer(peer.copy(onionAddress = "", isOnline = false))
+                            // Mark offline so presence UI reflects reality
+                            peerDao.insertPeer(peer.copy(isOnline = false))
                             
-                            // Goal 3: Fallback mechanism - re-broadcast a connection/sync request to the mesh
-                            // to discover their new Hub onion address
+                            // CRITICAL: Gossip-broadcast the actual MESSAGE packet so it
+                            // reaches the recipient via any reachable intermediate peer or Hub.
+                            // Give it full hops so it can traverse the mesh.
+                            val gossipDm = packet.copy(
+                                id = UUID.randomUUID().toString(),
+                                hops = 6
+                            )
+                            com.noslop.app.mesh.GossipService.broadcast(gossipDm)
+                            Logger.info(TAG, "Gossip-relayed DM ${packet.id} as fallback via mesh broadcast.")
+                            
+                            // Also send a USER_HANDSHAKE to heal the identity for future attempts
                             val myKeys = getLocalIdentity()
                             if (myKeys != null) {
                                 val timestamp = System.currentTimeMillis()
@@ -99,7 +107,7 @@ class MeshSocialRepository(
                                     hops = 1,
                                     senderId = myKeys.publicKeyB64,
                                     targetUserId = peer.publicKeyB64,
-                                    type = "USER_HANDSHAKE", // Handshake re-broadcast will update their identity locally when they reply
+                                    type = "USER_HANDSHAKE",
                                     payload = com.google.gson.Gson().toJsonTree(syncReq),
                                     signature = signature
                                 )
@@ -108,7 +116,13 @@ class MeshSocialRepository(
                         }
                     }
                 } else {
-                    Logger.warn(TAG, "Cannot send directed packet ${packet.id}: recipient onion address is blank")
+                    Logger.warn(TAG, "No onion address for recipient of directed packet ${packet.id}. Falling back to gossip relay.")
+                    // Even without a direct onion, we can still try to reach them via mesh gossip
+                    val gossipDm = packet.copy(
+                        id = UUID.randomUUID().toString(),
+                        hops = 6
+                    )
+                    com.noslop.app.mesh.GossipService.broadcast(gossipDm)
                 }
             } else {
                 Logger.info(TAG, "Hub is linked. Delegating broadcast packet ${packet.id} to Hub.")
