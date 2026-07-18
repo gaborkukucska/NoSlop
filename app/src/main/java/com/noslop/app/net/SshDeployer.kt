@@ -244,11 +244,11 @@ PYEOF
                         if run_sudo test -d /var/lib/tor/hainet_hidden_service; then
                             HS_DIR="/var/lib/tor/hainet_hidden_service/"
                         fi
-                        echo "" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                        echo "# HAI-Net Hidden Service" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                        echo "HiddenServiceDir ${'$'}HS_DIR" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                        echo "HiddenServicePort 8080 127.0.0.1:8080" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                        echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                        run_sudo bash -c "echo '' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo '# HAI-Net Hidden Service' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServiceDir ${'$'}HS_DIR' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServicePort 8080 127.0.0.1:8080' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServicePort 9999 127.0.0.1:9999' >> /etc/tor/torrc"
                         run_sudo systemctl restart tor || true
                         echo "Injected full HiddenService block into Tor configuration."
                     elif ! run_sudo grep -q "HiddenServicePort 9999" /etc/tor/torrc; then
@@ -454,11 +454,11 @@ PYEOF
                 rm -f gen_tor.py
                 
                 run_sudo grep -q "HAI-Net Hidden Service" /etc/tor/torrc || (
-                    echo "" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                    echo "# HAI-Net Hidden Service" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                    echo "HiddenServiceDir /var/lib/tor/hainet/" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                    echo "HiddenServicePort 8080 127.0.0.1:8080" | run_sudo tee -a /etc/tor/torrc >/dev/null
-                    echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                    run_sudo bash -c "echo '' >> /etc/tor/torrc"
+                    run_sudo bash -c "echo '# HAI-Net Hidden Service' >> /etc/tor/torrc"
+                    run_sudo bash -c "echo 'HiddenServiceDir /var/lib/tor/hainet/' >> /etc/tor/torrc"
+                    run_sudo bash -c "echo 'HiddenServicePort 8080 127.0.0.1:8080' >> /etc/tor/torrc"
+                    run_sudo bash -c "echo 'HiddenServicePort 9999 127.0.0.1:9999' >> /etc/tor/torrc"
                 )
                 
                 # Check for missing port 9999 in existing deployments
