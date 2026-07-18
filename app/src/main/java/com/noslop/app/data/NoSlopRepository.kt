@@ -415,8 +415,94 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    private var lastDmSyncTimestamp: Long = 0
+
+    private suspend fun syncPullIncrementalDMsFromHub() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val args = JSONObject().put("since", lastDmSyncTimestamp)
+        val resDms = invokeHubApi("sync_pull_dms", args)
+        
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            var latestTimestamp = lastDmSyncTimestamp
+            
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                val timestamp = dm.optLong("timestamp", 0)
+                if (timestamp > latestTimestamp) {
+                    latestTimestamp = timestamp
+                }
+                
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64 ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        map["media"] = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                    }
+                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = timestamp,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                        
+                        // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
+                        if (sender == myKeys.publicKeyB64) {
+                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = java.util.UUID.randomUUID().toString(),
+                                hops = 1,
+                                senderId = myKeys.publicKeyB64,
+                                targetUserId = peerPub,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+                        }
+                    }
+                }
+            }
+            lastDmSyncTimestamp = latestTimestamp
+        }
+    }
+
     suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
         syncPullHistoricalDataFromHub()
+        syncPullIncrementalDMsFromHub()
+        
         val res = invokeHubApi("sync_pull_packets", JSONObject())
         if (res != null && res.has("packets")) {
             val packetsArray = res.optJSONArray("packets")

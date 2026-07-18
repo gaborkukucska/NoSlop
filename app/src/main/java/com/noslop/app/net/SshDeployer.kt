@@ -236,6 +236,14 @@ PYEOF
                     fi
                     
                     run_sudo systemctl restart hainet-core.service
+                    
+                    # Ensure port 9999 is exposed in torrc for existing deployments
+                    run_sudo grep -q "HiddenServicePort 9999 127.0.0.1:9999" /etc/tor/torrc || (
+                        echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                        run_sudo systemctl restart tor || true
+                        echo "Injected missing port 9999 to Tor configuration."
+                    )
+
                     echo "Hub Update Complete!"
                     exit 0
                 fi
