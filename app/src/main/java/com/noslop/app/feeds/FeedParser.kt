@@ -50,7 +50,7 @@ object FeedParser {
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
 
-            val response = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute()
+            val response = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute()
             if (response.isSuccessful && response.body != null) {
                 Logger.info(TAG, "Successfully fetched feed: $feedUrl (HTTP ${response.code})")
                 response.body!!.byteStream().use { stream ->
@@ -448,7 +448,7 @@ object FeedParser {
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
                 .build()
 
-            val response = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute()
+            val response = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute()
             if (!response.isSuccessful || response.body == null) {
                 Logger.warn(TAG, "RSS discovery failed: HTTP ${response.code} for $inputUrl")
                 return inputUrl
@@ -512,7 +512,7 @@ object FeedParser {
                         .url(candidateUrl)
                         .header("User-Agent", "Mozilla/5.0")
                         .build()
-                    val probeResp = com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(probeReq).execute()
+                    val probeResp = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(probeReq).execute()
                     val probeType = probeResp.header("Content-Type", "") ?: ""
                     probeResp.close()
                     if (probeResp.isSuccessful && (probeType.contains("xml") || probeType.contains("rss") || probeType.contains("atom"))) {

@@ -19,14 +19,14 @@ import java.util.concurrent.ConcurrentHashMap
 object InvidiousApiClient {
     private const val TAG = "INVIDIOUS_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private const val BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
     /**
      * Dedicated probe client for resolveStreamUrl().
-     * Built once from scratch (not from clearnetClient.newBuilder()) so it has
-     * NO interceptors — in particular, clearnetClient's browser User-Agent
+     * Built once from scratch (not from activeClearnetClient.newBuilder()) so it has
+     * NO interceptors — in particular, activeClearnetClient's browser User-Agent
      * interceptor does NOT apply here. Building from scratch avoids UA leakage.
      * Short per-instance timeouts so dead instances are skipped quickly.
      */

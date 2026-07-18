@@ -21,6 +21,22 @@ import kotlinx.coroutines.withContext
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
 class SettingsRepository(private val appSettingDao: AppSettingDao) {
+    private val _useTorForClearnet = MutableStateFlow(true)
+    val useTorForClearnet: StateFlow<Boolean> = _useTorForClearnet.asStateFlow()
+
+    suspend fun initTorForClearnetSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("use_tor_for_clearnet")
+        val isEnabled = setting == null || setting == "true" // true by default
+        _useTorForClearnet.value = isEnabled
+        com.noslop.app.net.HttpClientProvider.useTorForClearnet = isEnabled
+    }
+
+    suspend fun setUseTorForClearnet(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("use_tor_for_clearnet", enabled.toString()))
+        _useTorForClearnet.value = enabled
+        com.noslop.app.net.HttpClientProvider.useTorForClearnet = enabled
+    }
+
 
     private val _mediaSettingsFlow = MutableStateFlow(MediaSettings())
     /** Current media settings; updated by [getMediaSettings] and [updateMediaSettings]. */

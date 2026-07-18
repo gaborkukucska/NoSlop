@@ -107,7 +107,7 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
             try {
                 val metadataUrl = "https://archive.org/metadata/$id"
                 val request = okhttp3.Request.Builder().url(metadataUrl).build()
-                val response = HttpClientProvider.clearnetClient.newCall(request).execute()
+                val response = HttpClientProvider.activeClearnetClient.newCall(request).execute()
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (body != null) {
@@ -207,7 +207,7 @@ private fun resolveVimeoSource(url: String): VideoSource {
             .header("Referer", "https://vimeo.com/")
             .build()
 
-        val response = HttpClientProvider.clearnetClient.newCall(request).execute()
+        val response = HttpClientProvider.activeClearnetClient.newCall(request).execute()
         if (!response.isSuccessful) {
             return fallbackVimeoEmbed(url)
         }
@@ -458,7 +458,7 @@ private fun ExoVideoPlayer(
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
             }
         } else {
-            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeClearnetClient)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 

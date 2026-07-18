@@ -22,7 +22,7 @@ object InternetArchiveClient {
     private const val TAG = "ARCHIVE_API"
     private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Search for videos on Internet Archive.

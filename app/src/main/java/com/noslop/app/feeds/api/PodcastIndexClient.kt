@@ -13,7 +13,7 @@ object PodcastIndexClient {
     private const val TAG = "PODCAST_IDX_API"
     private const val BASE_URL = "https://api.podcastindex.org/api/1.0"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchEpisodes(query: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-podcast-search", language: String = "en"): List<FeedItem> {
         val credentials = apiKeyRepo.getKey("podcastindex")

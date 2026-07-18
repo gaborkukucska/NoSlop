@@ -55,6 +55,7 @@ fun OnboardingScreen(
     
     val mnemonic by viewModel.mnemonic.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
+    val isUsingInsecureStorage by viewModel.isUsingInsecureStorage.collectAsState()
     val appLanguage by viewModel.appLanguage.collectAsState()
     val context = LocalContext.current
 
@@ -75,6 +76,24 @@ fun OnboardingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.fillMaxWidth()
             ) {
+                
+            if (isUsingInsecureStorage) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = DestructiveRed.copy(alpha = 0.2f)),
+                    border = BorderStroke(1.dp, DestructiveRed)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = DestructiveRed)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column {
+                            Text("Security Warning".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                            Text("Hardware-backed encryption is unavailable on this device. Your identity keys will be stored in plaintext. Proceed at your own risk.".tr, style = MaterialTheme.typography.bodySmall, color = TextLight)
+                        }
+                    }
+                }
+            }
+
                 Text(
                     text = "NO_SLOP".tr,
                     style = MaterialTheme.typography.headlineLarge.copy(

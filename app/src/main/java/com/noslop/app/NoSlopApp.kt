@@ -36,7 +36,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .okHttpClient { HttpClientProvider.clearnetClient }
+            .okHttpClient { HttpClientProvider.activeClearnetClient }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())

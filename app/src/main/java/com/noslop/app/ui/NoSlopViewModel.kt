@@ -219,6 +219,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val isForegroundServiceEnabled: StateFlow<Boolean> = repository.isForegroundServiceEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    
+    val useTorForClearnet: StateFlow<Boolean> = repository.useTorForClearnet
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setUseTorForClearnet(enabled: Boolean) {
+        viewModelScope.launch { repository.setUseTorForClearnet(enabled) }
+    }
+
     val isSendOnEnterEnabled: StateFlow<Boolean> = repository.isSendOnEnterEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -342,6 +350,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.getNotificationSettings()
             repository.initForegroundServiceSetting()
             repository.initSendOnEnterSetting()
+            repository.initTorForClearnetSetting()
         }
 
         viewModelScope.launch {

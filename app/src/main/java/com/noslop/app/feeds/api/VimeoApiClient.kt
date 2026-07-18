@@ -13,7 +13,7 @@ import okhttp3.Request
 object VimeoApiClient {
     private const val TAG = "VIMEO_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun fetchFeatured(
         apiKeyRepo: ApiKeyRepository,

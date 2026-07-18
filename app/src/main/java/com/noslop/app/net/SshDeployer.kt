@@ -6,6 +6,7 @@ import com.noslop.app.crypto.CryptoService
 import com.noslop.app.debug.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 enum class OverwriteStrategy {
@@ -36,7 +37,27 @@ object SshDeployer {
             val jsch = JSch()
             val session = jsch.getSession(user, ip, 22)
             session.setPassword(pass)
-            session.setConfig("StrictHostKeyChecking", "no")
+            
+            session.userInfo = object : com.jcraft.jsch.UserInfo {
+                override fun getPassphrase() = null
+                override fun getPassword() = pass
+                override fun promptPassword(message: String) = true
+                override fun promptPassphrase(message: String) = true
+                override fun promptYesNo(message: String): Boolean {
+                    Logger.info(TAG, "SSH Host Key Prompt: $message")
+                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch { onLog("\n[SECURITY] SSH Host Key Fingerprint:\n$message\nAuto-accepting for deployment...\n") }
+                    return true
+                }
+                override fun showMessage(message: String) {
+                    Logger.info(TAG, "SSH Message: $message")
+                }
+            }
+            session.setConfig("StrictHostKeyChecking", "ask")
+            // Provide a dummy known_hosts file so JSch can save and do TOFU
+            val knownHostsFile = java.io.File(System.getProperty("java.io.tmpdir"), "noslop_known_hosts")
+            if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
+            jsch.setKnownHosts(knownHostsFile.absolutePath)
+
             session.serverAliveInterval = 10000 // Keep connection alive during long idle periods (like model downloads)
             session.connect(15000)
 

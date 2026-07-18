@@ -1,7 +1,6 @@
 package com.noslop.app.ui.tabs
 
 import com.noslop.app.util.tr
-
 import android.os.Build
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -31,7 +30,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReportIssueScreen(onBack: () -> Unit) {
@@ -52,8 +50,6 @@ fun ReportIssueScreen(onBack: () -> Unit) {
     var submitSuccess by remember { mutableStateOf(false) }
     var submitError by remember { mutableStateOf<String?>(null) }
     
-    val hasGithubPat = BuildConfig.GITHUB_PAT.isNotBlank()
-
     if (submitSuccess) {
         AlertDialog(
             onDismissRequest = { 
@@ -61,7 +57,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 onBack()
             },
             title = { Text("Success".tr, color = TextLight, fontWeight = FontWeight.Bold) },
-            text = { Text("Your issue has been submitted successfully to GitHub! Thank you for your feedback.".tr, color = TextMuted) },
+            text = { Text("Your issue has been submitted successfully! Thank you for your feedback.".tr, color = TextMuted) },
             confirmButton = {
                 Button(
                     onClick = { 
@@ -80,7 +76,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
     if (submitError != null) {
         AlertDialog(
             onDismissRequest = { submitError = null },
-            title = { Text("Error".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            title = { Text("Notice".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
             text = { Text(submitError ?: "Unknown error occurred.", color = TextMuted) },
             confirmButton = {
                 Button(
@@ -110,13 +106,9 @@ fun ReportIssueScreen(onBack: () -> Unit) {
 
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
-                text = if (hasGithubPat) {
-                    "Help us improve NoSlop. Your report will be sent directly to our GitHub repository."
-                } else {
-                    "Issue submission is unavailable. The app was built without a GitHub API token. Please contact the developer to enable this feature."
-                },
+                text = "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (hasGithubPat) TextMuted else DestructiveRed,
+                color = TextMuted,
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
@@ -278,68 +270,55 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                         }
                     }
 
-                    if (hasGithubPat) {
-                        isSubmitting = true
-                        coroutineScope.launch {
-                            try {
-                                val label = when (selectedIssueType) {
-                                    "Bug" -> "bug"
-                                    "Feature Request" -> "enhancement"
-                                    "Question" -> "question"
-                                    else -> "bug"
-                                }
+                    isSubmitting = true
+                    coroutineScope.launch {
+                        try {
+                            val payload = mapOf(
+                                "title" to issueTitle,
+                                "body" to bodyBuilder.toString()
+                            )
 
-                                val assignees = if (BuildConfig.GITHUB_ASSIGNEE.isNotBlank()) {
-                                    listOf(BuildConfig.GITHUB_ASSIGNEE)
-                                } else {
-                                    emptyList()
-                                }
+                            val json = Gson().toJson(payload)
+                            val requestBody = json.toRequestBody("application/json".toMediaType())
 
-                                val payload = mutableMapOf<String, Any>(
-                                    "title" to issueTitle,
-                                    "body" to bodyBuilder.toString(),
-                                    "labels" to listOf(label)
-                                )
-                                if (assignees.isNotEmpty()) {
-                                    payload["assignees"] = assignees
-                                }
+                            val request = Request.Builder()
+                                .url("https://noslop.me/api/relay/github-issue")
+                                .post(requestBody)
+                                .build()
 
-                                val json = Gson().toJson(payload)
-                                val requestBody = json.toRequestBody("application/json".toMediaType())
-
-                                val request = Request.Builder()
-                                    .url("https://api.github.com/repos/gaborkukucska/NoSlop/issues")
-                                    .header("Authorization", "Bearer ${BuildConfig.GITHUB_PAT}")
-                                    .header("Accept", "application/vnd.github.v3+json")
-                                    .post(requestBody)
-                                    .build()
-
-                                val response = withContext(Dispatchers.IO) {
-                                    HttpClientProvider.clearnetClient.newCall(request).execute()
-                                }
-
-                                if (response.isSuccessful) {
-                                    submitSuccess = true
-                                } else {
-                                    val errorBody = response.body?.string()
-                                    submitError = "Failed to submit issue: HTTP ${response.code}\n$errorBody"
-                                    Logger.error("GITHUB", "Submit issue failed: HTTP ${response.code}", errorBody)
-                                }
-                            } catch (e: Exception) {
-                                submitError = "An error occurred while submitting the issue: ${e.message}"
-                                Logger.error("GITHUB", "Submit issue exception", e.stackTraceToString())
-                            } finally {
-                                isSubmitting = false
+                            val response = withContext(Dispatchers.IO) {
+                                HttpClientProvider.activeClearnetClient.newCall(request).execute()
                             }
+
+                            if (response.isSuccessful) {
+                                submitSuccess = true
+                            } else {
+                                throw Exception("HTTP ${response.code}")
+                            }
+                        } catch (e: Exception) {
+                            Logger.error("GITHUB", "Relay submit failed, falling back to browser: ${e.message}")
+                            withContext(Dispatchers.Main) {
+                                try {
+                                    val encodedTitle = android.net.Uri.encode(issueTitle)
+                                    val encodedBody = android.net.Uri.encode(bodyBuilder.toString())
+                                    val fallbackUrl = "https://github.com/gaborkukucska/NoSlop/issues/new?title=$encodedTitle&body=$encodedBody"
+                                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(fallbackUrl)))
+                                    submitError = "Relay server is unreachable. We've opened GitHub in your browser instead so you don't lose your report."
+                                } catch (fallbackEx: Exception) {
+                                    submitError = "Failed to submit and failed to open browser."
+                                }
+                            }
+                        } finally {
+                            isSubmitting = false
                         }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (hasGithubPat) AccentGreen else BorderSubtle,
+                    containerColor = AccentGreen,
                     contentColor = PrimaryBlack
                 ),
-                enabled = hasGithubPat && !isSubmitting && (title.isNotBlank() || description.isNotBlank())
+                enabled = !isSubmitting && (title.isNotBlank() || description.isNotBlank())
             ) {
                 if (isSubmitting) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), color = PrimaryBlack, strokeWidth = 2.dp)
@@ -348,7 +327,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 } else {
                     Icon(Icons.Default.BugReport, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (hasGithubPat) "Submit Issue" else "Unavailable (No API Token)", fontWeight = FontWeight.Bold)
+                    Text("Submit Issue", fontWeight = FontWeight.Bold)
                 }
             }
         }

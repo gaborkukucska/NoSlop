@@ -13,8 +13,6 @@ val localPropsFile = rootProject.file("local.properties")
 if (localPropsFile.exists()) {
     localPropsFile.reader().use { localProps.load(it) }
 }
-val githubPat: String = localProps.getProperty("GITHUB_PAT", "")
-val githubAssignee: String = localProps.getProperty("GITHUB_ASSIGNEE", "")
 
 android {
     namespace = "com.noslop.app"
@@ -24,8 +22,8 @@ android {
         applicationId = "com.noslop.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 33
-        versionName = "0.3.3-alpha"
+        versionCode = 34
+        versionName = "0.3.4-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -57,9 +55,6 @@ android {
             // Tor proxy ports
             buildConfigField("int", "TOR_SOCKS_PORT", "9050")
             buildConfigField("int", "TOR_CONTROL_PORT", "9051")
-            // GitHub issue submission
-            buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
-            buildConfigField("String", "GITHUB_ASSIGNEE", "\"$githubAssignee\"")
         }
         debug {
             isDebuggable = true
@@ -77,9 +72,6 @@ android {
             // Tor proxy ports for debug build
             buildConfigField("int", "TOR_SOCKS_PORT", "9052")
             buildConfigField("int", "TOR_CONTROL_PORT", "9053")
-            // GitHub issue submission
-            buildConfigField("String", "GITHUB_PAT", "\"$githubPat\"")
-            buildConfigField("String", "GITHUB_ASSIGNEE", "\"$githubAssignee\"")
         }
     }
 

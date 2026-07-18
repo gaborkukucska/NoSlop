@@ -17,7 +17,7 @@ object RedditApiClient {
     private const val TAG = "REDDIT_API"
     private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Fetch posts from a subreddit with a given sort order.

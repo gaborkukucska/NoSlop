@@ -54,6 +54,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
+    val useTorForClearnet: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.useTorForClearnet
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
     val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
 
@@ -113,7 +114,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val url = "http://$lanIp:8080/api/invoke"
                 val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
                 val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
-                com.noslop.app.net.HttpClientProvider.clearnetClient.newCall(request).execute().use { response ->
+                com.noslop.app.net.HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
                     val respBody = response.body?.string() ?: "{}"
                     if (response.isSuccessful) {
                         return@withContext JSONObject(respBody)
@@ -204,6 +205,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             obj.put("public_key", peer.publicKeyB64)
             obj.put("is_trusted", peer.isTrusted)
             obj.put("handle", peer.handle)
+            obj.put("onion_address", peer.onionAddress)
             peerArray.put(obj)
         }
         val args = JSONObject().put("peers", peerArray)
@@ -580,7 +582,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         settingsRepository.setForegroundServiceEnabled(enabled)
 
     suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
+    suspend fun initTorForClearnetSetting() = settingsRepository.initTorForClearnetSetting()
 
+    suspend fun setUseTorForClearnet(enabled: Boolean) = settingsRepository.setUseTorForClearnet(enabled)
     suspend fun setSendOnEnterEnabled(enabled: Boolean) =
         settingsRepository.setSendOnEnterEnabled(enabled)
 

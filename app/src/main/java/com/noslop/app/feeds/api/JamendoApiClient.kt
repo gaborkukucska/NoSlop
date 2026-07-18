@@ -18,7 +18,7 @@ object JamendoApiClient {
     // Default test client ID for Jamendo API
     private const val CLIENT_ID = "709fa152"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchTracks(tags: String, sourceId: String = "api-jamendo-music"): List<FeedItem> {
         return try {

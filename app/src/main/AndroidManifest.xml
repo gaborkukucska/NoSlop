@@ -84,7 +84,7 @@
             android:foregroundServiceType="dataSync" />
 
         <receiver android:name=".util.UpdateManager$DownloadReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
             </intent-filter>

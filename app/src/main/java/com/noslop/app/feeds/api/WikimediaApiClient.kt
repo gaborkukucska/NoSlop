@@ -16,7 +16,7 @@ object WikimediaApiClient {
 
     private const val TAG = "WIKIMEDIA_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private var lastContinueToken: String? = null
 

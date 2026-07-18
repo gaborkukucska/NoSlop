@@ -37,6 +37,7 @@ object HttpClientProvider {
      *  Short timeouts so a dead bootstrap doesn't stall app start. */
     private val bootstrapClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
             .writeTimeout(8, TimeUnit.SECONDS)
@@ -124,8 +125,16 @@ object HttpClientProvider {
      * - 30 s connect / read timeouts — generous enough for slow servers, tight
      *   enough to surface failures instead of hanging indefinitely
      */
-    val clearnetClient: OkHttpClient by lazy {
+    
+    @Volatile
+    var useTorForClearnet: Boolean = true
+
+    val activeClearnetClient: OkHttpClient
+        get() = if (useTorForClearnet) torClient else rawClearnetClient
+
+    val rawClearnetClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY) // Force direct connection for LAN/clearnet, ignoring Tor system properties
             .dns(cascadingDns)
             .addInterceptor { chain ->
                 chain.proceed(
@@ -146,7 +155,12 @@ object HttpClientProvider {
      * on the exit node.
      */
     val torClient: OkHttpClient by lazy {
+        val dispatcher = okhttp3.Dispatcher().apply {
+            maxRequests = 12
+            maxRequestsPerHost = 4
+        }
         OkHttpClient.Builder()
+            .dispatcher(dispatcher)
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
             .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s

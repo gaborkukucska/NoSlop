@@ -69,7 +69,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
             val request = Request.Builder().url(Constants.UPDATE_CHECK_URL).build()
-            val body = HttpClientProvider.clearnetClient.newCall(request).execute().use { response ->
+            val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     Logger.warn(TAG, "content.json fetch failed: HTTP ${response.code}")
                     return@withContext null

@@ -84,7 +84,7 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     val context = LocalContext.current
     val imageLoader = remember {
         ImageLoader.Builder(context)
-            .okHttpClient { HttpClientProvider.clearnetClient }
+            .okHttpClient { HttpClientProvider.activeClearnetClient }
             .interceptorDispatcher(Dispatchers.IO)
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {

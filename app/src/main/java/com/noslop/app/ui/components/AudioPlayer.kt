@@ -74,7 +74,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                     }
                 }
             } else {
-                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.clearnetClient)
+                val dataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.activeClearnetClient)
                 
                 val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
                     .setUsage(androidx.media3.common.C.USAGE_MEDIA)

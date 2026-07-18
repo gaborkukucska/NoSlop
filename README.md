@@ -17,7 +17,7 @@
 
 **NoSlop** is a privacy-first Kotlin Multiplatform app (Android & iOS) for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
 
-It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. All mesh network traffic is routed through **Tor by default**. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
+It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. All network traffic is routed through **Tor by default**. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
 
 ---
 
@@ -94,7 +94,7 @@ Your identity is generated locally and never leaves your device unless you expor
 
 ### Tor-Routed Networking
 
-All outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy running locally on port 9050.
+**By default**, all outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy (clearnet media can optionally be toggled to bypass Tor for speed in Settings, while mesh traffic remains strictly Tor-routed). running locally on port 9050.
 
 - Tor circuits are built before any data is sent. The app surfaces a clear status indicator so you always know if Tor is connected.
 - Your real IP address is never exposed to feed servers, peers, or anyone on the network.

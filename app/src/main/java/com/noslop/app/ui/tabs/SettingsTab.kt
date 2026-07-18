@@ -257,6 +257,35 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    
+                            val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Route Clearnet via Tor".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Private by default. Turn off for faster media loading. Mesh traffic always uses Tor.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = useTorForClearnet,
+                                    onCheckedChange = { viewModel.setUseTorForClearnet(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
                                     Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = if (hasHub) TextMuted else TextLight)
                                     Text(
                                         "Keep NoSlop running in the background for uninterrupted mesh sync and media auto-downloads.".tr,
