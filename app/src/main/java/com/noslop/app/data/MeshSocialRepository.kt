@@ -109,6 +109,7 @@ class MeshSocialRepository(
                         
                         val announcePay = com.noslop.app.mesh.AnnouncePeerPayload(
                             authorId = myKeys.publicKeyB64,
+                            onionAddress = myKeys.onionAddress,
                             timestamp = timestamp,
                             signature = signature
                         )

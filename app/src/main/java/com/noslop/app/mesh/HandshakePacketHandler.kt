@@ -262,7 +262,17 @@ class HandshakePacketHandler(
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer != null) {
             val wasOffline = !peer.isOnline
-            peerDao.insertPeer(peer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+            // Update onion address if the peer is broadcasting a new one (e.g. after deploying a Hub)
+            val newOnion = announcePay.onionAddress?.takeIf { it.isNotBlank() } ?: peer.onionAddress
+            val onionChanged = newOnion != peer.onionAddress && newOnion.isNotBlank()
+            if (onionChanged) {
+                Logger.info(TAG, "ANNOUNCE_PEER: ${peer.handle} onion address updated: ${peer.onionAddress.take(12)}... → ${newOnion.take(12)}...")
+            }
+            peerDao.insertPeer(peer.copy(
+                isOnline = true,
+                lastSeenAt = System.currentTimeMillis(),
+                onionAddress = newOnion
+            ))
             Logger.debug(TAG, "ANNOUNCE_PEER received: ${peer.handle} is online")
 
             // Catch-up sync: when a trusted peer transitions from offline → online,

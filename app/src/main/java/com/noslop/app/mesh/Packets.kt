@@ -118,6 +118,7 @@ data class PeerHandshakePayload(
 
 data class AnnouncePeerPayload(
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("onion_address") val onionAddress: String? = null,
     val timestamp: Long,
     val signature: String
 )
