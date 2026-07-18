@@ -491,6 +491,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                                 payload = payloadJson
                             )
                             com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+                        } else {
+                            // If we received this DM from a peer, we must process it locally to update the UI
+                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = id,
+                                senderId = sender,
+                                targetUserId = myKeys.publicKeyB64,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            handleIncomingPacket(packet)
                         }
                     }
                 }

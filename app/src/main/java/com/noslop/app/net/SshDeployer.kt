@@ -92,6 +92,8 @@ object SshDeployer {
                 android.util.Base64.NO_WRAP
             )
 
+            val expandedSeedB64 = identity?.privateKeyB64?.let { com.noslop.app.crypto.CryptoService.getRawEd25519Seed(it) } ?: ""
+
             val script = """
                 #!/bin/bash
                 set -e
@@ -166,16 +168,9 @@ EOF
                     rm -f ~/.hainet/auth.json
                     
                     cat << 'PYEOF' > gen_tor.py
-import base64, hashlib, os
+import base64
 try:
-    with open(os.path.expanduser("~/.hainet/identity/ed25519_priv.b64"), "r") as f:
-        b64_key = f.read().strip()
-    pkcs8 = base64.b64decode(b64_key)
-    seed = pkcs8[-32:]
-    expanded = bytearray(hashlib.sha512(seed).digest())
-    expanded[0] &= 248
-    expanded[31] &= 127
-    expanded[31] |= 64
+    expanded = base64.b64decode("$expandedSeedB64")
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
@@ -427,16 +422,9 @@ EOF
                 run_sudo apt-get install -y -qq tor >/dev/null 2>&1 || true
                 
                 cat << 'PYEOF' > gen_tor.py
-import base64, hashlib, os
+import base64
 try:
-    with open(os.path.expanduser("~/.hainet/identity/ed25519_priv.b64"), "r") as f:
-        b64_key = f.read().strip()
-    pkcs8 = base64.b64decode(b64_key)
-    seed = pkcs8[-32:]
-    expanded = bytearray(hashlib.sha512(seed).digest())
-    expanded[0] &= 248
-    expanded[31] &= 127
-    expanded[31] |= 64
+    expanded = base64.b64decode("$expandedSeedB64")
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
