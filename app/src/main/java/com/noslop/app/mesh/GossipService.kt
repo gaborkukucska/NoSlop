@@ -58,6 +58,14 @@ object GossipService {
         }
     }
 
+    /** Only push to Hub if the user actually has one configured */
+    private suspend fun pushToHubIfLinked(packet: NetworkPacket) {
+        val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) {
+            pushPacketToHub?.invoke(packet)
+        }
+    }
+
     private fun cleanupStaleRoutes() {
         val now = System.currentTimeMillis()
         val timeoutMs = 5 * 60 * 1000L // 5 minutes timeout
@@ -253,17 +261,17 @@ object GossipService {
             }
         } else if (packet.type == "MEDIA_RELAY_REQUEST") {
             handleRelayRequest(senderId, packet)
-            pushPacketToHub?.invoke(packet) // Also forward to others
+            pushToHubIfLinked(packet) // Also forward to others
             forwardPacket(packet)
             return false
         } else if (packet.type == "MEDIA_RECOVERY_FOUND") {
             handleRecoveryFound(senderId, packet)
-            pushPacketToHub?.invoke(packet)
+            pushToHubIfLinked(packet)
             // Do not automatically forward RECOVERY_FOUND, it follows the chain back
             return true
         } else {
             // Public message/post, process locally AND forward to other peers
-            pushPacketToHub?.invoke(packet)
+            pushToHubIfLinked(packet)
             forwardPacket(packet)
         }
 
@@ -406,11 +414,11 @@ object GossipService {
      * Outbound broadcast originating from us
      */
     suspend fun broadcast(packet: NetworkPacket) {
-        pushPacketToHub?.invoke(packet)
         val tx = transport ?: return
         
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
+            pushPacketToHub?.invoke(packet)
             Logger.info(TAG, "Hub is linked. Delegating broadcast of packet ${packet.id} to Hub.")
             return
         }

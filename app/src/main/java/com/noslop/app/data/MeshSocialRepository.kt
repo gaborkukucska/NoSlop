@@ -55,12 +55,25 @@ class MeshSocialRepository(
 
     private fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
         repositoryScope.launch {
-            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
             val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
-            if (hubStatus.isNullOrBlank()) {
-                meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+            val hasHub = !hubStatus.isNullOrBlank()
+
+            // Always push to Hub if linked (additional relay for redundancy)
+            if (hasHub) {
+                com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+            }
+
+            // Directed packets (DMs) MUST always be sent directly over Tor as well.
+            // Hub delegation only replaces direct sends for non-targeted broadcasts.
+            val isDirected = !packet.targetUserId.isNullOrBlank()
+            if (isDirected || !hasHub) {
+                if (onionAddress.isNotBlank()) {
+                    meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                } else {
+                    Logger.warn(TAG, "Cannot send directed packet ${packet.id}: recipient onion address is blank")
+                }
             } else {
-                Logger.info(TAG, "Hub is linked. Delegating packet ${packet.id} to Hub.")
+                Logger.info(TAG, "Hub is linked. Delegating broadcast packet ${packet.id} to Hub.")
             }
         }
     }
