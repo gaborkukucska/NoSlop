@@ -237,12 +237,26 @@ PYEOF
                     
                     run_sudo systemctl restart hainet-core.service
                     
-                    # Ensure port 9999 is exposed in torrc for existing deployments
-                    run_sudo grep -q "HiddenServicePort 9999 127.0.0.1:9999" /etc/tor/torrc || (
+                    # Ensure full HiddenService block exists in torrc for existing deployments
+                    if ! run_sudo grep -q "HiddenServiceDir.*hainet" /etc/tor/torrc; then
+                        # Detect which directory holds the key material
+                        HS_DIR="/var/lib/tor/hainet/"
+                        if run_sudo test -d /var/lib/tor/hainet_hidden_service; then
+                            HS_DIR="/var/lib/tor/hainet_hidden_service/"
+                        fi
+                        echo "" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                        echo "# HAI-Net Hidden Service" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                        echo "HiddenServiceDir ${'$'}HS_DIR" | run_sudo tee -a /etc/tor/torrc >/dev/null
+                        echo "HiddenServicePort 8080 127.0.0.1:8080" | run_sudo tee -a /etc/tor/torrc >/dev/null
                         echo "HiddenServicePort 9999 127.0.0.1:9999" | run_sudo tee -a /etc/tor/torrc >/dev/null
                         run_sudo systemctl restart tor || true
-                        echo "Injected missing port 9999 to Tor configuration."
-                    )
+                        echo "Injected full HiddenService block into Tor configuration."
+                    elif ! run_sudo grep -q "HiddenServicePort 9999" /etc/tor/torrc; then
+                        # Dir exists but port 9999 is missing (legacy deploy)
+                        run_sudo sed -i '/HiddenServicePort 8080/a HiddenServicePort 9999 127.0.0.1:9999' /etc/tor/torrc
+                        run_sudo systemctl restart tor || true
+                        echo "Injected missing port 9999 to existing Tor configuration."
+                    fi
 
                     echo "Hub Update Complete!"
                     exit 0
