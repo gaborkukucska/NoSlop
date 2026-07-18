@@ -1594,8 +1594,7 @@ fun toggleAggregator() {
             clipboard.setPrimaryClip(clip)
         }
     }
-
-    fun clearLogFile() { Logger.clearLog() }
+fun clearLogFile() { Logger.clearLog() }
 
     fun handleQrLogin(sessionId: String, ip: String) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1607,6 +1606,8 @@ fun toggleAggregator() {
                     val hubStatus = hubDeploymentStatus.value
                     if (hubStatus != null && hubStatus.contains("Active at ")) {
                         targetIp = hubStatus.substringAfter("Active at ").trim()
+                    } else {
+                        targetIp = "10.0.2.2" // Fallback to emulator host if missing
                     }
                 }
                 
@@ -1620,11 +1621,18 @@ fun toggleAggregator() {
                     }
                     return@launch
                 }
-                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
-                Logger.info("QR_LOGIN", "Signature generated (pubkey=${identity.publicKeyB64.take(12)}…)")
 
+                val signature = CryptoService.sign(sessionId, identity.privateKeyB64)
+                
+                val isOnion = targetIp.endsWith(".onion")
+                val proxy = if (isOnion) {
+                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(com.noslop.app.tor.TorService.PROXY_HOST, com.noslop.app.tor.TorService.SOCKS_PORT))
+                } else {
+                    java.net.Proxy.NO_PROXY
+                }
+                
                 val url = java.net.URL("http://$targetIp:8080/api/auth/qr/verify")
-                val connection = url.openConnection() as java.net.HttpURLConnection
+                val connection = url.openConnection(proxy) as java.net.HttpURLConnection
                 connection.requestMethod = "POST"
                 connection.setRequestProperty("Content-Type", "application/json")
                 connection.connectTimeout = 5000
@@ -1676,8 +1684,15 @@ fun toggleAggregator() {
                     return@launch
                 }
                 
+                val isOnion = ip.endsWith(".onion")
+                val proxy = if (isOnion) {
+                    java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress(com.noslop.app.tor.TorService.PROXY_HOST, com.noslop.app.tor.TorService.SOCKS_PORT))
+                } else {
+                    java.net.Proxy.NO_PROXY
+                }
+                
                 val initUrl = java.net.URL("http://$ip:8080/api/auth/qr/init")
-                val initConn = initUrl.openConnection() as java.net.HttpURLConnection
+                val initConn = initUrl.openConnection(proxy) as java.net.HttpURLConnection
                 initConn.requestMethod = "POST"
                 initConn.connectTimeout = 5000
                 if (initConn.responseCode != 200) {
@@ -1702,7 +1717,7 @@ fun toggleAggregator() {
                 """.trimIndent()
                 
                 val verifyUrl = java.net.URL("http://$ip:8080/api/auth/qr/verify")
-                val verifyConn = verifyUrl.openConnection() as java.net.HttpURLConnection
+                val verifyConn = verifyUrl.openConnection(proxy) as java.net.HttpURLConnection
                 verifyConn.requestMethod = "POST"
                 verifyConn.setRequestProperty("Content-Type", "application/json")
                 verifyConn.connectTimeout = 5000
