@@ -31,6 +31,10 @@ class DmPacketHandler(
         val opponentEncPub = peer?.encPublicKeyB64 ?: packet.senderId
 
         val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
+        if (plaintext == null) {
+            Logger.error(TAG, "FATAL: DM Decryption failed for sender ${packet.senderId}. Expected an X25519 key but got: ${opponentEncPub.take(16)}...")
+            return false
+        }
         if (plaintext != null) {
             var finalContent = plaintext
             var mediaId: String? = null

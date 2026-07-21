@@ -33,7 +33,7 @@ object GossipService {
     private var localPublicKeyB64: String = ""
     private var getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null
     private var checkEntityExists: (suspend (String, String) -> Boolean)? = null
-    var pushPacketToHub: (suspend (NetworkPacket) -> Unit)? = null
+    var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     fun initialize(
@@ -153,10 +153,11 @@ object GossipService {
         }
 
         // 3. Rate limit: 20 packets per sender per 10-second window
-        // Whitelist media streams and syncs to prevent chunk blocking during heavy transfers
+        // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        if (!isMediaPacket && !isSyncPacket) {
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
+        if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
             synchronized(limitList) {
@@ -256,6 +257,7 @@ object GossipService {
             if (packet.targetUserId != localPublicKeyB64) {
                 // Directed at someone else, just forward it if hops > 1
                 Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
+                pushToHubIfLinked(packet)
                 forwardPacket(packet)
                 return false
             }
@@ -388,7 +390,7 @@ object GossipService {
 
         val activePeers = dao.getAllPeersList()
         val peersToForward = activePeers.filter { 
-            it.publicKeyB64 != packet.senderId && it.publicKeyB64 != localPublicKeyB64 && it.isTrusted 
+            it.publicKeyB64 != packet.senderId && it.publicKeyB64 != localPublicKeyB64 && it.isTrusted && it.onionAddress.isNotBlank()
         }
 
         if (peersToForward.isEmpty()) return

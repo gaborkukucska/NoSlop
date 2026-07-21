@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -87,7 +90,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
         // --- Hub API Client ---
 
-    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val jsonStr = packet.toJson()
             val jsonObj = org.json.JSONObject(jsonStr)
@@ -96,11 +99,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val res = invokeHubApi("sync_push_packets", args)
             if (res != null) {
                 com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+                return@withContext true
             } else {
                 com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to push packet ${packet.id} to Hub (API returned null).")
+                return@withContext false
             }
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
+            return@withContext false
         }
     }
 
@@ -206,6 +212,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             obj.put("is_trusted", peer.isTrusted)
             obj.put("handle", peer.handle)
             obj.put("onion_address", peer.onionAddress)
+            obj.put("enc_public_key", peer.encPublicKeyB64)
             peerArray.put(obj)
         }
         val args = JSONObject().put("peers", peerArray)
@@ -401,12 +408,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val peerObj = peersArray.getJSONObject(i)
                 val pubKey = peerObj.optString("public_key")
                 if (pubKey.isNotBlank() && peerDao.getPeerByPublicKey(pubKey) == null) {
+                    val encPubKey = peerObj.optString("enc_public_key").takeIf { it.isNotBlank() } ?: ""
                     peerDao.insertPeer(com.noslop.app.data.Peer(
                         publicKeyB64 = pubKey,
                         handle = peerObj.optString("handle"),
                         tripcode = "sync",
-                        onionAddress = "",
-                        encPublicKeyB64 = pubKey,
+                        onionAddress = peerObj.optString("onion_address", ""),
+                        encPublicKeyB64 = encPubKey,
                         isTrusted = peerObj.optBoolean("is_trusted", false),
                         lastSeenAt = System.currentTimeMillis()
                     ))
@@ -518,6 +526,23 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     }
 
     suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
+        // 0. Ensure our onion address matches the Hub's true native onion address to fix asymmetric routing
+        try {
+            val resInfo = invokeHubApi("get_node_info", org.json.JSONObject())
+            if (resInfo != null && resInfo.has("onion_address")) {
+                val hubOnion = resInfo.getString("onion_address")
+                if (hubOnion.isNotBlank() && hubOnion.endsWith(".onion")) {
+                    val myKeys = getLocalIdentity()
+                    if (myKeys != null && myKeys.onionAddress != hubOnion) {
+                        com.noslop.app.debug.Logger.info("HUB_SYNC", "Healing asymmetric routing: Updating local onion from ${myKeys.onionAddress} to Hub's true onion $hubOnion")
+                        updateOnionAddress(hubOnion)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to fetch Hub node info: ${e.message}")
+        }
+
         syncPullHistoricalDataFromHub()
         syncPullIncrementalDMsFromHub()
         
@@ -660,7 +685,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
 
-    fun startPresenceHeartbeat() = meshSocialRepository.startPresenceHeartbeat()
+    private var hubSyncJob: kotlinx.coroutines.Job? = null
+
+    fun startPresenceHeartbeat() {
+        meshSocialRepository.startPresenceHeartbeat()
+        
+        if (hubSyncJob?.isActive == true) return
+        hubSyncJob = repositoryScope.launch {
+            while (isActive) {
+                try {
+                    val hubStatus = getAppSetting("hub_deployment_status")
+                    if (!hubStatus.isNullOrBlank()) {
+                        pullMeshPacketsFromHub()
+                    }
+                } catch (e: Exception) {
+                    // Ignore connection timeouts to prevent log spam when offline
+                }
+                delay(3000L)
+            }
+        }
+    }
 
     // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---
     suspend fun getMediaSettings(): MediaSettings = settingsRepository.getMediaSettings()

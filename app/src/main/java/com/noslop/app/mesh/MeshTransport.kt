@@ -93,9 +93,18 @@ class MeshTransport(
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         val hubStatus = repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
-            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
-            com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked. Delegating packet ${packet.id} to Hub.")
-            return@withContext true
+            val pushed = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet) ?: false
+            if (pushed) {
+                com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked and reachable. Delegated packet ${packet.id} to Hub.")
+                return@withContext true
+            } else {
+                com.noslop.app.debug.Logger.warn("MESH_TRANSPORT", "Hub linked but UNREACHABLE. Falling back to direct Tor routing for packet ${packet.id}.")
+            }
+        }
+
+        if (onionAddress.isBlank()) {
+            Logger.warn(TAG, "Cannot send ${packet.type} packet: target onion address is blank")
+            return@withContext false
         }
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
@@ -129,7 +138,10 @@ class MeshTransport(
                     Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms")
                     socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
                     val writer = PrintWriter(socket.getOutputStream(), true)
-                    writer.println(packet.toJson())
+                    writer.print(packet.toJson() + "\n")
+                    writer.flush()
+                    try { socket.shutdownOutput() } catch (e: Exception) {} // Let Tor proxy know we are done writing
+                    delay(150) // Brief pause to ensure Tor flushes the TCP buffer to the network
                     Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
                     return@withContext true
                 } catch (e: Exception) {
@@ -137,10 +149,10 @@ class MeshTransport(
                     val msg = e.message ?: ""
                     // Fast-fail if Tor explicitly tells us the peer is dead/unreachable
                     if (msg.contains("Host unreachable") || msg.contains("TTL expired") || msg.contains("general SOCKS server failure")) {
-                        Logger.warn(TAG, "Tor explicitly rejected routing to $onionAddress. Fast-failing to free circuit.")
-                        return@withContext false
+                        Logger.warn(TAG, "Tor explicitly rejected routing to $onionAddress. Retrying to allow circuit building.")
+                        // Do NOT return false here; allow the retry loop to continue!
                     }
-                    if (attempt < 3) delay(attempt * 2000L) // Reduced backoff
+                    if (attempt < 3) delay(attempt * 5000L) // Reduced backoff
                 } finally {
                     try { socket?.close() } catch (_: Exception) {}
                 }
