@@ -401,7 +401,7 @@ object GossipService {
         val forwardedPacket = NetworkPacket(
             id = packet.id,
             hops = currentHops - 1,
-            senderId = localPublicKeyB64, // Re-stamp senderId to local node ID (privacy preservation)
+            senderId = if (packet.type == "MESSAGE") packet.senderId else localPublicKeyB64, // Do not re-stamp DMs!
             targetUserId = packet.targetUserId,
             signature = packet.signature,
             type = packet.type,

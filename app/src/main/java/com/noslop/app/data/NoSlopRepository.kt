@@ -629,6 +629,33 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)
         _identityUpdateFlow.emit(Unit)
+        
+        // Broadcast the new identity so peers know the new onion address!
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val timestamp = System.currentTimeMillis()
+            val payload = "${myKeys.publicKeyB64}|${myKeys.displayName}|${address}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payload, myKeys.privateKeyB64)
+            val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
+                id = java.util.UUID.randomUUID().toString(),
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = myKeys.displayName,
+                fromDisplayName = myKeys.displayName,
+                fromHomeNode = address,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            val syncPacket = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = myKeys.publicKeyB64,
+                type = "USER_HANDSHAKE",
+                payload = com.google.gson.Gson().toJsonTree(syncReq),
+                signature = signature
+            )
+            com.noslop.app.mesh.GossipService.broadcast(syncPacket)
+        }
     }
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {

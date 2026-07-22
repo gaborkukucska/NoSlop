@@ -92,7 +92,7 @@ object SshDeployer {
                 android.util.Base64.NO_WRAP
             )
 
-            val expandedSeedB64 = identity?.privateKeyB64?.let { com.noslop.app.crypto.CryptoService.getRawEd25519Seed(it) } ?: ""
+            val expandedSeedB64 = identity?.privateKeyB64?.let { com.noslop.app.crypto.CryptoService.getRawEd25519Seed(it)?.removePrefix("ED25519-V3:")?.trim() } ?: ""
 
             val script = """
                 #!/bin/bash
