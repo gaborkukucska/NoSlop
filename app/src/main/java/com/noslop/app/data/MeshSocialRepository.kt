@@ -379,6 +379,9 @@ class MeshSocialRepository(
         )
         peerDao.insertPeer(newPeer)
 
+        // Sync with hub before dispatching so the hub firewall is aware of the pending peer
+        meshTransport.repository.syncPeersWithHub()
+
         val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
             val userProfile = getUserProfile()
@@ -418,6 +421,9 @@ class MeshSocialRepository(
     suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
         peerDao.insertPeer(peer.copy(isTrusted = true))
         _incomingRequestFlow.value = null
+        
+        // Sync with hub before dispatching so the hub firewall is aware of the new peer
+        meshTransport.repository.syncPeersWithHub()
         
         val myKeys = getLocalIdentity()
         val userProfile = getUserProfile()

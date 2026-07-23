@@ -432,7 +432,7 @@ object MediaManager {
                 val targetPubKey = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }?.publicKeyB64
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 2, // 2 hops allows successful pass-through if delegated to Hub
+                    hops = 3, // 3 hops allows successful pass-through if delegated to Hub
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                     targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
@@ -554,7 +554,7 @@ object MediaManager {
                     val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 2,
+                        hops = 3,
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                         targetUserId = targetPeer?.publicKeyB64,
                         type = "MEDIA_TRANSFER_ACK",
@@ -618,7 +618,7 @@ object MediaManager {
                     val metadata = getMetadataSync(payload.mediaId)
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 2,
+                        hops = 3,
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                         targetUserId = senderId,
                         type = "MEDIA_METADATA_RESPONSE", 
@@ -663,7 +663,7 @@ object MediaManager {
 
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 2,
+                    hops = 3,
                     senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
                     targetUserId = senderId,
                     type = "MEDIA_CHUNK",

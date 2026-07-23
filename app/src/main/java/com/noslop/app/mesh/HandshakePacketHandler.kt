@@ -80,7 +80,7 @@ class HandshakePacketHandler(
                 if (allowed) {
                     // Auto-accept connection for creators, restrict permissions by marking as temporary
                     peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = true))
-                    repo.setHandshakeAccepted(peer)
+                    repo.acceptConnectionRequest(peer) // Actually send the handshake!
                     Logger.info(TAG, "Auto-accepted connection request from ${peer.handle} (Creator Mode)")
                 } else {
                     Logger.warn(TAG, "Auto-accept rate limit exceeded. Falling back to manual request.")
@@ -115,6 +115,11 @@ class HandshakePacketHandler(
                     )
                 }
             }
+        } else {
+            // If they are already trusted but sending a CONNECTION_REQUEST, they likely didn't receive our acceptance confirmation
+            // (e.g., their Tor onion address was unreachable when we first accepted). Resend it!
+            Logger.info(TAG, "Received CONNECTION_REQUEST from already trusted peer ${peer.handle}. Resending USER_HANDSHAKE.")
+            repo.acceptConnectionRequest(peer)
         }
 
         return true
