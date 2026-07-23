@@ -28,7 +28,7 @@ class DmPacketHandler(
         }
         val msgPay = packet.getMessagePayload() ?: return false
         val peer = peerDao.getPeerByPublicKey(packet.senderId)
-        val opponentEncPub = peer?.encPublicKeyB64 ?: packet.senderId
+        val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: packet.senderId
 
         val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
         if (plaintext == null) {

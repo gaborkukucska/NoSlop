@@ -383,6 +383,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
 
             if (!hubStatus.isNullOrBlank()) {
+                com.noslop.app.tor.TorService.unregisterHiddenServices()
                 val identity = repository.getLocalIdentity()
                 if (identity != null) {
                     val oldPeer = repository.peerDao.getPeerByPublicKey(identity.publicKeyB64)

@@ -1,0 +1,1009 @@
+Logs from NoSlop with HUB:
+```
+[2026-07-23 13:37:12.568] [DEBUG] [ARCHIVE_API] Final mediaUrl for ConnectionsByJamesBurke (video): https://archive.org/download/ConnectionsByJamesBurke/Connections%2FSeason%201%2FConnections%20S01E01%20-%20The%20Trigger%20Effect.mp4
+[2026-07-23 13:37:13.230] [INFO] [SshDeployer] .
+[2026-07-23 13:37:13.266] [DEBUG] [ARCHIVE_API] Found 57 files in metadata for TheMemphisBelleAStoryofaFlyingFortress
+[2026-07-23 13:37:13.267] [INFO] [ARCHIVE_API] Resolved video for TheMemphisBelleAStoryofaFlyingFortress: https://archive.org/download/TheMemphisBelleAStoryofaFlyingFortress/Memphis.BelleTheA.Story.Of.A.Flying.Fortress.1944.mp4
+[2026-07-23 13:37:13.318] [DEBUG] [ARCHIVE_API] Final mediaUrl for hborealsex (video): https://archive.org/download/hborealsex/Real%20Sex%2001%20%281990%29.mp4
+[2026-07-23 13:37:14.473] [DEBUG] [ARCHIVE_API] Found 386 files in metadata for EUROPATheLastBattle
+[2026-07-23 13:37:14.474] [INFO] [ARCHIVE_API] Resolved video for EUROPATheLastBattle: https://archive.org/download/EUROPATheLastBattle/EUROPA%20-%20The%20Last%20Battle%20-%20Part%201.mp4
+[2026-07-23 13:37:15.229] [DEBUG] [ARCHIVE_API] Final mediaUrl for pbsnovadocs (video): https://archive.org/download/pbsnovadocs/A%20Mathematical%20Mystery%20Tour%20%281985%29.mp4
+[2026-07-23 13:37:15.229] [DEBUG] [ARCHIVE_API] Final mediaUrl for the-world-at-war-1973-thames-television-world-war-two (video): https://archive.org/download/the-world-at-war-1973-thames-television-world-war-two/01%20A%20New%20Germany%20%281933%E2%80%931939%29.mp4
+[2026-07-23 13:37:15.394] [DEBUG] [ARCHIVE_API] Found 65 files in metadata for nude.-aerobics.-1983
+[2026-07-23 13:37:15.396] [INFO] [ARCHIVE_API] Resolved video for nude.-aerobics.-1983: https://archive.org/download/nude.-aerobics.-1983/Nude.Aerobics.1983.mp4
+[2026-07-23 13:37:16.218] [WARN] [ARCHIVE_API] Download URL is HTML/restricted (AmirIkLekcijaPoKnigeShejhaHamdIbnAtika.Chast3), using embed fallback
+[2026-07-23 13:37:16.219] [DEBUG] [ARCHIVE_API] Found 14 files in metadata for turner_video_107883
+[2026-07-23 13:37:16.219] [DEBUG] [ARCHIVE_API] Final mediaUrl for AmirIkLekcijaPoKnigeShejhaHamdIbnAtika.Chast3 (video): https://archive.org/embed/AmirIkLekcijaPoKnigeShejhaHamdIbnAtika.Chast3
+[2026-07-23 13:37:16.221] [INFO] [ARCHIVE_API] Resolved video for turner_video_107883: https://archive.org/download/turner_video_107883/107883.ia.mp4
+[2026-07-23 13:37:16.384] [DEBUG] [ARCHIVE_API] Final mediaUrl for tracesofdeath1_202009 (video): https://archive.org/download/tracesofdeath1_202009/Traces%20Of%20Death%201%2FVIDEO_TS%2FVIDEO_TS.mp4
+[2026-07-23 13:37:18.227] [INFO] [SshDeployer] .
+[2026-07-23 13:37:18.473] [DEBUG] [ARCHIVE_API] Final mediaUrl for TheMemphisBelleAStoryofaFlyingFortress (video): https://archive.org/download/TheMemphisBelleAStoryofaFlyingFortress/Memphis.BelleTheA.Story.Of.A.Flying.Fortress.1944.mp4
+[2026-07-23 13:37:19.503] [WARN] [ARCHIVE_API] Download URL is HTML/restricted (EUROPATheLastBattle), using embed fallback
+[2026-07-23 13:37:19.505] [DEBUG] [ARCHIVE_API] Final mediaUrl for EUROPATheLastBattle (video): https://archive.org/embed/EUROPATheLastBattle
+[2026-07-23 13:37:21.341] [DEBUG] [ARCHIVE_API] Final mediaUrl for turner_video_107883 (video): https://archive.org/download/turner_video_107883/107883.ia.mp4
+[2026-07-23 13:37:21.747] [DEBUG] [ARCHIVE_API] Final mediaUrl for nude.-aerobics.-1983 (video): https://archive.org/download/nude.-aerobics.-1983/Nude.Aerobics.1983.mp4
+[2026-07-23 13:37:21.750] [INFO] [ARCHIVE_API] Internet Archive: fetched 20 items
+[2026-07-23 13:37:21.751] [INFO] [PUBLIC_API_SVC] Category 'Video Platforms': 20 items (20 before dedup)
+[2026-07-23 13:37:21.760] [INFO] [FEED] API pipeline: fetched 17 items for Video Platforms
+[2026-07-23 13:37:21.762] [INFO] [FEED] Refreshing source r/homelab (https://old.reddit.com/r/homelab.rss)
+[2026-07-23 13:37:21.762] [INFO] [FEED] Refreshing source Hackaday (https://hackaday.com/blog/feed/)
+[2026-07-23 13:37:21.763] [INFO] [FEED_PARSER] Fetching feed contents from: https://old.reddit.com/r/homelab.rss
+[2026-07-23 13:37:21.763] [INFO] [FEED] Refreshing source Slashdot (https://rss.slashdot.org/Slashdot/slashdotMain)
+[2026-07-23 13:37:21.764] [INFO] [FEED] Refreshing source Wired (https://www.wired.com/feed/rss)
+[2026-07-23 13:37:21.764] [INFO] [FEED_PARSER] Fetching feed contents from: https://hackaday.com/blog/feed/
+[2026-07-23 13:37:21.765] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.wired.com/feed/rss
+[2026-07-23 13:37:21.769] [INFO] [FEED_PARSER] Fetching feed contents from: https://rss.slashdot.org/Slashdot/slashdotMain
+[2026-07-23 13:37:23.231] [INFO] [SshDeployer] .
+[2026-07-23 13:37:24.030] [INFO] [FEED_PARSER] Successfully fetched feed: https://rss.slashdot.org/Slashdot/slashdotMain (HTTP 200)
+[2026-07-23 13:37:24.123] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 784c5a11-a886-498f-94c0-67d6fb26a7d0 of type ANNOUNCE_PEER to 1 trusted peers.
+[2026-07-23 13:37:24.127] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion:9999 via SOCKS5
+[2026-07-23 13:37:24.128] [INFO] [TOR] Polling 127.0.0.1:9052 for Tor proxy readiness...
+[2026-07-23 13:37:24.131] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:37:24.132] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:37:24.176] [INFO] [FEED] Refreshing source IGN (https://feeds.feedburner.com/ign/all)
+[2026-07-23 13:37:24.177] [INFO] [FEED_PARSER] Fetching feed contents from: https://feeds.feedburner.com/ign/all
+[2026-07-23 13:37:24.183] [INFO] [FEED_PARSER] Successfully fetched feed: https://hackaday.com/blog/feed/ (HTTP 200)
+[2026-07-23 13:37:24.381] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.wired.com/feed/rss (HTTP 200)
+[2026-07-23 13:37:24.408] [INFO] [FEED] Refreshing source Kotaku (https://kotaku.com/rss)
+[2026-07-23 13:37:24.409] [INFO] [FEED_PARSER] Fetching feed contents from: https://kotaku.com/rss
+[2026-07-23 13:37:24.604] [INFO] [FEED_PARSER] Successfully fetched feed: https://old.reddit.com/r/homelab.rss (HTTP 200)
+[2026-07-23 13:37:24.621] [INFO] [FEED] Refreshing source Eurogamer (https://www.eurogamer.net/feed)
+[2026-07-23 13:37:24.623] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.eurogamer.net/feed
+[2026-07-23 13:37:25.287] [INFO] [FEED] Refreshing source PC Gamer (https://www.pcgamer.com/rss/)
+[2026-07-23 13:37:25.289] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.pcgamer.com/rss/
+[2026-07-23 13:37:25.642] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:37:27.406] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.eurogamer.net/feed (HTTP 200)
+[2026-07-23 13:37:27.644] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:37:27.936] [INFO] [FEED_PARSER] Successfully fetched feed: https://feeds.feedburner.com/ign/all (HTTP 200)
+[2026-07-23 13:37:28.236] [INFO] [SshDeployer] .
+[2026-07-23 13:37:28.494] [INFO] [FEED] Refreshing source Top Gear (https://www.topgear.com/feed)
+[2026-07-23 13:37:28.496] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.topgear.com/feed
+[2026-07-23 13:37:28.540] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.pcgamer.com/rss/ (HTTP 200)
+[2026-07-23 13:37:28.625] [WARN] [MESH_TRANSPORT] Send attempt 2/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:37:28.713] [INFO] [FEED] Refreshing source Car and Driver (https://www.caranddriver.com/rss/all.xml/)
+[2026-07-23 13:37:28.715] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.caranddriver.com/rss/all.xml/
+[2026-07-23 13:37:30.129] [INFO] [FEED_PARSER] Successfully fetched feed: https://kotaku.com/rss (HTTP 200)
+[2026-07-23 13:37:30.306] [INFO] [FEED] Refreshing source MotorTrend (https://www.motortrend.com/f/motortrend.xml)
+[2026-07-23 13:37:30.308] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.motortrend.com/f/motortrend.xml
+[2026-07-23 13:37:30.598] [INFO] [FEED] Refreshing source Hi-Fructose (https://hifructose.com/feed/)
+[2026-07-23 13:37:30.599] [INFO] [FEED_PARSER] Fetching feed contents from: https://hifructose.com/feed/
+[2026-07-23 13:37:31.646] [WARN] [FEED_PARSER] Server returned HTTP 403 for https://www.topgear.com/feed. Response: Forbidden
+[2026-07-23 13:37:31.647] [INFO] [FEED] Refreshing source Juxtapoz (https://www.juxtapoz.com/feed/)
+[2026-07-23 13:37:31.648] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.juxtapoz.com/feed/
+[2026-07-23 13:37:31.812] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.caranddriver.com/rss/all.xml/ (HTTP 200)
+[2026-07-23 13:37:32.143] [INFO] [FEED] Refreshing source Colossal (https://www.thisiscolossal.com/feed/)
+[2026-07-23 13:37:32.144] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.thisiscolossal.com/feed/
+[2026-07-23 13:37:32.627] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:37:32.903] [WARN] [FEED_PARSER] Server returned HTTP 403 for https://www.motortrend.com/f/motortrend.xml. Response:
+[2026-07-23 13:37:32.905] [INFO] [FEED] Refreshing source 500px Popular (https://500px.com/popular.rss)
+[2026-07-23 13:37:32.907] [INFO] [FEED_PARSER] Fetching feed contents from: https://500px.com/popular.rss
+[2026-07-23 13:37:33.242] [INFO] [SshDeployer] .
+[2026-07-23 13:37:33.470] [INFO] [FEED_PARSER] Successfully fetched feed: https://hifructose.com/feed/ (HTTP 200)
+[2026-07-23 13:37:33.472] [ERROR] [FEED_PARSER] Error parsing XML stream for https://hifructose.com/feed/ | expected: /link read: head (position:END_TAG </head>@93:8 in java.io.InputStreamReader@d2b5caf)
+[2026-07-23 13:37:33.473] [INFO] [FEED] Refreshing source Flickr Explore (https://www.flickr.com/services/feeds/explore/)
+[2026-07-23 13:37:33.479] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.flickr.com/services/feeds/explore/
+[2026-07-23 13:37:33.655] [WARN] [MESH_TRANSPORT] Send attempt 3/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:37:33.657] [ERROR] [MESH_TRANSPORT] All send attempts failed for yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion
+[2026-07-23 13:37:34.734] [WARN] [FEED_PARSER] Server returned HTTP 403 for https://www.juxtapoz.com/feed/. Response:
+[2026-07-23 13:37:34.735] [INFO] [FEED] Refreshing source PetaPixel (https://petapixel.com/feed/)
+[2026-07-23 13:37:34.736] [INFO] [FEED_PARSER] Fetching feed contents from: https://petapixel.com/feed/
+[2026-07-23 13:37:35.383] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.thisiscolossal.com/feed/ (HTTP 200)
+[2026-07-23 13:37:36.161] [INFO] [FEED] Refreshing source Pitchfork (https://pitchfork.com/rss/all/)
+[2026-07-23 13:37:36.164] [INFO] [FEED_PARSER] Fetching feed contents from: https://pitchfork.com/rss/all/
+[2026-07-23 13:37:36.622] [WARN] [FEED_PARSER] Server returned HTTP 403 for https://500px.com/popular.rss. Response:
+[2026-07-23 13:37:36.623] [INFO] [FEED] Refreshing source Rolling Stone (https://www.rollingstone.com/feed/)
+[2026-07-23 13:37:36.626] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.rollingstone.com/feed/
+[2026-07-23 13:37:37.168] [WARN] [FEED_PARSER] Server returned HTTP 404 for https://www.flickr.com/services/feeds/explore/. Response:
+[2026-07-23 13:37:37.169] [INFO] [FEED] Refreshing source NME (https://www.nme.com/feed)
+[2026-07-23 13:37:37.170] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.nme.com/feed
+[2026-07-23 13:37:38.239] [INFO] [FEED_PARSER] Successfully fetched feed: https://petapixel.com/feed/ (HTTP 200)
+[2026-07-23 13:37:38.245] [INFO] [SshDeployer] .
+[2026-07-23 13:37:38.350] [INFO] [FEED] Starting custom search for query: Raid Owl and filter: null
+[2026-07-23 13:37:38.350] [INFO] [FEED] Starting custom search for query: Lawrence Systems and filter: null
+[2026-07-23 13:37:38.350] [INFO] [PUBLIC_API_SVC] Category 'Social Clearnet': 0 items (0 before dedup)
+[2026-07-23 13:37:38.351] [INFO] [FEED] Starting custom search for query: DB Tech and filter: null
+[2026-07-23 13:37:38.351] [INFO] [FEED] Starting custom search for query: TechnoTim and filter: null
+[2026-07-23 13:37:38.352] [INFO] [PUBLIC_API_SVC] Category 'Gaming': 0 items (0 before dedup)
+[2026-07-23 13:37:38.356] [INFO] [PUBLIC_API_SVC] Category 'Automotive': 0 items (0 before dedup)
+[2026-07-23 13:37:38.357] [INFO] [PUBLIC_API_SVC] Category 'Self-Hosting': 0 items (0 before dedup)
+[2026-07-23 13:37:38.360] [DEBUG] [PEXELS_API] No Pexels API key — skipping photo search
+[2026-07-23 13:37:38.410] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:37:38.423] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:37:38.443] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:37:38.452] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:37:38.767] [WARN] [FEED_PARSER] Server returned HTTP 404 for https://pitchfork.com/rss/all/. Response:
+[2026-07-23 13:37:38.770] [DEBUG] [PEXELS_API] No Pexels API key — skipping photo search
+[2026-07-23 13:37:39.646] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:37:39.647] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:37:39.686] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:37:39.688] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:37:39.720] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:37:39.720] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:37:39.721] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:37:39.722] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:37:39.811] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.rollingstone.com/feed/ (HTTP 200)
+[2026-07-23 13:37:39.818] [WARN] [FEED_PARSER] Server returned HTTP 403 for https://www.nme.com/feed. Response:
+[2026-07-23 13:37:39.824] [INFO] [FEED] Fetched 15 items for Slashdot
+[2026-07-23 13:37:39.825] [INFO] [FEED] Fetched 7 items for Hackaday
+[2026-07-23 13:37:39.826] [INFO] [FEED] Fetched 50 items for Wired
+[2026-07-23 13:37:39.827] [INFO] [FEED] Fetched 25 items for r/homelab
+[2026-07-23 13:37:39.827] [INFO] [FEED] Fetched 20 items for IGN
+[2026-07-23 13:37:39.828] [INFO] [FEED] Fetched 98 items for Eurogamer
+[2026-07-23 13:37:39.829] [INFO] [FEED] Fetched 20 items for Kotaku
+[2026-07-23 13:37:39.830] [INFO] [FEED] Fetched 45 items for PC Gamer
+[2026-07-23 13:37:39.831] [INFO] [FEED] Fetched 45 items for Car and Driver
+[2026-07-23 13:37:39.831] [INFO] [FEED] Fetched 10 items for Colossal
+[2026-07-23 13:37:39.843] [INFO] [FEED] Fetched 20 items for PetaPixel
+[2026-07-23 13:37:39.849] [INFO] [FEED] Fetched 9 items for Rolling Stone
+[2026-07-23 13:37:40.875] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:37:40.876] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:37:40.906] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:37:40.908] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:37:41.628] [INFO] [WIKIMEDIA_API] Wikimedia Featured: fetched 0
+[2026-07-23 13:37:41.629] [INFO] [PUBLIC_API_SVC] Category 'Art': 0 items (0 before dedup)
+[2026-07-23 13:37:41.668] [INFO] [WIKIMEDIA_API] Wikimedia Featured: fetched 0
+[2026-07-23 13:37:41.669] [INFO] [PUBLIC_API_SVC] Category 'Photography': 0 items (0 before dedup)
+[2026-07-23 13:37:41.788] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:41.790] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:37:41.808] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:41.809] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:37:42.559] [WARN] [JAMENDO_API] Jamendo API returned status: failed
+[2026-07-23 13:37:42.952] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:37:42.953] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:37:42.952] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:37:42.957] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:37:43.254] [INFO] [SshDeployer] .
+[2026-07-23 13:37:44.708] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:37:44.710] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:37:44.711] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:37:44.714] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:37:44.891] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:37:44.892] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:37:45.098] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:45.099] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:37:45.431] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:37:45.432] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:37:45.867] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:45.869] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:37:45.870] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:37:45.868] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:37:45.873] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:45.874] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:37:46.165] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:46.167] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:37:48.260] [INFO] [SshDeployer] .
+[2026-07-23 13:37:48.310] [DEBUG] [ARCHIVE_API] Fetching metadata for ca015_va_cs from: https://archive.org/metadata/ca015_va_cs/files
+[2026-07-23 13:37:48.311] [DEBUG] [ARCHIVE_API] Fetching metadata for e-mu-sound-central-esc-library-emulator-x-or-proteus-x_202103 from: https://archive.org/metadata/e-mu-sound-central-esc-library-emulator-x-or-proteus-x_202103/files
+[2026-07-23 13:37:48.314] [DEBUG] [ARCHIVE_API] Fetching metadata for BSCOMP0020 from: https://archive.org/metadata/BSCOMP0020/files
+[2026-07-23 13:37:48.316] [DEBUG] [ARCHIVE_API] Fetching metadata for BSCOMP0013 from: https://archive.org/metadata/BSCOMP0013/files
+[2026-07-23 13:37:48.322] [DEBUG] [ARCHIVE_API] Fetching metadata for mn010 from: https://archive.org/metadata/mn010/files
+[2026-07-23 13:37:48.322] [DEBUG] [ARCHIVE_API] Fetching metadata for Artists2Radio_-_Thats_Sheer_Madness from: https://archive.org/metadata/Artists2Radio_-_Thats_Sheer_Madness/files
+[2026-07-23 13:37:48.324] [DEBUG] [ARCHIVE_API] Fetching metadata for moulin002 from: https://archive.org/metadata/moulin002/files
+[2026-07-23 13:37:48.325] [DEBUG] [ARCHIVE_API] Fetching metadata for Mam135-Evenings-NorthDormEp from: https://archive.org/metadata/Mam135-Evenings-NorthDormEp/files
+[2026-07-23 13:37:48.324] [DEBUG] [ARCHIVE_API] Fetching metadata for BSCOMP0001 from: https://archive.org/metadata/BSCOMP0001/files
+[2026-07-23 13:37:48.325] [DEBUG] [ARCHIVE_API] Fetching metadata for DolebraiCompilationVol.02 from: https://archive.org/metadata/DolebraiCompilationVol.02/files
+[2026-07-23 13:37:48.326] [DEBUG] [ARCHIVE_API] Fetching metadata for siro600VariousArtists-GimmeAMinute from: https://archive.org/metadata/siro600VariousArtists-GimmeAMinute/files
+[2026-07-23 13:37:48.327] [DEBUG] [ARCHIVE_API] Fetching metadata for siro400VariousArtists-400 from: https://archive.org/metadata/siro400VariousArtists-400/files
+[2026-07-23 13:37:48.329] [DEBUG] [ARCHIVE_API] Fetching metadata for lf052mp3 from: https://archive.org/metadata/lf052mp3/files
+[2026-07-23 13:37:48.334] [DEBUG] [ARCHIVE_API] Fetching metadata for obcomp001 from: https://archive.org/metadata/obcomp001/files
+[2026-07-23 13:37:48.335] [DEBUG] [ARCHIVE_API] Fetching metadata for BSCOMP0002 from: https://archive.org/metadata/BSCOMP0002/files
+[2026-07-23 13:37:48.338] [DEBUG] [ARCHIVE_API] Fetching metadata for Necktar2017Volume9 from: https://archive.org/metadata/Necktar2017Volume9/files
+[2026-07-23 13:37:48.342] [DEBUG] [ARCHIVE_API] Fetching metadata for nws489 from: https://archive.org/metadata/nws489/files
+[2026-07-23 13:37:48.342] [DEBUG] [ARCHIVE_API] Fetching metadata for Necktar2017Volume7 from: https://archive.org/metadata/Necktar2017Volume7/files
+[2026-07-23 13:37:48.344] [DEBUG] [ARCHIVE_API] Fetching metadata for nws490 from: https://archive.org/metadata/nws490/files
+[2026-07-23 13:37:48.346] [DEBUG] [ARCHIVE_API] Fetching metadata for BSCOMP0010 from: https://archive.org/metadata/BSCOMP0010/files
+[2026-07-23 13:37:48.997] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:37:49.000] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:37:49.627] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:49.628] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:37:50.116] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:37:50.118] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:37:50.165] [DEBUG] [ARCHIVE_API] Found 60 files in metadata for e-mu-sound-central-esc-library-emulator-x-or-proteus-x_202103
+[2026-07-23 13:37:50.167] [WARN] [ARCHIVE_API] No playable audio found for e-mu-sound-central-esc-library-emulator-x-or-proteus-x_202103, dropping.
+[2026-07-23 13:37:50.411] [DEBUG] [ARCHIVE_API] Found 106 files in metadata for DolebraiCompilationVol.02
+[2026-07-23 13:37:50.412] [INFO] [ARCHIVE_API] Resolved audio for DolebraiCompilationVol.02: https://archive.org/download/DolebraiCompilationVol.02/Dolebrai_compilation_vol02_01_Blaxrotationists_-_Blaxrotation.mp3 (format=192Kbps MP3)
+[2026-07-23 13:37:50.574] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:37:50.576] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:37:50.725] [DEBUG] [ARCHIVE_API] Found 116 files in metadata for Artists2Radio_-_Thats_Sheer_Madness
+[2026-07-23 13:37:50.727] [INFO] [ARCHIVE_API] Resolved audio for Artists2Radio_-_Thats_Sheer_Madness: https://archive.org/download/Artists2Radio_-_Thats_Sheer_Madness/7787Kings_-_Bitchesss.mp3 (format=128Kbps MP3)
+[2026-07-23 13:37:50.876] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:37:50.877] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:37:51.002] [DEBUG] [ARCHIVE_API] Found 108 files in metadata for BSCOMP0013
+[2026-07-23 13:37:51.004] [INFO] [ARCHIVE_API] Resolved audio for BSCOMP0013: https://archive.org/download/BSCOMP0013/01-NilsHoffmann-SweetManLikeMe.mp3 (format=VBR MP3)
+[2026-07-23 13:37:51.218] [DEBUG] [ARCHIVE_API] Found 28 files in metadata for Mam135-Evenings-NorthDormEp
+[2026-07-23 13:37:51.219] [INFO] [ARCHIVE_API] Resolved audio for Mam135-Evenings-NorthDormEp: https://archive.org/download/Mam135-Evenings-NorthDormEp/01StillYoung.flac (format=Flac)
+[2026-07-23 13:37:52.474] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=DB+Tech&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:37:52.475] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:37:53.262] [INFO] [SshDeployer] .
+[2026-07-23 13:37:54.214] [DEBUG] [ARCHIVE_API] Found 17 files in metadata for moulin002
+[2026-07-23 13:37:54.217] [INFO] [ARCHIVE_API] Resolved audio for moulin002: https://archive.org/download/moulin002/DUDLEY_-_Seasonal_LP_-_01_-_Adequat.mp3 (format=VBR MP3)
+[2026-07-23 13:37:54.228] [DEBUG] [ARCHIVE_API] Found 765 files in metadata for siro600VariousArtists-GimmeAMinute
+[2026-07-23 13:37:54.231] [INFO] [ARCHIVE_API] Resolved audio for siro600VariousArtists-GimmeAMinute: https://archive.org/download/siro600VariousArtists-GimmeAMinute/1-01-Kanellos-Imminence.mp3 (format=VBR MP3)
+[2026-07-23 13:37:57.931] [DEBUG] [ARCHIVE_API] Found 109 files in metadata for BSCOMP0001
+[2026-07-23 13:37:57.933] [INFO] [ARCHIVE_API] Resolved audio for BSCOMP0001: https://archive.org/download/BSCOMP0001/01-M.A.Z.C.A.-SevenFacesofHim.mp3 (format=VBR MP3)
+[2026-07-23 13:37:57.964] [DEBUG] [ARCHIVE_API] Found 914 files in metadata for Necktar2017Volume7
+[2026-07-23 13:37:57.966] [INFO] [ARCHIVE_API] Resolved audio for Necktar2017Volume7: https://archive.org/download/Necktar2017Volume7/001.A_gift_for_the_gods_TZII_Necktar_2017_v7.mp3 (format=VBR MP3)
+[2026-07-23 13:37:58.267] [INFO] [SshDeployer] .
+[2026-07-23 13:37:58.364] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=Lawrence+Systems&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:37:58.365] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:37:59.114] [DEBUG] [ARCHIVE_API] Found 108 files in metadata for BSCOMP0020
+[2026-07-23 13:37:59.116] [INFO] [ARCHIVE_API] Resolved audio for BSCOMP0020: https://archive.org/download/BSCOMP0020/01-BlackBandCoalCompany-TogetherWeWillWait.mp3 (format=VBR MP3)
+[2026-07-23 13:38:01.534] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=Raid+Owl&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:38:01.535] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:38:02.467] [DEBUG] [ARCHIVE_API] Found 528 files in metadata for ca015_va_cs
+[2026-07-23 13:38:02.469] [INFO] [ARCHIVE_API] Resolved audio for ca015_va_cs: https://archive.org/download/ca015_va_cs/101.Etat_Des_Stocks_Klassikkos.mp3 (format=VBR MP3)
+[2026-07-23 13:38:03.276] [INFO] [SshDeployer] .
+[2026-07-23 13:38:03.740] [DEBUG] [ARCHIVE_API] Found 92 files in metadata for obcomp001
+[2026-07-23 13:38:03.743] [INFO] [ARCHIVE_API] Resolved audio for obcomp001: https://archive.org/download/obcomp001/os001-01_-_I_Am_Robot_And_Proud_-_Count_To_Six.mp3 (format=VBR MP3)
+[2026-07-23 13:38:03.749] [DEBUG] [ARCHIVE_API] Found 61 files in metadata for nws489
+[2026-07-23 13:38:03.750] [INFO] [ARCHIVE_API] Resolved audio for nws489: https://archive.org/download/nws489/01%20UFO.mp3 (format=VBR MP3)
+[2026-07-23 13:38:04.374] [DEBUG] [ARCHIVE_API] Found 108 files in metadata for BSCOMP0010
+[2026-07-23 13:38:04.376] [INFO] [ARCHIVE_API] Resolved audio for BSCOMP0010: https://archive.org/download/BSCOMP0010/01-Ghostown-MoyMoyMoy.mp3 (format=VBR MP3)
+[2026-07-23 13:38:04.887] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=TechnoTim&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:38:04.888] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:38:04.895] [DEBUG] [ARCHIVE_API] Found 119 files in metadata for BSCOMP0002
+[2026-07-23 13:38:04.897] [INFO] [ARCHIVE_API] Resolved audio for BSCOMP0002: https://archive.org/download/BSCOMP0002/01-Rockoutfit-Disclaimer.mp3 (format=VBR MP3)
+[2026-07-23 13:38:08.252] [DEBUG] [ARCHIVE_API] Found 868 files in metadata for Necktar2017Volume9
+[2026-07-23 13:38:08.253] [INFO] [ARCHIVE_API] Resolved audio for Necktar2017Volume9: https://archive.org/download/Necktar2017Volume9/001.Dawn_JimiMod_Necktar_2017_V9.mp3 (format=VBR MP3)
+[2026-07-23 13:38:08.281] [INFO] [SshDeployer] .
+[2026-07-23 13:38:08.526] [DEBUG] [ARCHIVE_API] Found 39 files in metadata for siro400VariousArtists-400
+[2026-07-23 13:38:08.526] [INFO] [ARCHIVE_API] Resolved audio for siro400VariousArtists-400: https://archive.org/download/siro400VariousArtists-400/1-01-Adenhm-AdenhmsThemeInEthanHolesDrum.mp3 (format=VBR MP3)
+[2026-07-23 13:38:08.530] [DEBUG] [ARCHIVE_API] Found 19 files in metadata for mn010
+[2026-07-23 13:38:08.531] [INFO] [ARCHIVE_API] Resolved audio for mn010: https://archive.org/download/mn010/mn010_01-irish-march.mp3 (format=VBR MP3)
+[2026-07-23 13:38:08.965] [DEBUG] [ARCHIVE_API] Found 38 files in metadata for lf052mp3
+[2026-07-23 13:38:08.966] [INFO] [ARCHIVE_API] Resolved audio for lf052mp3: https://archive.org/download/lf052mp3/01-scream_club-and_you_belong.mp3 (format=VBR MP3)
+[2026-07-23 13:38:08.977] [DEBUG] [ARCHIVE_API] Found 60 files in metadata for nws490
+[2026-07-23 13:38:08.985] [INFO] [ARCHIVE_API] Resolved audio for nws490: https://archive.org/download/nws490/01%20The%20Shadow%20of%20the%20Soul.mp3 (format=VBR MP3)
+[2026-07-23 13:38:11.002] [DEBUG] [ARCHIVE_API] Final mediaUrl for DolebraiCompilationVol.02 (audio): https://archive.org/download/DolebraiCompilationVol.02/Dolebrai_compilation_vol02_01_Blaxrotationists_-_Blaxrotation.mp3
+[2026-07-23 13:38:11.304] [DEBUG] [ARCHIVE_API] Final mediaUrl for Artists2Radio_-_Thats_Sheer_Madness (audio): https://archive.org/download/Artists2Radio_-_Thats_Sheer_Madness/7787Kings_-_Bitchesss.mp3
+[2026-07-23 13:38:11.522] [DEBUG] [ARCHIVE_API] Final mediaUrl for BSCOMP0013 (audio): https://archive.org/download/BSCOMP0013/01-NilsHoffmann-SweetManLikeMe.mp3
+[2026-07-23 13:38:11.857] [DEBUG] [ARCHIVE_API] Final mediaUrl for Mam135-Evenings-NorthDormEp (audio): https://archive.org/download/Mam135-Evenings-NorthDormEp/01StillYoung.flac
+[2026-07-23 13:38:12.581] [DEBUG] [ARCHIVE_API] Final mediaUrl for moulin002 (audio): https://archive.org/download/moulin002/DUDLEY_-_Seasonal_LP_-_01_-_Adequat.mp3
+[2026-07-23 13:38:12.665] [DEBUG] [ARCHIVE_API] Final mediaUrl for Necktar2017Volume7 (audio): https://archive.org/download/Necktar2017Volume7/001.A_gift_for_the_gods_TZII_Necktar_2017_v7.mp3
+[2026-07-23 13:38:12.849] [DEBUG] [ARCHIVE_API] Final mediaUrl for siro600VariousArtists-GimmeAMinute (audio): https://archive.org/download/siro600VariousArtists-GimmeAMinute/1-01-Kanellos-Imminence.mp3
+[2026-07-23 13:38:13.009] [DEBUG] [ARCHIVE_API] Final mediaUrl for ca015_va_cs (audio): https://archive.org/download/ca015_va_cs/101.Etat_Des_Stocks_Klassikkos.mp3
+[2026-07-23 13:38:13.011] [DEBUG] [ARCHIVE_API] Final mediaUrl for obcomp001 (audio): https://archive.org/download/obcomp001/os001-01_-_I_Am_Robot_And_Proud_-_Count_To_Six.mp3
+[2026-07-23 13:38:13.050] [DEBUG] [ARCHIVE_API] Final mediaUrl for BSCOMP0020 (audio): https://archive.org/download/BSCOMP0020/01-BlackBandCoalCompany-TogetherWeWillWait.mp3
+[2026-07-23 13:38:13.139] [DEBUG] [ARCHIVE_API] Final mediaUrl for Necktar2017Volume9 (audio): https://archive.org/download/Necktar2017Volume9/001.Dawn_JimiMod_Necktar_2017_V9.mp3
+[2026-07-23 13:38:13.143] [DEBUG] [ARCHIVE_API] Final mediaUrl for BSCOMP0010 (audio): https://archive.org/download/BSCOMP0010/01-Ghostown-MoyMoyMoy.mp3
+[2026-07-23 13:38:13.284] [INFO] [SshDeployer] .
+[2026-07-23 13:38:13.341] [DEBUG] [ARCHIVE_API] Final mediaUrl for nws489 (audio): https://archive.org/download/nws489/01%20UFO.mp3
+[2026-07-23 13:38:13.455] [DEBUG] [ARCHIVE_API] Final mediaUrl for BSCOMP0001 (audio): https://archive.org/download/BSCOMP0001/01-M.A.Z.C.A.-SevenFacesofHim.mp3
+[2026-07-23 13:38:13.740] [DEBUG] [ARCHIVE_API] Final mediaUrl for BSCOMP0002 (audio): https://archive.org/download/BSCOMP0002/01-Rockoutfit-Disclaimer.mp3
+[2026-07-23 13:38:14.078] [DEBUG] [ARCHIVE_API] Final mediaUrl for mn010 (audio): https://archive.org/download/mn010/mn010_01-irish-march.mp3
+[2026-07-23 13:38:14.385] [DEBUG] [ARCHIVE_API] Final mediaUrl for siro400VariousArtists-400 (audio): https://archive.org/download/siro400VariousArtists-400/1-01-Adenhm-AdenhmsThemeInEthanHolesDrum.mp3
+[2026-07-23 13:38:14.385] [DEBUG] [ARCHIVE_API] Final mediaUrl for nws490 (audio): https://archive.org/download/nws490/01%20The%20Shadow%20of%20the%20Soul.mp3
+[2026-07-23 13:38:14.388] [DEBUG] [ARCHIVE_API] Final mediaUrl for lf052mp3 (audio): https://archive.org/download/lf052mp3/01-scream_club-and_you_belong.mp3
+[2026-07-23 13:38:14.400] [INFO] [ARCHIVE_API] Internet Archive: fetched 19 items
+[2026-07-23 13:38:14.403] [INFO] [PUBLIC_API_SVC] Category 'Music': 19 items (19 before dedup)
+[2026-07-23 13:38:14.417] [INFO] [FEED] API pipeline: fetched 16 items for Music
+[2026-07-23 13:38:14.419] [INFO] [FEED] Feed synchronization completed.
+[2026-07-23 13:38:14.622] [INFO] [FEED_SYNC] Background WorkManager feed sync completed
+[2026-07-23 13:38:18.289] [INFO] [SshDeployer] .
+[2026-07-23 13:38:23.293] [INFO] [SshDeployer] .
+[2026-07-23 13:38:24.149] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet d0a22ae1-e029-46b2-b13a-fcfb3c3c0d7e of type ANNOUNCE_PEER to 1 trusted peers.
+[2026-07-23 13:38:24.159] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion:9999 via SOCKS5
+[2026-07-23 13:38:24.161] [INFO] [TOR] Polling 127.0.0.1:9052 for Tor proxy readiness...
+[2026-07-23 13:38:24.163] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:38:24.164] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:38:25.852] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:38:27.853] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:38:28.298] [INFO] [SshDeployer] .
+[2026-07-23 13:38:29.542] [WARN] [MESH_TRANSPORT] Send attempt 2/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:38:33.303] [INFO] [SshDeployer] .
+[2026-07-23 13:38:33.544] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:38:35.214] [WARN] [MESH_TRANSPORT] Send attempt 3/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:38:35.215] [ERROR] [MESH_TRANSPORT] All send attempts failed for yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion
+[2026-07-23 13:38:38.308] [INFO] [SshDeployer] .
+[2026-07-23 13:38:43.312] [INFO] [SshDeployer] .
+[2026-07-23 13:38:48.316] [INFO] [SshDeployer] .
+[2026-07-23 13:38:53.321] [INFO] [SshDeployer] .
+[2026-07-23 13:38:58.331] [INFO] [SshDeployer] .
+[2026-07-23 13:39:03.334] [INFO] [SshDeployer] .
+[2026-07-23 13:39:08.337] [INFO] [SshDeployer] .
+[2026-07-23 13:39:13.343] [INFO] [SshDeployer] .
+[2026-07-23 13:39:18.351] [INFO] [SshDeployer] .
+[2026-07-23 13:39:23.352] [INFO] [SshDeployer] .
+[2026-07-23 13:39:24.190] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 3dfdbf6a-df53-4da7-8e1c-af954304c136 of type ANNOUNCE_PEER to 1 trusted peers.
+[2026-07-23 13:39:24.194] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion:9999 via SOCKS5
+[2026-07-23 13:39:24.195] [INFO] [TOR] Polling 127.0.0.1:9052 for Tor proxy readiness...
+[2026-07-23 13:39:24.200] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:39:24.201] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:39:25.869] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:39:27.872] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:39:28.369] [INFO] [SshDeployer] .
+[2026-07-23 13:39:29.027] [WARN] [MESH_TRANSPORT] Send attempt 2/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:39:32.926] [INFO] [SshDeployer]     Finished `release` profile [optimized] target(s) in 17m 20s
+[2026-07-23 13:39:32.994] [INFO] [SshDeployer]
+  Setting up systemd service for Core...
+[2026-07-23 13:39:33.030] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:39:34.271] [INFO] [SshDeployer] Created symlink '/etc/systemd/system/multi-user.target.wants/hainet-core.service' → '/etc/systemd/system/hainet-core.service'.
+[2026-07-23 13:39:34.737] [INFO] [SshDeployer]   Core Daemon is now running on port 8080.
+[2026-07-23 13:39:34.795] [INFO] [SshDeployer]   Setting up Tor Hidden Service for Global Connectivity...
+[2026-07-23 13:39:35.123] [WARN] [MESH_TRANSPORT] Send attempt 3/3 to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion failed: SOCKS server general failure
+[2026-07-23 13:39:35.124] [ERROR] [MESH_TRANSPORT] All send attempts failed for yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion
+[2026-07-23 13:39:43.706] [INFO] [SshDeployer]   Tor Hidden Service configured!
+[2026-07-23 13:39:43.746] [INFO] [SshDeployer]
+=== Deployment Complete ===
+[2026-07-23 13:39:43.988] [INFO] [SshDeployer] Deployment finished with exit code: 0
+[2026-07-23 13:39:44.245] [INFO] [TOR] Unregistering hidden service lfsjijlzgwuzhupqxx24dos5smiqrw36zwovirtcrhppn7j6ubxajtid...
+[2026-07-23 13:39:44.250] [DEBUG] [TOR] DEL_ONION response: 250 OK
+[2026-07-23 13:39:44.252] [INFO] [TOR] Successfully unregistered hidden service lfsjijlzgwuzhupqxx24dos5smiqrw36zwovirtcrhppn7j6ubxajtid
+[2026-07-23 13:39:44.307] [INFO] [HubDiscovery] Discovery stopped: _ssh._tcp.
+[2026-07-23 13:39:45.761] [INFO] [HUB_SYNC] Pushed 1 contacts to Hub Firewall.
+[2026-07-23 13:39:46.761] [WARN] [HUB_API] LAN request failed with code 401 for cmd get_node_info: {"error":"unauthorized"}
+[2026-07-23 13:39:47.366] [WARN] [HUB_API] LAN request failed with code 401 for cmd get_node_info: {"error":"unauthorized"}
+[2026-07-23 13:40:24.997] [INFO] [HUB_SYNC] Pushed packet b9b0093d-f71e-436d-9b1f-14ae16d99bfa to Hub.
+[2026-07-23 13:40:24.998] [INFO] [GOSSIP] Hub is linked. Delegating broadcast of packet b9b0093d-f71e-436d-9b1f-14ae16d99bfa to Hub.
+[2026-07-23 13:40:46.828] [ERROR] [HUB_API] Tor fallback request failed: Connect timed out
+[2026-07-23 13:40:47.431] [ERROR] [HUB_API] Tor fallback request failed: Connect timed out
+[2026-07-23 13:40:47.987] [WARN] [HUB_API] LAN request failed with code 401 for cmd get_social_feed: {"error":"unauthorized"}
+[2026-07-23 13:40:48.491] [INFO] [HUB_SYNC] Pulled 1 valid mesh packets from Hub
+[2026-07-23 13:40:48.507] [DEBUG] [GOSSIP] processIncoming: Analyzing ANNOUNCE_PEER packet b9b0093d-f71e-436d-9b1f-14ae16d99bfa from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:40:48.509] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping ANNOUNCE_PEER packet b9b0093d-f71e-436d-9b1f-14ae16d99bfa
+[2026-07-23 13:40:48.510] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for ANNOUNCE_PEER packet b9b0093d-f71e-436d-9b1f-14ae16d99bfa (forwarded or filtered)
+[2026-07-23 13:40:49.279] [INFO] [TOR] Verifying Tor routing via check.torproject.org...
+[2026-07-23 13:40:49.916] [INFO] [QR_LOGIN] Attempting QR auth → 10.0.2.2 (session=ad82c34d…)
+[2026-07-23 13:40:51.626] [INFO] [QR_LOGIN] Hub responded with HTTP 200
+[2026-07-23 13:40:51.628] [INFO] [QR_LOGIN] Successfully authenticated with Hub at 10.0.2.2
+[2026-07-23 13:40:52.701] [WARN] [UPDATE_CHECK] content.json fetch failed: HTTP 530
+[2026-07-23 13:40:53.703] [INFO] [TOR] Tor check complete — isTor=true
+[2026-07-23 13:41:25.556] [INFO] [HUB_SYNC] Pushed packet 25cd618a-46f9-4d5a-a7c7-c7b424f040b8 to Hub.
+[2026-07-23 13:41:25.557] [INFO] [GOSSIP] Hub is linked. Delegating broadcast of packet 25cd618a-46f9-4d5a-a7c7-c7b424f040b8 to Hub.
+[2026-07-23 13:41:32.847] [INFO] [HUB_SYNC] Pulled 2 valid mesh packets from Hub
+[2026-07-23 13:41:32.853] [DEBUG] [GOSSIP] processIncoming: Analyzing ANNOUNCE_PEER packet 25cd618a-46f9-4d5a-a7c7-c7b424f040b8 from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:41:32.855] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping ANNOUNCE_PEER packet 25cd618a-46f9-4d5a-a7c7-c7b424f040b8
+[2026-07-23 13:41:32.855] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for ANNOUNCE_PEER packet 25cd618a-46f9-4d5a-a7c7-c7b424f040b8 (forwarded or filtered)
+[2026-07-23 13:41:32.862] [DEBUG] [GOSSIP] processIncoming: Analyzing CONNECTION_REQUEST packet ff26cd96-0da3-4950-a861-9289d94ef1bf from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:41:32.863] [DEBUG] [MESH_HANDLER] Dispatching CONNECTION_REQUEST packet ff26cd96-0da3-4950-a861-9289d94ef1bf from MCowBQYDK2VwAyEA... to handler
+[2026-07-23 13:41:32.881] [DEBUG] [MESH_HANDLER] Finished processing CONNECTION_REQUEST packet ff26cd96-0da3-4950-a861-9289d94ef1bf (success=true)
+[2026-07-23 13:41:42.127] [INFO] [HUB_SYNC] Pushed packet 850a0bac-2737-46bf-9a48-f7b13218c98b to Hub.
+[2026-07-23 13:41:42.127] [INFO] [HUB_SYNC] Pushed packet 6d6a5327-da75-40d2-80d7-3d8a07687c63 to Hub.
+[2026-07-23 13:41:43.127] [INFO] [HUB_SYNC] Pushed packet 850a0bac-2737-46bf-9a48-f7b13218c98b to Hub.
+[2026-07-23 13:41:43.127] [INFO] [HUB_SYNC] Pushed packet 6d6a5327-da75-40d2-80d7-3d8a07687c63 to Hub.
+[2026-07-23 13:41:43.128] [INFO] [MESH_TRANSPORT] Hub linked and reachable. Delegated packet 6d6a5327-da75-40d2-80d7-3d8a07687c63 to Hub.
+[2026-07-23 13:41:43.128] [INFO] [MESH_TRANSPORT] Hub linked and reachable. Delegated packet 850a0bac-2737-46bf-9a48-f7b13218c98b to Hub.
+[2026-07-23 13:41:47.373] [INFO] [HUB_SYNC] Pulled 4 valid mesh packets from Hub
+[2026-07-23 13:41:47.378] [DEBUG] [GOSSIP] processIncoming: Analyzing INVENTORY_SYNC_REQUEST packet 6bc7dc37-69a2-41d4-9731-521b1b35cb43 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:47.380] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping INVENTORY_SYNC_REQUEST packet 6bc7dc37-69a2-41d4-9731-521b1b35cb43
+[2026-07-23 13:41:47.380] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for INVENTORY_SYNC_REQUEST packet 6bc7dc37-69a2-41d4-9731-521b1b35cb43 (forwarded or filtered)
+[2026-07-23 13:41:47.384] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 50f862d4-bbeb-46a0-a8f5-fc4f3a530599 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:47.385] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 50f862d4-bbeb-46a0-a8f5-fc4f3a530599 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:41:48.063] [ERROR] [HUB_API] Tor fallback request failed: Connect timed out
+[2026-07-23 13:41:48.101] [INFO] [HUB_SYNC] Pushed packet 50f862d4-bbeb-46a0-a8f5-fc4f3a530599 to Hub.
+[2026-07-23 13:41:48.102] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 50f862d4-bbeb-46a0-a8f5-fc4f3a530599 (forwarded or filtered)
+[2026-07-23 13:41:48.106] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet cc923e53-3f4a-486a-89b5-e6f777d6644f from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:48.107] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet cc923e53-3f4a-486a-89b5-e6f777d6644f is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:41:48.601] [INFO] [HUB_SYNC] Pushed packet cc923e53-3f4a-486a-89b5-e6f777d6644f to Hub.
+[2026-07-23 13:41:48.603] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet cc923e53-3f4a-486a-89b5-e6f777d6644f (forwarded or filtered)
+[2026-07-23 13:41:48.606] [DEBUG] [GOSSIP] processIncoming: Analyzing INVENTORY_SYNC_REQUEST packet dd9a990d-086b-4ca4-a4d2-1c00ad857853 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:48.607] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping INVENTORY_SYNC_REQUEST packet dd9a990d-086b-4ca4-a4d2-1c00ad857853
+[2026-07-23 13:41:48.608] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for INVENTORY_SYNC_REQUEST packet dd9a990d-086b-4ca4-a4d2-1c00ad857853 (forwarded or filtered)
+[2026-07-23 13:41:53.732] [INFO] [HUB_SYNC] Pulled 2 valid mesh packets from Hub
+[2026-07-23 13:41:53.737] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 48614526-3228-43b8-be61-d71cecbe076a from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:53.737] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 48614526-3228-43b8-be61-d71cecbe076a is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:41:54.730] [INFO] [HUB_SYNC] Pushed packet 48614526-3228-43b8-be61-d71cecbe076a to Hub.
+[2026-07-23 13:41:54.731] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 48614526-3228-43b8-be61-d71cecbe076a (forwarded or filtered)
+[2026-07-23 13:41:54.735] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet af049844-6b74-497e-ab0e-9441a4e3dfaf from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:54.736] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet af049844-6b74-497e-ab0e-9441a4e3dfaf is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:41:56.334] [INFO] [HUB_SYNC] Pushed 2 contacts to Hub Firewall.
+[2026-07-23 13:41:56.335] [INFO] [HUB_SYNC] Pushed packet af049844-6b74-497e-ab0e-9441a4e3dfaf to Hub.
+[2026-07-23 13:41:56.337] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet af049844-6b74-497e-ab0e-9441a4e3dfaf (forwarded or filtered)
+[2026-07-23 13:41:59.227] [INFO] [HUB_SYNC] Pulled 2 valid mesh packets from Hub
+[2026-07-23 13:41:59.232] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 2b67cc82-c286-4950-a843-8d5ba615b0e7 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:41:59.233] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 2b67cc82-c286-4950-a843-8d5ba615b0e7 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:42:00.226] [INFO] [HUB_SYNC] Pushed packet 2b67cc82-c286-4950-a843-8d5ba615b0e7 to Hub.
+[2026-07-23 13:42:00.228] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 2b67cc82-c286-4950-a843-8d5ba615b0e7 (forwarded or filtered)
+[2026-07-23 13:42:00.232] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 375fd2e4-1fab-4644-8fb6-8f04cb56904a from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:42:00.233] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 375fd2e4-1fab-4644-8fb6-8f04cb56904a is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:42:01.226] [INFO] [HUB_SYNC] Pushed packet 375fd2e4-1fab-4644-8fb6-8f04cb56904a to Hub.
+[2026-07-23 13:42:01.227] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 375fd2e4-1fab-4644-8fb6-8f04cb56904a (forwarded or filtered)
+[2026-07-23 13:42:03.001] [INFO] [REPOSITORY] Sent E2EE DM locally stored | msgId=07b3e098-7bb0-4a95-929c-8d897e1c9e94
+[2026-07-23 13:42:03.725] [INFO] [HUB_SYNC] Pushed 1 DMs to Hub.
+[2026-07-23 13:42:03.725] [INFO] [HUB_SYNC] Pushed packet 89648f81-282a-42ce-8e63-c498355e3cd6 to Hub.
+[2026-07-23 13:42:04.370] [INFO] [HUB_SYNC] Pushed packet 89648f81-282a-42ce-8e63-c498355e3cd6 to Hub.
+[2026-07-23 13:42:04.371] [INFO] [MESH_TRANSPORT] Hub linked and reachable. Delegated packet 89648f81-282a-42ce-8e63-c498355e3cd6 to Hub.
+[2026-07-23 13:42:25.502] [INFO] [HUB_SYNC] Pulled 1 valid mesh packets from Hub
+[2026-07-23 13:42:25.514] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 1d2d72d6-ad81-4a47-9fd3-b07bcf789bda from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:42:25.516] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 1d2d72d6-ad81-4a47-9fd3-b07bcf789bda is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:42:26.412] [INFO] [HUB_SYNC] Pushed packet fbc155ab-6906-4b70-9472-14a6808393f3 to Hub.
+[2026-07-23 13:42:26.412] [INFO] [HUB_SYNC] Pushed packet 1d2d72d6-ad81-4a47-9fd3-b07bcf789bda to Hub.
+[2026-07-23 13:42:26.413] [INFO] [GOSSIP] Hub is linked. Delegating broadcast of packet fbc155ab-6906-4b70-9472-14a6808393f3 to Hub.
+[2026-07-23 13:42:26.413] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 1d2d72d6-ad81-4a47-9fd3-b07bcf789bda (forwarded or filtered)
+[2026-07-23 13:42:28.411] [INFO] [HUB_SYNC] Pushed packet 07958968-a5f1-4e4a-ad6c-4a55c40b6140 to Hub.
+[2026-07-23 13:42:28.411] [INFO] [HUB_SYNC] Pushed packet 8051d631-46be-4460-8c64-fbed656df2d7 to Hub.
+[2026-07-23 13:42:29.411] [INFO] [HUB_SYNC] Pushed packet 8051d631-46be-4460-8c64-fbed656df2d7 to Hub.
+[2026-07-23 13:42:29.411] [INFO] [HUB_SYNC] Pushed packet 07958968-a5f1-4e4a-ad6c-4a55c40b6140 to Hub.
+[2026-07-23 13:42:29.412] [INFO] [MESH_TRANSPORT] Hub linked and reachable. Delegated packet 07958968-a5f1-4e4a-ad6c-4a55c40b6140 to Hub.
+[2026-07-23 13:42:29.412] [INFO] [MESH_TRANSPORT] Hub linked and reachable. Delegated packet 8051d631-46be-4460-8c64-fbed656df2d7 to Hub.
+[2026-07-23 13:42:31.916] [INFO] [HUB_SYNC] Pulled 3 valid mesh packets from Hub
+[2026-07-23 13:42:31.921] [DEBUG] [GOSSIP] processIncoming: Analyzing MESSAGE packet 1c12fe64-037f-4951-bb77-4fb712337529 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:42:31.922] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping MESSAGE packet 1c12fe64-037f-4951-bb77-4fb712337529
+[2026-07-23 13:42:31.922] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for MESSAGE packet 1c12fe64-037f-4951-bb77-4fb712337529 (forwarded or filtered)
+[2026-07-23 13:42:31.926] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 6bbf34cc-d9a6-48b7-9a88-0a568d8e14d1 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:42:31.927] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 6bbf34cc-d9a6-48b7-9a88-0a568d8e14d1 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:42:32.915] [INFO] [HUB_SYNC] Pushed packet 6bbf34cc-d9a6-48b7-9a88-0a568d8e14d1 to Hub.
+[2026-07-23 13:42:32.916] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 6bbf34cc-d9a6-48b7-9a88-0a568d8e14d1 (forwarded or filtered)
+[2026-07-23 13:42:32.920] [DEBUG] [GOSSIP] processIncoming: Analyzing MESSAGE packet 2e1eeabb-90e2-4534-8e6a-76e182917b5b from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:42:32.920] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping MESSAGE packet 2e1eeabb-90e2-4534-8e6a-76e182917b5b
+[2026-07-23 13:42:32.921] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for MESSAGE packet 2e1eeabb-90e2-4534-8e6a-76e182917b5b (forwarded or filtered)
+[2026-07-23 13:42:38.065] [INFO] [HUB_SYNC] Pulled 1 valid mesh packets from Hub
+[2026-07-23 13:42:38.069] [DEBUG] [GOSSIP] processIncoming: Analyzing ANNOUNCE_PEER packet fbc155ab-6906-4b70-9472-14a6808393f3 from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:42:38.070] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping ANNOUNCE_PEER packet fbc155ab-6906-4b70-9472-14a6808393f3
+[2026-07-23 13:42:38.070] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for ANNOUNCE_PEER packet fbc155ab-6906-4b70-9472-14a6808393f3 (forwarded or filtered)
+[2026-07-23 13:43:01.319] [INFO] [HUB_SYNC] Pushed 2 contacts to Hub Firewall.
+[2026-07-23 13:43:01.320] [INFO] [HUB_SYNC] Pulled 6 valid mesh packets from Hub
+[2026-07-23 13:43:01.324] [DEBUG] [GOSSIP] processIncoming: Analyzing INVENTORY_SYNC_REQUEST packet 6d1fb110-b15f-470f-81c5-cf79368c858d from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:01.326] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping INVENTORY_SYNC_REQUEST packet 6d1fb110-b15f-470f-81c5-cf79368c858d
+[2026-07-23 13:43:01.327] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for INVENTORY_SYNC_REQUEST packet 6d1fb110-b15f-470f-81c5-cf79368c858d (forwarded or filtered)
+[2026-07-23 13:43:01.331] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet e96ce0a1-73ee-474c-9651-dc24d862594a from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:01.332] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet e96ce0a1-73ee-474c-9651-dc24d862594a is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:02.318] [INFO] [HUB_SYNC] Pushed packet e96ce0a1-73ee-474c-9651-dc24d862594a to Hub.
+[2026-07-23 13:43:02.319] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet e96ce0a1-73ee-474c-9651-dc24d862594a (forwarded or filtered)
+[2026-07-23 13:43:02.323] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet c945bc40-bf7b-484c-a05e-a0b725ef6fcf from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:02.324] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet c945bc40-bf7b-484c-a05e-a0b725ef6fcf is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:03.318] [INFO] [HUB_SYNC] Pushed packet c945bc40-bf7b-484c-a05e-a0b725ef6fcf to Hub.
+[2026-07-23 13:43:03.320] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet c945bc40-bf7b-484c-a05e-a0b725ef6fcf (forwarded or filtered)
+[2026-07-23 13:43:03.324] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 41fbe544-986f-44bf-83da-91dc79aef607 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:03.325] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 41fbe544-986f-44bf-83da-91dc79aef607 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:04.318] [INFO] [HUB_SYNC] Pushed packet 41fbe544-986f-44bf-83da-91dc79aef607 to Hub.
+[2026-07-23 13:43:04.319] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 41fbe544-986f-44bf-83da-91dc79aef607 (forwarded or filtered)
+[2026-07-23 13:43:04.324] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 62dedea5-ff15-49f5-9710-9e81229ade7b from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:04.324] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 62dedea5-ff15-49f5-9710-9e81229ade7b is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:05.319] [INFO] [HUB_SYNC] Pushed packet 62dedea5-ff15-49f5-9710-9e81229ade7b to Hub.
+[2026-07-23 13:43:05.320] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 62dedea5-ff15-49f5-9710-9e81229ade7b (forwarded or filtered)
+[2026-07-23 13:43:05.325] [DEBUG] [GOSSIP] processIncoming: Analyzing INVENTORY_SYNC_REQUEST packet b5644fad-83b3-4e80-a43e-76342c2fe1a6 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:05.326] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping INVENTORY_SYNC_REQUEST packet b5644fad-83b3-4e80-a43e-76342c2fe1a6
+[2026-07-23 13:43:05.327] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for INVENTORY_SYNC_REQUEST packet b5644fad-83b3-4e80-a43e-76342c2fe1a6 (forwarded or filtered)
+[2026-07-23 13:43:27.191] [INFO] [HUB_SYNC] Pushed packet 8048b1d8-03fa-478d-94bd-6f0e59b58ece to Hub.
+[2026-07-23 13:43:27.192] [INFO] [GOSSIP] Hub is linked. Delegating broadcast of packet 8048b1d8-03fa-478d-94bd-6f0e59b58ece to Hub.
+[2026-07-23 13:43:34.690] [INFO] [HUB_SYNC] Pulled 1 valid mesh packets from Hub
+[2026-07-23 13:43:34.695] [DEBUG] [GOSSIP] processIncoming: Analyzing ANNOUNCE_PEER packet 8048b1d8-03fa-478d-94bd-6f0e59b58ece from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:43:34.696] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping ANNOUNCE_PEER packet 8048b1d8-03fa-478d-94bd-6f0e59b58ece
+[2026-07-23 13:43:34.696] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for ANNOUNCE_PEER packet 8048b1d8-03fa-478d-94bd-6f0e59b58ece (forwarded or filtered)
+[2026-07-23 13:43:40.221] [INFO] [HUB_SYNC] Pulled 4 valid mesh packets from Hub
+[2026-07-23 13:43:40.226] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 958f3c0c-b595-4ead-9b09-fa14743d9244 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:40.226] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 958f3c0c-b595-4ead-9b09-fa14743d9244 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:41.220] [INFO] [HUB_SYNC] Pushed packet 958f3c0c-b595-4ead-9b09-fa14743d9244 to Hub.
+[2026-07-23 13:43:41.221] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 958f3c0c-b595-4ead-9b09-fa14743d9244 (forwarded or filtered)
+[2026-07-23 13:43:41.225] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet dad8fd6a-257a-4a1b-b4b7-44f032c7bf75 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:41.225] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet dad8fd6a-257a-4a1b-b4b7-44f032c7bf75 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:42.220] [INFO] [HUB_SYNC] Pushed packet dad8fd6a-257a-4a1b-b4b7-44f032c7bf75 to Hub.
+[2026-07-23 13:43:42.221] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet dad8fd6a-257a-4a1b-b4b7-44f032c7bf75 (forwarded or filtered)
+[2026-07-23 13:43:42.224] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 1bc67764-ac9a-425c-b10c-0e3a320436ee from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:42.225] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 1bc67764-ac9a-425c-b10c-0e3a320436ee is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:43.220] [INFO] [HUB_SYNC] Pushed packet 1bc67764-ac9a-425c-b10c-0e3a320436ee to Hub.
+[2026-07-23 13:43:43.221] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 1bc67764-ac9a-425c-b10c-0e3a320436ee (forwarded or filtered)
+[2026-07-23 13:43:43.225] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 4527302e-e984-42b3-a9ae-17dc806a3e87 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:43:43.225] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 4527302e-e984-42b3-a9ae-17dc806a3e87 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:43:44.010] [INFO] [HUB_SYNC] Pushed packet 4527302e-e984-42b3-a9ae-17dc806a3e87 to Hub.
+[2026-07-23 13:43:44.011] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 4527302e-e984-42b3-a9ae-17dc806a3e87 (forwarded or filtered)
+[2026-07-23 13:44:04.695] [INFO] [HUB_SYNC] Pushed 2 contacts to Hub Firewall.
+[2026-07-23 13:44:07.696] [INFO] [HUB_SYNC] Pulled 4 valid mesh packets from Hub
+[2026-07-23 13:44:07.701] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 709a6079-914b-45b7-a9df-6ad0683e4cae from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:44:07.701] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 709a6079-914b-45b7-a9df-6ad0683e4cae is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:44:08.695] [INFO] [HUB_SYNC] Pushed packet 709a6079-914b-45b7-a9df-6ad0683e4cae to Hub.
+[2026-07-23 13:44:08.696] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 709a6079-914b-45b7-a9df-6ad0683e4cae (forwarded or filtered)
+[2026-07-23 13:44:08.699] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 0bed1883-71ac-4231-9503-8d0de1202b63 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:44:08.700] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 0bed1883-71ac-4231-9503-8d0de1202b63 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:44:09.694] [INFO] [HUB_SYNC] Pushed packet 0bed1883-71ac-4231-9503-8d0de1202b63 to Hub.
+[2026-07-23 13:44:09.695] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 0bed1883-71ac-4231-9503-8d0de1202b63 (forwarded or filtered)
+[2026-07-23 13:44:09.700] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 77ac4dc4-fe79-45a6-88c5-8bcc2fc2dbdb from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:44:09.701] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 77ac4dc4-fe79-45a6-88c5-8bcc2fc2dbdb is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:44:10.694] [INFO] [HUB_SYNC] Pushed packet 77ac4dc4-fe79-45a6-88c5-8bcc2fc2dbdb to Hub.
+[2026-07-23 13:44:10.695] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 77ac4dc4-fe79-45a6-88c5-8bcc2fc2dbdb (forwarded or filtered)
+[2026-07-23 13:44:10.699] [DEBUG] [GOSSIP] processIncoming: Analyzing USER_HANDSHAKE packet 5de48108-19c5-4049-ae5e-3e904dc8d1a6 from MCowBQYDK2VwAyEA... (hops=6)
+[2026-07-23 13:44:10.700] [INFO] [GOSSIP] Directed USER_HANDSHAKE packet 5de48108-19c5-4049-ae5e-3e904dc8d1a6 is not for us (target=MCowBQYDK2VwAyEAs92O...) — forwarding
+[2026-07-23 13:44:11.694] [INFO] [HUB_SYNC] Pushed packet 5de48108-19c5-4049-ae5e-3e904dc8d1a6 to Hub.
+[2026-07-23 13:44:11.695] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for USER_HANDSHAKE packet 5de48108-19c5-4049-ae5e-3e904dc8d1a6 (forwarded or filtered)
+[2026-07-23 13:44:28.011] [INFO] [HUB_SYNC] Pushed packet d53e66df-a9f1-4856-962e-87fb139349e4 to Hub.
+[2026-07-23 13:44:28.012] [INFO] [GOSSIP] Hub is linked. Delegating broadcast of packet d53e66df-a9f1-4856-962e-87fb139349e4 to Hub.
+[2026-07-23 13:44:34.686] [INFO] [HUB_SYNC] Pulled 1 valid mesh packets from Hub
+[2026-07-23 13:44:34.690] [DEBUG] [GOSSIP] processIncoming: Analyzing ANNOUNCE_PEER packet d53e66df-a9f1-4856-962e-87fb139349e4 from MCowBQYDK2VwAyEA... (hops=1)
+[2026-07-23 13:44:34.691] [WARN] [FIREWALL] FIREWALL BLOCKED: Sender MCowBQYDK2VwAyEAxU73CA4ZD8ZpYWTeAd6Yeoh5KPgdFnRdwEDFJf4n0pw= is not trusted. Dropping ANNOUNCE_PEER packet d53e66df-a9f1-4856-962e-87fb139349e4
+[2026-07-23 13:44:34.692] [DEBUG] [MESH_HANDLER] GossipService rejected local processing for ANNOUNCE_PEER packet d53e66df-a9f1-4856-962e-87fb139349e4 (forwarded or filtered)
+```
+
+And the logs from the NoSlop without HUB that initiated the connection:
+```
+[2026-07-23 13:32:37.456] [INFO] [FEED] Refreshing source Rolling Stone (https://www.rollingstone.com/feed/)
+[2026-07-23 13:32:37.456] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.rollingstone.com/feed/
+[2026-07-23 13:32:37.546] [WARN] [FEED_PARSER] Server returned HTTP 404 for https://www.flickr.com/services/feeds/explore/. Response:
+[2026-07-23 13:32:37.547] [INFO] [FEED] Refreshing source NME (https://www.nme.com/feed)
+[2026-07-23 13:32:37.547] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.nme.com/feed
+[2026-07-23 13:32:40.156] [INFO] [FEED_PARSER] Successfully fetched feed: https://petapixel.com/feed/ (HTTP 200)
+[2026-07-23 13:32:40.335] [INFO] [FEED] Refreshing source Science News (https://www.sciencenews.org/feed)
+[2026-07-23 13:32:40.335] [INFO] [FEED_PARSER] Fetching feed contents from: https://www.sciencenews.org/feed
+[2026-07-23 13:32:40.991] [WARN] [FEED_PARSER] Server returned HTTP 404 for https://pitchfork.com/rss/all/. Response:
+[2026-07-23 13:32:40.993] [INFO] [FEED] Refreshing source r/homelab (https://old.reddit.com/r/homelab.rss)
+[2026-07-23 13:32:40.993] [INFO] [FEED_PARSER] Fetching feed contents from: https://old.reddit.com/r/homelab.rss
+[2026-07-23 13:32:41.400] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.nme.com/feed (HTTP 200)
+[2026-07-23 13:32:41.527] [INFO] [FEED] Fetched 0 items for PetaPixel
+[2026-07-23 13:32:41.528] [INFO] [PUBLIC_API_SVC] Category 'Social Clearnet': 0 items (0 before dedup)
+[2026-07-23 13:32:41.528] [INFO] [FEED] Starting custom search for query: Drop Site News and filter: null
+[2026-07-23 13:32:41.528] [INFO] [PUBLIC_API_SVC] Category 'World News': 0 items (0 before dedup)
+[2026-07-23 13:32:41.529] [DEBUG] [PEXELS_API] No Pexels API key — skipping photo search
+[2026-07-23 13:32:41.529] [INFO] [FEED] Starting custom search for query: DW News and filter: null
+[2026-07-23 13:32:41.530] [INFO] [FEED] Starting custom search for query: Veritasium and filter: null
+[2026-07-23 13:32:41.530] [INFO] [FEED] Starting custom search for query: Anton Petrov and filter: null
+[2026-07-23 13:32:41.530] [INFO] [FEED] Starting custom search for query: PBS Space Time and filter: null
+[2026-07-23 13:32:41.721] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:32:41.755] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:32:41.786] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:32:41.817] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:32:41.843] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.nadeko.net
+[2026-07-23 13:32:42.824] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.rollingstone.com/feed/ (HTTP 200)
+[2026-07-23 13:32:43.032] [INFO] [PUBLIC_API_SVC] Category 'Self-Hosting': 0 items (0 before dedup)
+[2026-07-23 13:32:43.105] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:32:43.105] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:32:43.106] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:32:43.106] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:32:43.108] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:32:43.108] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:32:43.116] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:32:43.117] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:32:43.118] [WARN] [INVIDIOUS_API] Instance https://inv.nadeko.net returned HTTP 403
+[2026-07-23 13:32:43.118] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.nerdvpn.de
+[2026-07-23 13:32:43.490] [INFO] [FEED_PARSER] Successfully fetched feed: https://www.sciencenews.org/feed (HTTP 200)
+[2026-07-23 13:32:43.544] [DEBUG] [PEXELS_API] No Pexels API key — skipping photo search
+[2026-07-23 13:32:44.685] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:32:44.685] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:32:44.687] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:32:44.688] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:32:44.988] [INFO] [FEED_PARSER] Successfully fetched feed: https://old.reddit.com/r/homelab.rss (HTTP 200)
+[2026-07-23 13:32:45.188] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:45.189] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:32:45.190] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:45.190] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:32:45.399] [INFO] [FEED] Fetched 0 items for NME
+[2026-07-23 13:32:45.399] [INFO] [FEED] Fetched 2 items for Slashdot
+[2026-07-23 13:32:45.400] [INFO] [FEED] Fetched 2 items for Hackaday
+[2026-07-23 13:32:45.400] [INFO] [FEED] Fetched 31 items for Wired
+[2026-07-23 13:32:45.400] [INFO] [FEED] Fetched 1 items for Colossal
+[2026-07-23 13:32:45.689] [INFO] [NASA_API] NASA Image Library: fetched 20 items for 'Art'
+[2026-07-23 13:32:46.533] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:32:46.534] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:32:46.536] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:32:46.536] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:32:47.786] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:32:47.787] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:32:47.791] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:32:47.792] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:32:48.339] [WARN] [NASA_API] NASA APOD returned 403
+[2026-07-23 13:32:48.699] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:32:48.699] [WARN] [JAMENDO_API] Jamendo API returned status: failed
+[2026-07-23 13:32:48.700] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:32:48.875] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:48.875] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:32:48.897] [INFO] [NASA_API] Resolved NASA video URL for 308_ISS-EyeOnEarth: https://images-assets.nasa.gov/video/308_ISS-EyeOnEarth/308_ISS-EyeOnEarth~orig.mp4
+[2026-07-23 13:32:49.000] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:49.001] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:32:49.003] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:49.003] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:32:49.204] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:32:49.206] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:32:49.521] [INFO] [WIKIMEDIA_API] Wikimedia Featured: fetched 25
+[2026-07-23 13:32:49.521] [INFO] [PUBLIC_API_SVC] Category 'Art': 45 items (45 before dedup)
+[2026-07-23 13:32:49.529] [INFO] [FEED] API pipeline: fetched 35 items for Art
+[2026-07-23 13:32:49.536] [INFO] [FEED] Fetched 5 items for Rolling Stone
+[2026-07-23 13:32:49.539] [INFO] [FEED] Fetched 13 items for Science News
+[2026-07-23 13:32:49.540] [INFO] [FEED] Fetched 4 items for r/homelab
+[2026-07-23 13:32:49.607] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:32:49.607] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:32:49.846] [INFO] [NASA_API] NASA Image Library: fetched 0 items for 'Sabine Hossenfelder Scott Manley Veritasium'
+[2026-07-23 13:32:49.847] [INFO] [PUBLIC_API_SVC] Category 'Science': 0 items (0 before dedup)
+[2026-07-23 13:32:49.900] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:49.900] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:32:50.360] [INFO] [NASA_API] Resolved NASA video URL for iss072m263441644-NASA astronaut discussES PHOTOGRaphy in space with nasaspaceflight.com: https://images-assets.nasa.gov/video/iss072m263441644-NASA astronaut discussES PHOTOGRaphy in space with nasaspaceflight.com/iss072m263441644-NASA astronaut discussES PHOTOGRaphy in space with nasaspaceflight.com~orig.mp4
+[2026-07-23 13:32:50.752] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:32:50.753] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:32:51.122] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:32:51.123] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:32:51.940] [INFO] [NASA_API] Resolved NASA video URL for jsc2026m000006-Artemis_II_Lunar_Flyby_Photography_Training: https://images-assets.nasa.gov/video/jsc2026m000006-Artemis_II_Lunar_Flyby_Photography_Training/jsc2026m000006-Artemis_II_Lunar_Flyby_Photography_Training~orig.mp4
+[2026-07-23 13:32:52.007] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=Anton+Petrov&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:32:52.008] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:32:52.687] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=Veritasium&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:32:52.687] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:32:52.688] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de returned HTTP 401
+[2026-07-23 13:32:52.688] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:32:52.859] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:52.860] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:32:53.187] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:32:53.188] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:32:53.380] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=Drop+Site+News&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:32:53.382] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:32:53.596] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:32:53.597] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:32:53.725] [DEBUG] [ARCHIVE_API] Fetching metadata for 20140621PumpUpThaVolume115 from: https://archive.org/metadata/20140621PumpUpThaVolume115/files
+[2026-07-23 13:32:53.725] [DEBUG] [ARCHIVE_API] Fetching metadata for FunkYou2010 from: https://archive.org/metadata/FunkYou2010/files
+[2026-07-23 13:32:53.725] [DEBUG] [ARCHIVE_API] Fetching metadata for public-figures-today-2 from: https://archive.org/metadata/public-figures-today-2/files
+[2026-07-23 13:32:53.725] [DEBUG] [ARCHIVE_API] Fetching metadata for Elf-Girl-001-Through-009-MP3s-320kbps from: https://archive.org/metadata/Elf-Girl-001-Through-009-MP3s-320kbps/files
+[2026-07-23 13:32:53.726] [DEBUG] [ARCHIVE_API] Fetching metadata for KEXP_Live_November_2010-9399 from: https://archive.org/metadata/KEXP_Live_November_2010-9399/files
+[2026-07-23 13:32:53.725] [DEBUG] [ARCHIVE_API] Fetching metadata for 20150221PumpUpThaVolume147 from: https://archive.org/metadata/20150221PumpUpThaVolume147/files
+[2026-07-23 13:32:53.727] [DEBUG] [ARCHIVE_API] Fetching metadata for 20140426PumpUpThaVolume108 from: https://archive.org/metadata/20140426PumpUpThaVolume108/files
+[2026-07-23 13:32:53.727] [DEBUG] [ARCHIVE_API] Fetching metadata for MidnightRadioCompilationVariousArtists23 from: https://archive.org/metadata/MidnightRadioCompilationVariousArtists23/files
+[2026-07-23 13:32:53.727] [DEBUG] [ARCHIVE_API] Fetching metadata for Bandcamp-Genres from: https://archive.org/metadata/Bandcamp-Genres/files
+[2026-07-23 13:32:53.728] [DEBUG] [ARCHIVE_API] Fetching metadata for 7ball-gas-collection-6 from: https://archive.org/metadata/7ball-gas-collection-6/files
+[2026-07-23 13:32:53.728] [DEBUG] [ARCHIVE_API] Fetching metadata for 7ball-gas-collection-8 from: https://archive.org/metadata/7ball-gas-collection-8/files
+[2026-07-23 13:32:53.728] [DEBUG] [ARCHIVE_API] Fetching metadata for BDJ428 from: https://archive.org/metadata/BDJ428/files
+[2026-07-23 13:32:53.728] [DEBUG] [ARCHIVE_API] Fetching metadata for AEM103_James_William_Roy-7633 from: https://archive.org/metadata/AEM103_James_William_Roy-7633/files
+[2026-07-23 13:32:53.730] [DEBUG] [ARCHIVE_API] Fetching metadata for KEXP_Live_January_2010-9445 from: https://archive.org/metadata/KEXP_Live_January_2010-9445/files
+[2026-07-23 13:32:53.730] [DEBUG] [ARCHIVE_API] Fetching metadata for NS3FINAL2 from: https://archive.org/metadata/NS3FINAL2/files
+[2026-07-23 13:32:53.730] [DEBUG] [ARCHIVE_API] Fetching metadata for NuisancesSonores2 from: https://archive.org/metadata/NuisancesSonores2/files
+[2026-07-23 13:32:53.730] [DEBUG] [ARCHIVE_API] Fetching metadata for NSMickey1703 from: https://archive.org/metadata/NSMickey1703/files
+[2026-07-23 13:32:53.731] [DEBUG] [ARCHIVE_API] Fetching metadata for NuisancesSonores1 from: https://archive.org/metadata/NuisancesSonores1/files
+[2026-07-23 13:32:53.732] [DEBUG] [ARCHIVE_API] Fetching metadata for 20-de-febrero-de-2023 from: https://archive.org/metadata/20-de-febrero-de-2023/files
+[2026-07-23 13:32:53.732] [DEBUG] [ARCHIVE_API] Fetching metadata for 7ball-gas-collection-11 from: https://archive.org/metadata/7ball-gas-collection-11/files
+[2026-07-23 13:32:53.810] [INFO] [NASA_API] Resolved NASA video URL for jscm001441_Top_20_Earth_Images_of_2020-4kMP4: https://images-assets.nasa.gov/video/jscm001441_Top_20_Earth_Images_of_2020-4kMP4/jscm001441_Top_20_Earth_Images_of_2020-4kMP4~orig.mp4
+[2026-07-23 13:32:53.811] [INFO] [NASA_API] NASA Image Library: fetched 20 items for 'Photography'
+[2026-07-23 13:32:53.900] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:53.901] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:32:53.938] [WARN] [INVIDIOUS_API] Instance https://invidious.nerdvpn.de failed: timeout
+[2026-07-23 13:32:53.939] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.f5.si
+[2026-07-23 13:32:54.110] [WARN] [INVIDIOUS_API] Instance https://invidious.f5.si failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:54.111] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://invidious.tiekoetter.com
+[2026-07-23 13:32:54.423] [WARN] [INVIDIOUS_API] Instance https://invidious.tiekoetter.com returned HTTP 403
+[2026-07-23 13:32:54.424] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://yt.chocolatemoo53.com
+[2026-07-23 13:32:54.639] [DEBUG] [ARCHIVE_API] Found 4 files in metadata for MidnightRadioCompilationVariousArtists23
+[2026-07-23 13:32:54.639] [WARN] [ARCHIVE_API] No playable audio found for MidnightRadioCompilationVariousArtists23, dropping.
+[2026-07-23 13:32:54.640] [DEBUG] [ARCHIVE_API] Found 20 files in metadata for public-figures-today-2
+[2026-07-23 13:32:54.641] [INFO] [ARCHIVE_API] Resolved audio for public-figures-today-2: https://archive.org/download/public-figures-today-2/Public%20Figures%20Today%20%281%29.flac (format=Flac)
+[2026-07-23 13:32:54.740] [DEBUG] [ARCHIVE_API] Found 9 files in metadata for NSMickey1703
+[2026-07-23 13:32:54.741] [INFO] [ARCHIVE_API] Resolved audio for NSMickey1703: https://archive.org/download/NSMickey1703/NS_Mickey.mp3 (format=VBR MP3)
+[2026-07-23 13:32:54.741] [DEBUG] [ARCHIVE_API] Found 73 files in metadata for 7ball-gas-collection-8
+[2026-07-23 13:32:54.741] [INFO] [ARCHIVE_API] Resolved audio for 7ball-gas-collection-8: https://archive.org/download/7ball-gas-collection-8/01%20The%20Insyderz%20-%20A%20Good%20Sailor%20Knows.flac (format=Flac)
+[2026-07-23 13:32:54.845] [WARN] [INVIDIOUS_API] Instance https://yt.chocolatemoo53.com returned HTTP 400
+[2026-07-23 13:32:54.846] [INFO] [INVIDIOUS_API] Trying Invidious instance: https://inv.zoomerville.com
+[2026-07-23 13:32:54.940] [DEBUG] [ARCHIVE_API] Found 11 files in metadata for NS3FINAL2
+[2026-07-23 13:32:54.940] [DEBUG] [ARCHIVE_API] Found 8 files in metadata for BDJ428
+[2026-07-23 13:32:54.942] [INFO] [ARCHIVE_API] Resolved audio for BDJ428: https://archive.org/download/BDJ428/BDJ-428.mp3 (format=VBR MP3)
+[2026-07-23 13:32:54.943] [INFO] [ARCHIVE_API] Resolved audio for NS3FINAL2: https://archive.org/download/NS3FINAL2/NS3_FINAL_2.mp3 (format=VBR MP3)
+[2026-07-23 13:32:54.949] [DEBUG] [ARCHIVE_API] Found 644 files in metadata for Elf-Girl-001-Through-009-MP3s-320kbps
+[2026-07-23 13:32:54.949] [INFO] [ARCHIVE_API] Resolved audio for Elf-Girl-001-Through-009-MP3s-320kbps: https://archive.org/download/Elf-Girl-001-Through-009-MP3s-320kbps/001_01%20-%20Du%CC%81ath%20Maethor.mp3 (format=VBR MP3)
+[2026-07-23 13:32:54.953] [DEBUG] [ARCHIVE_API] Found 93 files in metadata for Bandcamp-Genres
+[2026-07-23 13:32:54.954] [WARN] [ARCHIVE_API] No playable audio found for Bandcamp-Genres, dropping.
+[2026-07-23 13:32:55.039] [DEBUG] [ARCHIVE_API] Found 96 files in metadata for FunkYou2010
+[2026-07-23 13:32:55.039] [DEBUG] [ARCHIVE_API] Found 11 files in metadata for 20150221PumpUpThaVolume147
+[2026-07-23 13:32:55.039] [INFO] [ARCHIVE_API] Resolved audio for FunkYou2010: https://archive.org/download/FunkYou2010/AintLifeHard.mp3 (format=VBR MP3)
+[2026-07-23 13:32:55.040] [INFO] [ARCHIVE_API] Resolved audio for 20150221PumpUpThaVolume147: https://archive.org/download/20150221PumpUpThaVolume147/20150221_PumpUpThaVolume147.mp3 (format=VBR MP3)
+[2026-07-23 13:32:55.095] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=DW+News&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:32:55.096] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:32:55.141] [WARN] [INVIDIOUS_API] Instance https://inv.zoomerville.com failed: com.google.gson.stream.MalformedJsonException: Use JsonReader.setLenient(true) to accept malformed JSON at line 1 column 12 path $
+[2026-07-23 13:32:55.142] [ERROR] [INVIDIOUS_API] All Invidious instances failed for search
+[2026-07-23 13:32:55.662] [INFO] [WIKIMEDIA_API] Wikimedia Featured: fetched 25
+[2026-07-23 13:32:55.663] [INFO] [PUBLIC_API_SVC] Category 'Photography': 45 items (45 before dedup)
+[2026-07-23 13:32:55.670] [INFO] [FEED] API pipeline: fetched 39 items for Photography
+[2026-07-23 13:32:55.888] [DEBUG] [ARCHIVE_API] Found 73 files in metadata for 7ball-gas-collection-11
+[2026-07-23 13:32:55.890] [INFO] [ARCHIVE_API] Resolved audio for 7ball-gas-collection-11: https://archive.org/download/7ball-gas-collection-11/01%20The%20Insyderz%20-%20Paradise.flac (format=Flac)
+[2026-07-23 13:32:55.896] [DEBUG] [ARCHIVE_API] Found 7 files in metadata for 20140426PumpUpThaVolume108
+[2026-07-23 13:32:55.897] [INFO] [ARCHIVE_API] Resolved audio for 20140426PumpUpThaVolume108: https://archive.org/download/20140426PumpUpThaVolume108/20140426_PumpUpThaVolume108.mp3 (format=VBR MP3)
+[2026-07-23 13:32:56.451] [WARN] [REDDIT_API] Reddit API returned 403 for https://www.reddit.com/search.json?q=PBS+Space+Time&sort=relevance&limit=25&raw_json=1
+[2026-07-23 13:32:56.452] [INFO] [PUBLIC_API_SVC] Category 'Search': 0 items (0 before dedup)
+[2026-07-23 13:32:56.843] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:32:56.844] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:32:57.548] [DEBUG] [ARCHIVE_API] Found 67 files in metadata for KEXP_Live_November_2010-9399
+[2026-07-23 13:32:57.551] [INFO] [ARCHIVE_API] Resolved audio for KEXP_Live_November_2010-9399: https://archive.org/download/KEXP_Live_November_2010-9399/Black_Mountain_-_Wilderness_Heart_Live__KEXP.mp3 (format=VBR MP3)
+[2026-07-23 13:32:58.036] [DEBUG] [ARCHIVE_API] Found 67 files in metadata for KEXP_Live_January_2010-9445
+[2026-07-23 13:32:58.036] [INFO] [ARCHIVE_API] Resolved audio for KEXP_Live_January_2010-9445: https://archive.org/download/KEXP_Live_January_2010-9445/Ballak_Sissoko_and_Vincent_Sgal_-_Niadou_Live__KEXP.mp3 (format=VBR MP3)
+[2026-07-23 13:32:58.744] [DEBUG] [ARCHIVE_API] Found 11 files in metadata for NuisancesSonores2
+[2026-07-23 13:32:58.745] [INFO] [ARCHIVE_API] Resolved audio for NuisancesSonores2: https://archive.org/download/NuisancesSonores2/Nuisances%20Sonores%202.mp3 (format=VBR MP3)
+[2026-07-23 13:32:59.730] [DEBUG] [ARCHIVE_API] Found 8 files in metadata for 20140621PumpUpThaVolume115
+[2026-07-23 13:32:59.731] [INFO] [ARCHIVE_API] Resolved audio for 20140621PumpUpThaVolume115: https://archive.org/download/20140621PumpUpThaVolume115/20140621_PumpUpThaVolume115.mp3 (format=VBR MP3)
+[2026-07-23 13:33:00.560] [DEBUG] [ARCHIVE_API] Final mediaUrl for NS3FINAL2 (audio): https://archive.org/download/NS3FINAL2/NS3_FINAL_2.mp3
+[2026-07-23 13:33:00.656] [DEBUG] [ARCHIVE_API] Final mediaUrl for public-figures-today-2 (audio): https://archive.org/download/public-figures-today-2/Public%20Figures%20Today%20%281%29.flac
+[2026-07-23 13:33:00.658] [DEBUG] [ARCHIVE_API] Final mediaUrl for 20150221PumpUpThaVolume147 (audio): https://archive.org/download/20150221PumpUpThaVolume147/20150221_PumpUpThaVolume147.mp3
+[2026-07-23 13:33:00.681] [DEBUG] [ARCHIVE_API] Final mediaUrl for 7ball-gas-collection-8 (audio): https://archive.org/download/7ball-gas-collection-8/01%20The%20Insyderz%20-%20A%20Good%20Sailor%20Knows.flac
+[2026-07-23 13:33:00.748] [DEBUG] [ARCHIVE_API] Found 9 files in metadata for 20-de-febrero-de-2023
+[2026-07-23 13:33:00.750] [INFO] [ARCHIVE_API] Resolved audio for 20-de-febrero-de-2023: https://archive.org/download/20-de-febrero-de-2023/20%20DE%20FEBRERO%20DE%202023.mp3 (format=VBR MP3)
+[2026-07-23 13:33:00.838] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:33:00.838] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:33:00.962] [DEBUG] [ARCHIVE_API] Final mediaUrl for NSMickey1703 (audio): https://archive.org/download/NSMickey1703/NS_Mickey.mp3
+[2026-07-23 13:33:00.962] [DEBUG] [ARCHIVE_API] Final mediaUrl for FunkYou2010 (audio): https://archive.org/download/FunkYou2010/AintLifeHard.mp3
+[2026-07-23 13:33:01.345] [DEBUG] [ARCHIVE_API] Final mediaUrl for Elf-Girl-001-Through-009-MP3s-320kbps (audio): https://archive.org/download/Elf-Girl-001-Through-009-MP3s-320kbps/001_01%20-%20Du%CC%81ath%20Maethor.mp3
+[2026-07-23 13:33:01.486] [DEBUG] [ARCHIVE_API] Final mediaUrl for BDJ428 (audio): https://archive.org/download/BDJ428/BDJ-428.mp3
+[2026-07-23 13:33:01.739] [DEBUG] [ARCHIVE_API] Final mediaUrl for 7ball-gas-collection-11 (audio): https://archive.org/download/7ball-gas-collection-11/01%20The%20Insyderz%20-%20Paradise.flac
+[2026-07-23 13:33:01.840] [DEBUG] [ARCHIVE_API] Found 16 files in metadata for AEM103_James_William_Roy-7633
+[2026-07-23 13:33:01.841] [INFO] [ARCHIVE_API] Resolved audio for AEM103_James_William_Roy-7633: https://archive.org/download/AEM103_James_William_Roy-7633/James_William_Roy_-_01_-_Paper_Valentines.mp3 (format=VBR MP3)
+[2026-07-23 13:33:01.913] [DEBUG] [ARCHIVE_API] Final mediaUrl for 20140426PumpUpThaVolume108 (audio): https://archive.org/download/20140426PumpUpThaVolume108/20140426_PumpUpThaVolume108.mp3
+[2026-07-23 13:33:02.672] [DEBUG] [ARCHIVE_API] Found 11 files in metadata for NuisancesSonores1
+[2026-07-23 13:33:02.674] [INFO] [ARCHIVE_API] Resolved audio for NuisancesSonores1: https://archive.org/download/NuisancesSonores1/Nuisances%20Sonores%201.mp3 (format=VBR MP3)
+[2026-07-23 13:33:03.050] [DEBUG] [ARCHIVE_API] Final mediaUrl for KEXP_Live_November_2010-9399 (audio): https://archive.org/download/KEXP_Live_November_2010-9399/Black_Mountain_-_Wilderness_Heart_Live__KEXP.mp3
+[2026-07-23 13:33:03.811] [DEBUG] [ARCHIVE_API] Final mediaUrl for KEXP_Live_January_2010-9445 (audio): https://archive.org/download/KEXP_Live_January_2010-9445/Ballak_Sissoko_and_Vincent_Sgal_-_Niadou_Live__KEXP.mp3
+[2026-07-23 13:33:03.816] [DEBUG] [ARCHIVE_API] Found 73 files in metadata for 7ball-gas-collection-6
+[2026-07-23 13:33:03.816] [INFO] [ARCHIVE_API] Resolved audio for 7ball-gas-collection-6: https://archive.org/download/7ball-gas-collection-6/01%20Big%20Tent%20Revival%20-%20Rivalry.flac (format=Flac)
+[2026-07-23 13:33:04.595] [DEBUG] [ARCHIVE_API] Final mediaUrl for NuisancesSonores2 (audio): https://archive.org/download/NuisancesSonores2/Nuisances%20Sonores%202.mp3
+[2026-07-23 13:33:05.287] [DEBUG] [ARCHIVE_API] Final mediaUrl for 20140621PumpUpThaVolume115 (audio): https://archive.org/download/20140621PumpUpThaVolume115/20140621_PumpUpThaVolume115.mp3
+[2026-07-23 13:33:06.678] [DEBUG] [ARCHIVE_API] Final mediaUrl for 20-de-febrero-de-2023 (audio): https://archive.org/download/20-de-febrero-de-2023/20%20DE%20FEBRERO%20DE%202023.mp3
+[2026-07-23 13:33:08.049] [DEBUG] [ARCHIVE_API] Final mediaUrl for AEM103_James_William_Roy-7633 (audio): https://archive.org/download/AEM103_James_William_Roy-7633/James_William_Roy_-_01_-_Paper_Valentines.mp3
+[2026-07-23 13:33:09.008] [DEBUG] [ARCHIVE_API] Final mediaUrl for NuisancesSonores1 (audio): https://archive.org/download/NuisancesSonores1/Nuisances%20Sonores%201.mp3
+[2026-07-23 13:33:09.784] [DEBUG] [ARCHIVE_API] Final mediaUrl for 7ball-gas-collection-6 (audio): https://archive.org/download/7ball-gas-collection-6/01%20Big%20Tent%20Revival%20-%20Rivalry.flac
+[2026-07-23 13:33:09.785] [INFO] [ARCHIVE_API] Internet Archive: fetched 18 items
+[2026-07-23 13:33:09.785] [INFO] [PUBLIC_API_SVC] Category 'Music': 18 items (18 before dedup)
+[2026-07-23 13:33:09.789] [INFO] [FEED] API pipeline: fetched 11 items for Music
+[2026-07-23 13:33:09.790] [INFO] [FEED] Feed synchronization completed.
+[2026-07-23 13:33:09.991] [INFO] [FEED_SYNC] Background WorkManager feed sync completed
+[2026-07-23 13:33:34.016] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 1a91ac79-cc62-4017-8a1f-9934c0f417c1 of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:33:34.019] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:33:34.019] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:33:34.019] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:33:34.020] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:33:34.021] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:33:34.021] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:33:34.023] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:33:34.023] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:33:34.023] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:33:34.024] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:33:34.024] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:33:34.025] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:33:34.025] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:33:34.025] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:33:34.025] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:33:34.027] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:33:54.916] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:33:54.917] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:33:55.249] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:33:55.250] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:33:55.839] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:33:55.840] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:34:00.116] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:34:00.117] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:34:34.043] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 5444bd40-d11d-4257-a734-0528044dfbbc of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:34:34.048] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:34:34.048] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:34:34.048] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:34:34.048] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:34:34.050] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:34:34.049] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:34:34.051] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:34:34.051] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:34:34.051] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:34:34.048] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:34:34.052] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:34:34.053] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:34:34.054] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:34:34.054] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:34:34.055] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:34:34.055] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:34:56.718] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:34:56.719] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:34:56.746] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:34:56.747] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:34:58.048] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:34:58.048] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:34:58.676] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:34:58.676] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:35:34.069] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet d67f108c-2970-4217-87af-5015997cad2a of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:35:34.073] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:35:34.074] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:35:34.074] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:35:34.074] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:35:34.076] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:35:34.077] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:35:34.077] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:35:34.077] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:35:34.077] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:35:34.078] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:35:34.079] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:35:34.080] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:35:34.083] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:35:34.083] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:35:34.090] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:35:34.091] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:35:51.146] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:35:51.147] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:35:56.259] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:35:56.259] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:35:58.610] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:35:58.611] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:36:33.890] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:36:33.890] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:36:34.096] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 167f3e8c-fadf-4d5f-b06e-9b579a233fba of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:36:34.099] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:36:34.103] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:36:34.103] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:36:34.108] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:36:34.109] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:36:34.109] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:36:34.110] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:36:34.111] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:36:34.112] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:36:34.112] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:36:34.117] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:36:34.118] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:36:34.119] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:36:34.120] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:36:34.120] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:36:34.121] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:36:53.021] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:36:53.021] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:36:58.338] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:36:58.339] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:03.219] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:03.219] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:34.130] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 05afaf90-45ee-4b58-9c9b-082f5941e1dc of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:37:34.133] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:37:34.133] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:37:34.134] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:37:34.134] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:37:34.135] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:37:34.137] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:37:34.137] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:37:34.138] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:37:34.138] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:37:34.138] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:37:34.139] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:37:34.145] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:37:34.148] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:37:34.149] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:37:34.151] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:37:34.153] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:37:34.178] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: Connect timed out
+[2026-07-23 13:37:36.180] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:37:36.900] [WARN] [MESH_TRANSPORT] Send attempt 2/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:36.900] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:36.901] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:36.901] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:48.873] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:48.876] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:50.795] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:50.795] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:37:57.254] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:37:57.254] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:38:34.155] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet b4efc0ba-f4f3-480a-a07c-3344eb3b9ea0 of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:38:34.158] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:38:34.159] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:38:34.160] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:38:34.161] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:38:34.162] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:38:34.162] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:38:34.163] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:38:34.163] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:38:34.164] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:38:34.165] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:38:34.165] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:38:34.165] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:38:34.170] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:38:34.171] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:38:34.176] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:38:34.177] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:38:48.313] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:38:48.313] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:38:56.144] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:38:56.144] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:38:58.725] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:38:58.726] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:39:00.536] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:39:00.536] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:39:34.176] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 857b77b8-15cc-4e77-a397-4cb8887572f4 of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:39:34.178] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:39:34.178] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:39:34.178] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:39:34.178] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:39:34.178] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:39:34.179] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:39:34.180] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:39:34.180] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:39:34.183] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:39:34.183] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:39:34.185] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:39:34.185] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:39:34.185] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:39:34.186] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:39:34.188] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:39:34.189] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:39:50.166] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:39:50.167] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:39:57.741] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:39:57.741] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:39:58.158] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:39:58.159] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:40:01.730] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:40:01.732] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:40:34.192] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet c3679c35-775f-45c8-9c23-56a1a1c964e9 of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:40:34.194] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:40:34.195] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:40:34.195] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:40:34.196] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:40:34.196] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:40:34.196] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:40:34.196] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:40:34.198] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:40:34.201] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:40:34.201] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:40:34.201] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:40:34.202] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:40:34.206] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:40:34.206] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:40:34.207] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:40:34.208] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:40:51.707] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:40:51.707] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:40:53.846] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:40:53.846] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:40:58.932] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:40:58.933] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:41:16.909] [INFO] [MESH_TRANSPORT] Sending CONNECTION_REQUEST packet to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion:9999 via SOCKS5
+[2026-07-23 13:41:16.909] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:41:16.912] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:41:16.914] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion with timeout 60000 ms
+[2026-07-23 13:41:27.536] [INFO] [MESH_TRANSPORT] Packet sent to yvhpocaodeh4m2lbmtpadxuypkehskhydulhixoaidcsl7rh2komg5yd.onion (attempt 1)
+[2026-07-23 13:41:34.212] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet a8fb7601-c25d-47c8-9f95-7fdcec55982e of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:41:34.214] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:41:34.214] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:41:34.214] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:41:34.214] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:41:34.214] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:41:34.214] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:41:34.215] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:41:34.215] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:41:34.217] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:41:34.217] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:41:34.218] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:41:34.218] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:41:34.218] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:41:34.218] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:41:34.220] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:41:34.220] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:41:34.266] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: Connect timed out
+[2026-07-23 13:41:35.133] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:41:35.134] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:41:36.269] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:41:50.436] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:41:50.437] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:41:53.903] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:41:53.903] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:42:04.664] [WARN] [MESH_TRANSPORT] Send attempt 2/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:42:04.665] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:42:29.885] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:42:29.885] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:42:34.230] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 0e0ce5c7-420d-43ad-a07c-f62def103b8e of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:42:34.232] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:42:34.232] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:42:34.232] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:42:34.232] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:42:34.232] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:42:34.233] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:42:34.233] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:42:34.232] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:42:34.236] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:42:34.237] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:42:34.238] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:42:34.238] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:42:34.240] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:42:34.240] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:42:34.240] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:42:34.241] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:42:58.116] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:42:58.116] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+[2026-07-23 13:42:59.053] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:42:59.054] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:43:04.943] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:43:04.943] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:43:05.401] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:43:05.401] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:43:34.245] [INFO] [GOSSIP] Gossip broadcast: Spreading original packet 945ef47d-2597-4a23-b6b9-538254807527 of type ANNOUNCE_PEER to 4 trusted peers.
+[2026-07-23 13:43:34.247] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion:9999 via SOCKS5
+[2026-07-23 13:43:34.248] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion:9999 via SOCKS5
+[2026-07-23 13:43:34.248] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion:9999 via SOCKS5
+[2026-07-23 13:43:34.248] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:43:34.248] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:43:34.248] [INFO] [MESH_TRANSPORT] Sending ANNOUNCE_PEER packet to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion:9999 via SOCKS5
+[2026-07-23 13:43:34.249] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:43:34.249] [INFO] [TOR] Polling 127.0.0.1:9050 for Tor proxy readiness...
+[2026-07-23 13:43:34.250] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:43:34.250] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion with timeout 60000 ms
+[2026-07-23 13:43:34.252] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:43:34.252] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:43:34.253] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion with timeout 60000 ms
+[2026-07-23 13:43:34.253] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion with timeout 60000 ms
+[2026-07-23 13:43:34.259] [INFO] [TOR] Tor SOCKS5 proxy is accepting connections (attempt 1)
+[2026-07-23 13:43:34.259] [DEBUG] [MESH_TRANSPORT] Socket connected to proxy, attempting to connect to target onion: latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion with timeout 60000 ms
+[2026-07-23 13:43:53.695] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:43:53.695] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to ngo757cr6mgmphblti2t6drobuldbzhkn4lenkpqc26ikroplc6f27ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:43:55.103] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:43:55.104] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to latzrm6zdbeph5pl2morw5jcgyqmur6t7uxdmoqg3vrvg2hehb7e4oid.onion. Fast-failing to free circuit.
+[2026-07-23 13:43:58.861] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:43:58.861] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to zglkkgel4kab4yignowh6qpm2pkh535lb7ro2xrhj3nfjzslet5il2ad.onion. Fast-failing to free circuit.
+[2026-07-23 13:44:12.950] [WARN] [MESH_TRANSPORT] Send attempt 1/3 to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion failed: SOCKS: Host unreachable
+[2026-07-23 13:44:12.951] [WARN] [MESH_TRANSPORT] Tor explicitly rejected routing to hlmfxlfegl6v3epr5mahak4rjwtjox2ta3bkljkjgqvynix3im6wetid.onion. Fast-failing to free circuit.
+```

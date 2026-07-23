@@ -120,7 +120,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 val url = "http://$lanIp:8080/api/invoke"
                 val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
                 val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
-                com.noslop.app.net.HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
+                val client = com.noslop.app.net.HttpClientProvider.rawClearnetClient.newBuilder()
+                    .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                client.newCall(request).execute().use { response ->
                     val respBody = response.body?.string() ?: "{}"
                     if (response.isSuccessful) {
                         return@withContext JSONObject(respBody)
@@ -188,7 +191,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             )
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = java.util.UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = post.authorPublicKeyB64,
                 type = "POST",
                 payload = gson.toJsonTree(payload),
@@ -322,7 +325,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val peerPub = dm.optString("peer")
                     
                     val peer = peerDao.getPeerByPublicKey(peerPub)
-                    val peerEncPub = peer?.encPublicKeyB64 ?: peerPub
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
                     
                     val map = mutableMapOf<String, Any>("content" to contentStr)
                     val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
@@ -448,7 +451,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     val peerPub = dm.optString("peer")
                     
                     val peer = peerDao.getPeerByPublicKey(peerPub)
-                    val peerEncPub = peer?.encPublicKeyB64 ?: peerPub
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
                     
                     val map = mutableMapOf<String, Any>("content" to contentStr)
                     val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
@@ -492,7 +495,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                             )
                             val packet = com.noslop.app.mesh.NetworkPacket(
                                 id = java.util.UUID.randomUUID().toString(),
-                                hops = 1,
+                                hops = 3,
                                 senderId = myKeys.publicKeyB64,
                                 targetUserId = peerPub,
                                 type = "MESSAGE",

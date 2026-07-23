@@ -302,16 +302,16 @@ object CryptoService {
             val privKeyParams = getEd25519PrivateKeyParams(bytes)
             val seed = privKeyParams.encoded
             
-            val sha512 = MessageDigest.getInstance("SHA-512")
-            val expanded = sha512.digest(seed)
+            val pubKey = privKeyParams.generatePublicKey().encoded
             
-            expanded[0] = (expanded[0].toInt() and 248).toByte()
-            expanded[31] = (expanded[31].toInt() and 127).toByte()
-            expanded[31] = (expanded[31].toInt() or 64).toByte()
+            // Tor ADD_ONION ED25519-V3 expects the 64-byte libsodium format (seed || pubkey)
+            val torFormat = ByteArray(64)
+            System.arraycopy(seed, 0, torFormat, 0, 32)
+            System.arraycopy(pubKey, 0, torFormat, 32, 32)
             
-            Base64.encodeToString(expanded, Base64.NO_WRAP)
+            Base64.encodeToString(torFormat, Base64.NO_WRAP)
         } catch (e: Exception) {
-            Logger.error(TAG, "ED25519-V3 key expansion failed: ${e.message}")
+            Logger.error(TAG, "ED25519-V3 key conversion failed: ${e.message}")
             null
         }
     }

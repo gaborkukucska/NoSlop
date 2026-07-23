@@ -95,7 +95,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
@@ -110,7 +110,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
@@ -125,7 +125,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
@@ -222,7 +222,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = postBatch, comments = emptyList(), reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
@@ -237,7 +237,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = commentBatch, reactions = emptyList())
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
@@ -252,7 +252,7 @@ class SyncPacketHandler(
                 val syncResp = SyncResponsePayload(posts = emptyList(), comments = emptyList(), reactions = reactionBatch)
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localKeys.publicKeyB64,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",

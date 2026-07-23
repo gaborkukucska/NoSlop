@@ -35,31 +35,68 @@ object SshDeployer {
             Logger.info(TAG, "Connecting to $user@$ip:22")
 
             val jsch = JSch()
-            val session = jsch.getSession(user, ip, 22)
-            session.setPassword(pass)
             
-            session.userInfo = object : com.jcraft.jsch.UserInfo {
-                override fun getPassphrase() = null
-                override fun getPassword() = pass
-                override fun promptPassword(message: String) = true
-                override fun promptPassphrase(message: String) = true
-                override fun promptYesNo(message: String): Boolean {
-                    Logger.info(TAG, "SSH Host Key Prompt: $message")
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch { onLog("\n[SECURITY] SSH Host Key Fingerprint:\n$message\nAuto-accepting for deployment...\n") }
-                    return true
-                }
-                override fun showMessage(message: String) {
-                    Logger.info(TAG, "SSH Message: $message")
+            var connectionAttempts = 0
+            var session: com.jcraft.jsch.Session
+            
+            while (true) {
+                try {
+                    connectionAttempts++
+                    session = jsch.getSession(user, ip, 22)
+                    session.setPassword(pass)
+                    
+                    session.userInfo = object : com.jcraft.jsch.UserInfo {
+                        override fun getPassphrase() = null
+                        override fun getPassword() = pass
+                        override fun promptPassword(message: String) = true
+                        override fun promptPassphrase(message: String) = true
+                        override fun promptYesNo(message: String): Boolean {
+                            Logger.info(TAG, "SSH Host Key Prompt: $message")
+                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch { onLog("\n[SECURITY] SSH Host Key Fingerprint:\n$message\nAuto-accepting for deployment...\n") }
+                            return true
+                        }
+                        override fun showMessage(message: String) {
+                            Logger.info(TAG, "SSH Message: $message")
+                        }
+                    }
+                    session.setConfig("StrictHostKeyChecking", "ask")
+                    
+                    val knownHostsFile = java.io.File(System.getProperty("java.io.tmpdir"), "noslop_known_hosts")
+                    if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
+                    jsch.setKnownHosts(knownHostsFile.absolutePath)
+                    
+                    session.serverAliveInterval = 0
+                    
+                    session.connect(15000)
+                    session.timeout = 0 // Remove socket timeout after connection is established
+                    
+                    // Start manual keepalive to keep NAT alive without dropping connection on missed replies
+                    // We open a dummy channel and write to its stdin to generate client-to-server traffic
+                    val dummyChannel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
+                    dummyChannel.setCommand("cat > /dev/null")
+                    dummyChannel.connect()
+                    val dummyOut = dummyChannel.outputStream
+                    
+                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                        while (session.isConnected) {
+                            kotlinx.coroutines.delay(10000)
+                            try {
+                                dummyOut.write(0)
+                                dummyOut.flush()
+                            } catch (e: Exception) {
+                                // Ignore if connection drops
+                            }
+                        }
+                    }
+                    
+                    break
+                } catch (e: Exception) {
+                    if (connectionAttempts >= 3) throw e
+                    Logger.warn(TAG, "SSH Connection attempt $connectionAttempts failed: ${e.message}. Retrying in 2s...")
+                    withContext(Dispatchers.Main) { onLog("Connection attempt $connectionAttempts failed. Retrying in 2s...\n") }
+                    kotlinx.coroutines.delay(2000)
                 }
             }
-            session.setConfig("StrictHostKeyChecking", "ask")
-            // Provide a dummy known_hosts file so JSch can save and do TOFU
-            val knownHostsFile = java.io.File(System.getProperty("java.io.tmpdir"), "noslop_known_hosts")
-            if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
-            jsch.setKnownHosts(knownHostsFile.absolutePath)
-
-            session.serverAliveInterval = 10000 // Keep connection alive during long idle periods (like model downloads)
-            session.connect(15000)
 
             onLog("SSH connected. Preparing deployment...\n")
             Logger.info(TAG, "SSH session established to $ip")
@@ -98,20 +135,34 @@ object SshDeployer {
                 #!/bin/bash
                 set -e
                 exec 2>&1
+                export GIT_TERMINAL_PROMPT=0
+                export GIT_MERGE_AUTOEDIT=no
+                export DEBIAN_FRONTEND=noninteractive
                 echo '=== HAI-Net Hub Deployment ==='
                 echo "Target: ${'$'}(hostname) (${'$'}(uname -m))"
                 echo ""
                 
                 # Setup sudo helper
-                SUDO_PASS=${'$'}(echo "$passB64" | base64 -d)
+                export SUDO_PASS=${'$'}(echo "$passB64" | base64 -d)
                 
                 run_sudo() {
                     if [ "${'$'}(id -u)" -eq 0 ]; then
                         "${'$'}@"
                     else
-                        echo "${'$'}SUDO_PASS" | sudo -S -p "" "${'$'}@"
+                        echo "${'$'}SUDO_PASS" | /usr/bin/sudo -S -p "" "${'$'}@"
                     fi
                 }
+                
+                mkdir -p "${'$'}HOME/.cargo/bin"
+                cat << 'EOF_SUDO' > "${'$'}HOME/.cargo/bin/sudo"
+#!/bin/bash
+if [ "${'$'}(id -u)" -eq 0 ]; then
+    exec /usr/bin/sudo "${'$'}@"
+else
+    echo "${'$'}SUDO_PASS" | /usr/bin/sudo -S -p "" "${'$'}@"
+fi
+EOF_SUDO
+                chmod +x "${'$'}HOME/.cargo/bin/sudo"
                 
                 STRATEGY="${strategy.name}"
                 if [ "${'$'}STRATEGY" == "PROMPT" ]; then
@@ -127,11 +178,12 @@ object SshDeployer {
                     run_sudo systemctl disable hainet-core.service 2>/dev/null || true
                     run_sudo rm -f /etc/systemd/system/hainet-core.service
                     rm -rf hai
-                    run_sudo rm -rf ~/.hainet /var/lib/hainet /etc/hainet
+                    run_sudo rm -rf ~/.hainet /var/lib/hainet /etc/hainet /var/lib/tor/hainet /var/lib/tor/hainet_hidden_service
                 fi
 
                 if [ "${'$'}STRATEGY" == "RESET_IDENTITY" ]; then
                     echo "Resetting identity for existing deployment..."
+                    run_sudo chown -R "${'$'}(id -un):${'$'}(id -gn)" ~/.hainet 2>/dev/null || true
                     cat << EOF > reset_ident.py
 import json, base64, os, sys
 try:
@@ -168,9 +220,20 @@ EOF
                     rm -f ~/.hainet/auth.json
                     
                     cat << 'PYEOF' > gen_tor.py
-import base64
+import base64, hashlib, sys
+b64_str = "$expandedSeedB64"
+if not b64_str:
+    sys.exit(0)
 try:
-    expanded = base64.b64decode("$expandedSeedB64")
+    seed_pub = base64.b64decode(b64_str)
+    seed = seed_pub[:32]
+    
+    # Manually expand and clamp the seed for the Tor file format
+    expanded = bytearray(hashlib.sha512(seed).digest())
+    expanded[0] &= 248
+    expanded[31] &= 127
+    expanded[31] |= 64
+    
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
@@ -178,6 +241,7 @@ except Exception as e:
     print("Error generating tor key:", e)
 PYEOF
                     python3 gen_tor.py
+                    run_sudo rm -rf /var/lib/tor/hainet/
                     run_sudo mkdir -p /var/lib/tor/hainet/
                     run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
                     TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
@@ -185,6 +249,17 @@ PYEOF
                     run_sudo chmod 700 /var/lib/tor/hainet/
                     run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
                     rm -f gen_tor.py
+                    
+                    # Ensure full HiddenService block exists in torrc
+                    if ! run_sudo grep -q "HiddenServiceDir.*hainet" /etc/tor/torrc; then
+                        run_sudo bash -c "echo '' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo '# HAI-Net Hidden Service' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServiceDir /var/lib/tor/hainet/' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServicePort 8080 127.0.0.1:8080' >> /etc/tor/torrc"
+                        run_sudo bash -c "echo 'HiddenServicePort 9999 127.0.0.1:9999' >> /etc/tor/torrc"
+                    elif ! run_sudo grep -q "HiddenServicePort 9999" /etc/tor/torrc; then
+                        run_sudo sed -i '/HiddenServicePort 8080/a HiddenServicePort 9999 127.0.0.1:9999' /etc/tor/torrc
+                    fi
                     
                     run_sudo systemctl restart tor || true
                     run_sudo systemctl restart hainet-core.service || true
@@ -202,7 +277,7 @@ PYEOF
                     cd hai
                     
                     echo "Pulling latest changes from Git..."
-                    git pull
+                    git pull || (git fetch origin && git reset --hard origin/main) || true
                     export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                     
                     echo "Building React UI..."
@@ -214,11 +289,11 @@ PYEOF
                     fi
                     
                     echo "Building HAI-Net Core..."
-                    (while true; do echo -n "."; sleep 15; done) &
+                    (while true; do echo "."; sleep 5; done) &
                     KEEPALIVE_PID=${'$'}!
                     
                     set +e
-                    cargo build --release --package hainet-core
+                    cargo build --jobs 1 --release --package hainet-core
                     CARGO_EXIT=${'$'}?
                     set -e
                     
@@ -257,6 +332,19 @@ PYEOF
                     exit 0
                 fi
 
+                # Ensure Swap Space to prevent OOM during Rust compilation
+                echo 'Ensuring sufficient swap space...'
+                if command -v free &> /dev/null; then
+                    SWAP_MEGS=${'$'}(free -m | awk '/^Swap:/ {print ${'$'}2}')
+                    if [ -z "${'$'}SWAP_MEGS" ] || [ "${'$'}SWAP_MEGS" -lt 2048 ]; then
+                        echo '  Creating 2GB temporary swap file...'
+                        run_sudo fallocate -l 2G /swapfile || run_sudo dd if=/dev/zero of=/swapfile bs=1M count=2048
+                        run_sudo chmod 600 /swapfile || true
+                        run_sudo mkswap /swapfile || true
+                        run_sudo swapon /swapfile || true
+                    fi
+                fi
+
                 # Step 0: Ensure essential build tools are present
                 echo '[STEP 0/5] Checking build prerequisites...'
                 NEED_INSTALL=""
@@ -287,14 +375,13 @@ PYEOF
                 echo ""
                 
                 # Step 1: Check for / install Rust
+                export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                 if ! command -v cargo &> /dev/null; then
                     echo '[STEP 1/5] Rust/Cargo not found. Installing Rust...'
                     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                     echo '  Rust installed successfully.'
                 else
                     echo '[STEP 1/5] Rust/Cargo is already installed.'
-                    export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                 fi
                 echo "  cargo: ${'$'}(cargo --version)"
                 echo ""
@@ -324,13 +411,13 @@ PYEOF
                 cd hai
                 
                 # Start a background keep-alive loop to prevent NAT idle timeouts during long silent builds
-                (while true; do echo -n "."; sleep 30; done) &
+                (while true; do echo "."; sleep 5; done) &
                 KEEPALIVE_PID=${'$'}!
                 
                 # Run the installer
                 set +e # Disable exit on error temporarily so we can reliably kill the keepalive
                 export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
-                cargo run --package hainet-seed --bin hainet-seed -- install --config hub_config.json
+                cargo run --jobs 1 --package hainet-seed --bin hainet-seed -- install --config hub_config.json < /dev/null
                 CARGO_EXIT=${'$'}?
                 set -e
                 
@@ -361,12 +448,12 @@ PYEOF
                 echo '  Building Core daemon...'
                 export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                 
-                # Start a keep-alive loop to prevent Android emulator NAT timeouts during linking
-                (while true; do echo -n "."; sleep 15; done) &
+                # Start a keep-alive loop to prevent NAT timeouts during build/linking
+                (while true; do echo "."; sleep 5; done) &
                 KEEPALIVE_PID=${'$'}!
                 
                 set +e
-                cargo build --release --package hainet-core
+                cargo build --jobs 1 --release --package hainet-core
                 CARGO_EXIT=${'$'}?
                 set -e
                 
@@ -422,9 +509,20 @@ EOF
                 run_sudo apt-get install -y -qq tor >/dev/null 2>&1 || true
                 
                 cat << 'PYEOF' > gen_tor.py
-import base64
+import base64, hashlib, sys
+b64_str = "$expandedSeedB64"
+if not b64_str:
+    sys.exit(0)
 try:
-    expanded = base64.b64decode("$expandedSeedB64")
+    seed_pub = base64.b64decode(b64_str)
+    seed = seed_pub[:32]
+    
+    # Manually expand and clamp the seed for the Tor file format
+    expanded = bytearray(hashlib.sha512(seed).digest())
+    expanded[0] &= 248
+    expanded[31] &= 127
+    expanded[31] |= 64
+    
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
@@ -433,6 +531,7 @@ except Exception as e:
 PYEOF
                 python3 gen_tor.py
                 
+                run_sudo rm -rf /var/lib/tor/hainet/
                 run_sudo mkdir -p /var/lib/tor/hainet/
                 run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
                 TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
@@ -478,33 +577,18 @@ PYEOF
 
             val output = StringBuilder()
             val buf = ByteArray(4096)
-
             while (true) {
-                while (inputStream.available() > 0) {
-                    val len = inputStream.read(buf)
-                    if (len > 0) {
-                        val chunk = String(buf, 0, len)
-                        output.append(chunk)
-                        Logger.info(TAG, chunk.trimEnd())
-                        withContext(Dispatchers.Main) { onLog(chunk) }
-                    }
-                }
-                if (channel.isClosed) {
-                    // Drain any remaining bytes
-                    while (inputStream.available() > 0) {
-                        val len = inputStream.read(buf)
-                        if (len > 0) {
-                            val chunk = String(buf, 0, len)
-                            output.append(chunk)
-                            Logger.info(TAG, chunk.trimEnd())
-                            withContext(Dispatchers.Main) { onLog(chunk) }
-                        }
-                    }
-                    break
-                }
-                kotlinx.coroutines.delay(200)
+                val len = inputStream.read(buf)
+                if (len < 0) break // EOF
+                val chunk = String(buf, 0, len)
+                output.append(chunk)
+                Logger.info(TAG, chunk.trimEnd())
+                withContext(Dispatchers.Main) { onLog(chunk) }
             }
 
+            while (!channel.isClosed) {
+                kotlinx.coroutines.delay(100)
+            }
             val exitStatus = channel.exitStatus
             channel.disconnect()
             session.disconnect()

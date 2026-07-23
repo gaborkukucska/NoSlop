@@ -291,7 +291,7 @@ object GossipService {
             scope.launch {
                 val foundPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
+                    hops = 3,
                     senderId = localPublicKeyB64,
                     targetUserId = senderId,
                     type = "MEDIA_RECOVERY_FOUND",
@@ -349,7 +349,7 @@ object GossipService {
                 scope.launch {
                     val foundPacket = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 1,
+                        hops = 3,
                         senderId = localPublicKeyB64,
                         targetUserId = listenerId,
                         type = "MEDIA_RECOVERY_FOUND",

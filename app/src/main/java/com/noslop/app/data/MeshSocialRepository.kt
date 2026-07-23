@@ -104,7 +104,7 @@ class MeshSocialRepository(
                                 )
                                 val syncPacket = com.noslop.app.mesh.NetworkPacket(
                                     id = UUID.randomUUID().toString(),
-                                    hops = 1,
+                                    hops = 3,
                                     senderId = myKeys.publicKeyB64,
                                     targetUserId = peer.publicKeyB64,
                                     type = "USER_HANDSHAKE",
@@ -168,7 +168,7 @@ class MeshSocialRepository(
                         
                         val packet = com.noslop.app.mesh.NetworkPacket(
                             id = UUID.randomUUID().toString(),
-                            hops = 1,
+                            hops = 3,
                             senderId = myKeys.publicKeyB64,
                             type = "ANNOUNCE_PEER",
                             payload = com.google.gson.Gson().toJsonTree(announcePay),
@@ -403,7 +403,7 @@ class MeshSocialRepository(
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = publicKeyB64,
                 type = "CONNECTION_REQUEST",
@@ -442,7 +442,7 @@ class MeshSocialRepository(
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
                 type = "USER_HANDSHAKE",
@@ -475,7 +475,7 @@ class MeshSocialRepository(
         val gson = com.google.gson.Gson()
         val syncPacket = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 1,
+            hops = 3,
             senderId = myKeys.publicKeyB64,
             targetUserId = peer.publicKeyB64,
             type = "INVENTORY_SYNC_REQUEST",
@@ -502,7 +502,7 @@ class MeshSocialRepository(
             
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
                 type = "CONNECTION_REJECTED",
@@ -587,7 +587,7 @@ class MeshSocialRepository(
         val payloadJson = gson.toJsonTree(msgPay)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 1,
+            hops = 3,
             senderId = myKeys.publicKeyB64,
             targetUserId = recipientPubB64,
             type = "MESSAGE",
@@ -856,7 +856,7 @@ class MeshSocialRepository(
         if (peer != null) {
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = recipientPubB64,
                 type = "CHAT_REACTION",
