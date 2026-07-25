@@ -91,9 +91,17 @@ object TorService {
         // always proceed. FAILED also now falls through so the Retry button works.
         if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
-            // Still update the key in case it changed (e.g. after onboarding)
+            // FIX: Detect when a real identity key is provided for the first time
+            // (e.g. after onboarding completes, or on a warm restart with identity loaded).
+            // The previous code updated the key but never re-triggered registration,
+            // leaving wrong ephemeral hidden services published permanently.
+            val keyChanged = privateKeyB64 != null && privateKeyB64 != currentPrivateKeyB64
             currentPrivateKeyB64 = privateKeyB64
             currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
+            if (keyChanged && _torState.value == TorState.READY) {
+                Logger.info(TAG, "Identity key changed while Tor is READY. Re-registering hidden service with correct key.")
+                triggerRegistration()
+            }
             return
         }
 
@@ -168,15 +176,33 @@ object TorService {
         scope.launch {
             if (skipHiddenServiceRegistration) {
                 Logger.info(TAG, "Skipping hidden service registration (Hub connected mode). Using Tor strictly as an outbound SOCKS5 proxy.")
-            } else {
+            } else if (currentPrivateKeyB64 != null) {
+                // FIX: Clean up any stale hidden service from a previous session or
+                // a prior registration with the wrong key (e.g. ephemeral NEW key
+                // registered before identity was loaded during onboarding).
+                if (activeMainServiceId != null) {
+                    Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering with correct key.")
+                    unregisterHiddenService(activeMainServiceId!!)
+                    activeMainServiceId = null
+                }
                 // Small delay to ensure ControlPort is fully receptive
                 delay(3000)
                 registerHiddenService(currentPrivateKeyB64) { onionAddress ->
                     onAddressCallback?.invoke(onionAddress)
                 }
+            } else {
+                // FIX: Don't register with null key — that produces a random ephemeral
+                // address that doesn't match the user's identity. Defer until the real
+                // identity key is available (startTor will re-trigger via keyChanged check).
+                Logger.warn(TAG, "No identity key available yet. Deferring hidden service registration until identity is set.")
             }
             
             if (currentBurnablePrivateKeyB64 != null) {
+                // FIX: Also clean up stale burnable service
+                if (activeBurnableServiceId != null) {
+                    unregisterHiddenService(activeBurnableServiceId!!)
+                    activeBurnableServiceId = null
+                }
                 // Short delay between control port commands
                 delay(1000)
                 registerHiddenService(currentBurnablePrivateKeyB64) { onionAddress ->
@@ -414,7 +440,7 @@ object TorService {
 
                 if (serviceId != null) {
                     val onionAddress = "$serviceId.onion"
-                    if (privateKeyB64 != null) {
+                    if (privateKeyB64 == currentPrivateKeyB64) {
                         activeMainServiceId = serviceId
                     } else {
                         activeBurnableServiceId = serviceId

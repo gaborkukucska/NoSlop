@@ -130,30 +130,35 @@ class MeshTransport(
         try {
             // Fresh v3 onion descriptors can take up to 45 seconds to fetch from HSDirs.
             // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
-            val connectTimeout = if (packet.type.startsWith("MEDIA_")) 60000 else 60000
-            for (attempt in 1..3) { // Reduced retries to avoid blocking the semaphore
+            val isCritical = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE"
+            val maxAttempts = if (isCritical) 5 else 3
+            val connectTimeout = 60000
+            for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
                 try {
                     val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
                     socket = Socket(proxy)
                     // Onion connections can take time to establish (v3 circuits)
-                    Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms")
+                    Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms (attempt $attempt/$maxAttempts)")
                     socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
                     val writer = PrintWriter(socket.getOutputStream(), true)
                     writer.print(packet.toJson() + "\n")
                     writer.flush()
                     try { socket.shutdownOutput() } catch (e: Exception) {} // Let Tor proxy know we are done writing
                     delay(150) // Brief pause to ensure Tor flushes the TCP buffer to the network
-                    Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
+                    Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt/$maxAttempts)")
                     return@withContext true
                 } catch (e: Exception) {
-                    Logger.warn(TAG, "Send attempt $attempt/3 to $onionAddress failed: ${e.message}")
+                    Logger.warn(TAG, "Send attempt $attempt/$maxAttempts to $onionAddress failed: ${e.message}")
                     val msg = e.message ?: ""
                     // Fast-fail if Tor explicitly tells us the peer is dead/unreachable
                     if (msg.contains("Host unreachable") || msg.contains("TTL expired") || msg.contains("general SOCKS server failure")) {
                         Logger.warn(TAG, "Tor rejected initial routing to $onionAddress. Retrying to allow circuit building.")
                     }
-                    if (attempt < 3) delay(attempt * 2000L)
+                    if (attempt < maxAttempts) {
+                        val delayMs = if (isCritical) attempt * 4000L else attempt * 2000L
+                        delay(delayMs)
+                    }
                 } finally {
                     try { socket?.close() } catch (_: Exception) {}
                 }
