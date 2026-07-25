@@ -579,7 +579,13 @@ PYEOF
                     run_sudo sed -i '/HiddenServicePort 8080/a HiddenServicePort 9999 127.0.0.1:9999' /etc/tor/torrc
                 fi
                 
-                run_sudo systemctl restart tor || true
+                # Clear Tor cache to prevent HSDir corruption from VM clock-skew issues on startup
+                run_sudo systemctl stop tor || true
+                run_sudo rm -f /var/lib/tor/cached-*
+                run_sudo rm -f /var/lib/tor/state
+                run_sudo rm -f /var/lib/tor/sr-state
+                run_sudo rm -rf /var/lib/tor/diff-cache
+                run_sudo systemctl start tor || true
                 echo '  Tor Hidden Service configured!'
                 # --- END TOR SETUP ---
                 
