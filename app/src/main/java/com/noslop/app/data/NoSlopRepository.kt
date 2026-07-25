@@ -211,11 +211,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val peerArray = JSONArray()
         peers.forEach { peer ->
             val obj = JSONObject()
-            obj.put("public_key", peer.publicKeyB64)
+            obj.put("public_key_b64", peer.publicKeyB64)
             obj.put("is_trusted", peer.isTrusted)
             obj.put("handle", peer.handle)
             obj.put("onion_address", peer.onionAddress)
-            obj.put("enc_public_key", peer.encPublicKeyB64)
+            obj.put("enc_public_key_b64", peer.encPublicKeyB64)
             peerArray.put(obj)
         }
         val args = JSONObject().put("peers", peerArray)
