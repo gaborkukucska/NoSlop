@@ -586,6 +586,16 @@ PYEOF
                 run_sudo rm -f /var/lib/tor/sr-state
                 run_sudo rm -rf /var/lib/tor/diff-cache
                 run_sudo systemctl start tor || true
+                echo '  Waiting for Tor to generate hostname...'
+                for i in {1..10}; do
+                    if run_sudo test -f /var/lib/tor/hainet/hostname; then
+                        break
+                    fi
+                    sleep 1
+                done
+                run_sudo cp /var/lib/tor/hainet/hostname /var/lib/hainet/onion.txt || true
+                run_sudo chown $(id -un):$(id -gn) /var/lib/hainet/onion.txt || true
+                
                 echo '  Tor Hidden Service configured!'
                 # --- END TOR SETUP ---
                 
