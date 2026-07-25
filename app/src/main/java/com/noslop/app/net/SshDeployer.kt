@@ -542,6 +542,7 @@ if not b64_str:
 try:
     seed_pub = base64.b64decode(b64_str)
     seed = seed_pub[:32]
+    pub = seed_pub[32:]
     
     # Manually expand and clamp the seed for the Tor file format
     expanded = bytearray(hashlib.sha512(seed).digest())
@@ -552,6 +553,12 @@ try:
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
+        
+    # Tor v3 onion address: base32(pubkey + checksum + version)
+    checksum = hashlib.sha3_256(b".onion checksum" + pub + b"\x03").digest()[:2]
+    onion = base64.b32encode(pub + checksum + b"\x03").decode('utf-8').lower() + ".onion"
+    with open("onion.txt", "w") as f:
+        f.write(onion)
 except Exception as e:
     print("Error generating tor key:", e)
 PYEOF
@@ -560,10 +567,14 @@ PYEOF
                 run_sudo rm -rf /var/lib/tor/hainet/
                 run_sudo mkdir -p /var/lib/tor/hainet/
                 run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
-                TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
-                run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
+                TOR_USER=$(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                run_sudo chown -R $TOR_USER:$TOR_USER /var/lib/tor/hainet/
                 run_sudo chmod 700 /var/lib/tor/hainet/
                 run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+                
+                run_sudo mv onion.txt /var/lib/hainet/onion.txt
+                run_sudo chown $(id -un):$(id -gn) /var/lib/hainet/onion.txt
+                run_sudo chmod 644 /var/lib/hainet/onion.txt
                 rm -f gen_tor.py
                 
                 run_sudo grep -q "HAI-Net Hidden Service" /etc/tor/torrc || (
@@ -580,21 +591,14 @@ PYEOF
                 fi
                 
                 # Clear Tor cache to prevent HSDir corruption from VM clock-skew issues on startup
+                run_sudo systemctl stop tor@default || true
                 run_sudo systemctl stop tor || true
                 run_sudo rm -f /var/lib/tor/cached-*
                 run_sudo rm -f /var/lib/tor/state
                 run_sudo rm -f /var/lib/tor/sr-state
                 run_sudo rm -rf /var/lib/tor/diff-cache
+                run_sudo systemctl start tor@default || true
                 run_sudo systemctl start tor || true
-                echo '  Waiting for Tor to generate hostname...'
-                for i in {1..10}; do
-                    if run_sudo test -f /var/lib/tor/hainet/hostname; then
-                        break
-                    fi
-                    sleep 1
-                done
-                run_sudo cp /var/lib/tor/hainet/hostname /var/lib/hainet/onion.txt || true
-                run_sudo chown $(id -un):$(id -gn) /var/lib/hainet/onion.txt || true
                 
                 echo '  Tor Hidden Service configured!'
                 # --- END TOR SETUP ---
