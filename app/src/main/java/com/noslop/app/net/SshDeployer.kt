@@ -567,13 +567,13 @@ PYEOF
                 run_sudo rm -rf /var/lib/tor/hainet/
                 run_sudo mkdir -p /var/lib/tor/hainet/
                 run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
-                TOR_USER=$(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
-                run_sudo chown -R $TOR_USER:$TOR_USER /var/lib/tor/hainet/
+                TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
                 run_sudo chmod 700 /var/lib/tor/hainet/
                 run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
                 
                 run_sudo mv onion.txt /var/lib/hainet/onion.txt
-                run_sudo chown $(id -un):$(id -gn) /var/lib/hainet/onion.txt
+                run_sudo chown ${'$'}(id -un):${'$'}(id -gn) /var/lib/hainet/onion.txt
                 run_sudo chmod 644 /var/lib/hainet/onion.txt
                 rm -f gen_tor.py
                 
