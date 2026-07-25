@@ -91,12 +91,14 @@ class MeshTransport(
     }
 
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+        var pushedToHub = false
         val hubStatus = repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
-            val pushed = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet) ?: false
-            if (pushed) {
+            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet) ?: false
+            if (pushedToHub) {
                 com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked and reachable. Delegated packet ${packet.id} to Hub.")
-                return@withContext true
+                // We no longer return early here, so we can also attempt direct Tor routing.
+                // This bypasses potential Hub-side Tor DNS negative caching.
             } else {
                 com.noslop.app.debug.Logger.warn("MESH_TRANSPORT", "Hub linked but UNREACHABLE. Falling back to direct Tor routing for packet ${packet.id}.")
             }
@@ -112,14 +114,14 @@ class MeshTransport(
         val torReady = com.noslop.app.tor.TorService.waitForProxy(timeoutSeconds = 5)
         if (!torReady) {
             Logger.error(TAG, "Cannot send packet: Tor proxy not responding on $socksPort")
-            return@withContext false
+            return@withContext pushedToHub
         }
 
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST"
         if (isBackground) {
             if (!torSemaphore.tryAcquire()) {
                 Logger.warn(TAG, "Dropping background packet ${packet.type} to $onionAddress: Tor circuits busy")
-                return@withContext false
+                return@withContext pushedToHub
             }
         } else {
             torSemaphore.acquire()
@@ -157,7 +159,7 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            return@withContext false
+            return@withContext pushedToHub
         } finally {
             torSemaphore.release()
         }

@@ -145,24 +145,41 @@ object SshDeployer {
                 # Setup sudo helper
                 export SUDO_PASS=${'$'}(echo "$passB64" | base64 -d)
                 
-                run_sudo() {
-                    if [ "${'$'}(id -u)" -eq 0 ]; then
-                        "${'$'}@"
-                    else
-                        echo "${'$'}SUDO_PASS" | /usr/bin/sudo -S -p "" "${'$'}@"
-                    fi
-                }
+                # Self-healing: remove stray sudo shim from previous deployments
+                rm -f "${'$'}HOME/.cargo/bin/sudo"
                 
-                mkdir -p "${'$'}HOME/.cargo/bin"
-                cat << 'EOF_SUDO' > "${'$'}HOME/.cargo/bin/sudo"
+                # Setup transient askpass helper
+                cat << 'EOF_ASKPASS' > "${'$'}HOME/.hainet_askpass"
+#!/bin/bash
+echo "${'$'}SUDO_PASS"
+EOF_ASKPASS
+                chmod 700 "${'$'}HOME/.hainet_askpass"
+                export SUDO_ASKPASS="${'$'}HOME/.hainet_askpass"
+                
+                # Setup transient sudo shim for Rust binaries
+                mkdir -p "${'$'}HOME/.hainet_deploy_tmp"
+                cat << 'EOF_SHIM' > "${'$'}HOME/.hainet_deploy_tmp/sudo"
 #!/bin/bash
 if [ "${'$'}(id -u)" -eq 0 ]; then
-    exec /usr/bin/sudo "${'$'}@"
+    /usr/bin/sudo "${'$'}@"
 else
-    echo "${'$'}SUDO_PASS" | /usr/bin/sudo -S -p "" "${'$'}@"
+    /usr/bin/sudo -A "${'$'}@"
 fi
-EOF_SUDO
-                chmod +x "${'$'}HOME/.cargo/bin/sudo"
+EOF_SHIM
+                chmod 700 "${'$'}HOME/.hainet_deploy_tmp/sudo"
+                export PATH="${'$'}HOME/.hainet_deploy_tmp:${'$'}PATH"
+                
+                cleanup() {
+                    rm -f "${'$'}HOME/.hainet_askpass"
+                    rm -rf "${'$'}HOME/.hainet_deploy_tmp"
+                    unset SUDO_PASS
+                    unset SUDO_ASKPASS
+                }
+                trap cleanup EXIT
+                
+                run_sudo() {
+                    sudo "${'$'}@"
+                }
                 
                 STRATEGY="${strategy.name}"
                 if [ "${'$'}STRATEGY" == "PROMPT" ]; then
@@ -277,7 +294,11 @@ PYEOF
                     cd hai
                     
                     echo "Pulling latest changes from Git..."
-                    git pull || (git fetch origin && git reset --hard origin/main) || true
+                    git pull || (git fetch origin && git reset --hard origin/master) || true
+                    
+                    # Apply Antigravity dynamic patches to the freshly cloned/updated repo!
+
+                    
                     export PATH="${'$'}HOME/.cargo/bin:${'$'}PATH"
                     
                     echo "Building React UI..."
@@ -389,10 +410,15 @@ PYEOF
                 # Step 2: Clone or update the repository
                 echo '[STEP 2/5] Cloning/updating HAI-Net repository...'
                 if [ -d "hai" ]; then
-                    cd hai && git pull && cd ..
+                    cd hai
+                    git pull || { echo '[ERROR] Failed to update repository (merge conflicts?)'; exit 1; }
+                    cd ..
                 else
-                    git clone https://github.com/gaborkukucska/hai.git
+                    git clone https://github.com/gaborkukucska/hai.git || { echo '[ERROR] Failed to clone repository'; exit 1; }
                 fi
+                
+
+                
                 echo ""
                 
                 # Step 3: Write config from base64 payload

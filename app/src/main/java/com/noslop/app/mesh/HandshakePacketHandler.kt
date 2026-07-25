@@ -25,6 +25,11 @@ class HandshakePacketHandler(
 
     suspend fun handleConnectionRequest(packet: NetworkPacket, sendResponse: suspend (NetworkPacket) -> Unit = {}): Boolean {
         val connPay = packet.getConnectionRequestPayload() ?: return false
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        if (myPubKey == connPay.fromUserId) {
+            Logger.debug(TAG, "Ignoring CONNECTION_REQUEST originating from ourselves")
+            return false
+        }
         
         val signature = packet.signature
         if (signature == null) {
@@ -131,6 +136,12 @@ class HandshakePacketHandler(
         val signature = packet.signature
         if (signature == null) {
             Logger.warn(TAG, "Rejected USER_HANDSHAKE: Missing signature")
+            return false
+        }
+        
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        if (myPubKey == handPay.fromUserId) {
+            Logger.debug(TAG, "Ignoring USER_HANDSHAKE originating from ourselves")
             return false
         }
         var payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"

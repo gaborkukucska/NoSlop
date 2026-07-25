@@ -211,11 +211,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val peerArray = JSONArray()
         peers.forEach { peer ->
             val obj = JSONObject()
-            obj.put("public_key_b64", peer.publicKeyB64)
+            obj.put("public_key", peer.publicKeyB64)
             obj.put("is_trusted", peer.isTrusted)
             obj.put("handle", peer.handle)
             obj.put("onion_address", peer.onionAddress)
-            obj.put("enc_public_key_b64", peer.encPublicKeyB64)
+            obj.put("enc_public_key", peer.encPublicKeyB64)
             peerArray.put(obj)
         }
         val args = JSONObject().put("peers", peerArray)
@@ -410,7 +410,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             for (i in 0 until peersArray.length()) {
                 val peerObj = peersArray.getJSONObject(i)
                 val pubKey = peerObj.optString("public_key")
-                if (pubKey.isNotBlank() && peerDao.getPeerByPublicKey(pubKey) == null) {
+                val myKeys = getLocalIdentity()
+                if (pubKey.isNotBlank() && pubKey != myKeys?.publicKeyB64 && peerDao.getPeerByPublicKey(pubKey) == null) {
                     val encPubKey = peerObj.optString("enc_public_key").takeIf { it.isNotBlank() } ?: ""
                     peerDao.insertPeer(com.noslop.app.data.Peer(
                         publicKeyB64 = pubKey,

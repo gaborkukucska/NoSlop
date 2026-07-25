@@ -36,6 +36,13 @@ class MeshPacketHandler(
             return@withContext false
         }
 
+        // Drop packets that originated from our own identity — these are
+        // looped-back packets relayed through the hub or mesh.
+        if (packet.senderId == localKeys.publicKeyB64) {
+            Logger.debug(TAG, "Dropping self-originated ${packet.type} packet ${packet.id}")
+            return@withContext false
+        }
+
         // Let GossipService decide if this packet needs handling or forwarding
         val shouldProcessLocally = GossipService.processIncoming(packet)
         if (!shouldProcessLocally) {
