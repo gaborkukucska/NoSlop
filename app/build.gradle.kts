@@ -55,6 +55,9 @@ android {
             // Tor proxy ports
             buildConfigField("int", "TOR_SOCKS_PORT", "9050")
             buildConfigField("int", "TOR_CONTROL_PORT", "9051")
+            
+            val showSensitiveLogs = System.getenv("NOSLOP_SHOW_SENSITIVE_LOGS") == "true"
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", showSensitiveLogs.toString())
         }
         debug {
             isDebuggable = true
@@ -72,6 +75,8 @@ android {
             // Tor proxy ports for debug build
             buildConfigField("int", "TOR_SOCKS_PORT", "9052")
             buildConfigField("int", "TOR_CONTROL_PORT", "9053")
+            
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", "true")
         }
     }
 

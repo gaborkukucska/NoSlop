@@ -156,7 +156,7 @@ object GossipService {
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }

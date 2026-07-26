@@ -272,8 +272,11 @@ class HandshakePacketHandler(
 
     suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
-        val payloadToVerify = "${announcePay.authorId}|${announcePay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) return false
+        val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) {
+            com.noslop.app.debug.Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
+            return false
+        }
         
         val isOldPacket = (System.currentTimeMillis() - announcePay.timestamp) > 5 * 60 * 1000L
         if (isOldPacket) return true

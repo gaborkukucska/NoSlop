@@ -12,6 +12,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
+import com.noslop.app.BuildConfig
 
 /**
  * Structured debug logger for NoSlop.
@@ -48,6 +49,18 @@ object Logger {
     private var logFile: File? = null
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
 
+    // Regex to detect 56-character Tor v3 onion addresses
+    private val onionRegex = Regex("\\b[a-z2-7]{56}\\.onion\\b", RegexOption.IGNORE_CASE)
+
+    private fun scrub(text: String?): String? {
+        if (text == null) return null
+        if (BuildConfig.SHOW_SENSITIVE_LOGS) return text
+        return onionRegex.replace(text) { matchResult ->
+            val match = matchResult.value
+            match.take(6) + "..." + match.takeLast(10) // e.g. abcdef...wxyz.onion
+        }
+    }
+
     // Dedicated scope for fire-and-forget file writes — SupervisorJob so one failure
     // doesn't cancel other pending writes
     private val fileWriteScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -59,7 +72,10 @@ object Logger {
 
     fun getLogFilePath(): String = logFile?.absolutePath ?: "Not initialised"
 
-    private fun log(level: Level, module: String, message: String, details: String? = null) {
+    private fun log(level: Level, module: String, rawMessage: String, rawDetails: String? = null) {
+        val message = scrub(rawMessage) ?: rawMessage
+        val details = scrub(rawDetails)
+
         val entry = LogEntry(dateFormat.format(Date()), level, module, message, details)
 
         // 1. Write to ring buffer synchronously (fast, in-memory)

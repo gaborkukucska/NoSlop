@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.AddReaction
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -232,35 +234,139 @@ fun CommentItem(
             .background(PrimaryBlack.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
             .padding(12.dp)
     ) {
+        var showUserInfoDialog by remember { mutableStateOf(false) }
+
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (comment.authorAvatarB64 != null) {
-                val bitmap = remember(comment.authorAvatarB64) {
-                    try {
-                        val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                    } catch (e: Exception) { null }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { showUserInfoDialog = true }.padding(end = 8.dp)
+            ) {
+                if (comment.authorAvatarB64 != null) {
+                    val bitmap = remember(comment.authorAvatarB64) {
+                        try {
+                            val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        } catch (e: Exception) { null }
+                    }
+                    if (bitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = bitmap,
+                            contentDescription = "Avatar".tr,
+                            modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                 }
-                if (bitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = bitmap,
-                        contentDescription = "Avatar".tr,
-                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
+                Text(
+                    comment.authorHandle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Text(
-                comment.authorHandle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(comment.timestamp),
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted
             )
+        }
+
+        if (showUserInfoDialog) {
+            val discPeers by viewModel.discoverablePeers.collectAsState(initial = emptyList())
+            val peer = peers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }
+            val discPeer = discPeers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }
+            val isTrusted = peer?.isTrusted == true
+            val isSelf = comment.authorPublicKeyB64 == localKeys?.publicKeyB64
+
+            var showConnectWarning by remember { mutableStateOf(false) }
+
+            AlertDialog(
+                onDismissRequest = { showUserInfoDialog = false },
+                title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        if (comment.authorAvatarB64 != null) {
+                            val bitmap = remember(comment.authorAvatarB64) {
+                                try {
+                                    val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
+                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                } catch (e: Exception) { null }
+                            }
+                            if (bitmap != null) {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = bitmap,
+                                        contentDescription = "Avatar".tr,
+                                        modifier = Modifier.size(80.dp).clip(CircleShape),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                        }
+                        
+                        Text(comment.authorHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        
+                        if (isTrusted) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        if (!isSelf && !isTrusted && discPeer != null) {
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { showConnectWarning = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Connect".tr, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showUserInfoDialog = false }) { Text("Close".tr, color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
+
+            if (showConnectWarning && discPeer != null) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                AlertDialog(
+                    onDismissRequest = { showConnectWarning = false },
+                    title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                    text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.requestConnection(
+                                    handle = comment.authorHandle,
+                                    publicKeyB64 = comment.authorPublicKeyB64,
+                                    onionAddress = discPeer.onionAddress,
+                                    encPublicKeyB64 = discPeer.encPublicKeyB64,
+                                    useBurnableIdentity = true
+                                )
+                                showConnectWarning = false
+                                showUserInfoDialog = false
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                        ) {
+                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
+                    },
+                    containerColor = SurfaceDark
+                )
+            }
         }
         Spacer(modifier = Modifier.height(4.dp))
         if (comment.parentCommentId != null) {

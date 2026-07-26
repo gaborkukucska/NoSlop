@@ -22,6 +22,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
@@ -294,44 +296,91 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             }
             
             if (selectedDiscoverableNode != null) {
-                @OptIn(ExperimentalMaterial3Api::class)
-                ModalBottomSheet(
+                val peer = selectedDiscoverableNode!!
+                var showConnectWarning by remember { mutableStateOf(false) }
+
+                AlertDialog(
                     onDismissRequest = { selectedDiscoverableNode = null },
-                    containerColor = SurfaceDark
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth().padding(bottom = 32.dp), 
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(selectedDiscoverableNode!!.handle, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = TextLight)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        if (selectedDiscoverableNode!!.isCreator) {
-                            Text("Creator Node", color = AccentGreen, fontWeight = FontWeight.Bold)
-                            if (selectedDiscoverableNode!!.fundMeLink != null) {
+                    title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                            if (peer.authorAvatarB64 != null) {
+                                val bitmap = remember(peer.authorAvatarB64) {
+                                    try {
+                                        val bytes = android.util.Base64.decode(peer.authorAvatarB64, android.util.Base64.DEFAULT)
+                                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                    } catch (e: Exception) { null }
+                                }
+                                if (bitmap != null) {
+                                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                        androidx.compose.foundation.Image(
+                                            bitmap = bitmap,
+                                            contentDescription = "Avatar".tr,
+                                            modifier = Modifier.size(80.dp).clip(CircleShape),
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                }
+                            }
+                            
+                            Text(peer.handle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            
+                            if (peer.isCreator) {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Support: ${selectedDiscoverableNode!!.fundMeLink}", color = TextLight, fontSize = 14.sp)
+                                Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                if (!peer.fundMeLink.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("Support: ${peer.fundMeLink}", color = TextLight, fontSize = 12.sp)
+                                }
+                            }
+                            
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { showConnectWarning = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Connect".tr, fontWeight = FontWeight.Bold)
                             }
                         }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("This connection will be established using a temporary, burnable identity to protect your privacy. You can upgrade to a permanent connection later.", color = TextMuted, fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = {
-                                viewModel.requestConnection(
-                                    handle = selectedDiscoverableNode!!.handle,
-                                    publicKeyB64 = selectedDiscoverableNode!!.publicKeyB64,
-                                    onionAddress = selectedDiscoverableNode!!.onionAddress,
-                                    encPublicKeyB64 = selectedDiscoverableNode!!.encPublicKeyB64,
-                                    useBurnableIdentity = true
-                                )
-                                selectedDiscoverableNode = null
-                            }, 
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            modifier = Modifier.fillMaxWidth(0.8f)
-                        ) {
-                            Text("Connect via Mesh", fontWeight = FontWeight.Bold)
-                        }
-                    }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { selectedDiscoverableNode = null }) { Text("Close".tr, color = AccentGreen) }
+                    },
+                    containerColor = SurfaceDark
+                )
+
+                if (showConnectWarning) {
+                    AlertDialog(
+                        onDismissRequest = { showConnectWarning = false },
+                        title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                        text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    viewModel.requestConnection(
+                                        handle = peer.handle,
+                                        publicKeyB64 = peer.publicKeyB64,
+                                        onionAddress = peer.onionAddress,
+                                        encPublicKeyB64 = peer.encPublicKeyB64,
+                                        useBurnableIdentity = true
+                                    )
+                                    showConnectWarning = false
+                                    selectedDiscoverableNode = null
+                                    android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                            ) {
+                                Text("Connect".tr, fontWeight = FontWeight.Bold)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
+                        },
+                        containerColor = SurfaceDark
+                    )
                 }
             }
 
@@ -376,13 +425,30 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     border = BorderStroke(1.dp, if (peer.isCreator) AccentGreen else BorderSubtle)
                                 ) {
                                     Column(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
-                                            Text(peer.handle.take(1).uppercase(), color = TextLight, fontWeight = FontWeight.Bold)
+                                        val bitmap = remember(peer.authorAvatarB64) {
+                                            try {
+                                                if (peer.authorAvatarB64 != null) {
+                                                    val bytes = android.util.Base64.decode(peer.authorAvatarB64, android.util.Base64.DEFAULT)
+                                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                                } else null
+                                            } catch (e: Exception) { null }
+                                        }
+                                        if (bitmap != null) {
+                                            androidx.compose.foundation.Image(
+                                                bitmap = bitmap,
+                                                contentDescription = "Avatar",
+                                                modifier = Modifier.size(48.dp).clip(CircleShape),
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                            )
+                                        } else {
+                                            Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                                Text(peer.handle.take(1).uppercase(), color = TextLight, fontWeight = FontWeight.Bold)
+                                            }
                                         }
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Text(peer.handle, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (peer.isCreator) {
-                                            Text("Creator", color = AccentGreen, fontSize = 10.sp)
+                                            Text("Creator".tr, color = AccentGreen, fontSize = 10.sp)
                                         }
                                     }
                                 }

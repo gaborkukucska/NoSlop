@@ -346,6 +346,8 @@ fun FullScreenMeshCardV2(
         } else post.authorHandle
     }
 
+    val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -779,7 +781,6 @@ fun FullScreenMeshCardV2(
         val isContentTransparencyEnabled by (viewModel?.isContentTransparencyEnabled ?: kotlinx.coroutines.flow.flowOf(false)).collectAsState(initial = false)
         val showSoftBlockOverlay = isSoftBlocked && !revealOverride && !isContentTransparencyEnabled
         val showTransparencyBadge = isSoftBlocked && isContentTransparencyEnabled
-        val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
 
         Box(modifier = Modifier.fillMaxSize()) {
             OverlayInteractions(

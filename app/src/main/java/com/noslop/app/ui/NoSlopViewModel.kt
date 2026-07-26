@@ -1435,11 +1435,20 @@ fun toggleAggregator() {
             val isCreator = _isCreatorEnabled.value
             val link = _creatorFundMeLink.value.takeIf { it.isNotBlank() }
             
-            // Get burnable address from TorService
-            val burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+            // Wait for Tor to finish generating and registering the burnable hidden service
+            var burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+            var attempts = 0
+            while (burnableAddress == null && attempts < 15) {
+                kotlinx.coroutines.delay(1000)
+                burnableAddress = com.noslop.app.tor.TorService.currentBurnableOnionAddress
+                attempts++
+            }
             
             if (burnableAddress == null) {
-                Logger.warn("DISCOVERABLE", "Cannot broadcast discoverable: burnable address not ready")
+                Logger.warn("DISCOVERABLE", "Cannot broadcast discoverable: burnable address not ready after 15s")
+                withContext(Dispatchers.Main) {
+                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to broadcast discoverability: Tor address not ready."), android.widget.Toast.LENGTH_LONG).show()
+                }
                 return@launch
             }
             
