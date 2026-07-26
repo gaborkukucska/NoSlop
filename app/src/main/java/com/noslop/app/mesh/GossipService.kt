@@ -190,41 +190,34 @@ object GossipService {
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()
         if (packet.type == "REACTION" || packet.type == "VOTE" || 
             packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE") {
-            if (!filterSettings.allowIncomingReactions) {
-                var isExempt = false
-                val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
-                if (payloadObj != null && checkEntityExists != null) {
-                    when (packet.type) {
-                        "REACTION", "VOTE" -> {
-                            val postId = payloadObj.get("postId")?.asString
-                            if (postId != null && checkEntityExists!!("POST", postId)) isExempt = true
-                        }
-
-                        "COMMENT_REACTION", "COMMENT_VOTE" -> {
-                            val commentId = payloadObj.get("commentId")?.asString
-                            if (commentId != null && checkEntityExists!!("COMMENT", commentId)) isExempt = true
-                        }
+            var isTracked = false
+            val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
+            if (payloadObj != null && checkEntityExists != null) {
+                when (packet.type) {
+                    "REACTION", "VOTE" -> {
+                        val postId = payloadObj.get("postId")?.asString
+                        if (postId != null && checkEntityExists!!("POST", postId)) isTracked = true
+                    }
+                    "COMMENT_REACTION", "COMMENT_VOTE" -> {
+                        val commentId = payloadObj.get("commentId")?.asString
+                        if (commentId != null && checkEntityExists!!("COMMENT", commentId)) isTracked = true
                     }
                 }
-                
-                if (!isExempt) {
-                    Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally)")
-                    return false
-                }
+            }
+            if (!isTracked) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming reaction packet ${packet.id} (anchor not tracked locally)")
+                return false
             }
         } else if (packet.type == "COMMENT") {
-            if (!filterSettings.allowIncomingComments) {
-                var isExempt = false
-                val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
-                if (payloadObj != null && checkEntityExists != null) {
-                    val postId = payloadObj.get("postId")?.asString
-                    if (postId != null && checkEntityExists!!("POST", postId)) isExempt = true
-                }
-                
-                if (!isExempt) {
-                    Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")
-                    return false
-                }
+            var isTracked = false
+            val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
+            if (payloadObj != null && checkEntityExists != null) {
+                val postId = payloadObj.get("postId")?.asString
+                if (postId != null && checkEntityExists!!("POST", postId)) isTracked = true
+            }
+            if (!isTracked) {
+                Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")
+                return false
             }
         } else if (packet.type == "POST") {
             val postPay = packet.getPostPayload()

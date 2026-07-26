@@ -52,68 +52,40 @@ fun MeshFiltersScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             }
 
             item {
-                FilterCategory(
-                    title = "REACTIONS",
-                    description = "Likes and downvotes on posts and comments.",
-                    incomingChecked = settings.allowIncomingReactions,
-                    outgoingChecked = settings.allowOutgoingReactions,
-                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingReactions = it)) },
-                    onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingReactions = it)) }
-                )
-            }
-
-            item {
-                FilterCategory(
-                    title = "COMMENTS",
-                    description = "Text replies to posts.",
-                    incomingChecked = settings.allowIncomingComments,
-                    outgoingChecked = settings.allowOutgoingComments,
-                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingComments = it)) },
-                    onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingComments = it)) }
-                )
-            }
-
-            item {
-                FilterCategory(
-                    title = "TEXT POSTS",
-                    description = "Standard text-only user posts without attachments.",
+                FilterCategorySingle(
+                    title = "TEXT BROADCASTS",
+                    description = "Standard text-only user broadcasts without attachments.",
                     incomingChecked = settings.allowIncomingTextPosts,
-                    outgoingChecked = settings.allowOutgoingTextPosts,
-                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingTextPosts = it)) },
-                    onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingTextPosts = it)) }
+                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingTextPosts = it)) }
+                )
+            }
+
+            item {
+                FilterCategorySingle(
+                    title = "IMAGE BROADCASTS",
+                    description = "Broadcasts containing user-generated images.",
+                    incomingChecked = settings.allowIncomingImagePosts,
+                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingImagePosts = it)) }
+                )
+            }
+
+            item {
+                FilterCategorySingle(
+                    title = "VIDEO BROADCASTS",
+                    description = "Broadcasts containing user-generated videos.",
+                    incomingChecked = settings.allowIncomingVideoPosts,
+                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingVideoPosts = it)) }
                 )
             }
 
             item {
                 FilterCategory(
                     title = "CLEARNET SHARES",
-                    description = "Posts sharing URLs from the regular internet.",
+                    description = "Broadcasts sharing URLs from the regular internet.",
                     incomingChecked = settings.allowIncomingClearnetShares,
                     outgoingChecked = settings.allowOutgoingClearnetShares,
                     onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingClearnetShares = it)) },
                     onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingClearnetShares = it)) }
-                )
-            }
-
-            item {
-                FilterCategory(
-                    title = "IMAGE POSTS",
-                    description = "Posts containing user-generated images.",
-                    incomingChecked = settings.allowIncomingImagePosts,
-                    outgoingChecked = settings.allowOutgoingImagePosts,
-                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingImagePosts = it)) },
-                    onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingImagePosts = it)) }
-                )
-            }
-
-            item {
-                FilterCategory(
-                    title = "VIDEO POSTS",
-                    description = "Posts containing user-generated videos.",
-                    incomingChecked = settings.allowIncomingVideoPosts,
-                    outgoingChecked = settings.allowOutgoingVideoPosts,
-                    onIncomingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowIncomingVideoPosts = it)) },
-                    onOutgoingChange = { viewModel.updateMeshFilterSettings(settings.copy(allowOutgoingVideoPosts = it)) }
                 )
             }
         }

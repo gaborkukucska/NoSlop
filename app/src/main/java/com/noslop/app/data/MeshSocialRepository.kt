@@ -355,12 +355,8 @@ class MeshSocialRepository(
         val filterSettings = getMeshFilterSettings()
         val shouldBroadcast = if (clearnetUrl != null) {
             filterSettings.allowOutgoingClearnetShares
-        } else if (mediaMetadata != null) {
-            if (mediaMetadata.type == "image") filterSettings.allowOutgoingImagePosts
-            else if (mediaMetadata.type == "video") filterSettings.allowOutgoingVideoPosts
-            else true
         } else {
-            filterSettings.allowOutgoingTextPosts
+            true // All native mesh broadcasts are sent unconditionally
         }
 
         if (shouldBroadcast) {
@@ -694,9 +690,7 @@ class MeshSocialRepository(
         
         // Always broadcast comments on mesh posts (if we are commenting, the post is already tracked locally).
         // If we want to support isBridging for comments later, we can add it here.
-        if (getMeshFilterSettings().allowOutgoingComments) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -743,15 +737,7 @@ class MeshSocialRepository(
             reactionDao.insertReaction(localReaction)
         }
         
-        val shouldBroadcast = if (isBridging) {
-            true // The reaction IS the share context. Must be sent.
-        } else {
-            getMeshFilterSettings().allowOutgoingReactions // Respect the user's noise filter for normal reactions
-        }
-
-        if (shouldBroadcast) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -798,9 +784,7 @@ class MeshSocialRepository(
             voteDao.insertVote(localVote)
         }
 
-        if (getMeshFilterSettings().allowOutgoingReactions) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -942,9 +926,7 @@ class MeshSocialRepository(
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
             signature = signature
         )
-        if (getMeshFilterSettings().allowOutgoingReactions) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -991,9 +973,7 @@ class MeshSocialRepository(
             commentVoteDao.insertVote(localVote)
         }
 
-        if (getMeshFilterSettings().allowOutgoingReactions) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -1134,9 +1114,7 @@ class MeshSocialRepository(
         )
 
         commentDao.updateCommentContent(commentId, newContent, timestamp, signature)
-        if (getMeshFilterSettings().allowOutgoingComments) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
@@ -1166,9 +1144,7 @@ class MeshSocialRepository(
         )
 
         commentDao.markCommentDeleted(commentId)
-        if (getMeshFilterSettings().allowOutgoingComments) {
-            com.noslop.app.mesh.GossipService.broadcast(packet)
-        }
+        com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 }

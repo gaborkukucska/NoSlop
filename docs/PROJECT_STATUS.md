@@ -13,6 +13,10 @@
 ### 3. Foreground Service UX Polish
 *   **HSDir Delay Transparency**: Added a dedicated `AlertDialog` in `SettingsTab` when the user toggles the Foreground Service off, educating them on the 5-10 minute Tor v3 publication propagation window and setting proper reachability expectations.
 
+### 4. Mesh Filter UX Simplification
+*   **Removed Outgoing Native Gates**: Stripped the confusing "Outgoing" toggles for Text, Image, and Video posts from `MeshFiltersScreen`, renaming them to "Broadcasts" for clarity.
+*   **Unrestricted Network Engagement**: Removed outgoing mesh filters for `REACTION`, `VOTE`, and `COMMENT` packets. Native engagement is vital for the network's organic reputation and chronological sorting algorithms and must always be allowed to propagate. Mesh filters now exclusively govern heavy incoming media and automatic Clearnet-to-Mesh bridging.
+
 ## Completed Changes (2026-07-25)
 
 ### 1. Tor ED25519-V3 Key Derivation Math Fixed
