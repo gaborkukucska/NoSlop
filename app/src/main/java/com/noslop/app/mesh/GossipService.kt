@@ -156,7 +156,7 @@ object GossipService {
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE"
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "IDENTITY_UPDATE"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
@@ -174,8 +174,9 @@ object GossipService {
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
         val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND" || packet.type == "MEDIA_CHUNK"
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
+        val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT"
         
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)

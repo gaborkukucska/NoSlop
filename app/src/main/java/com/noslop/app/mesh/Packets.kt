@@ -110,6 +110,7 @@ data class PeerHandshakePayload(
     @SerializedName("from_username") val fromUsername: String,
     @SerializedName("from_display_name") val fromDisplayName: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     @SerializedName("from_home_node") val fromHomeNode: String,
     @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
@@ -130,6 +131,8 @@ data class AnnounceDiscoverablePayload(
     @SerializedName("enc_public_key") val encPublicKey: String,
     @SerializedName("is_creator") val isCreator: Boolean = false,
     @SerializedName("fund_me_link") val fundMeLink: String? = null,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -190,6 +193,7 @@ data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     val timestamp: Long,
     val signature: String
 )

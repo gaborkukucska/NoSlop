@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.1.0`, Room schema version 23 — see §10, compileSdk/targetSdk
+versionName `0.1.0`, Room schema version 5 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -54,8 +54,8 @@ mnemonic, onion address).
 │  ├─ IdentityRepository (keys, mnemonic, onion, lock state)          │
 │  ├─ MeshPacketHandler  (incoming packet dispatch)                   │
 │  ├─ FeedDao / PostDao / PeerDao / MessageDao / CommentDao /         │
-│  │   MeshVoteDao / CommentVoteDao (Room, v23)                       │
-│  │   ReactionDao / AppSettingDao (Room, v23)                        │
+│  │   MeshVoteDao / CommentVoteDao (Room, v5)                       │
+│  │   ReactionDao / AppSettingDao (Room, v5)                        │
 │  └─ ApiKeyRepository (user-supplied API keys, EncryptedSharedPrefs) │
 └──────┬─────────────────────────────┬───────────────────────────────┘
        │                              │
@@ -90,7 +90,7 @@ com.noslop.app
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
 │   ├── MediaSettings.kt           Auto-download policy: trust-based (friends/public), file exclusion (JSON in app_settings)
 │   ├── MeshFilterSettings.kt      Mesh broadcast filter toggles (JSON in app_settings)
-│   ├── NoSlopDatabase.kt          Room database, version 23
+│   ├── NoSlopDatabase.kt          Room database, version 5
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
 ├── debug/
@@ -800,7 +800,7 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 23)
+## 10. Data Model (Room, version 5)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
@@ -949,8 +949,8 @@ is traceable rather than silently disappearing:
    skew worth aligning at some point.
 9. ~~This document's §2 package-layout table and architecture diagram listed
    `NoSlopDatabase.kt` as Room "version 16" / "version 20" in two places,
-   while §10 and the header correctly said v23.~~ **Fixed** — both now read
-   v23, matching `@Database(version = 23, ...)`.
+   while §10 and the header correctly said v5.~~ **Fixed** — both now read
+   v5, matching `@Database(version = 5, ...)`.
 10. ~~§4.4's dispatch table and §5.2's payload-type table described an
     earlier ~11-handler, single-file version of `MeshPacketHandler` and were
     marked "Superseded" pointing elsewhere for current info, while

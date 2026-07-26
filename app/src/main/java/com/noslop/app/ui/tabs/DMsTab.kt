@@ -324,7 +324,14 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 }
                             }
                             
-                            Text(peer.handle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            val fullName = "${peer.handle}.${peer.tripcode}"
+                            val isTrusted = peer.isTrusted
+                            Text(if (isTrusted) fullName else peer.handle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            
+                            if (!peer.bio.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(peer.bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
+                            }
                             
                             if (peer.isCreator) {
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -335,14 +342,17 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 }
                             }
                             
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Button(
-                                onClick = { showConnectWarning = true },
+                            val targetOnion = peer.onionAddress
+                            if (!isTrusted && targetOnion.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Button(
+                                    onClick = { showConnectWarning = true },
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                             ) {
                                 Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Connect".tr, fontWeight = FontWeight.Bold)
+                            }
                             }
                         }
                     },

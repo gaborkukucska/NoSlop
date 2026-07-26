@@ -60,7 +60,8 @@ data class Peer(
     val isTemporary: Boolean = false,
     val isDiscoverable: Boolean = false,
     val isCreator: Boolean = false,
-    val fundMeLink: String? = null
+    val fundMeLink: String? = null,
+    val bio: String? = null
 )
 
 @Entity(tableName = "mesh_posts")

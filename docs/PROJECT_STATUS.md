@@ -2,6 +2,11 @@
 
 ## Completed Changes (2026-07-26)
 
+### 7. Discoverability & Profile Bio Support
+*   **Firewall Bypass**: Corrected the gossip firewall to properly permit `IDENTITY_UPDATE` and `USER_EXIT` packets from discoverable 3rd parties, allowing profile propagation without a trusted connection.
+*   **Bio Field Integration**: Added `bio` string support across the network protocol (`IdentityUpdatePayload`, `PeerHandshakePayload`, `AnnounceDiscoverablePayload`) and local database. The user info modal and DM lists now properly render bios.
+*   **Discoverable Connect UI**: The 'Connect' button is now consistently injected into all user profile modals (feed, comments) for any non-trusted 3rd-party peer with a known onion address.
+
 ### 6. Privacy UI & Display Name Polish
 *   **Share Button Guard**: The "Share" button is now explicitly hidden on all posts with `privacy = "friends"`, preventing peers from bridging or relaying private posts manually.
 *   **Identity Formatting**: `CryptoService` no longer appends the cryptographically generated `.tripcode` to the default `displayName` string, meaning users' explicitly typed handles are used universally. Older legacy handles are dynamically stripped in the UI for a cleaner display.

@@ -1457,7 +1457,8 @@ fun toggleAggregator() {
             val encKeyB64 = identity.encPublicKeyB64
             val timestamp = System.currentTimeMillis()
             
-            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}:${timestamp}"
+            val userProfile = repository.getUserProfile()
+            val msgToSign = "${localKeyB64}:${handle}:${burnableAddress}:${encKeyB64}:${isCreator}:${link ?: ""}:${userProfile.avatarB64 ?: ""}:${userProfile.bio ?: ""}:${timestamp}"
             val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, identity.privateKeyB64)
             
             val payload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
@@ -1467,6 +1468,8 @@ fun toggleAggregator() {
                 encPublicKey = encKeyB64,
                 isCreator = isCreator,
                 fundMeLink = link,
+                authorAvatarB64 = userProfile.avatarB64,
+                bio = userProfile.bio,
                 timestamp = timestamp,
                 signature = signature
             )

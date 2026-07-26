@@ -28,6 +28,9 @@ class HandshakePacketHandler(
         if (connPay.authorAvatarB64 != null) {
             payloadToVerify += "|${connPay.authorAvatarB64}"
         }
+        if (!connPay.bio.isNullOrBlank()) {
+            payloadToVerify += "|${connPay.bio}"
+        }
         if (!CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)) {
             return false
         }
@@ -75,7 +78,8 @@ class HandshakePacketHandler(
             isDiscoverable = existingPeer?.isDiscoverable ?: false,
             isCreator = existingPeer?.isCreator ?: false,
             fundMeLink = existingPeer?.fundMeLink,
-            customFolder = existingPeer?.customFolder
+            customFolder = existingPeer?.customFolder,
+            bio = connPay.bio ?: existingPeer?.bio
         )
         peerDao.insertPeer(peer)
         
@@ -146,6 +150,9 @@ class HandshakePacketHandler(
         if (handPay.authorAvatarB64 != null) {
             payloadToVerify += "|${handPay.authorAvatarB64}"
         }
+        if (!handPay.bio.isNullOrBlank()) {
+            payloadToVerify += "|${handPay.bio}"
+        }
         if (!CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)) return false
 
         val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
@@ -168,7 +175,8 @@ class HandshakePacketHandler(
             lastSeenAt = System.currentTimeMillis(),
             onionAddress = handPay.fromHomeNode,
             encPublicKeyB64 = handPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: peer.encPublicKeyB64,
-            authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64
+            authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
+            bio = handPay.bio ?: peer.bio
         ))
 
         if (!wasAlreadyTrusted) {
@@ -272,7 +280,7 @@ class HandshakePacketHandler(
 
     suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
-        val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.timestamp}"
+        val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
         if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) {
             com.noslop.app.debug.Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
             return false
@@ -297,6 +305,8 @@ class HandshakePacketHandler(
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,
+                authorAvatarB64 = announcePay.authorAvatarB64,
+                bio = announcePay.bio,
                 isOnline = true,
                 lastSeenAt = System.currentTimeMillis()
             )
@@ -309,6 +319,8 @@ class HandshakePacketHandler(
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,
+                authorAvatarB64 = announcePay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = announcePay.bio ?: peer.bio,
                 isOnline = true,
                 lastSeenAt = System.currentTimeMillis()
             ))
@@ -328,6 +340,9 @@ class HandshakePacketHandler(
         if (identityPay.authorAvatarB64 != null) {
             payloadToVerify += "|${identityPay.authorAvatarB64}"
         }
+        if (!identityPay.bio.isNullOrBlank()) {
+            payloadToVerify += "|${identityPay.bio}"
+        }
         if (!CryptoService.verify(payloadToVerify, identityPay.signature, identityPay.userId)) return false
 
         val isOldPacket = (System.currentTimeMillis() - identityPay.timestamp) > 5 * 60 * 1000L
@@ -339,7 +354,8 @@ class HandshakePacketHandler(
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),
-                authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64
+                authorAvatarB64 = identityPay.authorAvatarB64 ?: peer.authorAvatarB64,
+                bio = identityPay.bio ?: peer.bio
             ))
         }
         return true

@@ -658,6 +658,9 @@ fun FullScreenMeshCardV2(
                         val isSelf = post.authorPublicKeyB64 == myPubKey
 
                         var showConnectWarning by remember { mutableStateOf(false) }
+                        
+                        val targetOnion = discPeer?.onionAddress ?: peer?.onionAddress
+                        val targetEncPub = discPeer?.encPublicKeyB64 ?: peer?.encPublicKeyB64 ?: ""
 
                         AlertDialog(
                             onDismissRequest = { showUserInfoDialog = false },
@@ -684,7 +687,15 @@ fun FullScreenMeshCardV2(
                                         }
                                     }
                                     
-                                    Text(displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: post.authorTripcode
+                                    val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
+                                    Text(if (isTrusted || isSelf) fullName else displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    
+                                    val bio = peer?.bio ?: discPeer?.bio
+                                    if (!bio.isNullOrBlank()) {
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
                                     
                                     if (isTrusted) {
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -695,7 +706,7 @@ fun FullScreenMeshCardV2(
                                         }
                                     }
 
-                                    if (!isSelf && !isTrusted && discPeer != null) {
+                                    if (!isSelf && !isTrusted && targetOnion != null) {
                                         Spacer(modifier = Modifier.height(24.dp))
                                         Button(
                                             onClick = { showConnectWarning = true },
@@ -714,7 +725,7 @@ fun FullScreenMeshCardV2(
                             containerColor = SurfaceDark
                         )
 
-                        if (showConnectWarning && discPeer != null) {
+                        if (showConnectWarning && targetOnion != null) {
                             AlertDialog(
                                 onDismissRequest = { showConnectWarning = false },
                                 title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
@@ -725,8 +736,8 @@ fun FullScreenMeshCardV2(
                                             viewModel?.requestConnection(
                                                 handle = displayHandle,
                                                 publicKeyB64 = post.authorPublicKeyB64,
-                                                onionAddress = discPeer.onionAddress,
-                                                encPublicKeyB64 = discPeer.encPublicKeyB64,
+                                                onionAddress = targetOnion,
+                                                encPublicKeyB64 = targetEncPub,
                                                 useBurnableIdentity = true
                                             )
                                             showConnectWarning = false

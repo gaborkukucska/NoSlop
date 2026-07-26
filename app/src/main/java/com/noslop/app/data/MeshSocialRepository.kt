@@ -409,6 +409,7 @@ class MeshSocialRepository(
                 fromUsername = myKeys.displayName.substringBeforeLast("."),
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
+                bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
@@ -417,6 +418,9 @@ class MeshSocialRepository(
             var payloadToSign = "${myKeys.publicKeyB64}|${reqPay.fromUsername}|${myKeys.onionAddress}|${reqPay.timestamp}"
             if (avatarB64 != null) {
                 payloadToSign += "|$avatarB64"
+            }
+            if (!reqPay.bio.isNullOrBlank()) {
+                payloadToSign += "|${reqPay.bio}"
             }
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
@@ -451,6 +455,7 @@ class MeshSocialRepository(
                 fromUsername = myKeys.displayName.substringBeforeLast("."),
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
+                bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
@@ -459,6 +464,9 @@ class MeshSocialRepository(
             var payloadToSign = "${myKeys.publicKeyB64}|${handshakePay.fromUsername}|${myKeys.onionAddress}|${handshakePay.timestamp}"
             if (avatarB64 != null) {
                 payloadToSign += "|$avatarB64"
+            }
+            if (!handshakePay.bio.isNullOrBlank()) {
+                payloadToSign += "|${handshakePay.bio}"
             }
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
@@ -989,10 +997,14 @@ class MeshSocialRepository(
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
+        val bio = userProfile.bio
         val timestamp = System.currentTimeMillis()
         var payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
         if (avatarB64 != null) {
             payloadToSign += "|$avatarB64"
+        }
+        if (bio.isNotBlank()) {
+            payloadToSign += "|$bio"
         }
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
@@ -1000,6 +1012,7 @@ class MeshSocialRepository(
             userId = myKeys.publicKeyB64,
             handle = newHandle,
             authorAvatarB64 = avatarB64,
+            bio = bio.takeIf { it.isNotBlank() },
             timestamp = timestamp,
             signature = signature
         )

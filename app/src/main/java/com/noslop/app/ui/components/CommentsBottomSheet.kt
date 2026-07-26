@@ -280,6 +280,14 @@ fun CommentItem(
             val isSelf = comment.authorPublicKeyB64 == localKeys?.publicKeyB64
 
             var showConnectWarning by remember { mutableStateOf(false) }
+            
+            val targetOnion = discPeer?.onionAddress ?: peer?.onionAddress
+            val targetEncPub = discPeer?.encPublicKeyB64 ?: peer?.encPublicKeyB64 ?: ""
+            val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: ""
+            val displayHandle = if (tripcode.isNotBlank() && comment.authorHandle.endsWith(".$tripcode")) {
+                comment.authorHandle.removeSuffix(".$tripcode")
+            } else comment.authorHandle
+            val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
 
             AlertDialog(
                 onDismissRequest = { showUserInfoDialog = false },
@@ -306,7 +314,13 @@ fun CommentItem(
                             }
                         }
                         
-                        Text(comment.authorHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        Text(if (isTrusted || isSelf) fullName else displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        
+                        val bio = peer?.bio ?: discPeer?.bio
+                        if (!bio.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
                         
                         if (isTrusted) {
                             Spacer(modifier = Modifier.height(8.dp))
@@ -317,7 +331,7 @@ fun CommentItem(
                             }
                         }
 
-                        if (!isSelf && !isTrusted && discPeer != null) {
+                        if (!isSelf && !isTrusted && targetOnion != null) {
                             Spacer(modifier = Modifier.height(24.dp))
                             Button(
                                 onClick = { showConnectWarning = true },
@@ -336,7 +350,7 @@ fun CommentItem(
                 containerColor = SurfaceDark
             )
 
-            if (showConnectWarning && discPeer != null) {
+            if (showConnectWarning && targetOnion != null) {
                 val context = androidx.compose.ui.platform.LocalContext.current
                 AlertDialog(
                     onDismissRequest = { showConnectWarning = false },
@@ -346,10 +360,10 @@ fun CommentItem(
                         Button(
                             onClick = {
                                 viewModel.requestConnection(
-                                    handle = comment.authorHandle,
+                                    handle = displayHandle,
                                     publicKeyB64 = comment.authorPublicKeyB64,
-                                    onionAddress = discPeer.onionAddress,
-                                    encPublicKeyB64 = discPeer.encPublicKeyB64,
+                                    onionAddress = targetOnion,
+                                    encPublicKeyB64 = targetEncPub,
                                     useBurnableIdentity = true
                                 )
                                 showConnectWarning = false

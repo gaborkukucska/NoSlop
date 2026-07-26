@@ -45,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -95,6 +95,13 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Discoverability: Add bio field to peers
+                database.execSQL("ALTER TABLE peers ADD COLUMN bio TEXT DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -103,7 +110,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build()
                 INSTANCE = instance
                 instance
