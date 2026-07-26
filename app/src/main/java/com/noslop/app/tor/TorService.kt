@@ -67,7 +67,9 @@ object TorService {
                     }
                 }
                 org.torproject.jni.TorService.STATUS_OFF -> {
-                    _torState.value = TorState.FAILED
+                    if (_torState.value != TorState.STARTING) {
+                        _torState.value = TorState.FAILED
+                    }
                 }
                 org.torproject.jni.TorService.STATUS_STARTING -> {
                     _torState.value = TorState.STARTING
@@ -128,8 +130,17 @@ object TorService {
 
         try {
             val intent = android.content.Intent(context, org.torproject.jni.TorService::class.java)
+            
+            // FIX: Stop the stuck service first to ensure a clean Tor daemon restart
+            context.stopService(intent)
+            
             intent.action = org.torproject.jni.TorService.ACTION_START
-            context.startService(intent)
+            
+            try {
+                context.startService(intent)
+            } catch (e: IllegalStateException) {
+                Logger.warn(TAG, "startService threw IllegalStateException: ${e.message}")
+            }
 
             // Unified self-healing bootstrap loop
             bootstrapJob = scope.launch {

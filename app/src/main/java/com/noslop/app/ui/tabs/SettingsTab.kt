@@ -249,6 +249,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             val isForegroundServiceEnabled by viewModel.isForegroundServiceEnabled.collectAsState()
                             var showForegroundWarning by remember { mutableStateOf(false) }
+                            var showForegroundDisableWarning by remember { mutableStateOf(false) }
                             val hasHub = !hubDeploymentStatus.isNullOrBlank()
                             
                             val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
@@ -299,7 +300,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         if (it) {
                                             showForegroundWarning = true
                                         } else {
-                                            viewModel.setForegroundServiceEnabled(false)
+                                            showForegroundDisableWarning = true
                                         }
                                     },
                                     colors = SwitchDefaults.colors(
@@ -348,6 +349,36 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             }) {
                                                 Text("Enable Anyway".tr, color = DestructiveRed)
                                             }
+                                        }
+                                    }
+                                )
+                            }
+                            
+                            if (showForegroundDisableWarning) {
+                                AlertDialog(
+                                    onDismissRequest = { showForegroundDisableWarning = false },
+                                    containerColor = SurfaceDark,
+                                    title = { Text("Disable Background Mesh?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                                    text = { 
+                                        Text(
+                                            "Whenever the Tor daemon restarts (like when you toggle the foreground service), it has to publish your .onion address to the global Tor network's Hidden Service Directories (HSDirs). For Tor v3 addresses, this publication process takes anywhere from 5 to 10 minutes to fully propagate. During this time, you may be temporarily unreachable by peers.".tr,
+                                            color = TextMuted
+                                        ) 
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showForegroundDisableWarning = false
+                                                viewModel.setForegroundServiceEnabled(false)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                        ) {
+                                            Text("Disable".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showForegroundDisableWarning = false }) {
+                                            Text("Cancel".tr, color = AccentGreen)
                                         }
                                     }
                                 )

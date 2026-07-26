@@ -1,5 +1,18 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-26)
+
+### 1. Tor Service Recovery & Auto-Healing
+*   **Daemon Resurrection**: Fixed `TorService.kt` to handle Android's background service `IllegalStateException` limits safely and stop stuck daemon instances before restart.
+*   **Auto-Retry Observer**: Added an observer in `NoSlopViewModel` that automatically detects if Tor falls into the `FAILED` state (e.g. killed by the OS when foreground service stops) and seamlessly auto-retries bootstrapping up to 3 times in the background.
+
+### 2. Mesh Transport Fast-Failing & DM Spooler
+*   **Semaphore Gridlock Prevention**: `MeshTransport` now instantly fast-fails and frees Tor circuits upon receiving explicit `SOCKS: Host unreachable` or `TTL expired` rejections, rather than stubbornly waiting 60s per attempt and hoarding permits.
+*   **Background Retry Spooler**: Introduced a 15-minute background spooler in `MeshSocialRepository`. If a direct packet (DM/Handshake) fails initially due to the target's `.onion` still propagating to HSDirs, it will silently retry every 60 seconds. This perfectly mitigates Tor's 5-10 minute directory publication delay!
+
+### 3. Foreground Service UX Polish
+*   **HSDir Delay Transparency**: Added a dedicated `AlertDialog` in `SettingsTab` when the user toggles the Foreground Service off, educating them on the 5-10 minute Tor v3 publication propagation window and setting proper reachability expectations.
+
 ## Completed Changes (2026-07-25)
 
 ### 1. Tor ED25519-V3 Key Derivation Math Fixed

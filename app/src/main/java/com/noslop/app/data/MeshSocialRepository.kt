@@ -86,6 +86,26 @@ class MeshSocialRepository(
                             com.noslop.app.mesh.GossipService.broadcast(gossipDm)
                             Logger.info(TAG, "Gossip-relayed DM ${packet.id} as fallback via mesh broadcast.")
                             
+                            // Spool background retries for 15 minutes!
+                            repositoryScope.launch {
+                                Logger.warn(TAG, "Direct send failed. Spooling background retries for 15m for ${packet.type}.")
+                                for (i in 1..15) {
+                                    kotlinx.coroutines.delay(60_000) // Wait 1 minute
+                                    Logger.info(TAG, "Background retry $i/15 for ${packet.type} to $onionAddress")
+                                    // Give it a fresh ID so it passes deduplication on the target
+                                    val retryPacket = packet.copy(id = java.util.UUID.randomUUID().toString())
+                                    if (meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, retryPacket)) {
+                                        Logger.info(TAG, "Background retry $i/15 succeeded for ${packet.type} to $onionAddress!")
+                                        // Mark them back online
+                                        val updatedPeer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
+                                        if (updatedPeer != null) {
+                                            peerDao.insertPeer(updatedPeer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                            
                             // Also send a USER_HANDSHAKE to heal the identity for future attempts
                             val myKeys = getLocalIdentity()
                             if (myKeys != null) {

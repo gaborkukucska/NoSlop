@@ -153,7 +153,8 @@ class MeshTransport(
                     val msg = e.message ?: ""
                     // Fast-fail if Tor explicitly tells us the peer is dead/unreachable
                     if (msg.contains("Host unreachable") || msg.contains("TTL expired") || msg.contains("general SOCKS server failure")) {
-                        Logger.warn(TAG, "Tor rejected initial routing to $onionAddress. Retrying to allow circuit building.")
+                        Logger.warn(TAG, "Tor rejected routing to $onionAddress. Fast-failing to free circuit.")
+                        break
                     }
                     if (attempt < maxAttempts) {
                         val delayMs = if (isCritical) attempt * 4000L else attempt * 2000L
