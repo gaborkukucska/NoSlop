@@ -237,20 +237,12 @@ EOF
                     rm -f ~/.hainet/auth.json
                     
                     cat << 'PYEOF' > gen_tor.py
-import base64, hashlib, sys
+import base64, sys
 b64_str = "$expandedSeedB64"
 if not b64_str:
     sys.exit(0)
 try:
-    seed_pub = base64.b64decode(b64_str)
-    seed = seed_pub[:32]
-    
-    # Manually expand and clamp the seed for the Tor file format
-    expanded = bytearray(hashlib.sha512(seed).digest())
-    expanded[0] &= 248
-    expanded[31] &= 127
-    expanded[31] |= 64
-    
+    expanded = base64.b64decode(b64_str)
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
@@ -535,30 +527,15 @@ EOF
                 run_sudo apt-get install -y -qq tor >/dev/null 2>&1 || true
                 
                 cat << 'PYEOF' > gen_tor.py
-import base64, hashlib, sys
+import base64, sys
 b64_str = "$expandedSeedB64"
 if not b64_str:
     sys.exit(0)
 try:
-    seed_pub = base64.b64decode(b64_str)
-    seed = seed_pub[:32]
-    pub = seed_pub[32:]
-    
-    # Manually expand and clamp the seed for the Tor file format
-    expanded = bytearray(hashlib.sha512(seed).digest())
-    expanded[0] &= 248
-    expanded[31] &= 127
-    expanded[31] |= 64
-    
+    expanded = base64.b64decode(b64_str)
     header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
     with open("hs_ed25519_secret_key", "wb") as f:
         f.write(header + expanded)
-        
-    # Tor v3 onion address: base32(pubkey + checksum + version)
-    checksum = hashlib.sha3_256(b".onion checksum" + pub + b"\x03").digest()[:2]
-    onion = base64.b32encode(pub + checksum + b"\x03").decode('utf-8').lower() + ".onion"
-    with open("onion.txt", "w") as f:
-        f.write(onion)
 except Exception as e:
     print("Error generating tor key:", e)
 PYEOF
@@ -572,6 +549,7 @@ PYEOF
                 run_sudo chmod 700 /var/lib/tor/hainet/
                 run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
                 
+                echo "${identity?.onionAddress ?: ""}" > onion.txt
                 run_sudo mv onion.txt /var/lib/hainet/onion.txt
                 run_sudo chown ${'$'}(id -un):${'$'}(id -gn) /var/lib/hainet/onion.txt
                 run_sudo chmod 644 /var/lib/hainet/onion.txt

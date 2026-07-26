@@ -245,6 +245,8 @@ command expects:
      expanded[31] |= 0b01000000   (or 64)
 5. Base64-encode the 64 bytes -> "ED25519-V3:<base64>"
 ```
+
+> **Critical Implementation Note:** Tor explicitly expects the 64-byte *expanded secret scalar + PRF secret*. It does **not** accept the 64-byte `libsodium` format (`seed || pubkey`). Passing the `libsodium` format to `ADD_ONION` will cause Tor to re-expand the key incorrectly, resulting in a completely mismatched public key and `.onion` address that breaks all peer routing.
 This produces a **persistent** onion address tied to the same key used for
 post signatures — i.e., a node's mesh identity and its network address are
 cryptographically the same key.

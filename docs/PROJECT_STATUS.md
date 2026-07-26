@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-25)
+
+### 1. Tor ED25519-V3 Key Derivation Math Fixed
+*   **Proper SHA-512 Clamping**: Fixed a critical routing regression where `CryptoService.kt` and `SshDeployer.kt` were passing the 64-byte libsodium format (`seed || pubkey`) to the Tor daemon for `ADD_ONION`. Tor requires the 64-byte expanded and clamped secret key (SHA-512 of the seed with specific bitwise clamping). Corrected the math in both Kotlin and the Python deployment script to generate the exact same `.onion` address locally as the Tor daemon.
+
+### 2. Hub Firewall & Mesh Sync Disconnection
+*   **Mobile Identity Trust**: Fixed an issue where the Hub's `TrustFirewall` was rejecting `sync_push_packets` from the linked mobile device. `api_router.rs` now explicitly calls `engine.trust_peer(my_node_id)` ensuring the mobile app's signature is inherently trusted by its own Hub.
+
+### 3. Mesh Transport & Gossip Storm Prevention
+*   **Direct Routing Gate**: Patched `api_router.rs` to stop a dual-routing flood. If a directed packet has a known `target_onion`, the Hub will now only execute the direct SOCKS5 connection (with local background retries). It drops the redundant gossip broadcast unless the direct send fundamentally fails *and* no onion address was known.
+
+### 4. Tor Ephemeral Onboarding Fallback
+*   **Null Key Registration**: Fixed `TorService.kt` where a well-intentioned guard skipped hidden service registration if no identity key was loaded. Restored the ephemeral `registerHiddenService(null)` fallback, allowing new users to complete onboarding with a temporary `.onion` before their permanent identity is generated.
+
 ## Completed Changes (2026-07-13)
 
 ### 4. Bulletproof OTA Downloader (HttpURLConnection)

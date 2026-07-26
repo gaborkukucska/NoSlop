@@ -191,10 +191,15 @@ object TorService {
                     onAddressCallback?.invoke(onionAddress)
                 }
             } else {
-                // FIX: Don't register with null key — that produces a random ephemeral
-                // address that doesn't match the user's identity. Defer until the real
-                // identity key is available (startTor will re-trigger via keyChanged check).
-                Logger.warn(TAG, "No identity key available yet. Deferring hidden service registration until identity is set.")
+                if (activeMainServiceId != null) {
+                    Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering ephemeral key.")
+                    unregisterHiddenService(activeMainServiceId!!)
+                    activeMainServiceId = null
+                }
+                delay(3000)
+                registerHiddenService(null) { onionAddress ->
+                    onAddressCallback?.invoke(onionAddress)
+                }
             }
             
             if (currentBurnablePrivateKeyB64 != null) {
