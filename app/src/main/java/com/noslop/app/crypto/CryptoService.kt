@@ -125,7 +125,7 @@ object CryptoService {
                 privateKeyB64 = privB64,
                 tripcode = tripcode,
                 onionAddress = onion,
-                displayName = "$handle.$tripcode",
+                displayName = handle,
                 encPublicKeyB64 = encKeys.first,
                 encPrivateKeyB64 = encKeys.second
             )

@@ -1225,8 +1225,9 @@ fun UnifiedFeedTab(
 
                         if (sharedItem != null) {
                             Spacer(modifier = Modifier.height(8.dp))
-                            val title = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> "Mesh Post by ${u.post.authorHandle}"; else -> "" }
-                            val author = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.author ?: "Unknown"; is UnifiedItem.Mesh -> u.post.authorHandle; else -> "" }
+                            val cleanAuthor = when(val u = sharedItem) { is UnifiedItem.Mesh -> if (u.post.authorHandle.endsWith("." + u.post.authorTripcode)) u.post.authorHandle.removeSuffix("." + u.post.authorTripcode) else u.post.authorHandle; else -> "" }
+                            val title = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> "Mesh Post by $cleanAuthor"; else -> "" }
+                            val author = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.author ?: "Unknown"; is UnifiedItem.Mesh -> cleanAuthor; else -> "" }
                             val thumbUrl = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.thumbnailUrl; is UnifiedItem.Mesh -> u.post.clearnetThumbnailUrl ?: u.post.thumbnailB64; else -> null }
                             
                             ClearnetAttachment(

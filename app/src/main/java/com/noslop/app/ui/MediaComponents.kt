@@ -463,7 +463,7 @@ fun OverlayInteractions(
     showComment: Boolean = true,
     onLike: () -> Unit,
     onReaction: (String) -> Unit = {},
-    onShare: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onComment: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     reactionSummary: Map<String, Int> = emptyMap(),
@@ -558,11 +558,13 @@ fun OverlayInteractions(
                     }
                 }
 
-                InteractionButton(
-                    icon = Icons.Default.Share,
-                    label = "Share",
-                    onClick = onShare
-                )
+                if (onShare != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Share,
+                        label = "Share",
+                        onClick = onShare
+                    )
+                }
 
                 if (showComment && onComment != null) {
                     InteractionButton(

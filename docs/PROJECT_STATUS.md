@@ -2,6 +2,13 @@
 
 ## Completed Changes (2026-07-26)
 
+### 6. Privacy UI & Display Name Polish
+*   **Share Button Guard**: The "Share" button is now explicitly hidden on all posts with `privacy = "friends"`, preventing peers from bridging or relaying private posts manually.
+*   **Identity Formatting**: `CryptoService` no longer appends the cryptographically generated `.tripcode` to the default `displayName` string, meaning users' explicitly typed handles are used universally. Older legacy handles are dynamically stripped in the UI for a cleaner display.
+*   **User Info Modal Privacy**: The User Profile modal no longer leaks public keys, tripcodes, or network details to any user. It exclusively displays the Avatar, Handle, and connection status.
+*   **Burnable 3rd-Party Connections**: When a 3rd-party user taps on an author who is actively broadcasting `ANNOUNCE_DISCOVERABLE`, the modal now injects a "Connect" button. Tapping it triggers a mandatory warning dialog and exclusively routes the `CONNECTION_REQUEST` using the user's ephemeral/burnable identity, perfectly protecting the user's persistent onion address from strangers.
+
+
 ### 5. Friends-Only Broadcast Scoping
 *   **Hop Count Restriction**: Outbound packets for friends-only broadcasts (Posts, Comments, Reactions, Votes, Edits, Deletes) are now strictly restricted to `hops = 1`. This explicitly scopes network propagation to directly connected trusted peers.
 *   **Gossip Forwarder Guard**: The `GossipService` explicitly checks incoming `POST` payloads and drops any with `privacy = "friends"` from being relayed to other peers, completely isolating friends-only content from 3rd parties.

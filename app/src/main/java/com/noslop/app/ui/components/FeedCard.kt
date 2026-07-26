@@ -340,6 +340,12 @@ fun FullScreenMeshCardV2(
     val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
+    val displayHandle = remember(post.authorHandle, post.authorTripcode) {
+        if (post.authorHandle.endsWith(".${post.authorTripcode}")) {
+            post.authorHandle.removeSuffix(".${post.authorTripcode}")
+        } else post.authorHandle
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -592,8 +598,8 @@ fun FullScreenMeshCardV2(
             SegmentedArticleReader(
                 content = post.content,
                 title = post.clearnetTitle ?: post.content.take(60).trimEnd().let { if (it.length == 60) "$it…" else it },
-                author = post.authorHandle,
-                sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
+                author = displayHandle,
+                sourceLabel = if (post.clearnetUrl != null) "Shared by $displayHandle" else "MESH",
                 thumbnailUrl = post.clearnetThumbnailUrl,
                 articleUrl = post.clearnetUrl
             )
@@ -638,15 +644,24 @@ fun FullScreenMeshCardV2(
                                 Spacer(modifier = Modifier.width(8.dp))
                             }
                         }
-                        Text(post.authorHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                        Text(displayHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
                     }
 
                     if (showUserInfoDialog) {
+                        val allPeers by (viewModel?.peers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+                        val discPeers by (viewModel?.discoverablePeers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+                        val peer = allPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
+                        val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
+                        val isTrusted = peer?.isTrusted == true
+                        val isSelf = post.authorPublicKeyB64 == myPubKey
+
+                        var showConnectWarning by remember { mutableStateOf(false) }
+
                         AlertDialog(
                             onDismissRequest = { showUserInfoDialog = false },
-                            title = { Text(post.authorHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace) },
+                            title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
                             text = {
-                                Column {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                                     if (post.authorAvatarB64 != null) {
                                         val bitmap = remember(post.authorAvatarB64) {
                                             try {
@@ -663,14 +678,32 @@ fun FullScreenMeshCardV2(
                                                     contentScale = ContentScale.Crop
                                                 )
                                             }
-                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Spacer(modifier = Modifier.height(16.dp))
                                         }
                                     }
-                                    Text("Tripcode".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Text(".${post.authorTripcode}", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 13.sp)
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text("Public Key".tr, color = TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    Text(post.authorPublicKeyB64.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                                    
+                                    Text(displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                                    
+                                    if (isTrusted) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Box(
+                                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    if (!isSelf && !isTrusted && discPeer != null) {
+                                        Spacer(modifier = Modifier.height(24.dp))
+                                        Button(
+                                            onClick = { showConnectWarning = true },
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                        ) {
+                                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             },
                             confirmButton = {
@@ -678,6 +711,37 @@ fun FullScreenMeshCardV2(
                             },
                             containerColor = SurfaceDark
                         )
+
+                        if (showConnectWarning && discPeer != null) {
+                            AlertDialog(
+                                onDismissRequest = { showConnectWarning = false },
+                                title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                                text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            viewModel?.requestConnection(
+                                                handle = displayHandle,
+                                                publicKeyB64 = post.authorPublicKeyB64,
+                                                onionAddress = discPeer.onionAddress,
+                                                encPublicKeyB64 = discPeer.encPublicKeyB64,
+                                                useBurnableIdentity = true
+                                            )
+                                            showConnectWarning = false
+                                            showUserInfoDialog = false
+                                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), Toast.LENGTH_SHORT).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                    ) {
+                                        Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
+                                },
+                                containerColor = SurfaceDark
+                            )
+                        }
                     }
                     
                     if (post.content.isNotBlank() && !isArticle) {
@@ -724,7 +788,7 @@ fun FullScreenMeshCardV2(
                 showComment = true,
                 onLike = { viewModel?.reactToMeshPost(post.id, "like") },
                 onReaction = { type -> viewModel?.reactToMeshPost(post.id, type) },
-                onShare = onShareToMesh,
+                onShare = if (post.privacy == "friends") null else onShareToMesh,
                 onComment = { viewModel?.openCommentsForPost(post.id) },
                 reactionSummary = (reactions.map { it.reactionType } + votes.map { it.voteType })
                     .groupBy { it }.mapValues { it.value.size },
