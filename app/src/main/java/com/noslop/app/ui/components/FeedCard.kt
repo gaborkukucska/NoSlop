@@ -414,8 +414,53 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".aac") ||
                 resolvedUrl.contains(".ogg") ||
                 resolvedUrl.contains(".flac") -> {
-                    val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
-                    AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
+                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
+                    var newlyDownloaded by remember { mutableStateOf(false) }
+                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, "audio"))
+                    val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
+
+                    if (canPlay) {
+                        val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
+                        AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
+                    } else {
+                        val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
+                        val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
+
+                        LaunchedEffect(progress) {
+                            if (progress == 100) newlyDownloaded = true
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
+                            if (isVisible) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .clickable {
+                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
+                                            if (meta != null) {
+                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                                viewModel?.startMediaDownload(meta, origin)
+                                            }
+                                        }
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                                        if (progress > 0) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
+                                            Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
+                                        } else {
+                                            Text("Tap to Download Audio".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 effectiveMediaType == "image" || 
                 resolvedUrl.contains(".jpg") || 
@@ -423,8 +468,53 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".png") || 
                 resolvedUrl.contains(".webp") ||
                 resolvedUrl.contains(".gif") -> {
-                    val imageUrl = if (post.mediaUrl == null && post.clearnetThumbnailUrl != null) post.clearnetThumbnailUrl else resolvedUrl
-                    BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64)
+                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
+                    var newlyDownloaded by remember { mutableStateOf(false) }
+                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, "image"))
+                    val canShow = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
+
+                    if (canShow) {
+                        val imageUrl = if (post.mediaUrl == null && post.clearnetThumbnailUrl != null) post.clearnetThumbnailUrl else resolvedUrl
+                        BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64)
+                    } else {
+                        val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
+                        val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
+
+                        LaunchedEffect(progress) {
+                            if (progress == 100) newlyDownloaded = true
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            BlurredImageBackground(url = post.clearnetThumbnailUrl ?: "", thumbnailB64 = post.thumbnailB64)
+                            if (isVisible) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .clickable {
+                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
+                                            if (meta != null) {
+                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                                viewModel?.startMediaDownload(meta, origin)
+                                            }
+                                        }
+                                        .padding(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
+                                        if (progress > 0) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
+                                            Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
+                                        } else {
+                                            Text("Tap to Download Image".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 effectiveMediaType == "file" -> {
                     val rawMediaId = post.mediaUrl?.substringAfterLast("/")

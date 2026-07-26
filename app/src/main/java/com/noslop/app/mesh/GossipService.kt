@@ -191,16 +191,23 @@ object GossipService {
         if (packet.type == "REACTION" || packet.type == "VOTE" || 
             packet.type == "COMMENT_REACTION" || packet.type == "COMMENT_VOTE") {
             var isTracked = false
-            val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
-            if (payloadObj != null && checkEntityExists != null) {
+            if (checkEntityExists != null) {
                 when (packet.type) {
-                    "REACTION", "VOTE" -> {
-                        val postId = payloadObj.get("postId")?.asString
-                        if (postId != null && checkEntityExists!!("POST", postId)) isTracked = true
+                    "REACTION" -> {
+                        val pay = packet.getReactionPayload()
+                        if (pay != null && checkEntityExists!!("POST", pay.postId)) isTracked = true
                     }
-                    "COMMENT_REACTION", "COMMENT_VOTE" -> {
-                        val commentId = payloadObj.get("commentId")?.asString
-                        if (commentId != null && checkEntityExists!!("COMMENT", commentId)) isTracked = true
+                    "VOTE" -> {
+                        val pay = packet.getVotePayload()
+                        if (pay != null && checkEntityExists!!("POST", pay.postId)) isTracked = true
+                    }
+                    "COMMENT_REACTION" -> {
+                        val pay = packet.getCommentReactionPayload()
+                        if (pay != null && checkEntityExists!!("COMMENT", pay.commentId)) isTracked = true
+                    }
+                    "COMMENT_VOTE" -> {
+                        val pay = packet.getCommentVotePayload()
+                        if (pay != null && checkEntityExists!!("COMMENT", pay.commentId)) isTracked = true
                     }
                 }
             }
@@ -210,10 +217,9 @@ object GossipService {
             }
         } else if (packet.type == "COMMENT") {
             var isTracked = false
-            val payloadObj = packet.payload?.takeIf { it.isJsonObject }?.asJsonObject
-            if (payloadObj != null && checkEntityExists != null) {
-                val postId = payloadObj.get("postId")?.asString
-                if (postId != null && checkEntityExists!!("POST", postId)) isTracked = true
+            val pay = packet.getCommentPayload()
+            if (pay != null && checkEntityExists != null) {
+                if (checkEntityExists!!("POST", pay.postId)) isTracked = true
             }
             if (!isTracked) {
                 Logger.info("FIREWALL", "Mesh Filter: Dropped incoming comment packet ${packet.id} (anchor post not tracked locally)")

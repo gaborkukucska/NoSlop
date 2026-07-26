@@ -93,6 +93,56 @@ fun MeshFiltersScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 }
 
 @Composable
+fun FilterCategorySingle(
+    title: String,
+    description: String,
+    incomingChecked: Boolean,
+    onIncomingChange: (Boolean) -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+        border = BorderStroke(1.dp, BorderSubtle),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = TextMuted,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+            
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Allow Incoming".tr, color = TextLight, style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = incomingChecked,
+                    onCheckedChange = onIncomingChange,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = PrimaryBlack,
+                        checkedTrackColor = AccentGreen,
+                        uncheckedThumbColor = TextMuted,
+                        uncheckedTrackColor = SurfaceDark,
+                        uncheckedBorderColor = BorderSubtle
+                    )
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun FilterCategory(
     title: String,
     description: String,
