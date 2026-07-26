@@ -505,6 +505,7 @@ fun ChatThreadScreen(
             // ISOLATED INPUT BAR (Fixes UI Lag)
             ChatInputBar(
                 viewModel = viewModel,
+                hasAttachment = attachedFile != null,
                 onMediaAttached = { file -> attachedFile = file },
                 onSendMessage = { text ->
                     val mediaMetadata = attachedFile?.let { buildMediaMetadata(it) }
@@ -540,6 +541,7 @@ fun ChatThreadScreen(
 @Composable
 fun ChatInputBar(
     viewModel: NoSlopViewModel,
+    hasAttachment: Boolean,
     onMediaAttached: (java.io.File) -> Unit,
     onSendMessage: (String) -> Unit,
     onLaunchFilePicker: () -> Unit,
@@ -565,7 +567,7 @@ fun ChatInputBar(
             onMediaAttached = onMediaAttached,
             sendOnEnter = isSendOnEnterEnabled,
             onSend = { 
-                if (rawText.isNotBlank()) {
+                if (rawText.isNotBlank() || hasAttachment) {
                     onSendMessage(rawText)
                     rawText = ""
                 }
@@ -577,7 +579,7 @@ fun ChatInputBar(
 
         IconButton(
             onClick = {
-                if (rawText.isNotBlank()) {
+                if (rawText.isNotBlank() || hasAttachment) {
                     onSendMessage(rawText)
                     rawText = ""
                 }

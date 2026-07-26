@@ -22,7 +22,7 @@ object NasaApiClient {
     private const val DEMO_KEY = "DEMO_KEY"
     private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Astronomy Picture of the Day — returns random entries.

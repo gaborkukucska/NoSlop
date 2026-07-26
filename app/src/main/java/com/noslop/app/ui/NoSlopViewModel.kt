@@ -1573,7 +1573,12 @@ fun toggleAggregator() {
             val hubStatus = repository.getAppSetting("hub_deployment_status")
             com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
             
-            com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
+            // Re-read settings directly to avoid race condition with init
+            val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"
+            if (fgEnabled && hubStatus.isNullOrBlank()) {
+                com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
+            }
+            
             com.noslop.app.tor.TorService.startTor(getApplication(), identity?.privateKeyB64, burnableIdentity?.privateKeyB64)
         }
     }

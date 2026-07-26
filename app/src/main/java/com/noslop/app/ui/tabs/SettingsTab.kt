@@ -251,13 +251,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             var showForegroundWarning by remember { mutableStateOf(false) }
                             val hasHub = !hubDeploymentStatus.isNullOrBlank()
                             
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    
                             val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -286,6 +279,12 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
                                     Text("Foreground Service".tr, fontWeight = FontWeight.Bold, color = if (hasHub) TextMuted else TextLight)
                                     Text(
                                         "Keep NoSlop running in the background for uninterrupted mesh sync and media auto-downloads.".tr,

@@ -18,7 +18,7 @@ object PexelsApiClient {
     private const val TAG = "PEXELS_API"
     private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun getCuratedPhotos(
         apiKeyRepo: ApiKeyRepository,

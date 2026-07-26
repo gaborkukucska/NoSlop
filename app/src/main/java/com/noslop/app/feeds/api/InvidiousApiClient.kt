@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 object InvidiousApiClient {
     private const val TAG = "INVIDIOUS_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private const val BROWSER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
