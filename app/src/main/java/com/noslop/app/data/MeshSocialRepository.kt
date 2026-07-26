@@ -264,7 +264,7 @@ class MeshSocialRepository(
         
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "DELETE_POST",
             payload = com.google.gson.Gson().toJsonTree(deletePay),
@@ -323,7 +323,7 @@ class MeshSocialRepository(
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "POST",
             payload = payloadJson,
@@ -663,9 +663,10 @@ class MeshSocialRepository(
             parentCommentId = parentCommentId
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT",
             payload = com.google.gson.Gson().toJsonTree(commentPay),
@@ -714,9 +715,10 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "REACTION",
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
@@ -761,9 +763,10 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "VOTE",
             payload = com.google.gson.Gson().toJsonTree(votePayload),
@@ -904,6 +907,9 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingComment = commentDao.getCommentById(commentId)
+        val existingPost = existingComment?.postId?.let { postDao.getPostById(it) }
+
         if (action == "remove") {
             commentReactionDao.deleteReactionById(reactionId)
         } else {
@@ -920,7 +926,7 @@ class MeshSocialRepository(
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_REACTION",
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
@@ -950,9 +956,11 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingComment = commentDao.getCommentById(commentId)
+        val existingPost = existingComment?.postId?.let { postDao.getPostById(it) }
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_VOTE",
             payload = com.google.gson.Gson().toJsonTree(votePayload),
@@ -1068,7 +1076,7 @@ class MeshSocialRepository(
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "EDIT_POST",
             payload = com.google.gson.Gson().toJsonTree(editPay),
@@ -1104,9 +1112,10 @@ class MeshSocialRepository(
             timestamp = timestamp,
             signature = signature
         )
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "EDIT_COMMENT",
             payload = com.google.gson.Gson().toJsonTree(editPay),
@@ -1134,9 +1143,10 @@ class MeshSocialRepository(
             timestamp = timestamp,
             signature = signature
         )
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "DELETE_COMMENT",
             payload = com.google.gson.Gson().toJsonTree(deletePay),

@@ -2,6 +2,11 @@
 
 ## Completed Changes (2026-07-26)
 
+### 5. Friends-Only Broadcast Scoping
+*   **Hop Count Restriction**: Outbound packets for friends-only broadcasts (Posts, Comments, Reactions, Votes, Edits, Deletes) are now strictly restricted to `hops = 1`. This explicitly scopes network propagation to directly connected trusted peers.
+*   **Gossip Forwarder Guard**: The `GossipService` explicitly checks incoming `POST` payloads and drops any with `privacy = "friends"` from being relayed to other peers, completely isolating friends-only content from 3rd parties.
+
+
 ### 1. Tor Service Recovery & Auto-Healing
 *   **Daemon Resurrection**: Fixed `TorService.kt` to handle Android's background service `IllegalStateException` limits safely and stop stuck daemon instances before restart.
 *   **Auto-Retry Observer**: Added an observer in `NoSlopViewModel` that automatically detects if Tor falls into the `FAILED` state (e.g. killed by the OS when foreground service stops) and seamlessly auto-retries bootstrapping up to 3 times in the background.

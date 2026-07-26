@@ -273,7 +273,19 @@ object GossipService {
         } else {
             // Public message/post, process locally AND forward to other peers
             pushToHubIfLinked(packet)
-            forwardPacket(packet)
+            
+            var shouldForward = true
+            if (packet.type == "POST") {
+                val postPay = packet.getPostPayload()
+                if (postPay != null && postPay.privacy == "friends") {
+                    shouldForward = false
+                    Logger.info(TAG, "Not forwarding POST ${packet.id} because privacy is friends-only")
+                }
+            }
+            
+            if (shouldForward) {
+                forwardPacket(packet)
+            }
         }
 
         return true
