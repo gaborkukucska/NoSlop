@@ -131,9 +131,6 @@ object TorService {
         try {
             val intent = android.content.Intent(context, org.torproject.jni.TorService::class.java)
             
-            // FIX: Stop the stuck service first to ensure a clean Tor daemon restart
-            context.stopService(intent)
-            
             intent.action = org.torproject.jni.TorService.ACTION_START
             
             try {

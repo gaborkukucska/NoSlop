@@ -571,17 +571,24 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
         // Save button
         Button(
             onClick = {
-                viewModel.updateUserProfile(
-                    UserProfile(displayName = displayName, bio = bio, avatarB64 = avatarB64)
-                )
-                viewModel.updateContentPreferences(
-                    selectedCategories = localInterests.toList(),
-                    selectedMusicGenres = localMusicGenres.toList(),
-                    selectedVideoGenres = localVideoGenres.toList(),
-                    negativeKeywords = negativeKeywords,
-                    languagePreference = language,
-                    creatorKeywords = creatorKeywords
-                )
+                val profileChanged = displayName != currentProfile.displayName || bio != currentProfile.bio || avatarB64 != currentProfile.avatarB64
+                val prefsChanged = localInterests.toList() != interests || localMusicGenres.toList() != musicGenres || localVideoGenres.toList() != videoGenres || negativeKeywords != currentNegativeKeywords || language != currentLanguage || creatorKeywords != currentCreatorKeywords
+
+                if (profileChanged) {
+                    viewModel.updateUserProfile(
+                        UserProfile(displayName = displayName, bio = bio, avatarB64 = avatarB64)
+                    )
+                }
+                if (prefsChanged) {
+                    viewModel.updateContentPreferences(
+                        selectedCategories = localInterests.toList(),
+                        selectedMusicGenres = localMusicGenres.toList(),
+                        selectedVideoGenres = localVideoGenres.toList(),
+                        negativeKeywords = negativeKeywords,
+                        languagePreference = language,
+                        creatorKeywords = creatorKeywords
+                    )
+                }
                 onBack()
             },
             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),

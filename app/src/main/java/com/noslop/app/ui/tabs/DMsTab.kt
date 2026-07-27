@@ -193,6 +193,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
             val pendingRequests = peers.filter { !it.isTrusted && !it.isTemporary }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
+            val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
+            var isTemporaryContactsCollapsed by remember { androidx.compose.runtime.mutableStateOf(true) }
+            
             
             val isContactsCollapsed by viewModel.isContactsCollapsed.collectAsState()
             val existingFolders = rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
@@ -398,6 +401,37 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.weight(1f).fillMaxWidth()
             ) {
+                if (temporaryContacts.isNotEmpty()) {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { isTemporaryContactsCollapsed = !isTemporaryContactsCollapsed }.padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "TEMPORARY CONTACTS".tr,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextMuted,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Icon(
+                                imageVector = if (isTemporaryContactsCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                contentDescription = null,
+                                tint = TextMuted
+                            )
+                        }
+                    }
+                    if (!isTemporaryContactsCollapsed) {
+                        items(temporaryContacts) { peer ->
+                            PeerItem(
+                                peer = peer, 
+                                lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
+                                viewModel = viewModel
+                            )
+                        }
+                    }
+                }
+
                 if (pendingRequests.isNotEmpty()) {
                     item {
                         Text(

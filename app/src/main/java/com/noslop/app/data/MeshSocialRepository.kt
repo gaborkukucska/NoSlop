@@ -196,6 +196,44 @@ class MeshSocialRepository(
                         )
                         
                         com.noslop.app.mesh.GossipService.broadcast(packet)
+
+                        val isDiscoverable = db.appSettingDao().getSetting("is_discoverable_enabled") == "true"
+                        if (isDiscoverable) {
+                            val burnableAddress = getBurnableIdentity()?.onionAddress ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress
+                            if (burnableAddress != null) {
+                                val handle = getLocalHandle()
+                                val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
+                                val link = db.appSettingDao().getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }
+                                val userProfile = getUserProfile()
+                                
+                                // Omit avatar to save bandwidth on the periodic background heartbeat
+                                val msgToSign = "${myKeys.publicKeyB64}:${handle}:${burnableAddress}:${myKeys.encPublicKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
+                                val sig = CryptoService.sign(msgToSign, myKeys.privateKeyB64)
+                                
+                                val discPayload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
+                                    authorId = myKeys.publicKeyB64,
+                                    handle = handle,
+                                    onionAddress = burnableAddress,
+                                    encPublicKey = myKeys.encPublicKeyB64,
+                                    isCreator = isCreator,
+                                    fundMeLink = link,
+                                    authorAvatarB64 = null,
+                                    bio = userProfile.bio,
+                                    timestamp = timestamp,
+                                    signature = sig
+                                )
+                                
+                                val discPacket = com.noslop.app.mesh.NetworkPacket(
+                                    id = UUID.randomUUID().toString(),
+                                    hops = 4, // 4 hops to reach wider network periodically
+                                    senderId = myKeys.publicKeyB64,
+                                    type = "ANNOUNCE_DISCOVERABLE",
+                                    payload = com.google.gson.Gson().toJsonTree(discPayload),
+                                    signature = sig
+                                )
+                                com.noslop.app.mesh.GossipService.broadcast(discPacket)
+                            }
+                        }
                     }
 
                     val timeout = System.currentTimeMillis() - 3 * 60 * 1000
@@ -205,6 +243,14 @@ class MeshSocialRepository(
                         if (peer.isOnline && peer.lastSeenAt < timeout) {
                             peerDao.insertPeer(peer.copy(isOnline = false))
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
+                        }
+                        if (peer.isDiscoverable && peer.lastSeenAt < timeout) {
+                            if (!peer.isTrusted) {
+                                peerDao.deletePeer(peer)
+                                Logger.info(TAG, "Removed inactive discoverable peer: ${peer.handle}")
+                            } else {
+                                peerDao.insertPeer(peer.copy(isDiscoverable = false))
+                            }
                         }
                         if (peer.lastSeenAt < archiveTimeout) {
                             deletePeer(peer.publicKeyB64) // Wipes the peer AND their messages

@@ -113,11 +113,6 @@ fun PeerItem(
 
             // Actions
             Row {
-                if (!peer.isTrusted) {
-                    IconButton(onClick = { viewModel.togglePeerTrust(peer) }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer".tr, tint = AccentGreen)
-                    }
-                }
                 IconButton(onClick = { showContactCard = true }) {
                     Icon(Icons.Default.Info, contentDescription = "Contact Info".tr, tint = TextMuted)
                 }
@@ -130,7 +125,8 @@ fun PeerItem(
         ContactCardDialog(
             peer = peer,
             onDismiss = { showContactCard = false },
-            onDelete = { viewModel.removePeer(peer.publicKeyB64) }
+            onDelete = { viewModel.removePeer(peer.publicKeyB64) },
+            onConnect = { viewModel.acceptHandshake(peer) }
         )
     }
 }
@@ -175,7 +171,8 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
 private fun ContactCardDialog(
     peer: Peer,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onConnect: () -> Unit = {}
 ) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -326,6 +323,22 @@ private fun ContactCardDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (!peer.isTrusted) {
+                        Button(
+                            onClick = {
+                                onConnect()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     // Close button
                     OutlinedButton(
                         onClick = onDismiss,
@@ -338,22 +351,24 @@ private fun ContactCardDialog(
                     }
 
                     // Delete button
-                    Button(
-                        onClick = { showDeleteConfirmation = true },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DestructiveRed.copy(alpha = 0.15f),
-                            contentColor = DestructiveRed
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Remove".tr, fontWeight = FontWeight.Bold)
+                    if (peer.isTrusted) {
+                        Button(
+                            onClick = { showDeleteConfirmation = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                contentColor = DestructiveRed
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Remove".tr, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

@@ -280,6 +280,9 @@ class HandshakePacketHandler(
 
     suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
+        val myPubKey = repo.getLocalIdentity()?.publicKeyB64
+        if (myPubKey == announcePay.authorId) return false // Ignore our own announcements
+        
         val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
         if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) {
             com.noslop.app.debug.Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
