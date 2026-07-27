@@ -186,7 +186,7 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
     }
 
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
-        val burnableHandle = "Anon_${java.util.UUID.randomUUID().toString().take(6)}"
+        val burnableHandle = getHandle()
         val burnableIdentity = CryptoService.generateIdentity(burnableHandle)
         
         prefs.edit()
@@ -208,7 +208,7 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         val pubEnc = prefs.getString("burnable_pub_enc", null) ?: return null
         val tripcode = prefs.getString("burnable_tripcode", null) ?: return null
         val onion = prefs.getString("burnable_onion", null) ?: return null
-        val displayName = prefs.getString("burnable_display_name", null) ?: return null
+        val displayName = getHandle() // Bypass cache so old Anon_ usernames are erased dynamically!
         val privEd = prefs.getString("burnable_ed25519_private_key", null) ?: return null
         val privEnc = prefs.getString("burnable_enc_private_key", null) ?: return null
         

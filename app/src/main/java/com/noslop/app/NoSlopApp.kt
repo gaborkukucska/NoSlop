@@ -95,7 +95,8 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     repository.meshTransport, 
                     identity.publicKeyB64,
                     getMeshFilterSettings = { repository.getMeshFilterSettings() },
-                    checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) }
+                    checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) },
+            checkIsLocalUser = { pub -> repository.isLocalUser(pub) }
                 )
                 repository.startPresenceHeartbeat()
             }

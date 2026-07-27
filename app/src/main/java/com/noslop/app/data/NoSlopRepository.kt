@@ -569,6 +569,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    suspend fun isLocalUser(pubKey: String): Boolean {
+        val main = getLocalIdentity()?.publicKeyB64
+        val burnable = getBurnableIdentity()?.publicKeyB64
+        return pubKey == main || pubKey == burnable
+    }
+
     suspend fun checkEntityExistsLocally(type: String, id: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         when(type) {
             "POST" -> db.postDao().hasPost(id) > 0
@@ -669,7 +675,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             meshTransport, 
             keys.publicKeyB64,
             getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
-            checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) }
+            checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) },
+            checkIsLocalUser = { pub -> isLocalUser(pub) }
         )
         com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
         com.noslop.app.mesh.MediaManager.initialize(this)
@@ -918,7 +925,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         onionAddress: String,
         encPublicKeyB64: String = "",
         useBurnableIdentity: Boolean = false
-    ): Boolean = meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
+    ): Boolean {
+        if (useBurnableIdentity && getBurnableIdentity() == null) {
+            val newBurnable = generateBurnableIdentity()
+            val mainIdentity = getLocalIdentity()
+            if (mainIdentity != null) {
+                com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, newBurnable.privateKeyB64)
+            }
+        }
+        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
+    }
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.acceptConnectionRequest(peer)

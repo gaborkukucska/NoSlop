@@ -58,6 +58,7 @@ fun ChatThreadScreen(
     onSendMessage: (String, MediaMetadata?, String?) -> Unit,
     onBack: () -> Unit
 ) {
+    val burnableKeys by viewModel.burnableKeys.collectAsState()
     var replyingToMessageId by remember { mutableStateOf<String?>(null) }
     
     // ── Media attachment state ──
@@ -268,12 +269,14 @@ fun ChatThreadScreen(
             ) {
                 items(messages, key = { it.id }) { msg ->
                     val isSelf = msg.senderPub != peer.publicKeyB64
-                    val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys) {
+                    val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys, burnableKeys) {
                         var text = msg.ciphertext
                         var meta: MediaMetadata? = null
                         if (localKeys != null) {
                             val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
-                            val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) ?: msg.ciphertext
+                            val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) 
+                                ?: burnableKeys?.let { CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, it.encPrivateKeyB64) }
+                                ?: msg.ciphertext
                             try {
                                 val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
                                 if (obj.has("media")) meta = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
@@ -306,6 +309,7 @@ fun ChatThreadScreen(
                                             val replyTextRaw = if (localKeys != null) {
                                                 val oppPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
                                                 CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, localKeys.encPrivateKeyB64)
+                                                    ?: burnableKeys?.let { CryptoService.decryptDM(replyMsg.ciphertext, replyMsg.nonce, oppPub, it.encPrivateKeyB64) }
                                             } else null
                                             var replyText = replyTextRaw
                                             if (replyTextRaw != null) {

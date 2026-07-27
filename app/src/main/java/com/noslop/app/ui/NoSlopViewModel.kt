@@ -59,6 +59,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    val burnableKeys: StateFlow<CryptoService.IdentityKeys?> = repository.identityUpdateFlow
+        .flatMapLatest {
+            kotlinx.coroutines.flow.flow {
+                emit(repository.getBurnableIdentity())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     val localHandle: StateFlow<String> = localKeys
         .flatMapLatest {
             kotlinx.coroutines.flow.flow {
@@ -1359,6 +1367,27 @@ fun toggleAggregator() {
                     }
                 }
                 broadcastDiscoverable()
+            } else {
+                val burnable = repository.getBurnableIdentity()
+                if (burnable != null) {
+                    val timestamp = System.currentTimeMillis()
+                    val payload = "${burnable.publicKeyB64}|$timestamp"
+                    val signature = com.noslop.app.crypto.CryptoService.sign(payload, burnable.privateKeyB64)
+                    val exitPay = com.noslop.app.mesh.UserExitPayload(
+                        userId = burnable.publicKeyB64,
+                        timestamp = timestamp,
+                        signature = signature
+                    )
+                    val packet = com.noslop.app.mesh.NetworkPacket(
+                        id = java.util.UUID.randomUUID().toString(),
+                        hops = 6,
+                        senderId = burnable.publicKeyB64,
+                        type = "USER_EXIT",
+                        payload = com.google.gson.Gson().toJsonTree(exitPay),
+                        signature = signature
+                    )
+                    com.noslop.app.mesh.GossipService.broadcast(packet)
+                }
             }
         }
     }

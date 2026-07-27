@@ -61,10 +61,16 @@ class HandshakePacketHandler(
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
-        val handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
+        var handleToUse = if (connPay.fromUsername.isNotBlank()) connPay.fromUsername else existingPeer?.handle ?: "Unknown"
+        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
         val encPubToUse = connPay.fromEncryptionPublicKey?.takeIf { it.isNotBlank() } ?: existingPeer?.encPublicKeyB64 ?: ""
         val avatarToUse = connPay.authorAvatarB64 ?: existingPeer?.authorAvatarB64
         
+        val burnable = repo.getBurnableIdentity()
+        if (burnable != null && packet.targetUserId == burnable.publicKeyB64) {
+            db.appSettingDao().insertSetting(com.noslop.app.data.AppSetting("contact_identity_${connPay.fromUserId}", "burnable"))
+        }
+
         val peer = Peer(
             publicKeyB64 = connPay.fromUserId,
             handle = handleToUse,
@@ -74,7 +80,7 @@ class HandshakePacketHandler(
             isTrusted = false,
             lastSeenAt = System.currentTimeMillis(),
             authorAvatarB64 = avatarToUse,
-            isTemporary = existingPeer?.isTemporary ?: false,
+            isTemporary = if (burnable != null && packet.targetUserId == burnable.publicKeyB64) true else (existingPeer?.isTemporary ?: false),
             isDiscoverable = existingPeer?.isDiscoverable ?: false,
             isCreator = existingPeer?.isCreator ?: false,
             fundMeLink = existingPeer?.fundMeLink,
@@ -167,8 +173,13 @@ class HandshakePacketHandler(
             return true
         }
 
+        val pubBytes = Base64.decode(handPay.fromUserId, Base64.DEFAULT)
+        val tripcode = CryptoService.deriveTripcode(pubBytes)
+
         val wasAlreadyTrusted = peer.isTrusted
-        val handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else peer.handle
+        var handleToUse = if (handPay.fromUsername.isNotBlank()) handPay.fromUsername else peer.handle
+        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+        
         peerDao.insertPeer(peer.copy(
             handle = handleToUse,
             isTrusted = true,
@@ -295,11 +306,14 @@ class HandshakePacketHandler(
         val pubBytes = Base64.decode(announcePay.authorId, Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
+        var handleToUse = announcePay.handle
+        if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+        
         val peer = peerDao.getPeerByPublicKey(announcePay.authorId)
         if (peer == null) {
             val newPeer = Peer(
                 publicKeyB64 = announcePay.authorId,
-                handle = announcePay.handle,
+                handle = handleToUse,
                 tripcode = tripcode,
                 onionAddress = announcePay.onionAddress,
                 encPublicKeyB64 = announcePay.encPublicKey,
@@ -316,9 +330,9 @@ class HandshakePacketHandler(
             peerDao.insertPeer(newPeer)
         } else {
             peerDao.insertPeer(peer.copy(
-                handle = announcePay.handle,
+                handle = handleToUse,
                 onionAddress = announcePay.onionAddress,
-                isTemporary = if (peer.isTrusted) false else true,
+                isTemporary = if (peer.isTrusted) false else peer.isTemporary,
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,
@@ -353,7 +367,12 @@ class HandshakePacketHandler(
 
         val peer = peerDao.getPeerByPublicKey(identityPay.userId)
         if (peer != null) {
-            val handleToUse = if (identityPay.handle.isNotBlank()) identityPay.handle else peer.handle
+            val pubBytes = Base64.decode(identityPay.userId, Base64.DEFAULT)
+            val tripcode = CryptoService.deriveTripcode(pubBytes)
+            
+            var handleToUse = if (identityPay.handle.isNotBlank()) identityPay.handle else peer.handle
+            if (handleToUse.endsWith(".$tripcode")) handleToUse = handleToUse.removeSuffix(".$tripcode")
+            
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 lastSeenAt = System.currentTimeMillis(),

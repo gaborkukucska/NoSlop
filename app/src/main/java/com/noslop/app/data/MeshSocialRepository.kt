@@ -53,6 +53,11 @@ class MeshSocialRepository(
     private val voteDao = db.voteDao()
     private val commentVoteDao = db.commentVoteDao()
 
+    private suspend fun getIdentityForPeer(peerPubKey: String): CryptoService.IdentityKeys? {
+        val setting = db.appSettingDao().getSetting("contact_identity_$peerPubKey")
+        return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
+    }
+
     private fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
         repositoryScope.launch {
             val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
@@ -107,11 +112,11 @@ class MeshSocialRepository(
                             }
                             
                             // Also send a USER_HANDSHAKE to heal the identity for future attempts
-                            val myKeys = getLocalIdentity()
+                            val myKeys = packet.targetUserId?.let { getIdentityForPeer(it) } ?: getLocalIdentity()
                             if (myKeys != null) {
+                                val userProfile = getUserProfile()
+                                val avatarB64 = userProfile.avatarB64
                                 val timestamp = System.currentTimeMillis()
-                                val payload = "${myKeys.publicKeyB64}|${myKeys.displayName}|${myKeys.onionAddress}|$timestamp"
-                                val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
                                 val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
                                     id = UUID.randomUUID().toString(),
                                     fromUserId = myKeys.publicKeyB64,
@@ -119,14 +124,21 @@ class MeshSocialRepository(
                                     fromDisplayName = myKeys.displayName,
                                     fromHomeNode = myKeys.onionAddress,
                                     fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                                    authorAvatarB64 = avatarB64,
+                                    bio = userProfile.bio.takeIf { it.isNotBlank() },
                                     timestamp = timestamp,
-                                    signature = signature
+                                    signature = null
                                 )
+                                var payloadToSign = "${myKeys.publicKeyB64}|${syncReq.fromUsername}|${myKeys.onionAddress}|$timestamp"
+                                if (avatarB64 != null) payloadToSign += "|$avatarB64"
+                                if (!syncReq.bio.isNullOrBlank()) payloadToSign += "|${syncReq.bio}"
+                                
+                                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                                 val syncPacket = com.noslop.app.mesh.NetworkPacket(
                                     id = UUID.randomUUID().toString(),
                                     hops = 3,
                                     senderId = myKeys.publicKeyB64,
-                                    targetUserId = peer.publicKeyB64,
+                                    targetUserId = packet.targetUserId,
                                     type = "USER_HANDSHAKE",
                                     payload = com.google.gson.Gson().toJsonTree(syncReq),
                                     signature = signature
@@ -437,6 +449,7 @@ class MeshSocialRepository(
             onionAddress = onionAddress,
             encPublicKeyB64 = encPublicKeyB64,
             isTrusted = false, // We requested them, they are pending until they accept
+            isTemporary = useBurnableIdentity,
             lastSeenAt = System.currentTimeMillis()
         )
         peerDao.insertPeer(newPeer)
@@ -446,13 +459,16 @@ class MeshSocialRepository(
 
         val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
+            if (useBurnableIdentity) {
+                db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
+            }
             val userProfile = getUserProfile()
             val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
 
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.substringBeforeLast("."),
+                fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
                 bio = userProfile.bio.takeIf { it.isNotBlank() },
@@ -485,20 +501,22 @@ class MeshSocialRepository(
     }
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
-        peerDao.insertPeer(peer.copy(isTrusted = true))
+        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
+        val isTemp = peer.isTemporary || contactIdentity == "burnable"
+        peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp))
         _incomingRequestFlow.value = null
         
         // Sync with hub before dispatching so the hub firewall is aware of the new peer
         meshTransport.repository.syncPeersWithHub()
         
-        val myKeys = getLocalIdentity()
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
         if (myKeys != null) {
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.substringBeforeLast("."),
+                fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
                 bio = userProfile.bio.takeIf { it.isNotBlank() },
@@ -564,7 +582,7 @@ class MeshSocialRepository(
         peerDao.deletePeer(peer)
         _incomingRequestFlow.value = null
 
-        val myKeys = getLocalIdentity()
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
@@ -615,7 +633,7 @@ class MeshSocialRepository(
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
         replyToMessageId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
@@ -887,7 +905,7 @@ class MeshSocialRepository(
 }
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"

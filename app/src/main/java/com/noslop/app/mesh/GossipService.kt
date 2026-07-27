@@ -36,18 +36,22 @@ object GossipService {
     var pushPacketToHub: (suspend (NetworkPacket) -> Boolean)? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    private var checkIsLocalUser: (suspend (String) -> Boolean)? = null
+
     fun initialize(
         peerDao: PeerDao,
         transport: MeshTransport,
         localPublicKeyB64: String,
         getMeshFilterSettings: (suspend () -> com.noslop.app.data.MeshFilterSettings)? = null,
-        checkEntityExists: (suspend (String, String) -> Boolean)? = null
+        checkEntityExists: (suspend (String, String) -> Boolean)? = null,
+        checkIsLocalUser: (suspend (String) -> Boolean)? = null
     ) {
         this.peerDao = peerDao
         this.transport = transport
         this.localPublicKeyB64 = localPublicKeyB64
         this.getMeshFilterSettings = getMeshFilterSettings
         this.checkEntityExists = checkEntityExists
+        this.checkIsLocalUser = checkIsLocalUser
         
         cleanupJob?.cancel()
         cleanupJob = scope.launch {
@@ -254,7 +258,8 @@ object GossipService {
 
         // 5. If it is a directed message (has targetUserId), check if it is for us
         if (packet.targetUserId != null) {
-            if (packet.targetUserId != localPublicKeyB64) {
+            val isForUs = checkIsLocalUser?.invoke(packet.targetUserId) ?: (packet.targetUserId == localPublicKeyB64)
+            if (!isForUs) {
                 // Directed at someone else, just forward it if hops > 1
                 Logger.info(TAG, "Directed ${packet.type} packet ${packetId} is not for us (target=${packet.targetUserId?.take(20)}...) — forwarding")
                 pushToHubIfLinked(packet)

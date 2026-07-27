@@ -327,9 +327,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 }
                             }
                             
-                            val fullName = "${peer.handle}.${peer.tripcode}"
+                            var cleanHandle = peer.handle
+                            if (cleanHandle.endsWith(".${peer.tripcode}")) cleanHandle = cleanHandle.removeSuffix(".${peer.tripcode}")
+                            val fullName = "${cleanHandle}.${peer.tripcode}"
                             val isTrusted = peer.isTrusted
-                            Text(if (isTrusted) fullName else peer.handle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                            Text(if (isTrusted) fullName else cleanHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                             
                             if (!peer.bio.isNullOrBlank()) {
                                 Spacer(modifier = Modifier.height(12.dp))
@@ -490,7 +492,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                             }
                                         }
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Text(peer.handle, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        var cleanHandleRow = peer.handle
+                                        if (cleanHandleRow.endsWith(".${peer.tripcode}")) cleanHandleRow = cleanHandleRow.removeSuffix(".${peer.tripcode}")
+                                        Text(cleanHandleRow, fontWeight = FontWeight.Bold, color = TextLight, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (peer.isCreator) {
                                             Text("Creator".tr, color = AccentGreen, fontSize = 10.sp)
                                         }

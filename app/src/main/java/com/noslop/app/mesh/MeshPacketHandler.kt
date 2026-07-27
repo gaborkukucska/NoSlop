@@ -31,14 +31,15 @@ class MeshPacketHandler(
 
     suspend fun handleIncomingPacket(packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
         val localKeys = repo.getLocalIdentity()
+        val burnableKeys = repo.getBurnableIdentity()
         if (localKeys == null) {
             Logger.warn(TAG, "Dropping ${packet.type} packet — local identity not loaded (locked or not created yet)")
             return@withContext false
         }
 
-        // Drop packets that originated from our own identity — these are
+        // Drop packets that originated from our own identities — these are
         // looped-back packets relayed through the hub or mesh.
-        if (packet.senderId == localKeys.publicKeyB64) {
+        if (packet.senderId == localKeys.publicKeyB64 || (burnableKeys != null && packet.senderId == burnableKeys.publicKeyB64)) {
             Logger.debug(TAG, "Dropping self-originated ${packet.type} packet ${packet.id}")
             return@withContext false
         }

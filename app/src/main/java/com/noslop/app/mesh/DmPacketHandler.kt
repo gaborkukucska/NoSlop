@@ -23,14 +23,26 @@ class DmPacketHandler(
     private val notificationDao = db.notificationDao()
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
-        if (packet.targetUserId != localKeys.publicKeyB64) {
+        val burnableKeys = repo.getBurnableIdentity()
+        val myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
+            localKeys
+        } else if (burnableKeys != null && packet.targetUserId == burnableKeys.publicKeyB64) {
+            burnableKeys
+        } else {
             return false
         }
+
+        // If this DM hit our burnable identity, strictly associate this peer with the burnable identity 
+        // so our replies don't leak our main identity!
+        if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64) {
+            db.appSettingDao().insertSetting(AppSetting("contact_identity_${packet.senderId}", "burnable"))
+        }
+
         val msgPay = packet.getMessagePayload() ?: return false
         val peer = peerDao.getPeerByPublicKey(packet.senderId)
         val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: packet.senderId
 
-        val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
+        val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
         if (plaintext == null) {
             Logger.error(TAG, "FATAL: DM Decryption failed for sender ${packet.senderId}. Expected an X25519 key but got: ${opponentEncPub.take(16)}...")
             return false
