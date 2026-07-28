@@ -387,6 +387,8 @@ fun ChatThreadScreen(
                                                     val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
                                                         val url = mid.removePrefix("noslop-gif://")
                                                         if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
+                                                    } else if (isDownloaded && localFile != null) {
+                                                        localFile
                                                     } else {
                                                         val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
                                                         if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
@@ -399,6 +401,8 @@ fun ChatThreadScreen(
                                                     val model = if (mid.startsWith("noslop-gif://")) {
                                                         val url = mid.removePrefix("noslop-gif://")
                                                         if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
+                                                    } else if (isDownloaded && localFile != null) {
+                                                        localFile
                                                     } else {
                                                         val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
                                                         if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res

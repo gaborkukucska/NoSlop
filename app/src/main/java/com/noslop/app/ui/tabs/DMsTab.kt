@@ -191,7 +191,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             TorWarningPanel(viewModel)
 
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
-            val pendingRequests = peers.filter { !it.isTrusted && !it.isTemporary }
+            val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
             var isTemporaryContactsCollapsed by remember { androidx.compose.runtime.mutableStateOf(true) }

@@ -1,5 +1,18 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-28)
+
+### 1. Discoverable Mode & Burnable Identity Fixes
+*   **Burnable Identity Leak Fixed**: `NoSlopViewModel` now correctly pulls the `Burnable Identity` instead of the Main Identity when generating the `ANNOUNCE_DISCOVERABLE` broadcast. This guarantees peers will treat the incoming connection request as a temporary, anonymous contact rather than a permanent one.
+*   **Pending Request UI Visibility**: Corrected a bug in `DMsTab` where pending connection requests from Discoverable nodes instantly disappeared. The filter now hides `!isDiscoverable` instead of `!isTemporary`, allowing burnable pending requests to stay visible until accepted.
+
+### 2. Tor Mesh Transport Tuning & Fast-Fail
+*   **Timeout & Retry Reduction**: Dropped the Tor SOCKS5 `connectTimeout` in `MeshTransport` from 60 seconds to 30 seconds, and reduced the maximum attempts for critical packets from 5 to 3. Because Tor v3 hidden services can take 5-10 minutes to propagate to HSDirs, waiting 60s per attempt blocked the thread and gridlocked the queue. This change forces the transport to "fail-fast", instantly triggering the Gossip Relay fallback and background spooler for immediate delivery via intermediate peers.
+
+### 3. DM Media & GIF Rendering
+*   **MIME-Type Hack Removed**: Removed a legacy robustness hack in `DmPacketHandler` that forcefully rewrote `image` types to `gif`. This was causing the `MediaManager` to misclassify the file extension during download.
+*   **Local File Prioritization in Coil**: Updated `ChatThreadScreen` to natively pass the locally downloaded `File` object to Coil's `AsyncImage` for GIFs, fully bypassing the `noslop-gif://` proxy scheme. This ensures GIFs animate immediately after downloading without attempting to stream through the local Tor proxy.
+
 ## Completed Changes (2026-07-26)
 
 ### 7. Discoverability & Profile Bio Support

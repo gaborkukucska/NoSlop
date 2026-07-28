@@ -287,19 +287,13 @@ used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 - **Outbound sends** (`sendPacket(onionAddress, port, packet)`):
   1. `TorService.waitForProxy(timeoutSeconds = 5)` — abort if SOCKS5 not
      reachable.
-  2. Up to **3 attempts**. Each attempt opens a fresh
+    2. Up to **3 attempts** (for critical packets; 2 for background). Each attempt opens a fresh
      `Socket(Proxy(SOCKS, 127.0.0.1:TOR_SOCKS_PORT))`, calls
-     `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 60000)`
-     (60s connect timeout — new onion circuit builds can take up to 45s), writes one
+     `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000)`
+     (30s connect timeout — forces a fast-fail so we can fallback to Gossip Relay if the HSDir hasn't propagated yet), writes one
      line via `PrintWriter(autoFlush=true)`, then closes the socket.
-  3. Backoff between attempts: `delay(attempt * 2000L)` ms (2s, 4s).
-  4. Returns `true` on first successful write, `false` if all 3 attempts
-     fail.
-
-  Note: `docs/PROJECT_STATUS.md` milestone 14 describes "3 retries with 2s/4s
-  backoff" — the current code (`MeshTransport.kt`, read directly) implements
-  **5 attempts with `attempt*3000ms` backoff** (3s/6s/9s/12s for attempts
-  2–5). The status doc appears to predate a later tuning pass.
+  3. Backoff between attempts: `delay(attempt * 4000L)` ms for critical packets, or `2000L` otherwise.
+  4. Returns `true` on first successful write, `false` if all attempts fail.
 
 ### 4.2 Gossip Protocol (`GossipService.kt`)
 
