@@ -346,6 +346,22 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     Text("Support: ${peer.fundMeLink}", color = TextLight, fontSize = 12.sp)
                                 }
                             }
+
+                            if (isTrusted && peer.isTemporary) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (isTrusted) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
                             
                             val targetOnion = peer.onionAddress
                             if (!isTrusted && targetOnion.isNotBlank()) {

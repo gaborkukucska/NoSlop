@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -55,7 +56,11 @@ fun PeerItem(
                 onLongClick = onLongPress
             ),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.3f) else DestructiveRed.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, when {
+            peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.3f)
+            peer.isTrusted -> AccentGreen.copy(alpha = 0.3f)
+            else -> DestructiveRed.copy(alpha = 0.3f)
+        })
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -95,7 +100,10 @@ fun PeerItem(
                         fontFamily = FontFamily.Monospace,
                         fontSize = 14.sp
                     )
-                    if (peer.isTrusted) {
+                    if (peer.isTrusted && peer.isTemporary) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.AccessTime, contentDescription = "Temporary Contact".tr, tint = TemporaryAmber, modifier = Modifier.size(14.dp))
+                    } else if (peer.isTrusted) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(Icons.Default.CheckCircle, contentDescription = "Trusted".tr, tint = AccentGreen, modifier = Modifier.size(14.dp))
                     }
@@ -159,7 +167,11 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = peer.handle.take(1).uppercase(),
-                color = if (peer.isTrusted) AccentGreen else TextMuted,
+                color = when {
+                    peer.isTrusted && peer.isTemporary -> TemporaryAmber
+                    peer.isTrusted -> AccentGreen
+                    else -> TextMuted
+                },
                 fontWeight = FontWeight.Bold,
                 fontSize = (size / 2.2).sp
             )
@@ -198,7 +210,11 @@ private fun ContactCardDialog(
                         .clip(RoundedCornerShape(16.dp))
                         .border(
                             2.dp,
-                            if (peer.isTrusted) AccentGreen.copy(alpha = 0.5f) else BorderSubtle,
+                            when {
+                                peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
+                                peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
+                                else -> BorderSubtle
+                            },
                             RoundedCornerShape(16.dp)
                         )
                 ) {
@@ -242,7 +258,29 @@ private fun ContactCardDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Trust badge
-                if (peer.isTrusted) {
+                if (peer.isTrusted && peer.isTemporary) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TemporaryAmber.copy(alpha = 0.1f))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.AccessTime,
+                            contentDescription = null,
+                            tint = TemporaryAmber,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Temporary Contact".tr,
+                            color = TemporaryAmber,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else if (peer.isTrusted) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier

@@ -697,7 +697,14 @@ fun FullScreenMeshCardV2(
                                         Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                     }
                                     
-                                    if (isTrusted) {
+                                    if (isTrusted && peer?.isTemporary == true) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Box(
+                                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    } else if (isTrusted) {
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Box(
                                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
