@@ -77,7 +77,11 @@
         </activity>
 
         <service android:name="org.torproject.jni.TorService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                      android:value="Maintaining a persistent Tor daemon process." />
+        </service>
 
         <service android:name=".mesh.NoSlopForegroundService"
             android:exported="false"
