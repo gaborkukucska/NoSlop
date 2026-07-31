@@ -429,11 +429,14 @@ object MediaManager {
             )
 
             scope.launch {
-                val targetPubKey = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }?.publicKeyB64
+                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
+                val targetPubKey = targetPeer?.publicKeyB64
+                val isTargetTemp = targetPeer?.isTemporary == true
+                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3, // 3 hops allows successful pass-through if delegated to Hub
-                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    senderId = mySenderId,
                     targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
                     payload = com.google.gson.Gson().toJsonTree(payload)
@@ -653,6 +656,9 @@ object MediaManager {
                     }
                 }
 
+                val isTargetTemp = repo.peerDao.getPeerByPublicKey(senderId)?.isTemporary == true
+                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
+
                 val chunkPay = MediaChunkPayload(
                     mediaId = payload.mediaId,
                     chunkIndex = payload.chunkIndex,
@@ -664,7 +670,7 @@ object MediaManager {
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    senderId = mySenderId,
                     targetUserId = senderId,
                     type = "MEDIA_CHUNK",
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)

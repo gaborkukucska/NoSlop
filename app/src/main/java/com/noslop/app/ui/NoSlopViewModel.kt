@@ -125,10 +125,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isContactsCollapsed = MutableStateFlow(false)
     val isContactsCollapsed: StateFlow<Boolean> = _isContactsCollapsed.asStateFlow()
 
+    private val _isTemporaryContactsCollapsed = MutableStateFlow(false)
+    val isTemporaryContactsCollapsed: StateFlow<Boolean> = _isTemporaryContactsCollapsed.asStateFlow()
+
     fun setContactsCollapsed(collapsed: Boolean) {
         _isContactsCollapsed.value = collapsed
         viewModelScope.launch {
             repository.putAppSetting("dms_contacts_collapsed", collapsed.toString())
+        }
+    }
+
+    fun setTemporaryContactsCollapsed(collapsed: Boolean) {
+        _isTemporaryContactsCollapsed.value = collapsed
+        viewModelScope.launch {
+            repository.putAppSetting("temporary_contacts_collapsed", collapsed.toString())
         }
     }
 
@@ -412,6 +422,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
+            _isTemporaryContactsCollapsed.value = repository.getAppSetting("temporary_contacts_collapsed") == "true"
         }
         viewModelScope.launch { refreshExclusionCaches() }
 

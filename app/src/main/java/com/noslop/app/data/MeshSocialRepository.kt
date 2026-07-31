@@ -211,22 +211,23 @@ class MeshSocialRepository(
 
                         val isDiscoverable = db.appSettingDao().getSetting("is_discoverable_enabled") == "true"
                         if (isDiscoverable) {
-                            val burnableAddress = getBurnableIdentity()?.onionAddress ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress
-                            if (burnableAddress != null) {
+                            val burnableIdentity = getBurnableIdentity()
+                            val burnableAddress = burnableIdentity?.onionAddress ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress
+                            if (burnableAddress != null && burnableIdentity != null) {
                                 val handle = getLocalHandle()
                                 val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
                                 val link = db.appSettingDao().getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }
                                 val userProfile = getUserProfile()
                                 
                                 // Omit avatar to save bandwidth on the periodic background heartbeat
-                                val msgToSign = "${myKeys.publicKeyB64}:${handle}:${burnableAddress}:${myKeys.encPublicKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
-                                val sig = CryptoService.sign(msgToSign, myKeys.privateKeyB64)
+                                val msgToSign = "${burnableIdentity.publicKeyB64}:${handle}:${burnableAddress}:${burnableIdentity.encPublicKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
+                                val sig = CryptoService.sign(msgToSign, burnableIdentity.privateKeyB64)
                                 
                                 val discPayload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
-                                    authorId = myKeys.publicKeyB64,
+                                    authorId = burnableIdentity.publicKeyB64,
                                     handle = handle,
                                     onionAddress = burnableAddress,
-                                    encPublicKey = myKeys.encPublicKeyB64,
+                                    encPublicKey = burnableIdentity.encPublicKeyB64,
                                     isCreator = isCreator,
                                     fundMeLink = link,
                                     authorAvatarB64 = null,
@@ -238,7 +239,7 @@ class MeshSocialRepository(
                                 val discPacket = com.noslop.app.mesh.NetworkPacket(
                                     id = UUID.randomUUID().toString(),
                                     hops = 4, // 4 hops to reach wider network periodically
-                                    senderId = myKeys.publicKeyB64,
+                                    senderId = burnableIdentity.publicKeyB64,
                                     type = "ANNOUNCE_DISCOVERABLE",
                                     payload = com.google.gson.Gson().toJsonTree(discPayload),
                                     signature = sig

@@ -292,7 +292,17 @@ class HandshakePacketHandler(
     suspend fun handleAnnounceDiscoverable(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnounceDiscoverablePayload() ?: return false
         val myPubKey = repo.getLocalIdentity()?.publicKeyB64
-        if (myPubKey == announcePay.authorId) return false // Ignore our own announcements
+        val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
+        
+        if (myPubKey == announcePay.authorId || myBurnablePubKey == announcePay.authorId) return false // Ignore our own announcements
+        
+        // Heuristic: If we already have a trusted peer with this exact handle, ignore this announcement.
+        val existingPeers = peerDao.getAllPeersList()
+        val hasMatchingTrustedPeer = existingPeers.any { it.isTrusted && it.handle == announcePay.handle }
+        if (hasMatchingTrustedPeer) {
+            com.noslop.app.debug.Logger.info("HANDSHAKE", "Ignoring ANNOUNCE_DISCOVERABLE from ${announcePay.handle} because we already have a trusted peer with this handle.")
+            return false
+        }
         
         val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
         if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) {
@@ -332,7 +342,7 @@ class HandshakePacketHandler(
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 onionAddress = announcePay.onionAddress,
-                isTemporary = if (peer.isTrusted) false else peer.isTemporary,
+                isTemporary = peer.isTemporary,
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,

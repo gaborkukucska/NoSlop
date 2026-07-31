@@ -426,6 +426,8 @@ before insertion via `commentDao`/`reactionDao`.
 | `MEDIA_PENDING` | `MediaPendingPayload {media_id, chunk_index}` | Signals an in-flight/awaited chunk — used by the AIMD inflight-tracking state in `MediaManager` |
 | `MEDIA_TRANSFER_ACK` | `MediaTransferAckPayload {media_id}` | Transfer-completion acknowledgement |
 
+> **Note on Temporary Contacts and Media Routing:** Media packets exchanged with a peer designated as a "Temporary Contact" (e.g., from a Discoverable connection) must explicitly use the local node's **burnable identity** public key as the `senderId` instead of the main identity. Because the temporary contact's gossip firewall is only aware of the burnable identity that performed the handshake, any media response or chunk request signed by the main identity will be immediately dropped as an unknown sender.
+
 `MediaMetadata` (embedded in `PostPayload.media_metadata` and
 `MediaRelayRequestPayload.metadata`): `id, type ("audio"|"video"|"file"|
 "image"), mime_type, size, chunk_count, access_key?, filename?, origin_node?,

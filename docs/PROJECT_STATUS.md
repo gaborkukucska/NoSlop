@@ -1,5 +1,16 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-07-31)
+
+### 1. Discoverable Mode & Temporary Contacts
+*   **Heartbeat Identity Leak Fixed**: Fixed `MeshSocialRepository`'s background periodic heartbeat which was inadvertently broadcasting `ANNOUNCE_DISCOVERABLE` packets signed by the *main* identity instead of the *burnable* identity.
+*   **Heuristic Discoverability Filtering**: Added logic to `HandshakePacketHandler` to drop `ANNOUNCE_DISCOVERABLE` packets if the handle perfectly matches an already trusted peer's handle or the local burnable identity. This keeps the feed clean and prevents known friends (or the user themselves) from popping up as "new" discoverable peers.
+*   **Temporary Status Persistency**: Fixed a bug where a trusted peer broadcasting a discoverable packet would overwrite its local `isTemporary` state to `false`, accidentally upgrading them to a permanent contact.
+*   **Temporary Contacts UI Persistence**: The "Temporary Contacts" list in `DMsTab` now saves its collapsed/expanded state across app sessions using `AppSetting`.
+
+### 2. Media Downloads for Temporary Contacts
+*   **Burnable Proxy Routing**: Fixed a major bug in `MediaManager` and `GossipService` where media packets (`MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_REQUEST`, and `MEDIA_CHUNK`) sent between temporary contacts were signed with the local node's *main* identity rather than the *burnable* identity. The recipient's mesh firewall would subsequently drop them (as it only trusted the burnable identity). Media requests and chunk relays are now properly routed through the burnable identity for temporary contacts.
+
 ## Completed Changes (2026-07-28)
 
 ### 1. Discoverable Mode & Burnable Identity Fixes

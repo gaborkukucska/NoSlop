@@ -194,8 +194,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
-            var isTemporaryContactsCollapsed by remember { androidx.compose.runtime.mutableStateOf(true) }
-            
+            val isTemporaryContactsCollapsed by viewModel.isTemporaryContactsCollapsed.collectAsState()
             
             val isContactsCollapsed by viewModel.isContactsCollapsed.collectAsState()
             val existingFolders = rawContacts.mapNotNull { it.customFolder }.filter { it.isNotBlank() }.distinct().sorted()
@@ -422,7 +421,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 if (temporaryContacts.isNotEmpty()) {
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable { isTemporaryContactsCollapsed = !isTemporaryContactsCollapsed }.padding(bottom = 8.dp),
+                            modifier = Modifier.fillMaxWidth().clickable { viewModel.setTemporaryContactsCollapsed(!isTemporaryContactsCollapsed) }.padding(bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
