@@ -391,11 +391,15 @@ fun FullScreenMeshCardV2(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(PrimaryBlack.copy(alpha=0.6f))
                                         .clickable {
-                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
-                                            if (meta != null) {
-                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
-                                                viewModel?.startMediaDownload(meta, origin)
-                                            }
+                                            val accurateMeta = com.noslop.app.mesh.MediaMetadata(
+                                                id = rawMediaId ?: "",
+                                                type = effectiveMediaType ?: "video",
+                                                mimeType = "video/mp4",
+                                                size = post.mediaSize,
+                                                chunkCount = if (post.mediaSize > 0) (post.mediaSize / (256 * 1024)).toInt() + 1 else 999
+                                            )
+                                            val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                            viewModel?.startMediaDownload(accurateMeta, origin)
                                         }
                                         .padding(16.dp),
                                     contentAlignment = Alignment.Center
@@ -448,11 +452,15 @@ fun FullScreenMeshCardV2(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(PrimaryBlack.copy(alpha=0.6f))
                                         .clickable {
-                                            val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
-                                            if (meta != null) {
-                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
-                                                viewModel?.startMediaDownload(meta, origin)
-                                            }
+                                            val accurateMeta = com.noslop.app.mesh.MediaMetadata(
+                                                id = rawMediaId ?: "",
+                                                type = effectiveMediaType ?: "audio",
+                                                mimeType = "audio/mp4",
+                                                size = post.mediaSize,
+                                                chunkCount = if (post.mediaSize > 0) (post.mediaSize / (256 * 1024)).toInt() + 1 else 999
+                                            )
+                                            val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                            viewModel?.startMediaDownload(accurateMeta, origin)
                                         }
                                         .padding(16.dp),
                                     contentAlignment = Alignment.Center

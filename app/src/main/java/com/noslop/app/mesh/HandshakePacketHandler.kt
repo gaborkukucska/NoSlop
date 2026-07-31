@@ -296,9 +296,9 @@ class HandshakePacketHandler(
         
         if (myPubKey == announcePay.authorId || myBurnablePubKey == announcePay.authorId) return false // Ignore our own announcements
         
-        // Heuristic: If we already have a trusted peer with this exact handle, ignore this announcement.
+        // Heuristic: If we already have a trusted peer with this exact handle but a DIFFERENT public key, ignore this announcement to prevent spoofing.
         val existingPeers = peerDao.getAllPeersList()
-        val hasMatchingTrustedPeer = existingPeers.any { it.isTrusted && it.handle == announcePay.handle }
+        val hasMatchingTrustedPeer = existingPeers.any { it.publicKeyB64 != announcePay.authorId && it.isTrusted && it.handle == announcePay.handle }
         if (hasMatchingTrustedPeer) {
             com.noslop.app.debug.Logger.info("HANDSHAKE", "Ignoring ANNOUNCE_DISCOVERABLE from ${announcePay.handle} because we already have a trusted peer with this handle.")
             return false

@@ -1097,6 +1097,8 @@ fun UnifiedFeedTab(
     if (isComposing) {
         var postContent by remember { mutableStateOf("") }
         var selectedPrivacy by remember { mutableStateOf("public") }
+        val coroutineScope = rememberCoroutineScope()
+        var isProcessingAttachment by remember { mutableStateOf(false) }
         var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
         val contextWrapper = LocalContext.current
         val captureManager = remember { com.noslop.app.mesh.MediaCaptureManager(contextWrapper) }
@@ -1127,17 +1129,28 @@ fun UnifiedFeedTab(
                             if (nameIndex != -1) originalName = cursor.getString(nameIndex)
                         }
                     }
-                    var finalName = originalName
-                    if (finalName == null || !finalName.contains(".")) {
-                        val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(resolvedMimeType)
-                        val extension = if (mimeExt != null) ".$mimeExt" else ".bin" 
-                        finalName = (finalName ?: "mesh_attach_${System.currentTimeMillis()}") + extension
+                    isProcessingAttachment = true
+                    coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        try {
+                            var finalName = originalName
+                            if (finalName == null || !finalName.contains(".")) {
+                                val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(resolvedMimeType)
+                                val extension = if (mimeExt != null) ".$mimeExt" else ".bin" 
+                                finalName = (finalName ?: "mesh_attach_${System.currentTimeMillis()}") + extension
+                            }
+                            val safeName = finalName.replace(" ", "_")
+                            val tempFile = java.io.File(contextWrapper.cacheDir, safeName)
+                            contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                attachedFile = tempFile
+                                isProcessingAttachment = false
+                            }
+                        } catch (e: Exception) { 
+                            Logger.error("MAIN", "Failed to copy attached file", e.message)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { isProcessingAttachment = false }
+                        }
                     }
-                    val safeName = finalName.replace(" ", "_")
-                    val tempFile = java.io.File(contextWrapper.cacheDir, safeName)
-                    contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
-                    attachedFile = tempFile
-                } catch (e: Exception) { Logger.error("MAIN", "Failed to copy attached file", e.message) }
+                } catch (e: Exception) { Logger.error("MAIN", "Failed to setup attached file", e.message) }
             }
         }
 
@@ -1263,50 +1276,57 @@ fun UnifiedFeedTab(
                 confirmButton = {
                     Button(
                         onClick = {
-                            val mediaMetadata = attachedFile?.let { file ->
-                                val ext = file.extension.lowercase()
-                                val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
-                                val type = when {
-                                    mimeType.startsWith("image") -> "image"
-                                    mimeType.startsWith("video") -> "video"
-                                    mimeType.startsWith("audio") -> "audio"
-                                    else -> "file"
+                            isProcessingAttachment = true
+                            coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                val mediaMetadata = attachedFile?.let { file ->
+                                    val ext = file.extension.lowercase()
+                                    val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+                                    val type = when {
+                                        mimeType.startsWith("image") -> "image"
+                                        mimeType.startsWith("video") -> "video"
+                                        mimeType.startsWith("audio") -> "audio"
+                                        else -> "file"
+                                    }
+                                    val id = "post_${file.name}"
+                                    com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
+                                    val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
+                                    com.noslop.app.mesh.MediaMetadata(
+                                        id = id, 
+                                        type = type, 
+                                        mimeType = mimeType, 
+                                        size = file.length(), 
+                                        chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
+                                        originNode = viewModel.localKeys.value?.onionAddress, 
+                                        ownerId = viewModel.localKeys.value?.publicKeyB64, 
+                                        thumbnailB64 = thumbnail,
+                                        filename = file.name
+                                    )
                                 }
-                                val id = "post_${file.name}"
-                                com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
-                                com.noslop.app.mesh.MediaMetadata(
-                                    id = id, 
-                                    type = type, 
-                                    mimeType = mimeType, 
-                                    size = file.length(), 
-                                    chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
-                                    originNode = viewModel.localKeys.value?.onionAddress, 
-                                    ownerId = viewModel.localKeys.value?.publicKeyB64, 
-                                    thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type),
-            filename = file.name
-        )
+                                
+                                val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }
+                                val cTitle = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> u.post.clearnetTitle ?: u.post.content; else -> null }
+                                val cThumb = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.thumbnailUrl; is UnifiedItem.Mesh -> u.post.clearnetThumbnailUrl ?: u.post.thumbnailB64; else -> null }
+                                val cType = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.mediaType; is UnifiedItem.Mesh -> u.post.clearnetMediaType ?: u.post.mediaType; else -> null }
+                                
+                                val finalContent = if (postContent.isBlank() && sharedItem != null) "🔥 Shared Post" else postContent
+                                
+                                viewModel.composeAndBroadcastPost(
+                                    content = finalContent, 
+                                    mediaMetadata = mediaMetadata, 
+                                    privacy = selectedPrivacy,
+                                    clearnetUrl = url,
+                                    clearnetTitle = cTitle,
+                                    clearnetThumbnailUrl = cThumb,
+                                    clearnetMediaType = cType
+                                )
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    isProcessingAttachment = false
+                                    handleDismiss()
+                                }
                             }
-                            
-                            val url = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.url; is UnifiedItem.Mesh -> u.post.clearnetUrl; else -> null }
-                            val cTitle = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.title; is UnifiedItem.Mesh -> u.post.clearnetTitle ?: u.post.content; else -> null }
-                            val cThumb = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.thumbnailUrl; is UnifiedItem.Mesh -> u.post.clearnetThumbnailUrl ?: u.post.thumbnailB64; else -> null }
-                            val cType = when(val u = sharedItem) { is UnifiedItem.Feed -> u.item.mediaType; is UnifiedItem.Mesh -> u.post.clearnetMediaType ?: u.post.mediaType; else -> null }
-                            
-                            val finalContent = if (postContent.isBlank() && sharedItem != null) "🔥 Shared Post" else postContent
-                            
-                            viewModel.composeAndBroadcastPost(
-                                content = finalContent, 
-                                mediaMetadata = mediaMetadata, 
-                                privacy = selectedPrivacy,
-                                clearnetUrl = url,
-                                clearnetTitle = cTitle,
-                                clearnetThumbnailUrl = cThumb,
-                                clearnetMediaType = cType
-                            )
-                            handleDismiss()
                         },
-                        enabled = postContent.isNotBlank() || attachedFile != null || sharedItem != null, colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                    ) { Text("Sign & Gossip".tr, fontWeight = FontWeight.Bold) }
+                        enabled = !isProcessingAttachment && (postContent.isNotBlank() || attachedFile != null || sharedItem != null), colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) { Text(if (isProcessingAttachment) "Processing...".tr else "Sign & Gossip".tr, fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel".tr, color = TextMuted) } }
             )

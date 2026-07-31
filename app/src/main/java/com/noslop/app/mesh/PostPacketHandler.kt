@@ -67,7 +67,8 @@ class PostPacketHandler(
             clearnetTitle = postPay.clearnetTitle,
             clearnetThumbnailUrl = postPay.clearnetThumbnailUrl,
             clearnetMediaType = effectiveClearnetType,
-            isOrphaned = false
+            isOrphaned = false,
+            mediaSize = postPay.mediaMetadata?.size ?: 0L
         )
         postDao.insertPost(meshPost)
         

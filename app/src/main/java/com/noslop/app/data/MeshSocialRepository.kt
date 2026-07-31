@@ -405,7 +405,8 @@ class MeshSocialRepository(
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
             clearnetThumbnailUrl = clearnetThumbnailUrl,
-            clearnetMediaType = clearnetMediaType
+            clearnetMediaType = clearnetMediaType,
+            mediaSize = mediaMetadata?.size ?: 0L
         )
 
         postDao.insertPost(localPost)
