@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -333,7 +334,8 @@ fun FullScreenMeshCardV2(
     onShareToMesh: () -> Unit,
     viewModel: NoSlopViewModel? = null,
     bottomSlideOffset: Float = 0f,
-    rightSlideOffset: Float = 0f
+    rightSlideOffset: Float = 0f,
+    onNavigateToFilter: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(post.mediaUrl, context) ?: post.clearnetUrl
@@ -703,6 +705,40 @@ fun FullScreenMeshCardV2(
                                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+
+                                        val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+                                        val userPosts = authorPosts.filter { it.authorPublicKeyB64 == post.authorPublicKeyB64 }
+                                        if (userPosts.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Text("Creator Content".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            androidx.compose.foundation.lazy.LazyColumn(
+                                                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
+                                            ) {
+                                                items(userPosts) { userPost ->
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(vertical = 4.dp)
+                                                            .background(SurfaceDark.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                                            .border(1.dp, PrimaryBlack, RoundedCornerShape(8.dp))
+                                                            .clickable {
+                                                                showUserInfoDialog = false
+                                                                onNavigateToFilter("Author:${post.authorPublicKeyB64}")
+                                                            }
+                                                            .padding(12.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = userPost.content.take(100).replace("\n", " ") + if (userPost.content.length > 100) "..." else "",
+                                                            color = TextLight,
+                                                            fontSize = 12.sp,
+                                                            maxLines = 2,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else if (isTrusted) {
                                         Spacer(modifier = Modifier.height(8.dp))

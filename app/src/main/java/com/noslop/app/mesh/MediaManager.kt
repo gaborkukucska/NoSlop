@@ -555,10 +555,12 @@ object MediaManager {
             if (peer != null) {
                 scope.launch {
                     val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
+                    val isTargetTemp = targetPeer?.isTemporary == true
+                    val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
                         hops = 3,
-                        senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        senderId = mySenderId,
                         targetUserId = targetPeer?.publicKeyB64,
                         type = "MEDIA_TRANSFER_ACK",
                         payload = com.google.gson.Gson().toJsonTree(ack)
@@ -575,6 +577,15 @@ object MediaManager {
 
     private suspend fun attemptMeshRecovery(dl: ActiveDownload) {
         val repo = repository ?: return
+        
+        val targetPeer = dl.peerOnion?.let { onion -> repo.peerDao.getAllPeersList().find { it.onionAddress == onion } }
+        if (targetPeer?.isTemporary == true) {
+            Logger.info(TAG, "Not attempting mesh recovery for temporary contact media ${dl.metadata.id}. Retrying direct.")
+            dl.consecutiveTimeouts = 0
+            requestNextChunks(dl)
+            return
+        }
+
         val myIdentity = repo.getLocalIdentity() ?: return
         
         val payload = MediaRelayRequestPayload(
@@ -600,11 +611,19 @@ object MediaManager {
     fun handleRecoveryFound(senderId: String, mediaId: String) {
         val dl = activeDownloads[mediaId] ?: return
         if (dl.status == ActiveDownload.Status.RECOVERING) {
-            Logger.info(TAG, "Media $mediaId found at $senderId")
-            dl.peerOnion = senderId
-            dl.status = ActiveDownload.Status.ACTIVE
-            dl.consecutiveTimeouts = 0 
-            requestNextChunks(dl)
+            scope.launch {
+                val recoveryPeer = repository?.peerDao?.getPeerByPublicKey(senderId)
+                val onion = recoveryPeer?.onionAddress
+                if (onion != null) {
+                    Logger.info(TAG, "Media $mediaId found at $senderId (onion: $onion)")
+                    dl.peerOnion = onion
+                    dl.status = ActiveDownload.Status.ACTIVE
+                    dl.consecutiveTimeouts = 0 
+                    requestNextChunks(dl)
+                } else {
+                    Logger.error(TAG, "Received MEDIA_RECOVERY_FOUND from $senderId but cannot find their onion address")
+                }
+            }
         }
     }
 

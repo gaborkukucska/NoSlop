@@ -595,6 +595,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (actualFilter == "My Content" && localPubKey != null) {
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == localPubKey }
             unseenFeeds = emptyList()
+        } else if (actualFilter?.startsWith("Author:") == true) {
+            val authorPub = actualFilter.substringAfter("Author:")
+            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == authorPub }
+            unseenFeeds = emptyList()
         } else if (localPubKey != null) {
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
         }
@@ -625,7 +629,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
 
-        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && actualFilter != "History" && actualFilter != "Liked"
+        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && actualFilter != "History" && actualFilter != "Liked" && !actualFilter.startsWith("Author:")
 
         val creators = _creatorKeywords.value.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         val isCreatorMatch = { item: FeedItem ->

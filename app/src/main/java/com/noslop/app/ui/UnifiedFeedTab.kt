@@ -795,7 +795,8 @@ fun UnifiedFeedTab(
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
-                            rightSlideOffset = rightSlideOffset
+                            rightSlideOffset = rightSlideOffset,
+                            onNavigateToFilter = { mode -> filterMode = mode }
                         )
                     }
                 }

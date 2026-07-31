@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.content.pm.ServiceInfo
+import androidx.core.app.ServiceCompat
 import androidx.core.app.NotificationCompat
 import com.noslop.app.MainActivity
 import com.noslop.app.NoSlopApp
@@ -47,7 +49,17 @@ class NoSlopForegroundService : Service() {
         Logger.info(TAG, "NoSlopForegroundService started")
         
         val notification = createNotification("Mesh network sync active")
-        startForeground(NOTIFICATION_ID, notification)
+        
+        if (Build.VERSION.SDK_INT >= 34) {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
 
         // Starting this foreground service elevates the process priority,
         // which prevents Android from killing TorService and GossipService 

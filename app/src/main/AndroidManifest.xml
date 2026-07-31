@@ -24,7 +24,7 @@
 
     <!-- Foreground Service permissions for background mesh sync -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".NoSlopApp"
@@ -81,7 +81,10 @@
 
         <service android:name=".mesh.NoSlopForegroundService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                      android:value="Maintaining a persistent Tor mesh network daemon for decentralized peer-to-peer communication." />
+        </service>
 
         <receiver android:name=".util.UpdateManager$DownloadReceiver"
             android:exported="false">
