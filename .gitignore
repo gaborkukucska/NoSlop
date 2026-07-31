@@ -56,3 +56,4 @@ tcls/
 get-git.sh
 *.py
 test_parse/
+*.txt

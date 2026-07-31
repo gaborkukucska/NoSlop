@@ -21,10 +21,10 @@ object MediaManager {
     private const val TAG = "MEDIA_MANAGER"
     
     // Dynamic Chunk Sizing Bounds
-    private const val MIN_CHUNK_SIZE = 32 * 1024  // 32KB
-    private const val MAX_CHUNK_SIZE = 128 * 1024 // 128KB
+    const val MIN_CHUNK_SIZE = 64 * 1024
+    const val MAX_CHUNK_SIZE = 512 * 1024
+    const val DOWNLOAD_TIMEOUT_MS = 120000L
     private const val MAX_CONCURRENCY = 4
-    private const val DOWNLOAD_TIMEOUT_MS = 120000L // 120s
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var repository: NoSlopRepository? = null

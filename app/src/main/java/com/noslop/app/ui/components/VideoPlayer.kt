@@ -426,6 +426,8 @@ private fun ExoVideoPlayer(
         }
     }
 
+    var videoSizeState by remember { mutableStateOf(androidx.media3.common.VideoSize.UNKNOWN) }
+
     DisposableEffect(url) {
         Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
         hasError = false
@@ -448,6 +450,9 @@ private fun ExoVideoPlayer(
                     }
                     override fun onRenderedFirstFrame() {
                         onReady()
+                    }
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        videoSizeState = videoSize
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         hasError = true
@@ -489,6 +494,9 @@ private fun ExoVideoPlayer(
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
+                        }
+                        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                            videoSizeState = videoSize
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             val cause = error.cause
@@ -558,8 +566,12 @@ private fun ExoVideoPlayer(
                     }
                 },
                 update = { view ->
+                    val temp = videoSizeState
                     view.player = exoPlayer
                     view.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    if (temp.width > 0 && temp.height > 0) {
+                        view.requestLayout()
+                    }
                 },
                 onRelease = { view ->
                     view.player = null

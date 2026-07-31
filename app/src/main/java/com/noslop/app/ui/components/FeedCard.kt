@@ -406,10 +406,11 @@ fun FullScreenMeshCardV2(
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
-                                        if (progress > 0) {
+                                        val progressState = rawMediaId?.let { downloadProgress[it] }
+                                        if (progressState != null) {
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
-                                            Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
+                                            LinearProgressIndicator(progress = { progressState / 100f }, color = AccentGreen)
+                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading $progressState%", color = TextLight, fontSize = 12.sp)
                                         } else {
                                             Text("Tap to Download Video".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }
@@ -467,10 +468,11 @@ fun FullScreenMeshCardV2(
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
-                                        if (progress > 0) {
+                                        val progressState = rawMediaId?.let { downloadProgress[it] }
+                                        if (progressState != null) {
                                             Spacer(modifier = Modifier.height(8.dp))
-                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen)
-                                            Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
+                                            LinearProgressIndicator(progress = { progressState / 100f }, color = AccentGreen)
+                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading $progressState%", color = TextLight, fontSize = 12.sp)
                                         } else {
                                             Text("Tap to Download Audio".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }

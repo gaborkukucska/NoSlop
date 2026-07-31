@@ -1099,6 +1099,7 @@ fun UnifiedFeedTab(
         var selectedPrivacy by remember { mutableStateOf("public") }
         val coroutineScope = rememberCoroutineScope()
         var isProcessingAttachment by remember { mutableStateOf(false) }
+        var compressionProgress by remember { mutableStateOf<Int?>(null) }
         var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
         val contextWrapper = LocalContext.current
         val captureManager = remember { com.noslop.app.mesh.MediaCaptureManager(contextWrapper) }
@@ -1287,19 +1288,40 @@ fun UnifiedFeedTab(
                                         mimeType.startsWith("audio") -> "audio"
                                         else -> "file"
                                     }
-                                    val id = "post_${file.name}"
-                                    com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
-                                    val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type)
+                                    
+                                    var finalFile = file
+                                    if (type == "video" && file.length() > 20 * 1024 * 1024) {
+                                        val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}")
+                                        com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile).collect { state ->
+                                            when(state) {
+                                                is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                        compressionProgress = state.percentage
+                                                    }
+                                                }
+                                                is com.noslop.app.media.VideoCompressor.CompressState.Success -> {
+                                                    finalFile = state.file
+                                                }
+                                                is com.noslop.app.media.VideoCompressor.CompressState.Error -> {
+                                                    com.noslop.app.debug.Logger.error("COMPRESS", "Error compressing video", state.exception.stackTraceToString())
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    val id = "post_${finalFile.name}"
+                                    com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id)
+                                    val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type)
                                     com.noslop.app.mesh.MediaMetadata(
                                         id = id, 
                                         type = type, 
                                         mimeType = mimeType, 
-                                        size = file.length(), 
-                                        chunkCount = (file.length() / (256 * 1024)).toInt() + 1, 
+                                        size = finalFile.length(), 
+                                        chunkCount = (finalFile.length() / (256 * 1024)).toInt() + 1, 
                                         originNode = viewModel.localKeys.value?.onionAddress, 
                                         ownerId = viewModel.localKeys.value?.publicKeyB64, 
                                         thumbnailB64 = thumbnail,
-                                        filename = file.name
+                                        filename = finalFile.name
                                     )
                                 }
                                 
@@ -1326,7 +1348,14 @@ fun UnifiedFeedTab(
                             }
                         },
                         enabled = !isProcessingAttachment && (postContent.isNotBlank() || attachedFile != null || sharedItem != null), colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                    ) { Text(if (isProcessingAttachment) "Processing...".tr else "Sign & Gossip".tr, fontWeight = FontWeight.Bold) }
+                    ) { 
+                        val processingText = if (isProcessingAttachment) {
+                            if (compressionProgress != null) "Compressing... $compressionProgress%".tr else "Processing...".tr
+                        } else {
+                            "Sign & Gossip".tr
+                        }
+                        Text(processingText, fontWeight = FontWeight.Bold) 
+                    }
                 },
                 dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel".tr, color = TextMuted) } }
             )

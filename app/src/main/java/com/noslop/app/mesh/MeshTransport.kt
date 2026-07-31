@@ -132,7 +132,7 @@ class MeshTransport(
             // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
             val isCritical = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE"
             val maxAttempts = if (isCritical) 3 else 2
-            val connectTimeout = 30000
+            val connectTimeout = 60000
             for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
                 try {
