@@ -1,5 +1,38 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-01)
+
+### 1. Tor Stability & Daemon Recovery
+*   **SIGABRT Crash Prevention**: Fixed a critical issue in `TorService.kt` where transient network connectivity blips (e.g., switching between Wi-Fi and mobile data) would cause the app to forcefully set the Tor state to `FAILED`, triggering a full daemon restart. The underlying `libtor.so` native library would crash with `SIGABRT` during these forced restarts. The fix allows the daemon to recover gracefully from connectivity interruptions instead of restarting, significantly improving Tor stability on mobile networks.
+
+### 2. Media Transfer Fixes & Download Resume
+*   **EOF Detection Fix**: Fixed an indefinite hang in `MediaManager.kt` where downloads of files with a known `totalSize` (from `MediaMetadata.size`) would stall at completion. The `eofOffset` and `contiguousBytes` evaluation logic was corrected to properly detect when all bytes have been received.
+*   **Download Progress Accuracy**: Updated `MediaChunkPayload` in `Packets.kt` to include a `totalSize: Long?` field. The sender now populates this from the actual file size, and the receiver dynamically updates `ActiveDownload.totalBytes` if the initial metadata size was 0 (indeterminate). This eliminated the bug where large video downloads would show 0% → 50% → hang, and instead shows accurate 1% → 100% progression.
+*   **Download Resume on App Restart**: Fixed a critical bug where `MediaManager.startDownload()` unconditionally deleted the existing `.part` file (`dl.partFile.delete()`) on every download start, forcing all downloads to restart from 0% after an app restart. The method now reads the existing `.part` file size and resumes from the last contiguous byte offset. The progress bar immediately jumps to the correct percentage upon resume.
+
+### 3. AIMD Congestion Control Tuning for Tor
+*   **Tor-Optimized Chunk Parameters**: Re-tuned the AIMD (Additive-Increase/Multiplicative-Decrease) constants in `MediaManager.kt` specifically for Tor Hidden Service circuits:
+    - `MIN_CHUNK_SIZE`: 64KB → **128KB** (avoids wasting Tor circuit setup on tiny payloads).
+    - `MAX_CHUNK_SIZE`: 256KB → **1MB** (maximizes throughput per circuit).
+    - `MAX_CONCURRENCY`: 4 → **2** (reduces parallel SOCKS5 handshake overhead over Tor).
+    - `DOWNLOAD_TIMEOUT_MS`: 120s → **300s** (5 minutes, accommodates Tor's higher latency).
+    - Initial `currentChunkSize`: 16KB → **128KB**; `ssthresh`: 16.0 → **2.0**.
+*   The AIMD ramp-up behavior is preserved: starts at 128KB/1 socket, ramps to 1MB/2 sockets on success, throttles back on timeout.
+
+### 4. DM Media Compression
+*   **Video Transcoding in DMs**: Ported the `VideoCompressor` integration from the feed post composer into `ChatThreadScreen.kt`. DM video attachments exceeding 20MB are now automatically transcoded before sending, preventing the app from crashing when attempting to copy and send raw 500MB+ video files. The `buildMediaMetadata()` function was converted from synchronous to `suspend` and runs on `Dispatchers.IO`.
+*   **Image Compression in DMs**: DM image attachments exceeding 500KB are automatically scaled down to a maximum of 1280×1280 pixels and re-compressed as JPEG at 75% quality before sending.
+*   **Compression Progress UI**: A "Compressing... X%" progress banner now appears above the DM input bar while media is being processed, providing clear feedback instead of the app appearing frozen.
+
+### 5. Feed Post Media Compression
+*   **Image Compression for Feed Posts**: Added automatic image compression to the feed post composer in `UnifiedFeedTab.kt`. Images exceeding 500KB are scaled to 1280×1280 max and JPEG-compressed at 75% quality, dramatically reducing mesh transfer times for image posts.
+
+### 6. UI Polish
+*   **Transparent Download Overlay**: Reduced the "Tap to Download" overlay opacity in `FeedCard.kt` from 60% (`0.6f`) to 30% (`0.3f`) across all media types (video, audio, image), allowing the thumbnail to remain clearly visible behind the download prompt.
+*   **Persistent Thumbnail on Load Failure**: Updated `BlurredImageBackground` in `MediaComponents.kt` to set `error` and `fallback` painters to the base64 thumbnail. Previously, when the clearnet thumbnail URL was empty (common for mesh-native posts), the image loader would flash the base64 placeholder briefly and then render a solid black box. The thumbnail now persists permanently.
+*   **1GB Auto-Download Limit**: Increased the maximum value of the auto-download file size slider in `SettingsTab.kt` from 100MB to 1GB (`1f..1000f`), allowing users to set higher limits for large transcoded video files.
+
+
 ## Completed Changes (2026-07-31)
 
 ### 1. Discoverable Mode & Temporary Contacts

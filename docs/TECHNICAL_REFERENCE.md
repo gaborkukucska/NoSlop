@@ -490,36 +490,36 @@ just to the wire protocol:
 ### 6.1 Chunking Constants (`MediaManager.kt`)
 
 ```kotlin
-private const val CHUNK_SIZE = 256 * 1024       // 256 KB
-private const val MAX_CONCURRENCY = 4
-private const val DOWNLOAD_TIMEOUT_MS = 60000L  // 60s
+const val MIN_CHUNK_SIZE = 128 * 1024        // 128 KB (Tor-optimized minimum)
+const val MAX_CHUNK_SIZE = 1024 * 1024       // 1 MB (maximizes per-circuit throughput)
+private const val MAX_CONCURRENCY = 2        // Max 2 concurrent SOCKS5 sockets
+const val DOWNLOAD_TIMEOUT_MS = 300000L      // 5 minutes (accommodates Tor latency)
 ```
-256 KB matches gChat's documented chunk size exactly (`docs/ARCHITECTURE.md`
-§2: "Files are split into 256KB chunks").
+These values are specifically tuned for Tor Hidden Service circuits. The previous
+values (64KB min, 256KB max, 4 concurrent, 120s timeout) caused excessive SOCKS5
+handshake overhead and frequent timeouts on high-latency Tor circuits.
 
-**Concurrency is no longer a flat cap.** `MAX_CONCURRENCY = 4` remains in the
-file, but only as the *initial* AIMD (Additive-Increase/Multiplicative-
-Decrease) window value — it no longer hard-caps in-flight chunk requests at
-steady state. Each download tracks a per-download AIMD state machine:
+**AIMD Congestion Control.** Each download tracks a per-download AIMD state
+machine tuned for Tor's characteristics:
 
-- `windowSize` starts at `4.0`, `ssthresh` starts at `128.0`.
-- **Slow start**: while `windowSize < ssthresh`, each received chunk does
-  `windowSize += 1`.
-- **Congestion avoidance**: once `windowSize >= ssthresh`, each received
-  chunk does `windowSize += 1 / windowSize` (sub-linear growth).
-- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(2.0,
-  windowSize * 0.5)` and `windowSize` resets to `1.0` (classic Reno-style
-  AIMD).
-- `windowSize` is capped at `128.0`.
+- `currentChunkSize` starts at `128 KB`, `currentConcurrency` starts at `1.0`,
+  `ssthresh` starts at `2.0`.
+- **Slow start**: while `currentConcurrency < ssthresh`, each received chunk does
+  `currentConcurrency += 1`.
+- **Congestion avoidance**: once `currentConcurrency >= ssthresh`, each received
+  chunk does `currentConcurrency += 1 / currentConcurrency` (sub-linear growth).
+- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(1.0,
+  currentConcurrency * 0.5)` and `currentConcurrency` resets to `1.0`.
+- `currentConcurrency` is capped at `2.0` (the `MAX_CONCURRENCY` constant).
+- `currentChunkSize` dynamically grows on success (up to `MAX_CHUNK_SIZE`) and
+  shrinks on timeout (down to `MIN_CHUNK_SIZE`).
 - New `MEDIA_REQUEST`s for additional chunks are only issued while
-  `inflight.size < windowSize.toInt()` — i.e. `windowSize` (rounded down) is
-  the live concurrency cap.
+  `inflight.size < currentConcurrency.toInt()`.
 
 This mirrors the algorithm documented for `hainet-social/src/congestion.rs`
 and directly resolves the gap flagged in
-[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop)
-(that section's prose is now historical — see its own checklist in §12,
-which already marks this item done). For full detail see
+[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
+For full detail see
 [WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
 
 ### 6.2 Storage Layout
@@ -547,7 +547,8 @@ Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
      will download 3rd-party media.
 - `settings.maxFileSizeMB` — if `metadata.size > maxBytes && size > 0`, skip
   (a `size == 0` placeholder, as used by `MediaProxyService`'s synthetic
-  metadata, bypasses this check).
+  metadata, bypasses this check). The Settings UI slider allows values from
+  1MB to 1000MB (1GB), defaulting to 10MB.
 
 ### 6.4 Local Streaming Proxy (`MediaProxyService.kt`)
 
@@ -586,6 +587,55 @@ Mesh posts with media generate a small, high-compression Base64 thumbnail
 (`MediaMetadata.thumbnailB64`) embedded directly in the `POST` gossip packet —
 peers can render a preview immediately without waiting for the full chunked
 transfer.
+
+The `BlurredImageBackground` composable (in `MediaComponents.kt`) renders
+this thumbnail as both a blurred background fill and a centered foreground
+image. The `error` and `fallback` painters are explicitly set to the Base64
+thumbnail bitmap, ensuring the preview persists permanently if the high-res
+clearnet URL is empty or fails to load (common for mesh-native posts).
+
+### 6.6 Download Resume (`MediaManager.startDownload`)
+
+Downloads survive app restarts. When `startDownload()` is called for a media
+item that already has an existing `.part` file on disk:
+
+1. If `0 < partFile.length() < totalBytes` — the download resumes from the
+   existing byte offset. `contiguousBytes` and `nextRequestOffset` are set to
+   `partFile.length()`, and the progress bar immediately shows the correct
+   percentage.
+2. If `partFile.length() >= totalBytes` — the part file is already complete
+   and is finalized immediately without re-downloading.
+3. If the part file is zero bytes — it is deleted and the download starts
+   fresh.
+
+This replaced the previous behavior where `startDownload()` unconditionally
+called `dl.partFile.delete()`, forcing every download to restart from 0%
+after an app kill/restart.
+
+### 6.7 Media Compression Pipeline
+
+Media attachments are automatically compressed before being stored in the
+mesh media directory and broadcast to peers. This runs in both the feed post
+composer (`UnifiedFeedTab.kt`) and the DM composer (`ChatThreadScreen.kt`):
+
+**Video transcoding** (threshold: > 20MB):
+- Uses `VideoCompressor.compressVideo()` (Media3 Transformer) to transcode
+  the video into a smaller format.
+- A "Compressing... X%" progress indicator is shown during transcoding.
+- The compressed file replaces the original attachment before
+  `copyFileToMediaDirectory` is called.
+
+**Image compression** (threshold: > 500KB):
+- The image is decoded into a bitmap and proportionally scaled down to fit
+  within a 1280×1280 pixel bounding box.
+- Re-compressed as JPEG at 75% quality.
+- The compressed file is only used if it is actually smaller than the
+  original (failsafe for already-optimized images).
+
+In the DM composer, `buildMediaMetadata()` is a `suspend` function that runs
+on `Dispatchers.IO`, with a coroutine launched from `rememberCoroutineScope()`
+on the send button click. This prevents the UI from freezing during
+compression of large files.
 
 ---
 
@@ -762,6 +812,14 @@ launch).
    SOCKS5 proxy, looks for the string "Congratulations. This browser is
    configured to use Tor.") → `READY` + `triggerRegistration()`. This loop
    exists as a fallback for missed `STATUS_ON` broadcasts.
+6. **Connectivity blip resilience**: transient network interruptions (e.g.,
+   Wi-Fi ↔ mobile data switches) no longer force the Tor state to `FAILED`.
+   Previously, the `STATUS_OFF` broadcast handler would set `FAILED` and
+   trigger a full daemon restart, which caused `SIGABRT` crashes in
+   `libtor.so` (the native Tor library does not tolerate being forcefully
+   killed mid-circuit). The handler now allows the daemon to recover
+   gracefully on its own, only surfacing `FAILED` if it cannot re-establish
+   circuits after the bootstrap loop's timeout.
 
 ### 9.2 Hidden Service Registration
 
