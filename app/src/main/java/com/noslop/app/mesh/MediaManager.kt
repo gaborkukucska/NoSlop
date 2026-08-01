@@ -79,6 +79,7 @@ object MediaManager {
         var ssthresh = 2.0 // threshold for concurrency
         var consecutiveTimeouts = 0
         var lastAttemptAt = 0L
+        var savedPeerOnion: String? = null // Remembered for fallback during recovery
 
         fun updateContiguous() {
             while (writtenOffsets.containsKey(contiguousBytes)) {
@@ -399,17 +400,17 @@ object MediaManager {
                         // AIMD Multiplicative Decrease on timeout
                         dl.ssthresh = Math.max(2.0, dl.currentConcurrency * 0.5)
                         dl.currentConcurrency = 1.0
-                        dl.currentChunkSize = Math.max(16 * 1024, dl.currentChunkSize / 2)
+                        dl.currentChunkSize = Math.max(MIN_CHUNK_SIZE, dl.currentChunkSize / 2)
                         dl.consecutiveTimeouts++
                         
-                        if (dl.consecutiveTimeouts >= 4) {
+                        if (dl.consecutiveTimeouts >= 8) {
                             recoveryNeeded = true
                         }
                     }
                 }
                 
                 if (recoveryNeeded) {
-                    Logger.warn(TAG, "Media $id: persistent timeouts. Recovering.")
+                    Logger.warn(TAG, "Media $id: persistent timeouts (${dl.consecutiveTimeouts}). Recovering.")
                     scope.launch {
                         val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
                         if (isTemp) {
@@ -417,10 +418,13 @@ object MediaManager {
                             dl.consecutiveTimeouts = 0
                             requestNextChunks(dl)
                         } else {
+                            // Remember original peer for fallback after recovery attempts
+                            val originalPeer = dl.peerOnion
                             dl.peerOnion = null
                             dl.status = ActiveDownload.Status.RECOVERING
                             resetDownloadTracking(dl)
                             dl.lastAttemptAt = now
+                            dl.savedPeerOnion = originalPeer
                             attemptMeshRecovery(dl)
                         }
                     }
@@ -432,7 +436,17 @@ object MediaManager {
             } else if (dl.status == ActiveDownload.Status.RECOVERING) {
                 if (now - dl.lastAttemptAt > 30000) {
                     dl.lastAttemptAt = now
-                    scope.launch { attemptMeshRecovery(dl) }
+                    dl.consecutiveTimeouts++
+                    // After 3 recovery attempts, try falling back to the original peer
+                    if (dl.consecutiveTimeouts % 3 == 0 && dl.savedPeerOnion != null) {
+                        Logger.info(TAG, "Media $id: recovery stalled, retrying original peer ${dl.savedPeerOnion}")
+                        dl.peerOnion = dl.savedPeerOnion
+                        dl.status = ActiveDownload.Status.ACTIVE
+                        dl.consecutiveTimeouts = 0
+                        scope.launch { requestNextChunks(dl) }
+                    } else {
+                        scope.launch { attemptMeshRecovery(dl) }
+                    }
                 }
                 // Drop entirely if abandoned for 10 mins
                 if (now - dl.lastAttemptAt > 600_000L) {

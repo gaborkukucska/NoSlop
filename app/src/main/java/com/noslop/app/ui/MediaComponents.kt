@@ -223,12 +223,48 @@ fun SegmentedArticleReader(
             if (page == 0) {
                 // Page 0: Hero Layout (Magazine Style)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    AsyncImage(
-                        model = thumbnailUrl ?: fallbackImage,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    var imageLoadFailed by remember { mutableStateOf(false) }
+
+                    if (!imageLoadFailed) {
+                        AsyncImage(
+                            model = thumbnailUrl ?: fallbackImage,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            onError = { imageLoadFailed = true }
+                        )
+                    } else {
+                        // Fallback for Tor-blocked images
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1A1A1A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(32.dp)
+                            ) {
+                                Icon(Icons.Default.BrokenImage, contentDescription = null, tint = TextMuted, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    title,
+                                    color = TextLight,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                                if (!author.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        author,
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     // Gradient Scrim (dark -> transparent upward)
                     Box(

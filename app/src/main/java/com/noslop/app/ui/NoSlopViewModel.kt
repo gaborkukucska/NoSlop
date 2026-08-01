@@ -594,11 +594,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()
         
-        val anchorTime = _unifiedFeed.value.firstOrNull()?.timestamp
-        
         val exclusionIds = currentIds + sessionLoadedIds
-        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.publishedAt <= anchorTime) }
-        var unseenMeshes = allMeshes.filter { it.id !in exclusionIds && (isSearchActive || anchorTime == null || it.timestamp <= anchorTime) }
+        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds }
+        var unseenMeshes = allMeshes.filter { it.id !in exclusionIds }
 
         if (isSearchActive) {
             val q = activeSearchQuery.lowercase()
@@ -767,9 +765,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val rawArticles = recentFeeds.filter { it.mediaType.isNullOrEmpty() }
 
         // Determine proportional mix based on needed size
-        val targetV = if (needed <= 3) 2 else 5
-        val targetOther = if (needed <= 3) 0 else 1
-        val targetM = if (needed <= 3) 1 else 2
+        val targetM = needed / 2
+        val remaining = needed - targetM
+        
+        val targetV = Math.max(1, remaining * 2 / 3) // videos get most of the clearnet quota
+        val targetOther = Math.max(0, (remaining - targetV) / 3)
 
         val v = rawVideos.takeDiverse(targetV, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
         val a = rawAudios.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
@@ -794,17 +794,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Separate creators from others to force them to the absolute front
         val creatorBatch = batch.filter { 
             it is UnifiedItem.Feed && isCreatorMatch(it.item) 
-        }.toMutableList()
+        }.sortedByDescending { it.timestamp }.toMutableList()
         
-        val meshBatch = batch.filterIsInstance<UnifiedItem.Mesh>().toMutableList()
-        val otherBatch = batch.filter { it !in creatorBatch && it !in meshBatch }.toMutableList()
-
-        // No internal shuffling to guarantee absolute chronological primacy!
-        // The arrays are already sorted descending.
+        val otherBatch = batch.filter { it !in creatorBatch }
+            .sortedByDescending { it.timestamp }.toMutableList()
 
         val finalBatch = mutableListOf<UnifiedItem>()
         finalBatch.addAll(creatorBatch)
-        finalBatch.addAll(meshBatch)
         finalBatch.addAll(otherBatch)
 
         // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload
@@ -1158,6 +1154,21 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.recordSwipe(itemId)
             cachedExcludedIds = repository.getSwipeExcludedIds()
+        }
+    }
+
+    fun discardFeedItem(itemId: String) {
+        val currentFeed = _unifiedFeed.value.toMutableList()
+        val iterator = currentFeed.iterator()
+        var modified = false
+        while (iterator.hasNext()) {
+            if (iterator.next().id == itemId) {
+                iterator.remove()
+                modified = true
+            }
+        }
+        if (modified) {
+            _unifiedFeed.value = currentFeed
         }
     }
 

@@ -361,9 +361,26 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     isSearchingChannels = true
                     kotlinx.coroutines.delay(300) // Debounce typing
                     try {
-                        searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
+                        val invidious = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
+                        if (invidious.isNotEmpty()) {
+                            searchedChannels = invidious
+                        } else {
+                            throw Exception("Invidious returned empty")
+                        }
                     } catch (e: Exception) {
-                        com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Channel search failed: ${e.message}")
+                        com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Channel search failed: ${e.message}, trying fallback")
+                        try {
+                            val fallback = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.noslop.app.feeds.api.RedditApiClient.searchReddit(channelSearchQuery, "relevance")
+                                    .mapNotNull { it.author }
+                                    .distinct()
+                                    .take(3)
+                            }
+                            searchedChannels = fallback
+                        } catch (e2: Exception) {
+                            com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Fallback search failed: ${e2.message}")
+                            searchedChannels = emptyList()
+                        }
                     } finally {
                         isSearchingChannels = false
                     }

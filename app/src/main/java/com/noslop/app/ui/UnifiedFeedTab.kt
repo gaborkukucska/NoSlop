@@ -708,12 +708,15 @@ fun UnifiedFeedTab(
         var pageEnteredAt = 0L
         snapshotFlow { pagerState.settledPage }.collect { currentPage ->
             val now = System.currentTimeMillis()
-            if (previousPage >= 0 && previousPage in unifiedItems.indices) {
+            if (previousPage >= 0 && previousPage < currentPage && previousPage in unifiedItems.indices) {
                 val dwellMs = now - pageEnteredAt
+                val leftItem = unifiedItems[previousPage]
                 if (dwellMs < 5000L) {
-                    val leftItem = unifiedItems[previousPage]
                     viewModel.recordItemSwiped(leftItem.id)
+                } else {
+                    viewModel.markItemViewed(leftItem.id, leftItem is UnifiedItem.Mesh)
                 }
+                viewModel.discardFeedItem(leftItem.id)
             }
             previousPage = currentPage
             pageEnteredAt = now
