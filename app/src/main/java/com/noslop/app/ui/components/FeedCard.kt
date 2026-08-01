@@ -134,7 +134,7 @@ fun FullScreenFeedCard(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .background(PrimaryBlack.copy(alpha=0.3f))
                                         .clickable {
                                             val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
                                             if (meta != null) {
@@ -389,7 +389,7 @@ fun FullScreenMeshCardV2(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .background(PrimaryBlack.copy(alpha=0.3f))
                                         .clickable {
                                             val accurateMeta = com.noslop.app.mesh.MediaMetadata(
                                                 id = rawMediaId ?: "",
@@ -451,7 +451,7 @@ fun FullScreenMeshCardV2(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .background(PrimaryBlack.copy(alpha=0.3f))
                                         .clickable {
                                             val accurateMeta = com.noslop.app.mesh.MediaMetadata(
                                                 id = rawMediaId ?: "",
@@ -510,7 +510,7 @@ fun FullScreenMeshCardV2(
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(8.dp))
-                                        .background(PrimaryBlack.copy(alpha=0.6f))
+                                        .background(PrimaryBlack.copy(alpha=0.3f))
                                         .clickable {
                                             val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
                                             if (meta != null) {

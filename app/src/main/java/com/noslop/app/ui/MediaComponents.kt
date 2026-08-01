@@ -90,7 +90,9 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                 .blur(20.dp),
             contentScale = ContentScale.Crop,
             alpha = 0.5f,
-            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            error = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            fallback = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
         
         // Foreground uncropped layer
@@ -101,7 +103,9 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                 .fillMaxWidth()
                 .align(Alignment.Center),
             contentScale = ContentScale.Fit,
-            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            error = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            fallback = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
     }
 

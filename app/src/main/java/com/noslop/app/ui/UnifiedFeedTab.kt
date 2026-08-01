@@ -1332,6 +1332,40 @@ fun UnifiedFeedTab(
                                                     com.noslop.app.debug.Logger.error("COMPRESS", "Error compressing video", state.exception.stackTraceToString())
                                                 }
                                             }
+                                            }
+                                        }
+                                    } else if (type == "image" && file.length() > 500 * 1024) {
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                            compressionProgress = 0 // Triggers "Processing..." UI
+                                        }
+                                        try {
+                                            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                                            if (bitmap != null) {
+                                                val maxDim = 1280
+                                                val width = bitmap.width
+                                                val height = bitmap.height
+                                                var newWidth = width
+                                                var newHeight = height
+                                                if (width > maxDim || height > maxDim) {
+                                                    val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+                                                    newWidth = (width * ratio).toInt()
+                                                    newHeight = (height * ratio).toInt()
+                                                }
+                                                val scaled = if (newWidth != width || newHeight != height) {
+                                                    android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+                                                } else bitmap
+                                                
+                                                val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}.jpg")
+                                                val out = java.io.FileOutputStream(compressedFile)
+                                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, out)
+                                                out.close()
+                                                
+                                                if (compressedFile.length() < file.length()) {
+                                                    finalFile = compressedFile
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            com.noslop.app.debug.Logger.error("COMPRESS", "Error compressing image: ${e.message}")
                                         }
                                     }
                                     
