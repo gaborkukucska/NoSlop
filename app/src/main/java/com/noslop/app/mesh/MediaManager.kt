@@ -339,11 +339,29 @@ object MediaManager {
             }
         }
         
-        // Wipe any stale part file from a previously killed run
-        if (dl.partFile.exists()) dl.partFile.delete()
+        // Resume from existing .part file if present
+        if (dl.partFile.exists()) {
+            val existingBytes = dl.partFile.length()
+            if (existingBytes > 0 && (dl.totalBytes == 0L || existingBytes < dl.totalBytes)) {
+                dl.contiguousBytes = existingBytes
+                dl.nextRequestOffset = existingBytes
+                Logger.info(TAG, "Resuming download ${metadata.id} from ${existingBytes} bytes (${if (dl.totalBytes > 0) "${existingBytes * 100 / dl.totalBytes}%" else "unknown total"})")
+            } else if (dl.totalBytes > 0 && existingBytes >= dl.totalBytes) {
+                // Part file is already complete — finalize it
+                Logger.info(TAG, "Part file for ${metadata.id} already complete (${existingBytes} bytes), finalizing")
+                dl.contiguousBytes = existingBytes
+                dl.eofOffset = existingBytes
+            } else {
+                // Zero-byte or corrupt part file — start fresh
+                dl.partFile.delete()
+            }
+        }
         
         activeDownloads[metadata.id] = dl
-        updateProgress(metadata.id, 0)
+        val initialProgress = if (dl.totalBytes > 0 && dl.contiguousBytes > 0) {
+            (dl.contiguousBytes * 100 / dl.totalBytes).toInt().coerceIn(0, 99)
+        } else 0
+        updateProgress(metadata.id, initialProgress)
         updateWakeLock()
         
         if (dl.status == ActiveDownload.Status.ACTIVE) {

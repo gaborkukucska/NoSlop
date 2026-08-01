@@ -2,6 +2,7 @@
 package com.noslop.app.ui.components
 
 import com.noslop.app.util.tr
+import kotlinx.coroutines.launch
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,6 +68,7 @@ fun ChatThreadScreen(
     var isRecordingVideo by remember { mutableStateOf(false) }
     var fullscreenImage by remember { mutableStateOf<String?>(null) }
     var fullscreenVideo by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     val context = LocalContext.current
     val captureManager = remember { MediaCaptureManager(context) }
@@ -134,7 +136,10 @@ fun ChatThreadScreen(
         }
     }
 
-    fun buildMediaMetadata(file: java.io.File): MediaMetadata {
+    var isProcessingMedia by remember { mutableStateOf(false) }
+    var compressionProgress by remember { mutableStateOf<Int?>(null) }
+
+    suspend fun buildMediaMetadata(file: java.io.File): MediaMetadata {
         val ext = file.extension.lowercase()
         val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
         val type = when {
@@ -143,18 +148,76 @@ fun ChatThreadScreen(
             mimeType.startsWith("audio") -> "audio"
             else -> "file"
         }
-        val id = "dm-${file.name}"
-        com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(file, type, id)
+        
+        var finalFile = file
+        
+        // Compress large videos (> 20MB)
+        if (type == "video" && file.length() > 20 * 1024 * 1024) {
+            val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}")
+            com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile).collect { state ->
+                when(state) {
+                    is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            compressionProgress = state.percentage
+                        }
+                    }
+                    is com.noslop.app.media.VideoCompressor.CompressState.Success -> {
+                        finalFile = state.file
+                    }
+                    is com.noslop.app.media.VideoCompressor.CompressState.Error -> {
+                        Logger.error("CHAT_COMPRESS", "Error compressing video: ${state.exception.message}")
+                    }
+                }
+            }
+        }
+        // Compress large images (> 500KB)
+        else if (type == "image" && file.length() > 500 * 1024) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                compressionProgress = 0
+            }
+            try {
+                val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                if (bitmap != null) {
+                    val maxDim = 1280
+                    val width = bitmap.width
+                    val height = bitmap.height
+                    var newWidth = width
+                    var newHeight = height
+                    if (width > maxDim || height > maxDim) {
+                        val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+                        newWidth = (width * ratio).toInt()
+                        newHeight = (height * ratio).toInt()
+                    }
+                    val scaled = if (newWidth != width || newHeight != height) {
+                        android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
+                    } else bitmap
+                    
+                    val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}.jpg")
+                    val out = java.io.FileOutputStream(compressedFile)
+                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, out)
+                    out.close()
+                    
+                    if (compressedFile.length() < file.length()) {
+                        finalFile = compressedFile
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error("CHAT_COMPRESS", "Error compressing image: ${e.message}")
+            }
+        }
+        
+        val id = "dm-${finalFile.name}"
+        com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id)
         return MediaMetadata(
             id = id,
             type = type,
             mimeType = mimeType,
-            size = file.length(),
-            chunkCount = (file.length() / (256 * 1024)).toInt() + 1,
+            size = finalFile.length(),
+            chunkCount = (finalFile.length() / (256 * 1024)).toInt() + 1,
             originNode = localKeys?.onionAddress,
             ownerId = localKeys?.publicKeyB64,
-            thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(file, type),
-            filename = file.name
+            thumbnailB64 = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type),
+            filename = finalFile.name
         )
     }
 
@@ -510,16 +573,45 @@ fun ChatThreadScreen(
                 }
             }
 
+            // Compression progress banner
+            if (isProcessingMedia) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentGreen, strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (compressionProgress != null && compressionProgress!! > 0) "Compressing... ${compressionProgress}%".tr else "Processing media...".tr,
+                        color = TextLight, style = MaterialTheme.typography.labelSmall
+                    )
+                }
+            }
+
             // ISOLATED INPUT BAR (Fixes UI Lag)
             ChatInputBar(
                 viewModel = viewModel,
                 hasAttachment = attachedFile != null,
                 onMediaAttached = { file -> attachedFile = file },
                 onSendMessage = { text ->
-                    val mediaMetadata = attachedFile?.let { buildMediaMetadata(it) }
-                    onSendMessage(text, mediaMetadata, replyingToMessageId)
+                    val fileToProcess = attachedFile
+                    val replyId = replyingToMessageId
                     attachedFile = null
                     replyingToMessageId = null
+                    if (fileToProcess != null) {
+                        isProcessingMedia = true
+                        compressionProgress = null
+                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            val mediaMetadata = buildMediaMetadata(fileToProcess)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                isProcessingMedia = false
+                                compressionProgress = null
+                                onSendMessage(text, mediaMetadata, replyId)
+                            }
+                        }
+                    } else {
+                        onSendMessage(text, null, replyId)
+                    }
                 },
                 onLaunchFilePicker = { filePickerLauncher.launch("*/*") },
                 onLaunchCamera = {

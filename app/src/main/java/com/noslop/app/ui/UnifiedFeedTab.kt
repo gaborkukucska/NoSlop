@@ -1332,7 +1332,6 @@ fun UnifiedFeedTab(
                                                     com.noslop.app.debug.Logger.error("COMPRESS", "Error compressing video", state.exception.stackTraceToString())
                                                 }
                                             }
-                                            }
                                         }
                                     } else if (type == "image" && file.length() > 500 * 1024) {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
