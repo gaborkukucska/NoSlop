@@ -553,7 +553,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 Slider(
                                     value = mediaSettings.maxFileSizeMB.toFloat(),
                                     onValueChange = { viewModel.updateMediaSettings(mediaSettings.copy(maxFileSizeMB = it.toInt())) },
-                                    valueRange = 1f..100f,
+                                    valueRange = 1f..1000f,
                                     colors = SliderDefaults.colors(thumbColor = AccentGreen, activeTrackColor = AccentGreen)
                                 )
                                 

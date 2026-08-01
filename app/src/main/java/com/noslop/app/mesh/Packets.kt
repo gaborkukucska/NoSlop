@@ -80,6 +80,7 @@ data class MediaChunkPayload(
     @SerializedName("chunk_index") val chunkIndex: Int,
     @SerializedName("total_chunks") val totalChunks: Int,
     @SerializedName("byte_offset") val byteOffset: Long? = null,
+    @SerializedName("total_size") val totalSize: Long? = null,
     val data: String // Base64 encoded
 )
 

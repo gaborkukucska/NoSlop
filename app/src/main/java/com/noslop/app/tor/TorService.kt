@@ -371,15 +371,15 @@ object TorService {
                     val detail = if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed"
                     Logger.info(TAG, "Tor check complete — isTor=$isTor")
                     if (!isTor && _torState.value == TorState.READY) {
-                        _torState.value = TorState.FAILED
+                        // Do NOT set FAILED here, the daemon is still running
+                        Logger.warn(TAG, "Tor check failed: Proxy responded but not Tor-routed")
                     }
                     Pair(isTor, detail)
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Tor check failed: ${e.message}")
-                if (_torState.value == TorState.READY) {
-                    _torState.value = TorState.FAILED
-                }
+                // Do NOT set FAILED here, the daemon is still running
+                Logger.warn(TAG, "Tor check failed: Proxy unreachable")
                 Pair(false, "Proxy unreachable: ${e.message}")
             }
         }

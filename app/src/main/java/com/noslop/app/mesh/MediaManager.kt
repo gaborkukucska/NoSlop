@@ -62,7 +62,7 @@ object MediaManager {
         enum class Status { ACTIVE, RECOVERING, COMPLETED, ERROR }
 
         val partFile = File(mediaDir, "${metadata.id}.part")
-        val totalBytes = metadata.size
+        var totalBytes = metadata.size
         
         var contiguousBytes = 0L
         var nextRequestOffset = 0L
@@ -535,6 +535,10 @@ object MediaManager {
         dl.inflight.remove(offset)
         dl.consecutiveTimeouts = 0
 
+        if (payload.totalSize != null && payload.totalSize > dl.totalBytes) {
+            dl.totalBytes = payload.totalSize
+        }
+
         var shouldFinish = false
         synchronized(dl) {
             if (data.isNotEmpty()) {
@@ -553,8 +557,10 @@ object MediaManager {
             // EOF Detection: 
             // 1. Data length returned was smaller than requested (end of file)
             // 2. Or we know the total size and have crossed it
-            if (data.size < requestedLength || (dl.totalBytes > 0 && dl.contiguousBytes >= dl.totalBytes)) {
+            if (data.size < requestedLength) {
                 dl.eofOffset = offset + data.size
+            } else if (dl.totalBytes > 0 && dl.contiguousBytes >= dl.totalBytes) {
+                dl.eofOffset = dl.totalBytes
             }
             
             if (dl.eofOffset != -1L && dl.contiguousBytes >= dl.eofOffset) {
@@ -731,6 +737,7 @@ object MediaManager {
                     chunkIndex = payload.chunkIndex,
                     totalChunks = if (payload.byteOffset == null) ((totalSize / payload.chunkSize).toInt() + 1) else 999,
                     byteOffset = offset,
+                    totalSize = totalSize,
                     data = Base64.encodeToString(buffer, Base64.NO_WRAP)
                 )
 
