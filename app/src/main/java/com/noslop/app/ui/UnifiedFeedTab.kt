@@ -513,6 +513,7 @@ fun UnifiedFeedTab(
     }
 
     var searchResultsActive by remember { mutableStateOf(false) }
+    var forceScrollToTop by remember { mutableStateOf(false) }
 
     val applySearchQuery: (String) -> Unit = { newQuery ->
         if (newQuery.isBlank() && searchResultsActive) {
@@ -607,15 +608,26 @@ fun UnifiedFeedTab(
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
         if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
-            if (unifiedItems.isNotEmpty()) {
-                pagerState.scrollToPage(0)
-            }
+            forceScrollToTop = true
         }
         
         viewModel.syncFilterMode(filterMode)
         
         if (unifiedItems.size < 5) {
             viewModel.loadMoreFeedItems(filterMode)
+        }
+    }
+
+    LaunchedEffect(unifiedItems) {
+        if (forceScrollToTop && unifiedItems.isNotEmpty()) {
+            pagerState.scrollToPage(0)
+            forceScrollToTop = false
+        }
+    }
+
+    LaunchedEffect(isActiveTab) {
+        if (isActiveTab && (filterMode == "Mesh" || filterMode == "My Content")) {
+            viewModel.syncFilterMode(filterMode, forceRefresh = true)
         }
     }
 
@@ -928,6 +940,12 @@ fun UnifiedFeedTab(
                         onClick = { 
                             val q = localSearchQuery.trim()
                             if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                            
+                            val force = (localFilterMode == "Mesh" || localFilterMode == "My Content")
+                            if (force && filterMode == localFilterMode && q == searchQuery) {
+                                viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
+                            }
+                            
                             searchQuery = q
                             filterMode = localFilterMode
                             if (q.isNotBlank()) {
@@ -1076,7 +1094,15 @@ fun UnifiedFeedTab(
             },
             confirmButton = {
                 Button(
-                    onClick = { applySearchQuery(localSearchQuery); filterMode = localFilterMode; showSearchModal = false },
+                    onClick = { 
+                        val force = (localFilterMode == "Mesh" || localFilterMode == "My Content")
+                        if (force && filterMode == localFilterMode && localSearchQuery == searchQuery) {
+                            viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
+                        }
+                        applySearchQuery(localSearchQuery)
+                        filterMode = localFilterMode
+                        showSearchModal = false 
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack), shape = RoundedCornerShape(8.dp)
                 ) { Text("Apply".tr, fontWeight = FontWeight.Bold) }
             },

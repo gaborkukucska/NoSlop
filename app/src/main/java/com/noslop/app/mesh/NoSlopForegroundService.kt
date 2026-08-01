@@ -26,10 +26,14 @@ class NoSlopForegroundService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, NoSlopForegroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to start foreground service: ${e.message}")
             }
         }
 
@@ -50,15 +54,19 @@ class NoSlopForegroundService : Service() {
         
         val notification = createNotification("Mesh network sync active")
         
-        if (Build.VERSION.SDK_INT >= 34) {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to call startForeground: ${e.message}")
         }
 
         // Starting this foreground service elevates the process priority,
@@ -73,7 +81,11 @@ class NoSlopForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        try {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to stop foreground: ${e.message}")
+        }
         super.onDestroy()
         Logger.info(TAG, "NoSlopForegroundService destroyed")
 

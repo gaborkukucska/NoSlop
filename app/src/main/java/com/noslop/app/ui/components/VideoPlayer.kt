@@ -415,12 +415,12 @@ private fun ExoVideoPlayer(
                 player.pause()
                 try {
                     val currentPos = player.currentPosition
-                    android.util.Log.e("NoSlop/VIDEO_DEBUG", "LaunchedEffect isVisible=false. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
+                    Logger.debug("VIDEO_DEBUG", "LaunchedEffect isVisible=false. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
                     if (currentPos > 0L) {
                         PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
                     }
                 } catch (e: Exception) {
-                    android.util.Log.e("NoSlop/VIDEO_DEBUG", "Failed to save playback position on pause: ${e.message}")
+                    Logger.debug("VIDEO_DEBUG", "Failed to save playback position on pause: ${e.message}")
                 }
             }
         }
@@ -519,12 +519,12 @@ private fun ExoVideoPlayer(
         onDispose {
             try {
                 val currentPos = player.currentPosition
-                android.util.Log.e("NoSlop/VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
+                Logger.debug("VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
                 if (currentPos > 0L) {
                     PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
                 }
             } catch (e: Exception) {
-                android.util.Log.e("NoSlop/VIDEO_DEBUG", "Failed to save playback position during dispose: ${e.message}")
+                Logger.debug("VIDEO_DEBUG", "Failed to save playback position during dispose: ${e.message}")
             }
             player.release()
             exoPlayer = null

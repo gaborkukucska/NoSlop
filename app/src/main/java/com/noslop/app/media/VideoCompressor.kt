@@ -62,7 +62,12 @@ object VideoCompressor {
                 .setEffects(effects)
                 .build()
 
-            transformer?.start(editedMediaItem, outputFile.absolutePath)
+            try {
+                transformer?.start(editedMediaItem, outputFile.absolutePath)
+            } catch (e: Exception) {
+                trySend(CompressState.Error(e))
+                close()
+            }
         }
 
         val progressJob = launch {

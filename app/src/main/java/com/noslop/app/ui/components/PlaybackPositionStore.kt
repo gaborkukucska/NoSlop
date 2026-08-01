@@ -69,23 +69,23 @@ internal object PlaybackPositionStore {
     /** Save the current position for [url]. Call this from onDispose / pause,
      *  not on a tight timer, to keep writes cheap. */
     fun save(url: String, positionMs: Long, durationMs: Long) {
-        android.util.Log.e("NoSlop/VIDEO_DEBUG", "PlaybackPositionStore.save() called for $url, pos=$positionMs, duration=$durationMs")
+        Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore.save() called for $url, pos=$positionMs, duration=$durationMs")
         if (url.isBlank() || positionMs <= 0L) return
 
         if (positionMs < MIN_RESUMABLE_MS) {
-            android.util.Log.e("NoSlop/VIDEO_DEBUG", "PlaybackPositionStore: ignored save for '$url' (pos $positionMs < $MIN_RESUMABLE_MS)")
+            Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore: ignored save for '$url' (pos $positionMs < $MIN_RESUMABLE_MS)")
             return // Ignore noisy saves at the very beginning
         }
 
         // If video is nearly finished, clear saved position so it restarts next time
         if (durationMs > 0L && (durationMs - positionMs) < MIN_REMAINING_MS) {
-            android.util.Log.e("NoSlop/VIDEO_DEBUG", "PlaybackPositionStore: cleared finished video '$url'")
+            Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore: cleared finished video '$url'")
             positions.remove(url)
             persistRemove(url)
             return
         }
 
-        android.util.Log.e("NoSlop/VIDEO_DEBUG", "PlaybackPositionStore: saved memory pos for '$url' -> $positionMs")
+        Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore: saved memory pos for '$url' -> $positionMs")
         positions[url] = positionMs
 
         // Throttle disk writes: only flush if position has moved meaningfully.
@@ -98,7 +98,7 @@ internal object PlaybackPositionStore {
     /** Returns the remembered position for [url], or 0L if none / not resumable. */
     fun resumePositionFor(url: String): Long {
         val pos = positions[url] ?: 0L
-        android.util.Log.e("NoSlop/VIDEO_DEBUG", "PlaybackPositionStore: requested resume for '$url' -> $pos")
+        Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore: requested resume for '$url' -> $pos")
         return pos
     }
 

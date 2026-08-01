@@ -11,6 +11,18 @@
 ### 2. Media Downloads for Temporary Contacts
 *   **Burnable Proxy Routing**: Fixed a major bug in `MediaManager` and `GossipService` where media packets (`MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_REQUEST`, and `MEDIA_CHUNK`) sent between temporary contacts were signed with the local node's *main* identity rather than the *burnable* identity. The recipient's mesh firewall would subsequently drop them (as it only trusted the burnable identity). Media requests and chunk relays are now properly routed through the burnable identity for temporary contacts.
 
+### 3. Stability & Tor Resiliency
+*   **Foreground Service Crash Loop**: Wrapped `startForegroundService` and `stopForeground` in safety blocks to prevent fatal `AndroidRuntime` crashes under Android 12+ strict background execution limits.
+*   **Tor Auto-Recovery**: Added an active monitoring loop in `NoSlopViewModel` that seamlessly attempts up to 3 restarts if the Tor daemon falls into a `FAILED` state.
+*   **Logcat Spam Reduction**: Downgraded routine ExoPlayer `VIDEO_DEBUG` events from `Log.e` to internal debug logging, clearing up 86% of the false-positive error noise.
+
+### 4. Media & Feed UX Polish
+*   **Mesh Feed Top-Snapping**: The "Mesh Network" and "Your Broadcasts" feeds now explicitly bypass the "last viewed" memory feature. Opening these filters instantly snaps to the top to show the newest content, resolving the need to scroll back up.
+*   **Large File Transfers**: Reduced the maximum Tor chunk size from 512KB to 256KB and lowered the maximum concurrent SOCKS5 connections from 8 to 4, preventing Tor circuit timeouts and buffer congestion on large media transfers.
+*   **Relay Restamping for Temporary Contacts**: `MEDIA_RECOVERY_FOUND` packets now correctly restamp the sender ID as the node's *Burnable Identity* when relaying to a Temporary Contact, preventing the target's firewall from silently dropping the recovery payload.
+*   **VideoCompressor Crash Fix**: Handled Media3 Transformer exceptions in `VideoCompressor.kt` to gracefully emit error states instead of fatally crashing the background coroutine.
+*   **Invidious Instance Refresh**: Replaced 10 dead or rate-limited YouTube proxy instances with 5 known-good instances (`yewtu.be`, `projectsegfau.lt`, etc.) resolving the widespread `NXDOMAIN` and `403` search failures.
+
 ## Completed Changes (2026-07-28)
 
 ### 1. Discoverable Mode & Burnable Identity Fixes

@@ -383,8 +383,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            var retryCount = 0
             TorService.torState.collect { state ->
-                if (state == TorState.READY || state == TorState.PROXY_READY) refreshTorStatus()
+                if (state == TorState.READY || state == TorState.PROXY_READY) {
+                    retryCount = 0
+                    refreshTorStatus()
+                } else if (state == TorState.FAILED) {
+                    if (retryCount < 3) {
+                        retryCount++
+                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor ($retryCount/3)...")
+                        kotlinx.coroutines.delay(5000)
+                        startTor()
+                    } else {
+                        com.noslop.app.debug.Logger.error("VM", "Tor FAILED permanently after 3 retries.")
+                    }
+                }
             }
         }
 
@@ -503,16 +516,21 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun syncFilterMode(mode: String) {
-        if (currentFilterMode != mode) {
+    fun syncFilterMode(mode: String, forceRefresh: Boolean = false) {
+        if (currentFilterMode != mode || forceRefresh) {
             if (mode == "Live Feed") {
-                clearSearchAndRestoreFeed()
+                if (currentFilterMode != mode) clearSearchAndRestoreFeed()
             } else {
-
                 currentFilterMode = mode
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 loadMoreFeedItems(mode)
+                if (forceRefresh) {
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        _scrollToTopEvent.emit(Unit)
+                    }
+                }
             }
         }
     }

@@ -39,18 +39,13 @@ object InvidiousApiClient {
             .build()
     }
 
-    // Hardcoded fallback instances (known-good as of June 2026)
+    // Hardcoded fallback instances (known-good as of July 2026)
     private val FALLBACK_INSTANCES = listOf(
-        "https://iv.melmac.space",
-        "https://inv.zzls.xyz",
-        "https://invidious.nerdvpn.de",
-        "https://invidious.no-logs.com",
-        "https://invidious.io.lol",
-        "https://inv.tux.pizza",
-        "https://invidious.privacydev.net",
-        "https://inv.nadeko.net",
-        "https://invidious.lunar.icu",
-        "https://yt.drgnz.club"
+        "https://invidious.projectsegfau.lt",
+        "https://yewtu.be",
+        "https://vid.puffyan.us",
+        "https://invidious.fdn.fr",
+        "https://invidious.perennialte.ch"
     )
 
     // Cached dynamic instances

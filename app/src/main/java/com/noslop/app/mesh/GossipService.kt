@@ -176,7 +176,7 @@ object GossipService {
 
         // 4. Firewall — drop all packets from non-trusted senders except ConnectionRequest/UserHandshake/MediaRelay
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
-        val isMediaRelayPacket = packet.type == "MEDIA_RELAY_REQUEST" || packet.type == "MEDIA_RECOVERY_FOUND" || packet.type == "MEDIA_CHUNK"
+        val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT"
         
@@ -366,18 +366,20 @@ object GossipService {
         state.listeners.forEach { listenerId ->
             if (listenerId != localPublicKeyB64) {
                 scope.launch {
-                    val foundPacket = NetworkPacket(
-                        id = UUID.randomUUID().toString(),
-                        hops = 3,
-                        senderId = localPublicKeyB64,
-                        targetUserId = listenerId,
-                        type = "MEDIA_RECOVERY_FOUND",
-                        payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
-                    )
-                    // We need onion address for sending. 
-                    // This assumes listeners are our connected peers.
                     val peer = peerDao?.getPeerByPublicKey(listenerId)
                     if (peer != null) {
+                        val isTargetTemp = peer.isTemporary
+                        val mySenderId = if (isTargetTemp) transport?.repository?.getBurnableIdentity()?.publicKeyB64 ?: localPublicKeyB64 else localPublicKeyB64
+                        
+                        val foundPacket = NetworkPacket(
+                            id = UUID.randomUUID().toString(),
+                            hops = 3,
+                            senderId = mySenderId,
+                            targetUserId = listenerId,
+                            type = "MEDIA_RECOVERY_FOUND",
+                            payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
+                        )
+                        
                         val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")
                         if (hubStatus.isNullOrBlank()) {
                             transport?.sendPacket(peer.onionAddress, Constants.MESH_PORT, foundPacket)

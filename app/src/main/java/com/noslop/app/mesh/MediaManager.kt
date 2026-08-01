@@ -22,7 +22,7 @@ object MediaManager {
     
     // Dynamic Chunk Sizing Bounds
     const val MIN_CHUNK_SIZE = 64 * 1024
-    const val MAX_CHUNK_SIZE = 512 * 1024
+    const val MAX_CHUNK_SIZE = 256 * 1024
     const val DOWNLOAD_TIMEOUT_MS = 120000L
     private const val MAX_CONCURRENCY = 4
 
@@ -297,6 +297,46 @@ object MediaManager {
         
         if (peerOnion == null) {
             dl.status = ActiveDownload.Status.RECOVERING
+        } else {
+            // Ensure target peer knows our burnable identity so they can route chunks back to us
+            scope.launch {
+                val repo = repository ?: return@launch
+                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peerOnion }
+                if (targetPeer == null || !targetPeer.isTrusted) {
+                    val burnable = repo.getBurnableIdentity()
+                    if (burnable != null) {
+                        val handle = repo.getLocalHandle()
+                        val isCreator = repo.getAppSetting("is_creator_enabled") == "true"
+                        val link = repo.getAppSetting("creator_fundme_link")
+                        val bio = repo.getUserProfile().bio
+                        val timestamp = System.currentTimeMillis()
+                        val msgToSign = "${burnable.publicKeyB64}:${handle}:${burnable.onionAddress}:${burnable.encPublicKeyB64}:${isCreator}:${link ?: ""}::${bio ?: ""}:${timestamp}"
+                        val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, burnable.privateKeyB64)
+                        val payload = AnnounceDiscoverablePayload(
+                            authorId = burnable.publicKeyB64,
+                            handle = handle,
+                            onionAddress = burnable.onionAddress,
+                            encPublicKey = burnable.encPublicKeyB64,
+                            isCreator = isCreator,
+                            fundMeLink = link,
+                            authorAvatarB64 = null,
+                            bio = bio,
+                            timestamp = timestamp,
+                            signature = signature
+                        )
+                        val packet = NetworkPacket(
+                            id = java.util.UUID.randomUUID().toString(),
+                            hops = 1,
+                            senderId = burnable.publicKeyB64,
+                            targetUserId = targetPeer?.publicKeyB64,
+                            type = "ANNOUNCE_DISCOVERABLE",
+                            payload = com.google.gson.Gson().toJsonTree(payload),
+                            signature = signature
+                        )
+                        repo.meshTransport.sendPacket(peerOnion, Constants.MESH_PORT, packet)
+                    }
+                }
+            }
         }
         
         // Wipe any stale part file from a previously killed run
@@ -352,11 +392,20 @@ object MediaManager {
                 
                 if (recoveryNeeded) {
                     Logger.warn(TAG, "Media $id: persistent timeouts. Recovering.")
-                    dl.peerOnion = null
-                    dl.status = ActiveDownload.Status.RECOVERING
-                    resetDownloadTracking(dl)
-                    dl.lastAttemptAt = now
-                    scope.launch { attemptMeshRecovery(dl) }
+                    scope.launch {
+                        val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
+                        if (isTemp) {
+                            Logger.info(TAG, "Media $id: Not recovering for temporary contact. Retrying direct.")
+                            dl.consecutiveTimeouts = 0
+                            requestNextChunks(dl)
+                        } else {
+                            dl.peerOnion = null
+                            dl.status = ActiveDownload.Status.RECOVERING
+                            resetDownloadTracking(dl)
+                            dl.lastAttemptAt = now
+                            attemptMeshRecovery(dl)
+                        }
+                    }
                     continue
                 }
                 
@@ -455,11 +504,18 @@ object MediaManager {
                     
                     if (dl.consecutiveTimeouts >= 3 && dl.status == ActiveDownload.Status.ACTIVE) {
                         Logger.warn(TAG, "Media ${dl.metadata.id}: send failures. Recovering.")
-                        dl.peerOnion = null
-                        dl.status = ActiveDownload.Status.RECOVERING
-                        resetDownloadTracking(dl)
-                        dl.lastAttemptAt = System.currentTimeMillis()
-                        attemptMeshRecovery(dl)
+                        val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
+                        if (isTemp) {
+                            Logger.info(TAG, "Media ${dl.metadata.id}: Not recovering for temporary contact. Retrying direct.")
+                            dl.consecutiveTimeouts = 0
+                            // Will be retried on next loop
+                        } else {
+                            dl.peerOnion = null
+                            dl.status = ActiveDownload.Status.RECOVERING
+                            resetDownloadTracking(dl)
+                            dl.lastAttemptAt = System.currentTimeMillis()
+                            attemptMeshRecovery(dl)
+                        }
                     }
                 }
             }
@@ -526,7 +582,7 @@ object MediaManager {
                 } else {
                     dl.currentConcurrency += 1.0 / Math.floor(dl.currentConcurrency) // Congestion avoidance
                 }
-                dl.currentConcurrency = Math.min(8.0, dl.currentConcurrency) // Max 8 concurrent requests over Tor
+                dl.currentConcurrency = Math.min(4.0, dl.currentConcurrency) // Max 4 concurrent requests over Tor
             }
             requestNextChunks(dl)
         }
@@ -578,14 +634,6 @@ object MediaManager {
     private suspend fun attemptMeshRecovery(dl: ActiveDownload) {
         val repo = repository ?: return
         
-        val targetPeer = dl.peerOnion?.let { onion -> repo.peerDao.getAllPeersList().find { it.onionAddress == onion } }
-        if (targetPeer?.isTemporary == true) {
-            Logger.info(TAG, "Not attempting mesh recovery for temporary contact media ${dl.metadata.id}. Retrying direct.")
-            dl.consecutiveTimeouts = 0
-            requestNextChunks(dl)
-            return
-        }
-
         val myIdentity = repo.getLocalIdentity() ?: return
         
         val payload = MediaRelayRequestPayload(
