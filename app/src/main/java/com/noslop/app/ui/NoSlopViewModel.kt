@@ -455,7 +455,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     
                     if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         val idList = savedIdsStr.split(",")
+                        val hiddenIds = cachedViewedIds + cachedExcludedIds
                         val restoredFeed = idList.mapNotNull { id ->
+                            if (id in hiddenIds) return@mapNotNull null
                             val feed = feeds.find { it.id == id }
                             if (feed != null) UnifiedItem.Feed(feed)
                             else {
@@ -508,6 +510,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 repository.searchCustomFeed(query, filterMode)
+
+                // Give Room's Flow a moment to emit the newly-inserted items
+                // into allFeeds, then explicitly populate the feed.
+                kotlinx.coroutines.delay(300)
+                loadMoreFeedItems()
             } catch (e: Exception) {
                 Logger.error("VM", "Custom search exception: ${e.message}")
             } finally {
@@ -619,18 +626,24 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
         }
 
-        if (!isSearchActive) {
-            if (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
-                actualFilter == "Videos" || actualFilter == "Audio" || 
-                actualFilter == "Images" || actualFilter == "Articles") {
-                val hiddenIds = cachedViewedIds + cachedExcludedIds
-                if (hiddenIds.isNotEmpty()) {
-                    unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
-                    unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
-                }
-                if (actualFilter == "Live Feed" || actualFilter == "Random") {
-                    unseenFeeds = unseenFeeds.filter { !it.isRead }
-                }
+        // Swiped items are always hidden from clearnet feeds (user explicitly dismissed them)
+        if (cachedExcludedIds.isNotEmpty()) {
+            unseenFeeds = unseenFeeds.filter { it.id !in cachedExcludedIds }
+        }
+
+        // In feed-centric modes, also exclude viewed items and swiped mesh posts
+        // so the feed feels fresh. NOT applied in Mesh / My Content / History modes
+        // where the user expects to see everything.
+        if (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
+            actualFilter == "Videos" || actualFilter == "Audio" || 
+            actualFilter == "Images" || actualFilter == "Articles") {
+            val hiddenIds = cachedViewedIds + cachedExcludedIds
+            if (hiddenIds.isNotEmpty()) {
+                unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
+                unseenMeshes = unseenMeshes.filter { it.id !in hiddenIds }
+            }
+            if (actualFilter == "Live Feed" || actualFilter == "Random") {
+                unseenFeeds = unseenFeeds.filter { !it.isRead }
             }
         }
         

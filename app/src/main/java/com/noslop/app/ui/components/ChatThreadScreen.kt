@@ -73,17 +73,7 @@ fun ChatThreadScreen(
     val context = LocalContext.current
     val captureManager = remember { MediaCaptureManager(context) }
 
-    val gifImageLoader = remember {
-        ImageLoader.Builder(context)
-            .components {
-                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    add(coil.decode.ImageDecoderDecoder.Factory())
-                } else {
-                    add(coil.decode.GifDecoder.Factory())
-                }
-            }
-            .build()
-    }
+
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -280,7 +270,6 @@ fun ChatThreadScreen(
         return
     }
 
-    CompositionLocalProvider(LocalImageLoader provides gifImageLoader) {
         Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
             // Header
             Row(
@@ -456,7 +445,7 @@ fun ChatThreadScreen(
                                                         val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
                                                         if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
                                                     }
-                                                    coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, imageLoader = gifImageLoader, modifier = Modifier.fillMaxSize())
+                                                    coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
                                                 } else if (meta?.thumbnailB64 != null && isVideo) {
                                                     val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
                                                     coil.compose.AsyncImage(model = decoded, contentDescription = "Video Thumbnail".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -635,9 +624,7 @@ fun ChatThreadScreen(
                 }
             }
         }
-    }
 }
-
 @Composable
 fun ChatInputBar(
     viewModel: NoSlopViewModel,

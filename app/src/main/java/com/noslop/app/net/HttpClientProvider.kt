@@ -132,17 +132,24 @@ object HttpClientProvider {
     val activeClearnetClient: OkHttpClient
         get() = if (useTorForClearnet) torClient else rawClearnetClient
 
+    private val userAgentInterceptor = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        if (request.header("User-Agent") != null) {
+            chain.proceed(request)
+        } else {
+            chain.proceed(
+                request.newBuilder()
+                    .header("User-Agent", BROWSER_USER_AGENT)
+                    .build()
+            )
+        }
+    }
+
     val rawClearnetClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY) // Force direct connection for LAN/clearnet, ignoring Tor system properties
             .dns(cascadingDns)
-            .addInterceptor { chain ->
-                chain.proceed(
-                    chain.request().newBuilder()
-                        .header("User-Agent", BROWSER_USER_AGENT)
-                        .build()
-                )
-            }
+            .addInterceptor(userAgentInterceptor)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -161,6 +168,7 @@ object HttpClientProvider {
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
+            .addInterceptor(userAgentInterceptor)
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
             .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s

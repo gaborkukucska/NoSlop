@@ -361,11 +361,11 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     isSearchingChannels = true
                     kotlinx.coroutines.delay(300) // Debounce typing
                     try {
-                        val invidious = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
-                        if (invidious.isNotEmpty()) {
-                            searchedChannels = invidious
+                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(3) }
+                        if (ytChannels.isNotEmpty()) {
+                            searchedChannels = ytChannels
                         } else {
-                            throw Exception("Invidious returned empty")
+                            throw Exception("YouTube returned empty")
                         }
                     } catch (e: Exception) {
                         com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Channel search failed: ${e.message}, trying fallback")

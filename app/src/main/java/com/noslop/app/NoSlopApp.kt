@@ -36,13 +36,30 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .okHttpClient { HttpClientProvider.activeClearnetClient }
+            // Always use clearnet for images — thumbnail URLs are public CDN links
+            // (ytimg.com, pexels, etc.) that don't reveal user identity.
+            // Routing them through Tor causes slow loads and black images.
+            .okHttpClient { HttpClientProvider.rawClearnetClient }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())
                 } else {
                     add(coil.decode.GifDecoder.Factory())
                 }
+                add(object : coil.intercept.Interceptor {
+                    override suspend fun intercept(chain: coil.intercept.Interceptor.Chain): coil.request.ImageResult {
+                        val request = chain.request
+                        val url = request.data.toString()
+                        if (url.startsWith("noslop://")) {
+                            val resolved = com.noslop.app.ui.resolveMediaUrl(url, this@NoSlopApp)
+                            if (resolved != null) {
+                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
+                                return chain.proceed(request.newBuilder().data(newData).build())
+                            }
+                        }
+                        return chain.proceed(request)
+                    }
+                })
             }
             .build()
     }

@@ -31,7 +31,7 @@ object PublicApiService {
         try {
             when (category) {
                 "Technology", "Open Source", "Self-Hosting" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, "technology", apiKeyRepo, language = language) }
                     items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchArticles(query, "technology", apiKeyRepo) }
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("technology", "hot") }
@@ -44,7 +44,7 @@ object PublicApiService {
                 "Science" -> {
                     items += safeCall("api-nasa-apod", activeApiSourceIds) { NasaApiClient.fetchAPOD(apiKeyRepo) }
                     items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query science $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query science $language") }
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.getTopHeadlines("science", apiKeyRepo, language = language) }
                     items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchSection("science", apiKeyRepo) }
                 }
@@ -54,14 +54,14 @@ object PublicApiService {
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("worldnews", "hot") }
                 }
                 "Video Platforms" -> {
-                    items += safeCall("api-yt-trending", activeApiSourceIds) { InvidiousApiClient.getTrendingVideos() }
+                    items += safeCall("api-yt-trending", activeApiSourceIds) { YouTubeInternalClient.getTrendingVideos() }
                     items += safeCall("api-vimeo-featured", activeApiSourceIds) { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                     items += safeCall("api-archive-video", activeApiSourceIds) { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
                     items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
                     items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query music $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query music $language") }
                     items += safeCall("api-pexels-video", activeApiSourceIds) { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                     items += safeCall("api-archive-audio", activeApiSourceIds) { InternetArchiveClient.searchAudio(query) }
                 }
@@ -77,7 +77,7 @@ object PublicApiService {
                     items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo, language = language) }
                 }
                 "Gaming" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query gaming $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query gaming $language") }
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles("gaming", null, apiKeyRepo, language = language) }
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("gaming", "hot") }
                 }
@@ -87,7 +87,7 @@ object PublicApiService {
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("LifeProTips", "hot") }
                 }
                 "Automotive" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query cars automotive $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query cars automotive $language") }
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("cars", "hot") }
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo, language = language) }
                 }
@@ -98,7 +98,7 @@ object PublicApiService {
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
                 "Search Videos" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
                 }
                 "Search Audio" -> {
                     items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
@@ -115,7 +115,7 @@ object PublicApiService {
                 }
                 else -> {
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { InvidiousApiClient.searchVideos("$query $language") }
+                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.searchReddit(query) }
                 }
             }

@@ -82,37 +82,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 @Composable
 fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     val context = LocalContext.current
-    val imageLoader = remember {
-        ImageLoader.Builder(context)
-            .okHttpClient { HttpClientProvider.activeClearnetClient }
-            .interceptorDispatcher(Dispatchers.IO)
-            .components {
-                if (android.os.Build.VERSION.SDK_INT >= 28) {
-                    add(coil.decode.ImageDecoderDecoder.Factory())
-                } else {
-                    add(coil.decode.GifDecoder.Factory())
-                }
-                add(object : Interceptor {
-                    override suspend fun intercept(chain: Interceptor.Chain): coil.request.ImageResult {
-                        val request = chain.request
-                        val url = request.data.toString()
-                        if (url.startsWith("noslop://")) {
-                            val resolved = resolveMediaUrl(url, context)
-                            if (resolved != null) {
-                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
-                                return chain.proceed(request.newBuilder().data(newData).build())
-                            }
-                        }
-                        return chain.proceed(request)
-                    }
-                })
-            }
-            .build()
-    }
-
-    CompositionLocalProvider(LocalImageLoader provides imageLoader) {
-        MainScreenContent(viewModel, initialRoute)
-    }
+    MainScreenContent(viewModel, initialRoute)
 }
 
 @Composable

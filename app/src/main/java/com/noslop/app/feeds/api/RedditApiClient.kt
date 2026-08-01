@@ -52,7 +52,6 @@ object RedditApiClient {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (privacy-first aggregator)")
                 .build()
 
             val response = client.newCall(request).execute()

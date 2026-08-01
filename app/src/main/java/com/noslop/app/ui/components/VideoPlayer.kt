@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.noslop.app.debug.Logger
-import com.noslop.app.feeds.api.InvidiousApiClient
+import com.noslop.app.feeds.api.YouTubeInternalClient
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.Dispatchers
@@ -179,13 +179,13 @@ private fun extractVimeoId(url: String): String? = when {
     else -> url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() && it.all { c -> c.isDigit() } }
 }
 
-private fun resolveYouTubeSource(url: String): VideoSource {
+private suspend fun resolveYouTubeSource(url: String): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
 
-    val streamUrl = InvidiousApiClient.resolveStreamUrl(videoId)
+    val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId)
     if (streamUrl != null) {
         return VideoSource.Direct(streamUrl)
     }
