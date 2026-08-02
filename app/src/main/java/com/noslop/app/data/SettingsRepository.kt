@@ -100,6 +100,21 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
         _meshFilterSettingsFlow.value = settings
     }
 
+    private val _feedMixSettingsFlow = MutableStateFlow(FeedMixSettings())
+    val feedMixSettingsFlow: StateFlow<FeedMixSettings> = _feedMixSettingsFlow.asStateFlow()
+
+    suspend fun getFeedMixSettings(): FeedMixSettings = withContext(Dispatchers.IO) {
+        val json = appSettingDao.getSetting("feed_mix_settings")
+        val settings = FeedMixSettings.fromJson(json)
+        _feedMixSettingsFlow.value = settings
+        settings
+    }
+
+    suspend fun updateFeedMixSettings(settings: FeedMixSettings) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("feed_mix_settings", settings.toJson()))
+        _feedMixSettingsFlow.value = settings
+    }
+
     /** Hydrate [isForegroundServiceEnabled] from storage (defaults to false when unset). */
     suspend fun initForegroundServiceSetting() = withContext(Dispatchers.IO) {
         val setting = appSettingDao.getSetting("foreground_service_enabled")

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,33 +33,19 @@ import androidx.compose.ui.graphics.asImageBitmap
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
-    // Profile state
-    val currentProfile by viewModel.userProfile.collectAsState()
+fun ContentPreferencesScreen(
+    viewModel: NoSlopViewModel,
+    onBack: () -> Unit,
+    onNavigateToMeshFilters: () -> Unit
+) {
     val currentNegativeKeywords by viewModel.negativeKeywords.collectAsState()
     val currentLanguage by viewModel.languagePreference.collectAsState()
     val currentCreatorKeywords by viewModel.creatorKeywords.collectAsState()
     val isUsingInsecureStorage by viewModel.isUsingInsecureStorage.collectAsState()
 
-    var displayName by remember { mutableStateOf(currentProfile.displayName) }
-    var bio by remember { mutableStateOf(currentProfile.bio) }
-    var avatarB64 by remember { mutableStateOf(currentProfile.avatarB64) }
     var negativeKeywords by remember { mutableStateOf(currentNegativeKeywords) }
     var language by remember { mutableStateOf(currentLanguage) }
     var creatorKeywords by remember { mutableStateOf(currentCreatorKeywords) }
-    var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
-
-    if (cropUri != null) {
-        com.noslop.app.ui.components.AvatarCropper(
-            uri = cropUri!!,
-            onCropSuccess = { b64 ->
-                avatarB64 = b64
-                cropUri = null
-            },
-            onCancel = { cropUri = null }
-        )
-        return
-    }
 
     // Categories & genres state
     val interests by viewModel.selectedInterests.collectAsState()
@@ -122,74 +109,21 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 }
             }
 
-            // ────────────────── PROFILE ──────────────────
+            // ────────────────── CONTENT MIX RATIO ──────────────────
             item {
-                val context = LocalContext.current
-                val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-                    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-                ) { uri: android.net.Uri? ->
-                    cropUri = uri
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(SurfaceDark)
-                        .clickable { launcher.launch("image/*") },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (avatarB64 != null) {
-                        val bitmap = remember(avatarB64) {
-                            try {
-                                val bytes = android.util.Base64.decode(avatarB64, android.util.Base64.DEFAULT)
-                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                            } catch (e: Exception) { null }
-                        }
-                        if (bitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = bitmap,
-                                contentDescription = "Profile Avatar".tr,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        } else {
-                            Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
-                        }
-                    } else {
-                        Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
-                    }
-                }
+                com.noslop.app.ui.tabs.FeedMixSettingsSection(viewModel = viewModel)
                 Spacer(modifier = Modifier.height(16.dp))
-            }
 
-            item {
-                Text("PROFILE".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it },
-                    label = { Text("Display Name".tr) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
+                Button(
+                    onClick = onNavigateToMeshFilters,
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                    border = BorderStroke(1.dp, BorderSubtle),
                     modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = bio,
-                    onValueChange = { bio = it },
-                    label = { Text("Bio".tr) },
-                    maxLines = 3,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    Icon(Icons.Default.FilterAlt, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mesh Filters".tr, fontWeight = FontWeight.Bold)
+                }
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -218,6 +152,24 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 ) {
                     Text("Manage Sources".tr, fontWeight = FontWeight.Bold)
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── NEGATIVE KEYWORDS ──────────────────
+            item {
+                Text("FILTERING".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = negativeKeywords,
+                    onValueChange = { negativeKeywords = it },
+                    label = { Text("Negative Keywords (comma separated)".tr) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -319,24 +271,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             }
             }
 
-            // ────────────────── NEGATIVE KEYWORDS ──────────────────
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("FILTERING".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
 
-                OutlinedTextField(
-                    value = negativeKeywords,
-                    onValueChange = { negativeKeywords = it },
-                    label = { Text("Negative Keywords (comma separated)".tr) },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-            }
 
             // Creator word-cloud suggestion chips (derived from current selected interests)
             // Shown ABOVE the text field so users pick from suggestions first
@@ -588,24 +523,14 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
         // Save button
         Button(
             onClick = {
-                val profileChanged = displayName != currentProfile.displayName || bio != currentProfile.bio || avatarB64 != currentProfile.avatarB64
-                val prefsChanged = localInterests.toList() != interests || localMusicGenres.toList() != musicGenres || localVideoGenres.toList() != videoGenres || negativeKeywords != currentNegativeKeywords || language != currentLanguage || creatorKeywords != currentCreatorKeywords
-
-                if (profileChanged) {
-                    viewModel.updateUserProfile(
-                        UserProfile(displayName = displayName, bio = bio, avatarB64 = avatarB64)
-                    )
-                }
-                if (prefsChanged) {
-                    viewModel.updateContentPreferences(
-                        selectedCategories = localInterests.toList(),
-                        selectedMusicGenres = localMusicGenres.toList(),
-                        selectedVideoGenres = localVideoGenres.toList(),
-                        negativeKeywords = negativeKeywords,
-                        languagePreference = language,
-                        creatorKeywords = creatorKeywords
-                    )
-                }
+                viewModel.updateContentPreferences(
+                    selectedCategories = localInterests.toList(),
+                    selectedMusicGenres = localMusicGenres.toList(),
+                    selectedVideoGenres = localVideoGenres.toList(),
+                    negativeKeywords = negativeKeywords,
+                    languagePreference = language,
+                    creatorKeywords = creatorKeywords
+                )
                 onBack()
             },
             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),

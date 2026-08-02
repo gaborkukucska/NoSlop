@@ -114,13 +114,13 @@ fun OnboardingScreen(
                     modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
                 )
 
-                // 7-dot step indicators
+                // 9-dot step indicators
                 Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(8) { index ->
+                    repeat(9) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -191,11 +191,15 @@ fun OnboardingScreen(
                             else selectedSources.add(src)
                         }
                     )
-                    8 -> Step8HubSetup(
+                    8 -> Step8FeedMix(
+                        viewModel = viewModel,
+                        onNext = { currentStep++ }
+                    )
+                    9 -> Step9HubSetup(
                         viewModel = viewModel,
                         mnemonic = mnemonic,
                         handle = handleText,
-                        onComplete = { goToHub ->
+                        onComplete = { goToHub: Boolean ->
                             viewModel.completeOnboarding(
                                 handleText, 
                                 selectedSources, 
@@ -1092,7 +1096,7 @@ fun Step7Feeds(
 }
 
 @Composable
-fun Step8HubSetup(
+fun Step9HubSetup(
     viewModel: NoSlopViewModel,
     mnemonic: String?,
     handle: String,
@@ -1138,6 +1142,52 @@ fun Step8HubSetup(
         
         TextButton(onClick = { onComplete(false) }) {
             Text("Skip for now", color = TextMuted)
+        }
+    }
+}
+
+@Composable
+fun Step8FeedMix(
+    viewModel: NoSlopViewModel,
+    onNext: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Icon(
+            Icons.Default.Tune,
+            contentDescription = null,
+            tint = AccentGreen,
+            modifier = Modifier.size(64.dp).padding(bottom = 16.dp)
+        )
+        Text(
+            text = "Content Mix".tr,
+            style = MaterialTheme.typography.titleLarge,
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        Text(
+            text = "Tune the proportion of content types you want to see in your feed.".tr,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TextMuted,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+        )
+
+        Box(modifier = Modifier.weight(1f)) {
+            com.noslop.app.ui.tabs.FeedMixSettingsSection(viewModel = viewModel)
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = onNext,
+            modifier = Modifier.fillMaxWidth().height(50.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+        ) {
+            Text("Next".tr, fontWeight = FontWeight.Bold)
         }
     }
 }

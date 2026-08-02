@@ -121,6 +121,15 @@ object YouTubeInternalClient {
                         val viewsText = videoRenderer.getAsJsonObject("viewCountText")
                             ?.get("simpleText")?.asString ?: ""
                             
+                        // Extract published time
+                        val publishedTimeText = videoRenderer.getAsJsonObject("publishedTimeText")
+                            ?.get("simpleText")?.asString
+                            ?: videoRenderer.getAsJsonObject("publishedTimeText")
+                                ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
+                                ?.get("text")?.asString
+                                
+                        val publishedAtTime = parseRelativeTime(publishedTimeText)
+
                         items.add(FeedItem(
                             id = "yt_$videoId",
                             sourceId = "api-yt",
@@ -128,7 +137,7 @@ object YouTubeInternalClient {
                             url = "https://www.youtube.com/watch?v=$videoId",
                             author = author,
                             excerpt = "$lengthText • $viewsText",
-                            publishedAt = System.currentTimeMillis(),
+                            publishedAt = publishedAtTime,
                             thumbnailUrl = bestThumb,
                             mediaUrl = "https://www.youtube.com/watch?v=$videoId",
                             mediaType = "video",
@@ -278,5 +287,32 @@ object YouTubeInternalClient {
             Logger.error(TAG, "resolveStreamUrl failed: ${e.message}")
             return@withContext null
         }
+    }
+    private fun parseRelativeTime(publishedTimeText: String?): Long {
+        if (publishedTimeText == null) return System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        try {
+            val match = Regex("(\\d+)").find(publishedTimeText)
+            if (match != null) {
+                val amount = match.groupValues[1].toLongOrNull() ?: return now
+                val t = publishedTimeText.lowercase()
+                val multiplier = when {
+                    t.contains("sec") || t.contains("seg") -> 1000L
+                    t.contains("min") -> 60_000L
+                    t.contains("hour") || t.contains("hor") || t.contains("heur") || t.contains("stund") -> 3_600_000L
+                    t.contains("day") || t.contains("día") || t.contains("dia") || t.contains("jour") || t.contains("tag") || t.contains("dni") || t.contains("gün") -> 86_400_000L
+                    t.contains("week") || t.contains("seman") || t.contains("semain") || t.contains("woch") || t.contains("tydz") || t.contains("hafta") -> 604_800_000L
+                    t.contains("month") || t.contains("mes") || t.contains("mois") || t.contains("monat") || t.contains("miesi") || t.contains("ay") -> 2_592_000_000L
+                    t.contains("year") || t.contains("año") || t.contains("ano") || t.contains("ans") || t.contains("jahr") || t.contains("rok") || t.contains("lat") || t.contains("yıl") -> 31_536_000_000L
+                    else -> 0L
+                }
+                if (multiplier > 0) {
+                    return now - (amount * multiplier)
+                }
+            }
+        } catch (e: Exception) {
+            // fallback to current time
+        }
+        return now
     }
 }

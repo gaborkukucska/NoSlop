@@ -42,6 +42,9 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE sourceId LIKE 'api_%'")
     suspend fun clearApiItems()
 
+    @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%'")
+    suspend fun deleteYouTubeItems()
+
     @Query("DELETE FROM feed_items WHERE isSaved = 0")
     suspend fun clearUnsavedItems()
 

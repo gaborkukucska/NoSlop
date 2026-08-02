@@ -116,6 +116,8 @@ object PublicApiService {
                 else -> {
                     items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
+                    items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
+                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.searchReddit(query) }
                 }
             }

@@ -51,11 +51,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     } else if (selectedSettingsScreen == 3) {
         ApiKeysScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 5) {
-        ContentPreferencesScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+        ContentPreferencesScreen(
+            viewModel = viewModel,
+            onBack = { selectedSettingsScreen = 0 },
+            onNavigateToMeshFilters = { selectedSettingsScreen = 7 }
+        )
     } else if (selectedSettingsScreen == 6) {
         ReportIssueScreen(onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 7) {
         MeshFiltersScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 8) {
+        ProfileScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -455,34 +461,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
                             Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 8 }.padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Profile & Preferences".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text("Edit Profile".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
-                            
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 7 }.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.FilterAlt, contentDescription = null, tint = AccentGreen)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Mesh Filters".tr, fontWeight = FontWeight.Bold, color = TextLight)
-                                }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
-                            }
-                            
-                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
                             
                             val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
                             Row(
@@ -845,6 +834,21 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         uncheckedTrackColor = SurfaceDark
                                     )
                                 )
+                            }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 5 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.FilterList, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Filtering & Content Mix".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
                             
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))

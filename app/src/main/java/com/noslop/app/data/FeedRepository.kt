@@ -87,6 +87,12 @@ class FeedRepository(
         Logger.info(TAG, "Cleared previous feed items and sources")
     }
 
+    /** Purge YouTube items so they are re-fetched with correct dates */
+    suspend fun deleteYouTubeItems() = withContext(Dispatchers.IO) {
+        feedDao.deleteYouTubeItems()
+        Logger.info(TAG, "Purged stale YouTube items from DB")
+    }
+
     /**
      * Detects when a destructive Room migration has wiped feed sources and user
      * preferences that were stored only in Room (app_settings, feed_sources).

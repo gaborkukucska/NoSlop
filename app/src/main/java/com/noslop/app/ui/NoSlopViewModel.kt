@@ -226,6 +226,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val mediaSettings: StateFlow<MediaSettings> = repository.mediaSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MediaSettings())
 
+    val meshFilterSettingsFlow: StateFlow<com.noslop.app.data.MeshFilterSettings> = repository.meshFilterSettingsFlow
+
+    val feedMixSettingsFlow: StateFlow<com.noslop.app.data.FeedMixSettings> = repository.feedMixSettingsFlow
+
     val meshFilterSettings: StateFlow<MeshFilterSettings> = repository.meshFilterSettingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), MeshFilterSettings())
 
@@ -341,6 +345,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _selectedInterests.value = repository.getUserSelectedCategories()
                 _isAggregatorEnabled.value = repository.isAggregatorEnabled()
                 refreshFeeds()
+            }
+            
+            // One-time migration: purge YouTube items with stale dates
+            val ytDateMigrated = repository.getAppSetting("yt_date_migrated")
+            if (ytDateMigrated == null) {
+                repository.deleteYouTubeItems()
+                repository.putAppSetting("yt_date_migrated", "1")
+                Logger.info("VM", "One-time YouTube date migration: purged stale items")
             }
             
             // Smart Hub Sync Loop
@@ -606,12 +618,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         var unseenMeshes = allMeshes.filter { it.id !in exclusionIds }
 
         if (isSearchActive) {
-            val q = activeSearchQuery.lowercase()
-            unseenFeeds = unseenFeeds.filter {
-                it.title.lowercase().contains(q) || it.excerpt?.lowercase()?.contains(q) == true || it.author?.lowercase()?.contains(q) == true
+            val terms = activeSearchQuery.lowercase().split("\\s+".toRegex()).filter { it.isNotEmpty() }
+            unseenFeeds = unseenFeeds.filter { item ->
+                terms.all { term ->
+                    item.title.lowercase().contains(term) || 
+                    item.excerpt?.lowercase()?.contains(term) == true || 
+                    item.author?.lowercase()?.contains(term) == true
+                }
             }
-            unseenMeshes = unseenMeshes.filter {
-                it.content.lowercase().contains(q) || it.clearnetTitle?.lowercase()?.contains(q) == true || it.authorHandle.lowercase().contains(q)
+            unseenMeshes = unseenMeshes.filter { item ->
+                terms.all { term ->
+                    item.content.lowercase().contains(term) || 
+                    item.clearnetTitle?.lowercase()?.contains(term) == true || 
+                    item.authorHandle.lowercase().contains(term)
+                }
             }
         }
 
@@ -672,7 +692,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        val specificNeeded = if (isInitialLoad) 3 else 10
+        val specificNeeded = if (isSearchActive) 15 else if (isInitialLoad) 3 else 10
 
         if (isSpecificFilter || isSearchActive) {
             val specificFeeds = unseenFeeds.filter {
@@ -750,7 +770,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         // --- SMART INTERLEAVING ALGORITHM (Live Feed & Random) ---
-        val needed = if (isInitialLoad) 3 else 10
+        val needed = if (isInitialLoad) 5 else 10
+        val mixSettings = feedMixSettingsFlow.value
 
         val userInterests = _selectedInterests.value
         val prioritySourceIds = sources.value.filter { 
@@ -772,36 +793,76 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
 
-        val rawVideos = recentFeeds.filter { it.mediaType?.contains("video") == true }
-        val rawAudios = recentFeeds.filter { it.mediaType?.contains("audio") == true }
-        val rawImages = recentFeeds.filter { it.mediaType?.contains("image") == true }
-        val rawArticles = recentFeeds.filter { it.mediaType.isNullOrEmpty() }
+        // Filter based on toggles
+        val rawVideos = if (mixSettings.videoEnabled) recentFeeds.filter { it.mediaType?.contains("video") == true } else emptyList()
+        val rawAudios = if (mixSettings.audioEnabled) recentFeeds.filter { it.mediaType?.contains("audio") == true } else emptyList()
+        val rawImages = if (mixSettings.imageEnabled) recentFeeds.filter { it.mediaType?.contains("image") == true } else emptyList()
+        val rawArticles = if (mixSettings.articleEnabled) recentFeeds.filter { it.mediaType.isNullOrEmpty() } else emptyList()
+        val rawMeshes = if (mixSettings.meshEnabled) recentMeshes else emptyList()
 
-        // Determine proportional mix based on needed size
-        val targetM = needed / 2
-        val remaining = needed - targetM
+        // Calculate quotas based on precise percentages
+        val totalActivePercent = (if (mixSettings.videoEnabled) mixSettings.videoPercent else 0) +
+                                 (if (mixSettings.audioEnabled) mixSettings.audioPercent else 0) +
+                                 (if (mixSettings.imageEnabled) mixSettings.imagePercent else 0) +
+                                 (if (mixSettings.articleEnabled) mixSettings.articlePercent else 0) +
+                                 (if (mixSettings.meshEnabled) mixSettings.meshPercent else 0)
+                                 
+        val normalize = if (totalActivePercent > 0) 100.0f / totalActivePercent else 0.0f
         
-        val targetV = Math.max(1, remaining * 2 / 3) // videos get most of the clearnet quota
-        val targetOther = Math.max(0, (remaining - targetV) / 3)
+        val targetV = Math.max(if (mixSettings.videoEnabled) 1 else 0, Math.round(needed * ((mixSettings.videoPercent * normalize) / 100f)))
+        val targetA = Math.max(if (mixSettings.audioEnabled) 1 else 0, Math.round(needed * ((mixSettings.audioPercent * normalize) / 100f)))
+        val targetI = Math.max(if (mixSettings.imageEnabled) 1 else 0, Math.round(needed * ((mixSettings.imagePercent * normalize) / 100f)))
+        val targetT = Math.max(if (mixSettings.articleEnabled) 1 else 0, Math.round(needed * ((mixSettings.articlePercent * normalize) / 100f)))
+        val targetM = Math.max(if (mixSettings.meshEnabled) 1 else 0, Math.round(needed * ((mixSettings.meshPercent * normalize) / 100f)))
 
-        val v = rawVideos.takeDiverse(targetV, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val a = rawAudios.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val i = rawImages.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val t = rawArticles.takeDiverse(targetOther, { it.sourceId }, isCreatorMatch).map { UnifiedItem.Feed(it) }
-        val m = recentMeshes.take(targetM).map { UnifiedItem.Mesh(it) }
+        // Group by author to prevent clumping. If author is null, fallback to sourceId
+        val diverseKey = { it: FeedItem -> it.author ?: it.sourceId }
+
+        val v = rawVideos.takeDiverse(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val a = rawAudios.takeDiverse(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val i = rawImages.takeDiverse(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val t = rawArticles.takeDiverse(targetT, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val m = rawMeshes.take(targetM).map { UnifiedItem.Mesh(it) }.toMutableList()
 
         val batch = mutableListOf<UnifiedItem>()
-        batch.addAll(v)
-        batch.addAll(a)
-        batch.addAll(i)
-        batch.addAll(t)
-        batch.addAll(m)
+        val buckets = listOf(v, m, a, i, t) // Order of round-robin attempts
+        
+        // True Round-Robin Interleaving
+        var addedInPass = true
+        while (batch.size < needed && addedInPass) {
+            addedInPass = false
+            for (bucket in buckets) {
+                if (bucket.isNotEmpty() && batch.size < needed) {
+                    batch.add(bucket.removeAt(0))
+                    addedInPass = true
+                }
+            }
+        }
 
         if (batch.size < needed) {
             val usedIds = batch.map { it.id }.toSet()
-            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + rawAudios.map { UnifiedItem.Feed(it) } + rawImages.map { UnifiedItem.Feed(it) } + recentMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
+            val leftovers = (rawVideos.map { UnifiedItem.Feed(it) } + rawAudios.map { UnifiedItem.Feed(it) } + rawImages.map { UnifiedItem.Feed(it) } + rawMeshes.map { UnifiedItem.Mesh(it) } + rawArticles.map { UnifiedItem.Feed(it) })
                 .filter { it.id !in usedIds }
-            batch.addAll(leftovers.take(needed - batch.size))
+            
+            // Round-robin leftovers
+            val leftoverBuckets = listOf(
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true }.toMutableList(),
+                leftovers.filterIsInstance<UnifiedItem.Mesh>().toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("audio") == true }.toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType?.contains("image") == true }.toMutableList(),
+                leftovers.filter { it is UnifiedItem.Feed && it.item.mediaType.isNullOrEmpty() }.toMutableList()
+            )
+            
+            var addedLeftover = true
+            while (batch.size < needed && addedLeftover) {
+                addedLeftover = false
+                for (bucket in leftoverBuckets) {
+                    if (bucket.isNotEmpty() && batch.size < needed) {
+                        batch.add(bucket.removeAt(0))
+                        addedLeftover = true
+                    }
+                }
+            }
         }
 
         // Separate creators from others to force them to the absolute front
@@ -809,8 +870,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             it is UnifiedItem.Feed && isCreatorMatch(it.item) 
         }.sortedByDescending { it.timestamp }.toMutableList()
         
-        val otherBatch = batch.filter { it !in creatorBatch }
-            .sortedByDescending { it.timestamp }.toMutableList()
+        val otherBatch = batch.filter { it !in creatorBatch }.toMutableList()
 
         val finalBatch = mutableListOf<UnifiedItem>()
         finalBatch.addAll(creatorBatch)
@@ -993,9 +1053,8 @@ fun toggleAggregator() {
             if (languagePreference != null) _languagePreference.value = languagePreference
             if (creatorKeywords != null) _creatorKeywords.value = creatorKeywords
 
-            // DO NOT wipe the unified feed or session history!
-            // Just refresh feeds to pull down new content matching the new preferences in the background.
-            refreshFeeds()
+            // Wipe the unified feed and session history to apply new preferences immediately
+            forceResetFeed()
         }
     }
 
@@ -1103,6 +1162,9 @@ fun toggleAggregator() {
                 // Load the best items instantly
                 loadMoreFeedItems()
                 
+                // Purge stale YouTube items so they are re-fetched with correct dates
+                repository.deleteYouTubeItems()
+
                 // Kick off background fetch to replenish the database
                 repository.refreshFeeds()
                 
@@ -1332,6 +1394,7 @@ fun toggleAggregator() {
     fun updateMediaSettings(settings: MediaSettings) { viewModelScope.launch { repository.updateMediaSettings(settings) } }
     fun updateNotificationSettings(settings: com.noslop.app.data.NotificationSettings) { viewModelScope.launch { repository.updateNotificationSettings(settings) } }
     fun updateMeshFilterSettings(settings: MeshFilterSettings) { viewModelScope.launch { repository.updateMeshFilterSettings(settings) } }
+    fun updateFeedMixSettings(settings: com.noslop.app.data.FeedMixSettings) { viewModelScope.launch { repository.updateFeedMixSettings(settings) } }
 
     fun setForegroundServiceEnabled(enabled: Boolean) {
         viewModelScope.launch {
