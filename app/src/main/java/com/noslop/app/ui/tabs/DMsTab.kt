@@ -439,7 +439,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         }
                     }
                     if (!isTemporaryContactsCollapsed) {
-                        items(temporaryContacts) { peer ->
+                        items(temporaryContacts, key = { it.publicKeyB64 }) { peer ->
                             PeerItem(
                                 peer = peer, 
                                 lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
@@ -459,7 +459,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
-                    items(pendingRequests) { peer ->
+                    items(pendingRequests, key = { it.publicKeyB64 }) { peer ->
                         PeerItem(peer, conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, viewModel)
                     }
                 }
@@ -479,7 +479,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                         ) {
-                            items(discoverablePeers) { peer ->
+                            items(discoverablePeers, key = { it.publicKeyB64 }) { peer ->
                                 Card(
                                     modifier = Modifier.width(140.dp).clickable { selectedDiscoverableNode = peer },
                                     colors = CardDefaults.cardColors(containerColor = SurfaceDark),
@@ -574,7 +574,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
-                    items(contacts) { peer ->
+                    items(contacts, key = { it.publicKeyB64 }) { peer ->
                         PeerItem(
                             peer = peer, 
                             lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
@@ -605,7 +605,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         if (dmStep == 0) {
             TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID", onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 2) {
-            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer", onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer\n(Optional: scan Gabby's QR from gallery to connect with the dev)", onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
         }
 
         // Render dialogs

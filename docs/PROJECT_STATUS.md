@@ -1,5 +1,22 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-02) - Part 2
+
+### 1. Connection & Mesh Stability
+*   **Persistent Packet Spooler**: Upgraded the background retry spooler in `MeshSocialRepository.kt` to persist for up to 72 hours (from 15 minutes) for all packet types (`CONNECTION_REQUEST`, `USER_HANDSHAKE`, etc.). This ensures handshakes and critical DMs eventually reach peers even if they are offline for extended periods.
+
+### 2. UI/UX Polish
+*   **DMs List State Mixing Fixed**: Added explicit `key` parameters (`publicKeyB64`) to all `LazyColumn` and `LazyRow` items in `DMsTab.kt`. This fixes a critical Compose bug where internal state (like the User Info Modal) would stay attached to an index and swap to the wrong user when the contact list reordered due to online status changes.
+*   **Avatar Rotation**: Added a 90-degree rotation button to `AvatarCropper.kt`, allowing users to fix image orientation before finalizing their profile picture.
+
+### 3. Onboarding & Tutorials
+*   **Onboarding Flow Streamlined**: Removed the "Setup a HUB" slide from the onboarding flow as the integration is still maturing, and fixed the "Content Mix" slide layout/navigation buttons.
+*   **Tutorial Overlays**: Rebuilt the Feed tutorial slides in `UnifiedFeedTab.kt` to use explicit scrim overlays with transparent punch-outs (via `Canvas` and `BlendMode.Clear`) that physically highlight the relevant UI elements (Navigation, Top Controls, Interaction Icons).
+*   **DM Tutorial Note**: Updated the DM tutorial text to explicitly clarify that scanning the developer's QR code from the gallery is completely optional.
+
+### 4. Media Privacy
+*   **Public Auto-Download Default**: Changed the default value of `autoDownloadPublic` in `MediaSettings.kt` to `false`. Users must now explicitly opt-in to automatically download media from non-contact mesh broadcasts.
+
 ## Completed Changes (2026-08-02)
 
 ### 1. Tor Background Stability

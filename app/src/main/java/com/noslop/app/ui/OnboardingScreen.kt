@@ -120,7 +120,7 @@ fun OnboardingScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    repeat(9) { index ->
+                    repeat(8) { index ->
                         Box(
                             modifier = Modifier
                                 .padding(horizontal = 4.dp)
@@ -192,32 +192,7 @@ fun OnboardingScreen(
                         }
                     )
                     8 -> Step8FeedMix(
-                        viewModel = viewModel,
-                        onNext = { currentStep++ }
-                    )
-                    9 -> Step9HubSetup(
-                        viewModel = viewModel,
-                        mnemonic = mnemonic,
-                        handle = handleText,
-                        onComplete = { goToHub: Boolean ->
-                            viewModel.completeOnboarding(
-                                handleText, 
-                                selectedSources, 
-                                selectedInterests, 
-                                selectedMusicGenres,
-                                selectedVideoGenres,
-                                mnemonic!!,
-                                creatorKeywordsText
-                            )
-                            if (goToHub) {
-                                context.startActivity(android.content.Intent(context, com.noslop.app.MainActivity::class.java).apply {
-                                    putExtra("target_route", "hubs-deploy")
-                                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                })
-                            } else {
-                                onComplete()
-                            }
-                        }
+                        viewModel = viewModel
                     )
                 }
             }
@@ -228,7 +203,7 @@ fun OnboardingScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (currentStep > 1 && currentStep < 8) {
+                if (currentStep > 1 && currentStep <= 8) {
                     Button(
                         onClick = { currentStep-- },
                         colors = ButtonDefaults.buttonColors(
@@ -251,24 +226,36 @@ fun OnboardingScreen(
 
                 val canProceed = when (currentStep) {
                     1 -> true
-                    2 -> true // Language selection always has a valid default
-                    3 -> handleText.isNotBlank() && mnemonic != null // Identity
-                    4 -> selectedInterests.isNotEmpty() // Interests
-                    5 -> true // Creator keywords are optional
-                    6 -> true // Optional genre selection
-                    7 -> selectedSources.isNotEmpty() // Feeds
-                    8 -> true // Hub Setup is optional
+                    2 -> true
+                    3 -> handleText.isNotBlank() && mnemonic != null
+                    4 -> selectedInterests.isNotEmpty()
+                    5 -> true
+                    6 -> true
+                    7 -> selectedSources.isNotEmpty()
+                    8 -> true
                     else -> false
                 }
 
-                if (currentStep < 8) {
+                if (currentStep <= 8) {
                     Button(
                         onClick = {
                             if (currentStep == 5 && creatorKeywordsText.isNotBlank()) {
-                                // Trigger background fetch for creators while user finishes onboarding
                                 viewModel.triggerBackgroundCreatorPreFetch(creatorKeywordsText)
                             }
-                            currentStep++
+                            if (currentStep == 8) {
+                                viewModel.completeOnboarding(
+                                    handleText, 
+                                    selectedSources, 
+                                    selectedInterests, 
+                                    selectedMusicGenres,
+                                    selectedVideoGenres,
+                                    mnemonic!!,
+                                    creatorKeywordsText
+                                )
+                                onComplete()
+                            } else {
+                                currentStep++
+                            }
                         },
                         enabled = canProceed,
                         colors = ButtonDefaults.buttonColors(
@@ -282,14 +269,13 @@ fun OnboardingScreen(
                             .height(50.dp)
                             .testTag("onboarding_next_button")
                     ) {
-                        Text(if (currentStep == 7) "Continue to Hub Setup".tr else "Continue".tr,
+                        Text(if (currentStep == 8) "Finish".tr else "Continue".tr,
                             fontWeight = FontWeight.Bold,
                             color = if (canProceed) PrimaryBlack else TextMuted
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Icon(Icons.Default.ArrowForward, contentDescription = "Next".tr)
+                        Icon(if (currentStep == 8) Icons.Default.Check else Icons.Default.ArrowForward, contentDescription = "Next".tr)
                     }
-                    // Step 8 doesn't use the standard navigation buttons since it handles completion internally
                 }
             }
         }
@@ -1099,72 +1085,16 @@ fun Step7Feeds(
     }
 }
 
-@Composable
-fun Step9HubSetup(
-    viewModel: NoSlopViewModel,
-    mnemonic: String?,
-    handle: String,
-    onComplete: (Boolean) -> Unit
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "Connect a Home Hub".tr,
-            style = MaterialTheme.typography.titleLarge,
-            color = TextLight,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
 
-        Text(
-            text = "Keep your Node online 24/7. Deploy HAI-Net to a device on your local network, or connect to an existing one.".tr,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TextMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(bottom = 24.dp, start = 16.dp, end = 16.dp)
-        )
-
-        Icon(
-            imageVector = Icons.Default.Router,
-            contentDescription = null,
-            tint = AccentGreen,
-            modifier = Modifier.size(80.dp).padding(bottom = 24.dp)
-        )
-
-        OutlinedButton(
-            onClick = { onComplete(true) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp).height(50.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryBlack, containerColor = AccentGreen),
-            border = BorderStroke(1.dp, AccentGreen)
-        ) {
-            Text("Set up Hub Now", fontWeight = FontWeight.Bold)
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        TextButton(onClick = { onComplete(false) }) {
-            Text("Skip for now", color = TextMuted)
-        }
-    }
-}
 
 @Composable
 fun Step8FeedMix(
-    viewModel: NoSlopViewModel,
-    onNext: () -> Unit
+    viewModel: NoSlopViewModel
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            Icons.Default.Tune,
-            contentDescription = null,
-            tint = AccentGreen,
-            modifier = Modifier.size(64.dp).padding(bottom = 16.dp)
-        )
         Text(
             text = "Content Mix".tr,
             style = MaterialTheme.typography.titleLarge,
@@ -1182,16 +1112,6 @@ fun Step8FeedMix(
 
         Box(modifier = Modifier.weight(1f)) {
             com.noslop.app.ui.tabs.FeedMixSettingsSection(viewModel = viewModel)
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = onNext,
-            modifier = Modifier.fillMaxWidth().height(50.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-        ) {
-            Text("Next".tr, fontWeight = FontWeight.Bold)
         }
     }
 }

@@ -1,5 +1,10 @@
 // app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt
 package com.noslop.app.ui
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.foundation.Canvas
 
 import com.noslop.app.util.tr
 
@@ -1489,6 +1494,9 @@ private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Co
 
 @Composable
 fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Float = 0f, rightSlideOffset: Float = 0f) {
+    var authorRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    var interactRect by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1499,7 +1507,11 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(start = 12.dp, bottom = 24.dp)
-                .graphicsLayer { translationY = bottomSlideOffset },
+                .graphicsLayer { translationY = bottomSlideOffset }
+                .onGloballyPositioned { coords ->
+                    val rootOffset = coords.boundsInRoot()
+                    authorRect = rootOffset
+                },
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
@@ -1528,11 +1540,40 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                 .align(Alignment.BottomEnd)
                 .padding(bottom = 80.dp, end = 8.dp)
                 .graphicsLayer { translationX = rightSlideOffset }
+                .onGloballyPositioned { coords ->
+                    val rootOffset = coords.boundsInRoot()
+                    interactRect = rootOffset
+                }
         )
+
+        // Scrim overlay to punch holes
+        if (step in 1..4) {
+            Canvas(modifier = Modifier.fillMaxSize().zIndex(5f).graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
+                drawRect(Color.Black.copy(alpha = 0.75f))
+                if (step == 1) {
+                    // Navigation Menu - approximate bottom 80dp
+                    drawRect(Color.Black, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - 80.dp.toPx()), size = androidx.compose.ui.geometry.Size(size.width, 80.dp.toPx()), blendMode = BlendMode.Clear)
+                } else if (step == 2) {
+                    // Interaction Icons
+                    if (interactRect != androidx.compose.ui.geometry.Rect.Zero) {
+                        drawRoundRect(
+                            Color.Black,
+                            topLeft = androidx.compose.ui.geometry.Offset(interactRect.left, interactRect.top),
+                            size = androidx.compose.ui.geometry.Size(interactRect.width, interactRect.height),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(16.dp.toPx()),
+                            blendMode = BlendMode.Clear
+                        )
+                    }
+                } else if (step == 3) {
+                    // Top Controls - approximate top 100dp
+                    drawRect(Color.Black, topLeft = androidx.compose.ui.geometry.Offset(0f, 0f), size = androidx.compose.ui.geometry.Size(size.width, 100.dp.toPx()), blendMode = BlendMode.Clear)
+                }
+            }
+        }
 
         // Center Content
         Box(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().zIndex(10f),
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {

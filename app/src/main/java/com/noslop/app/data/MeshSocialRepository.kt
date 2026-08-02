@@ -75,32 +75,32 @@ class MeshSocialRepository(
                 if (onionAddress.isNotBlank()) {
                     val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                     if (!success && isDirected) {
-                        Logger.warn(TAG, "Direct send to $onionAddress failed. Falling back to gossip relay for DM ${packet.id}.")
+                        Logger.warn(TAG, "Direct send to $onionAddress failed. Falling back to gossip relay for ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
                             // Mark offline so presence UI reflects reality
                             peerDao.insertPeer(peer.copy(isOnline = false))
                             
-                            // CRITICAL: Gossip-broadcast the actual MESSAGE packet so it
+                            // CRITICAL: Gossip-broadcast the actual packet so it
                             // reaches the recipient via any reachable intermediate peer or Hub.
                             // Give it full hops so it can traverse the mesh.
-                            val gossipDm = packet.copy(
+                            val gossipPacket = packet.copy(
                                 id = UUID.randomUUID().toString(),
                                 hops = 6
                             )
-                            com.noslop.app.mesh.GossipService.broadcast(gossipDm)
-                            Logger.info(TAG, "Gossip-relayed DM ${packet.id} as fallback via mesh broadcast.")
+                            com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
+                            Logger.info(TAG, "Gossip-relayed ${packet.type} ${packet.id} as fallback via mesh broadcast.")
                             
-                            // Spool background retries for 15 minutes!
+                            // Spool background retries for 72 hours! (4320 minutes)
                             repositoryScope.launch {
-                                Logger.warn(TAG, "Direct send failed. Spooling background retries for 15m for ${packet.type}.")
-                                for (i in 1..15) {
+                                Logger.warn(TAG, "Direct send failed. Spooling background retries for 72h for ${packet.type}.")
+                                for (i in 1..4320) {
                                     kotlinx.coroutines.delay(60_000) // Wait 1 minute
-                                    Logger.info(TAG, "Background retry $i/15 for ${packet.type} to $onionAddress")
+                                    Logger.info(TAG, "Background retry $i/4320 for ${packet.type} to $onionAddress")
                                     // Give it a fresh ID so it passes deduplication on the target
                                     val retryPacket = packet.copy(id = java.util.UUID.randomUUID().toString())
                                     if (meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, retryPacket)) {
-                                        Logger.info(TAG, "Background retry $i/15 succeeded for ${packet.type} to $onionAddress!")
+                                        Logger.info(TAG, "Background retry $i/4320 succeeded for ${packet.type} to $onionAddress!")
                                         // Mark them back online
                                         val updatedPeer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                                         if (updatedPeer != null) {
