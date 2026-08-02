@@ -57,9 +57,10 @@ import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloat
 
 @Composable
-fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null) {
+fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null, fallbackUrl: String? = null) {
     var showZoom by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    var isError by remember { mutableStateOf(false) }
     val thumbBitmap = remember(thumbnailB64) {
         thumbnailB64?.let {
             try {
@@ -70,15 +71,19 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
-        val isProxy = url.toString().contains("127.0.0.1") || url.toString().contains("localhost")
+        val activeUrl = if (isError && fallbackUrl != null) fallbackUrl else url
+        val isProxy = activeUrl.toString().contains("127.0.0.1") || activeUrl.toString().contains("localhost")
         
         // If url is a File object, pass it directly. If proxy, pass null to force the placeholder.
-        val actualModel = if (isProxy) null else if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
+        val actualModel = if (isProxy) null else if (activeUrl is String && activeUrl.startsWith("file://")) java.io.File(activeUrl.removePrefix("file://")) else activeUrl
         
         val request = coil.request.ImageRequest.Builder(context)
             .data(actualModel)
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
+            .listener(
+                onError = { _, _ -> if (!isError) isError = true }
+            )
             .build()
             
         // Background blurred layer

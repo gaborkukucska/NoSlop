@@ -1,5 +1,16 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-02)
+
+### 1. Tor Background Stability
+*   **WakeLock Integration**: Added a `PowerManager.WakeLock` (PARTIAL_WAKE_LOCK) to `NoSlopForegroundService.kt`. This ensures the CPU stays awake while the Tor daemon and Mesh listener run in the background, preventing Android from suspending Tor's socket activity and dropping mesh connectivity.
+
+### 2. UI/UX Polish
+*   **Image Fallbacks**: Fixed a bug where clearnet images would show a black screen if Coil failed to load the primary `mediaUrl`. Added a `fallbackUrl` capability to `BlurredImageBackground` that routes to `thumbnailUrl` if the primary network request fails or times out.
+*   **Search Input Debouncing**: Re-wired the creator channel search in `OnboardingScreen` and `ContentPreferencesScreen`. Increased the text debounce from 300ms to 500ms and correctly implemented `CancellationException` handling so background Coroutine tasks don't crash or bounce UI state when typing quickly.
+*   **Translation Sync**: Conducted a deep audit of all new UI flows (`ProfileScreen`, `FeedMixSettingsSection`, `OnboardingScreen`) and successfully ported missing strings into the `content_en.json` and `content_hu.json` localization files.
+
+
 ## Completed Changes (2026-08-01)
 
 ### 1. Tor Stability & Daemon Recovery

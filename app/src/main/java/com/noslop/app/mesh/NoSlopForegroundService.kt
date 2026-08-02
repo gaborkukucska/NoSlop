@@ -17,7 +17,10 @@ import com.noslop.app.NoSlopApp
 import com.noslop.app.debug.Logger
 import com.noslop.app.tor.TorService
 
+import android.os.PowerManager
+
 class NoSlopForegroundService : Service() {
+    private var wakeLock: PowerManager.WakeLock? = null
 
     companion object {
         private const val TAG = "FOREGROUND_SERVICE"
@@ -47,6 +50,14 @@ class NoSlopForegroundService : Service() {
         super.onCreate()
         Logger.info(TAG, "NoSlopForegroundService created")
         createNotificationChannel()
+        
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "NoSlop::MeshSyncWakeLock")
+            wakeLock?.acquire()
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to acquire WakeLock: ${e.message}")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -82,9 +93,12 @@ class NoSlopForegroundService : Service() {
 
     override fun onDestroy() {
         try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
             stopForeground(Service.STOP_FOREGROUND_REMOVE)
         } catch (e: Exception) {
-            Logger.error(TAG, "Failed to stop foreground: ${e.message}")
+            Logger.error(TAG, "Failed to release WakeLock or stop foreground: ${e.message}")
         }
         super.onDestroy()
         Logger.info(TAG, "NoSlopForegroundService destroyed")

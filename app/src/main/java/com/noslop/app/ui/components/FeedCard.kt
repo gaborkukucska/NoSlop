@@ -173,7 +173,7 @@ fun FullScreenFeedCard(
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 isVisualCategory && hasVisualMedia -> {
-                    BlurredImageBackground(url = resolvedUrl)
+                    BlurredImageBackground(url = resolvedUrl, fallbackUrl = item.thumbnailUrl)
                 }
                 item.mediaType == "image" || 
                 resolvedUrl.contains(".jpg") || 
@@ -181,7 +181,7 @@ fun FullScreenFeedCard(
                 resolvedUrl.contains(".png") || 
                 resolvedUrl.contains(".webp") ||
                 resolvedUrl.contains(".gif") -> {
-                    BlurredImageBackground(url = resolvedUrl)
+                    BlurredImageBackground(url = resolvedUrl, fallbackUrl = item.thumbnailUrl)
                 }
                 else -> {
                     val sourceLabel = getSourceLabel(item)
@@ -495,7 +495,7 @@ fun FullScreenMeshCardV2(
 
                     if (canShow) {
                         val imageUrl = if (post.mediaUrl == null && post.clearnetThumbnailUrl != null) post.clearnetThumbnailUrl else resolvedUrl
-                        BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64)
+                        BlurredImageBackground(url = imageUrl ?: "", thumbnailB64 = post.thumbnailB64, fallbackUrl = post.clearnetThumbnailUrl)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0

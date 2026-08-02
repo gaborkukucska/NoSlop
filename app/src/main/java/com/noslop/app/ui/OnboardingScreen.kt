@@ -669,7 +669,7 @@ fun Step5Creators(
             return@LaunchedEffect
         }
         isSearchingChannels = true
-        kotlinx.coroutines.delay(300) // Debounce typing
+        kotlinx.coroutines.delay(500) // Increase debounce to 500ms
         try {
             val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(3) }
             if (ytChannels.isNotEmpty()) {
@@ -677,6 +677,8 @@ fun Step5Creators(
             } else {
                 throw Exception("YouTube returned empty")
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             com.noslop.app.debug.Logger.error("ONBOARDING", "Channel search failed: ${e.message}, trying fallback")
             try {
@@ -687,13 +689,15 @@ fun Step5Creators(
                         .take(3)
                 }
                 searchedChannels = fallback
+            } catch (e2: kotlinx.coroutines.CancellationException) {
+                throw e2
             } catch (e2: Exception) {
                 com.noslop.app.debug.Logger.error("ONBOARDING", "Fallback search failed: ${e2.message}")
                 searchedChannels = emptyList()
             }
-        } finally {
-            isSearchingChannels = false
         }
+        // Only clear the spinner if we weren't cancelled
+        isSearchingChannels = false
     }
     
     val combinedSuggestions = remember(suggestions, searchedChannels) {
