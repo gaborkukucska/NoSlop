@@ -94,8 +94,10 @@ class MeshSocialRepository(
                             // Spool background retries for 72 hours! (4320 minutes)
                             repositoryScope.launch {
                                 Logger.warn(TAG, "Direct send failed. Spooling background retries for 72h for ${packet.type}.")
+                                kotlinx.coroutines.delay((5000..30000).random().toLong()) // Initial scatter to prevent dogpiling Tor
                                 for (i in 1..4320) {
-                                    kotlinx.coroutines.delay(60_000) // Wait 1 minute
+                                    val jitter = (0..15000).random().toLong()
+                                    kotlinx.coroutines.delay(60_000 + jitter) // Wait 1 min + random jitter
                                     Logger.info(TAG, "Background retry $i/4320 for ${packet.type} to $onionAddress")
                                     // Give it a fresh ID so it passes deduplication on the target
                                     val retryPacket = packet.copy(id = java.util.UUID.randomUUID().toString())
@@ -623,6 +625,37 @@ class MeshSocialRepository(
     suspend fun deletePeer(publicKeyB64: String) = withContext(Dispatchers.IO) {
         val peer = peerDao.getPeerByPublicKey(publicKeyB64)
         if (peer != null) {
+            val myKeys = getLocalIdentity()
+            if (myKeys != null) {
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val exitPayload = com.noslop.app.mesh.UserExitPayload(
+                    userId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = publicKeyB64,
+                    type = "USER_EXIT",
+                    payload = com.google.gson.Gson().toJsonTree(exitPayload),
+                    signature = signature
+                )
+                
+                // Send USER_EXIT directly to inform them we're disconnecting
+                repositoryScope.launch {
+                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                }
+            }
+
+            com.noslop.app.mesh.GossipService.recordDeletedPeer(publicKeyB64)
+            com.noslop.app.mesh.GossipService.removePeerFromRelays(publicKeyB64)
+
             peerDao.deletePeer(peer)
             // Also clean up messages
             messageDao.deleteMessagesWithPeer(publicKeyB64)
@@ -1236,5 +1269,81 @@ class MeshSocialRepository(
         commentDao.markCommentDeleted(commentId)
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
+    }
+
+    suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext false
+        val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext false
+        
+        for (messageId in messageIds) {
+            val msg = messageDao.getMessageById(messageId)
+            if (msg != null && msg.senderPub == myKeys.publicKeyB64) {
+                // If it's our own message, broadcast DELETE_MESSAGE
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "$messageId|${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                    messageId = messageId,
+                    authorId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = peerPubB64,
+                    type = "DELETE_MESSAGE",
+                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    signature = signature
+                )
+                
+                messageDao.deleteMessageByIdAndSender(messageId, myKeys.publicKeyB64)
+                dispatchPacket(peer.onionAddress, packet)
+                kotlinx.coroutines.delay(300L) // Pace to prevent Tor TCP saturation
+            } else if (msg != null) {
+                // If it's their message, we can only delete it locally
+                messageDao.deleteMessageByIdAndSender(messageId, peerPubB64)
+            }
+        }
+        meshTransport.repository.triggerDmSync()
+        true
+    }
+
+    suspend fun clearChat(peerPubB64: String) = withContext(Dispatchers.IO) {
+        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext
+        val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext
+        
+        val messages = messageDao.getMessagesWithPeerList(peerPubB64)
+        for (msg in messages) {
+            if (msg.senderPub == myKeys.publicKeyB64) {
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "${msg.id}|${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                    messageId = msg.id,
+                    authorId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = peerPubB64,
+                    type = "DELETE_MESSAGE",
+                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    signature = signature
+                )
+                dispatchPacket(peer.onionAddress, packet)
+                kotlinx.coroutines.delay(300L) // Pace to prevent Tor TCP saturation
+            }
+        }
+        
+        // Delete all locally regardless of sender
+        messageDao.deleteMessagesWithPeer(peerPubB64)
+        meshTransport.repository.triggerDmSync()
     }
 }

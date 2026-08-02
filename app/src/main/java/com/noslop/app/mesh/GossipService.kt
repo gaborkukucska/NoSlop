@@ -28,6 +28,35 @@ object GossipService {
 
     private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
 
+    private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
+
+    fun recordDeletedPeer(publicKeyB64: String) {
+        recentlyDeletedPeers[publicKeyB64] = System.currentTimeMillis()
+    }
+
+    fun isPeerRecentlyDeleted(publicKeyB64: String): Boolean {
+        val deletedAt = recentlyDeletedPeers[publicKeyB64] ?: return false
+        val gracePeriod = 7L * 24 * 60 * 60 * 1000L // 7 days
+        if (System.currentTimeMillis() - deletedAt < gracePeriod) {
+            return true
+        }
+        recentlyDeletedPeers.remove(publicKeyB64)
+        return false
+    }
+
+    fun removePeerFromRelays(publicKeyB64: String) {
+        val iterator = relayStates.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.value.listeners.remove(publicKeyB64)) {
+                Logger.info(TAG, "Removed deleted peer $publicKeyB64 from relay listeners for media ${entry.key}")
+                if (entry.value.listeners.isEmpty()) {
+                    iterator.remove()
+                }
+            }
+        }
+    }
+
     fun flushFirewallBuffer(senderId: String) {
         val buffer = firewallBuffer.remove(senderId)
         if (buffer != null && buffer.isNotEmpty()) {
@@ -174,7 +203,7 @@ object GossipService {
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "IDENTITY_UPDATE"
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "IDENTITY_UPDATE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }

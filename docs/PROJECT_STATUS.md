@@ -2,6 +2,13 @@
 
 ## Completed Changes (2026-08-02) - Part 2
 
+### 6. Contact Management & Peer Deletion
+*   **Zombie Connection Guard**: Fixed a bug where deleting a peer could result in them being silently resurrected as a pending request. `GossipService` now maintains a `recentlyDeletedPeers` cache (7-day TTL), and `HandshakePacketHandler` strictly rejects any incoming `CONNECTION_REQUEST` from these keys, closing the 1-hour vulnerability window.
+*   **Peer Disconnect Protocol**: `MeshSocialRepository.deletePeer()` now actively transmits a direct `USER_EXIT` packet to the deleted peer's onion address before local cleanup, properly notifying them of the disconnect.
+*   **Media Relay Cleanup**: Deleting a peer now synchronously invokes `GossipService.removePeerFromRelays()` to instantly reap any dangling media relay listener references.
+
+
+
 ### 5. Handshake & Messaging Race Conditions
 *   **Accidental Peer Deletion Fixed**: Fixed a critical UI bug where tapping outside the "Accept Handshake" dialog triggered the dismiss event which was incorrectly mapped to `rejectHandshake()`. This permanently deleted the pending peer, breaking all subsequent handshake confirmations. It now properly maps to `dismissHandshakeDialog()` which hides the UI without destroying the database entry.
 *   **Message Trust Firewall Buffer**: Fixed a race condition where a `MESSAGE` packet and a `USER_HANDSHAKE` packet sent simultaneously over a newly opened Tor circuit could arrive out of order. `GossipService` now implements a 15-second holding buffer for `MESSAGE` packets from untrusted peers. When the `USER_HANDSHAKE` arrives milliseconds later, it flushes the buffer and processes the E2EE message instead of permanently dropping it.

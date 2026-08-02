@@ -56,6 +56,12 @@ class HandshakePacketHandler(
             return false
         }
 
+        // Drop requests from peers we recently deleted
+        if (existingPeer == null && GossipService.isPeerRecentlyDeleted(connPay.fromUserId)) {
+            Logger.warn(TAG, "Ignored CONNECTION_REQUEST from recently deleted peer: ${connPay.fromUserId}")
+            return false
+        }
+
         val isNewRequest = existingPeer == null
 
         val pubBytes = Base64.decode(connPay.fromUserId, Base64.DEFAULT)
