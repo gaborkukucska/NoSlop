@@ -26,6 +26,20 @@ object GossipService {
         var lastActivity: Long = System.currentTimeMillis()
     )
 
+    private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
+
+    fun flushFirewallBuffer(senderId: String) {
+        val buffer = firewallBuffer.remove(senderId)
+        if (buffer != null && buffer.isNotEmpty()) {
+            Logger.info(TAG, "Flushing ${buffer.size} buffered packets for newly trusted peer $senderId")
+            scope.launch {
+                for (packet in buffer) {
+                    processIncoming(packet)
+                }
+            }
+        }
+    }
+
     private var cleanupJob: Job? = null
 
     private var peerDao: PeerDao? = null
@@ -185,6 +199,17 @@ object GossipService {
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 if (peer == null || !peer.isTrusted) {
+                    if (packet.type == "MESSAGE") {
+                        val buffer = firewallBuffer.getOrPut(senderId) { java.util.Collections.synchronizedList(mutableListOf()) }
+                        if (buffer.size < 10) {
+                            buffer.add(packet)
+                            Logger.info("FIREWALL", "Buffered MESSAGE packet ${packet.id} from untrusted sender $senderId for 15s")
+                            scope.launch {
+                                delay(15000)
+                                buffer.remove(packet)
+                            }
+                        }
+                    }
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Sender $senderId is not trusted. Dropping ${packet.type} packet $packetId")
                     return false
                 }

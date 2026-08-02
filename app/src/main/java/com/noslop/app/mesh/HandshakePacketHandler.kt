@@ -105,6 +105,7 @@ class HandshakePacketHandler(
             if (allowed) {
                 peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = true))
                 repo.acceptConnectionRequest(peer)
+                GossipService.flushFirewallBuffer(connPay.fromUserId)
                 Logger.info(TAG, "Auto-accepted connection request from ${peer.handle}")
             } else {
                 repo.setIncomingRequest(peer)
@@ -190,6 +191,8 @@ class HandshakePacketHandler(
             authorAvatarB64 = handPay.authorAvatarB64 ?: peer.authorAvatarB64,
             bio = handPay.bio ?: peer.bio
         ))
+        
+        GossipService.flushFirewallBuffer(handPay.fromUserId)
 
         if (!wasAlreadyTrusted) {
             val notifSettings = repo.notificationSettingsFlow.value

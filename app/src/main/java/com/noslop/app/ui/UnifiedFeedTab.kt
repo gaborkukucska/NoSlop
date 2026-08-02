@@ -393,7 +393,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     // Incoming Handshake Request Dialog
     incomingRequest?.let { peer ->
         AlertDialog(
-            onDismissRequest = { viewModel.rejectHandshake() },
+            onDismissRequest = { viewModel.dismissHandshakeDialog() },
             containerColor = SurfaceDark,
             title = {
                 Text("Accept Handshake?".tr, color = TextLight, fontWeight = FontWeight.Bold)

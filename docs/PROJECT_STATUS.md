@@ -2,6 +2,13 @@
 
 ## Completed Changes (2026-08-02) - Part 2
 
+### 5. Handshake & Messaging Race Conditions
+*   **Accidental Peer Deletion Fixed**: Fixed a critical UI bug where tapping outside the "Accept Handshake" dialog triggered the dismiss event which was incorrectly mapped to `rejectHandshake()`. This permanently deleted the pending peer, breaking all subsequent handshake confirmations. It now properly maps to `dismissHandshakeDialog()` which hides the UI without destroying the database entry.
+*   **Message Trust Firewall Buffer**: Fixed a race condition where a `MESSAGE` packet and a `USER_HANDSHAKE` packet sent simultaneously over a newly opened Tor circuit could arrive out of order. `GossipService` now implements a 15-second holding buffer for `MESSAGE` packets from untrusted peers. When the `USER_HANDSHAKE` arrives milliseconds later, it flushes the buffer and processes the E2EE message instead of permanently dropping it.
+*   **Discoverable Timeout Extension**: Increased the heartbeat timeout for Discoverable nodes from 3 minutes to 15 minutes to account for Tor's native v3 Hidden Service Directory (HSDir) publication delays.
+
+
+
 ### 1. Connection & Mesh Stability
 *   **Persistent Packet Spooler**: Upgraded the background retry spooler in `MeshSocialRepository.kt` to persist for up to 72 hours (from 15 minutes) for all packet types (`CONNECTION_REQUEST`, `USER_HANDSHAKE`, etc.). This ensures handshakes and critical DMs eventually reach peers even if they are offline for extended periods.
 

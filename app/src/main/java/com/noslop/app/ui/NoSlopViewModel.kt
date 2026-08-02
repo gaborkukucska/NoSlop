@@ -1652,6 +1652,13 @@ fun toggleAggregator() {
         } 
     }
     
+    
+    fun dismissHandshakeDialog() {
+        viewModelScope.launch {
+            repository.clearIncomingRequest()
+        }
+    }
+
     fun rejectHandshake() {
         viewModelScope.launch {
             val peer = incomingRequest.value

@@ -250,6 +250,7 @@ class MeshSocialRepository(
                     }
 
                     val timeout = System.currentTimeMillis() - 3 * 60 * 1000
+                    val discoverableTimeout = System.currentTimeMillis() - 15 * 60 * 1000
                     val archiveTimeout = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000L
                     val peers = peerDao.getAllPeersList()
                     for (peer in peers) {
@@ -257,7 +258,7 @@ class MeshSocialRepository(
                             peerDao.insertPeer(peer.copy(isOnline = false))
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
                         }
-                        if (peer.isDiscoverable && peer.lastSeenAt < timeout) {
+                        if (peer.isDiscoverable && peer.lastSeenAt < discoverableTimeout) {
                             if (!peer.isTrusted) {
                                 peerDao.deletePeer(peer)
                                 Logger.info(TAG, "Removed inactive discoverable peer: ${peer.handle}")
