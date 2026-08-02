@@ -56,8 +56,10 @@ class ReactionPacketHandler(
                     val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
                     val displayEmoji = emojiMap[payload.reactionType] ?: payload.reactionType
                     
-                    val title = "New Reaction"
-                    val msg = "$authorName reacted $displayEmoji to your post."
+                    val title = com.noslop.app.util.LanguageManager.translate("New Reaction")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} reacted {emoji} to your post.")
+                        .replace("{author}", authorName)
+                        .replace("{emoji}", displayEmoji)
                     val route = "post/${payload.postId}"
                     
                     db.notificationDao().insertNotification(
@@ -195,8 +197,10 @@ class ReactionPacketHandler(
                     val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
                     val displayEmoji = emojiMap[reactionPay.reactionType] ?: reactionPay.reactionType
                     
-                    val title = "New Reaction"
-                    val msg = "$authorName reacted $displayEmoji to your comment."
+                    val title = com.noslop.app.util.LanguageManager.translate("New Reaction")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} reacted {emoji} to your comment.")
+                        .replace("{author}", authorName)
+                        .replace("{emoji}", displayEmoji)
                     val route = "post/${comment?.postId}/comment/${comment?.id}"
                     
                     db.notificationDao().insertNotification(

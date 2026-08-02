@@ -192,7 +192,7 @@ fun ContentPreferencesScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(category, color = TextLight)
+                        Text(category.tr, color = TextLight)
                         Checkbox(
                             checked = isSelected,
                             onCheckedChange = {
@@ -224,7 +224,7 @@ fun ContentPreferencesScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight)
+                            Text(genre.tr, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = {
@@ -258,7 +258,7 @@ fun ContentPreferencesScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight)
+                            Text(genre.tr, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = {

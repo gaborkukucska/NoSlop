@@ -85,8 +85,10 @@ class DmPacketHandler(
             messageDao.insertMessage(msg)
             repo.triggerDmSync()
             
-            val title = "New Direct Message"
-            val msgBody = "Message from ${peer?.handle ?: "Anonymous"}"
+            val title = com.noslop.app.util.LanguageManager.translate("New Direct Message")
+            val anon = com.noslop.app.util.LanguageManager.translate("Anonymous")
+            val msgBody = com.noslop.app.util.LanguageManager.translate("Message from {author}")
+                .replace("{author}", peer?.handle ?: anon)
             val route = "chat/${packet.senderId}"
             
             notificationDao.insertNotification(

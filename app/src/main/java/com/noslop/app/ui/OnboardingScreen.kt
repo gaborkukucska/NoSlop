@@ -621,7 +621,7 @@ fun Step4Interests(
                 ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            text = category,
+                            text = category.tr,
                             style = MaterialTheme.typography.titleSmall,
                             color = if (isSelected) AccentGreen else TextLight,
                             textAlign = TextAlign.Center,
@@ -911,7 +911,7 @@ fun Step6Genres(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight, fontWeight = FontWeight.Bold)
+                            Text(genre.tr, color = TextLight, fontWeight = FontWeight.Bold)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = { onToggleMusicGenre(genre) },
@@ -943,7 +943,7 @@ fun Step6Genres(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight, fontWeight = FontWeight.Bold)
+                            Text(genre.tr, color = TextLight, fontWeight = FontWeight.Bold)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = { onToggleVideoGenre(genre) },

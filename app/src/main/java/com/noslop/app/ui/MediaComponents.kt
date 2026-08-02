@@ -586,7 +586,7 @@ fun OverlayInteractions(
                         // Single tap opens picker (gChat parity), matching user request
                         InteractionButton(
                             icon = Icons.Default.AddReaction,
-                            label = "React",
+                            label = "React".tr,
                             onClick = { showReactionPicker = !showReactionPicker }
                         )
 
@@ -606,7 +606,7 @@ fun OverlayInteractions(
                 if (onShare != null) {
                     InteractionButton(
                         icon = Icons.Default.Share,
-                        label = "Share",
+                        label = "Share".tr,
                         onClick = onShare
                     )
                 }
@@ -614,7 +614,7 @@ fun OverlayInteractions(
                 if (showComment && onComment != null) {
                     InteractionButton(
                         icon = Icons.Default.Chat,
-                        label = if (commentCount > 0) commentCount.toString() else "Chat",
+                        label = if (commentCount > 0) commentCount.toString() else "Chat".tr,
                         onClick = onComment
                     )
                 }
@@ -622,7 +622,7 @@ fun OverlayInteractions(
                 if (onDelete != null) {
                     InteractionButton(
                         icon = Icons.Default.Delete,
-                        label = "Delete",
+                        label = "Delete".tr,
                         onClick = onDelete,
                         tint = DestructiveRed
                     )

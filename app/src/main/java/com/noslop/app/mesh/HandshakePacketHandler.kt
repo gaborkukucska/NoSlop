@@ -116,8 +116,9 @@ class HandshakePacketHandler(
             if (isNewRequest) {
                 val notifSettings = repo.notificationSettingsFlow.value
                 if (notifSettings.connectionRequests) {
-                    val title = "New Connection Request"
-                    val msg = "${peer.handle} wants to connect with you."
+                    val title = com.noslop.app.util.LanguageManager.translate("New Connection Request")
+                    val msg = com.noslop.app.util.LanguageManager.translate("{author} wants to connect with you.")
+                        .replace("{author}", peer.handle)
                     val route = "notifications"
                     
                     notificationDao.insertNotification(
@@ -193,8 +194,9 @@ class HandshakePacketHandler(
         if (!wasAlreadyTrusted) {
             val notifSettings = repo.notificationSettingsFlow.value
             if (notifSettings.system) {
-                val title = "Connection Accepted"
-                val msg = "${handPay.fromUsername} accepted your connection request."
+                val title = com.noslop.app.util.LanguageManager.translate("Connection Accepted")
+                val msg = com.noslop.app.util.LanguageManager.translate("{author} accepted your connection request.")
+                        .replace("{author}", handPay.fromUsername)
                 val route = "chat/${handPay.fromUserId}"
 
                 notificationDao.insertNotification(
@@ -237,8 +239,9 @@ class HandshakePacketHandler(
 
             val notifSettings = repo.notificationSettingsFlow.value
             if (notifSettings.system) {
-                val title = "Connection Declined"
-                val msg = "${peer.handle} declined your connection request."
+                val title = com.noslop.app.util.LanguageManager.translate("Connection Declined")
+                val msg = com.noslop.app.util.LanguageManager.translate("{author} declined your connection request.")
+                        .replace("{author}", peer.handle)
                 val route = "notifications"
 
                 notificationDao.insertNotification(

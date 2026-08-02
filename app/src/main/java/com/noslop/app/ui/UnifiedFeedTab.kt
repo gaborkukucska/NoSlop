@@ -932,7 +932,8 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(if (localSearchQuery.isNotBlank()) "Search Online for \"$localSearchQuery\"" else "Search Online", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        val searchText = if (localSearchQuery.isNotBlank()) "Search Online for".tr + " \"$localSearchQuery\"" else "Search Online".tr
+                        Text(searchText, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
 
                     Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
@@ -989,7 +990,7 @@ fun UnifiedFeedTab(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(icon, contentDescription = null, tint = if (selected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text(mode, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                                            Text(mode.tr, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                         }
                                     }
                                 }
@@ -1010,7 +1011,7 @@ fun UnifiedFeedTab(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(icon, contentDescription = null, tint = if (selected) AccentGreen else TextMuted, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text(mode, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                                    Text(mode.tr, color = if (selected) AccentGreen else TextLight, fontSize = 13.sp, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
                                 }
                             }
                         }

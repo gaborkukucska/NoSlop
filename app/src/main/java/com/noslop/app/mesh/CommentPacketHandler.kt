@@ -73,8 +73,10 @@ class CommentPacketHandler(
         val localKeys = repo.getLocalIdentity()
         val notifSettings = repo.notificationSettingsFlow.value
         if (notifSettings.comments && post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && commPay.comment.authorId != localKeys?.publicKeyB64) {
-            val title = "New Comment"
-            val msg = "${commPay.comment.authorName} commented: ${commPay.comment.content.take(50)}"
+            val title = com.noslop.app.util.LanguageManager.translate("New Comment")
+            val msg = com.noslop.app.util.LanguageManager.translate("{author} commented: {content}")
+                .replace("{author}", commPay.comment.authorName)
+                .replace("{content}", commPay.comment.content.take(50))
             val route = "post/${commPay.postId}/comment/${commPay.comment.id}"
             
             notificationDao.insertNotification(
