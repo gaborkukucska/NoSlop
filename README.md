@@ -122,7 +122,7 @@ Your identity is generated locally and never leaves your device unless you expor
 ## Getting Started
 
 1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is now the `mvp/` (Kotlin Multiplatform) directory.
-2. **Run the onboarding flow** — 6 steps: generate your Word Cloud, pick your interests, optionally scan a friend's QR to add your first contact.
+2. **Run the onboarding flow** — 9 steps: set your language, generate your Word Cloud, pick your interests and creators, choose content sources, set your content mix ratios, and optionally deploy a HAI-Net Hub.
 3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
 
 ---

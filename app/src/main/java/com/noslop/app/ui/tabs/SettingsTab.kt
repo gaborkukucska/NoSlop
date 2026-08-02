@@ -410,6 +410,22 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
 
+                            // EDIT PROFILE
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 8 }.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text("Edit Profile".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                            }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
                             // APP LANGUAGE SELECTOR
                             val appLanguage by viewModel.appLanguage.collectAsState()
                             val availableLanguages = listOf("en" to "English", "hu" to "Magyar")
@@ -460,19 +476,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth().clickable { selectedSettingsScreen = 8 }.padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Face, contentDescription = null, tint = AccentGreen)
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Edit Profile".tr, fontWeight = FontWeight.Bold, color = TextLight)
-                                }
-                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
-                            }
-                            
+                            // SEND CHAT ON ENTER
                             val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -496,6 +500,91 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         uncheckedThumbColor = TextMuted,
                                         uncheckedTrackColor = SurfaceDark
                                     )
+                                )
+                            }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
+                            // NOTIFICATIONS
+                            val notificationSettings by viewModel.notificationSettings.collectAsState()
+                            
+                            Text("Notifications".tr, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Direct Messages".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.dms,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(dms = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Comments & Replies".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.comments,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(comments = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Mentions".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.mentions,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(mentions = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Reactions".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.reactions,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(reactions = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Connection Requests".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.connectionRequests,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(connectionRequests = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("System Alerts".tr, color = TextLight, fontSize = 14.sp)
+                                Switch(
+                                    checked = notificationSettings.system,
+                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(system = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
                                 )
                             }
                         }
@@ -869,106 +958,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     }
                 }
 
-                }
-                if (selectedTabIndex == 0) {
-                item {
-                    Text(
-                        text = "SYSTEM & NOTIFICATIONS".tr,
-                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
-                        color = TextMuted,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-                        border = BorderStroke(1.dp, BorderSubtle)
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
-                            val notificationSettings by viewModel.notificationSettings.collectAsState()
-                            
-                            Text("Notifications".tr, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Direct Messages".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.dms,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(dms = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Comments & Replies".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.comments,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(comments = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Mentions".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.mentions,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(mentions = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Reactions".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.reactions,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(reactions = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Connection Requests".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.connectionRequests,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(connectionRequests = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                            
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("System Alerts".tr, color = TextLight, fontSize = 14.sp)
-                                Switch(
-                                    checked = notificationSettings.system,
-                                    onCheckedChange = { viewModel.updateNotificationSettings(notificationSettings.copy(system = it)) },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
-                                )
-                            }
-                        }
-                    }
-                }
 
                 }
                 if (selectedTabIndex == 1) {

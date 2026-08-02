@@ -46,7 +46,7 @@ mnemonic, onion address).
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │ UI Layer (Jetpack Compose, tabs/*)                                  │
-│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ContentPreferencesScreen  │
+│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ProfileScreen │ ContentPreferencesScreen  │
 └───────────────────────────┬───────────────────────────────────────┘
                              │ NoSlopViewModel (StateFlow)
 ┌───────────────────────────▼───────────────────────────────────────┐
@@ -115,20 +115,21 @@ com.noslop.app
 ├── tor/
 │   └── TorService.kt                Embedded Tor lifecycle, hidden service registration
 ├── ui/
-│   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
+│   ├── ContentPreferencesScreen.kt  Content filtering/categories/genres/languages/sources/mix ratios
 │   ├── HaiNetTab.kt                 Home Hub deployment + control interface (delegates to HubSetupScreen)
 │   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
 │   ├── MediaUtils.kt                Top-level media resolution utility (formerly MainScreen)
 │   ├── MediaComponents.kt           Shared media UI helpers
 │   ├── NoSlopViewModel.kt            ViewModel exposing repository as StateFlow
-│   ├── OnboardingScreen.kt           6-step onboarding flow
+│   ├── OnboardingScreen.kt           9-step onboarding flow (includes Content Mix step)
+│   ├── ProfileScreen.kt              Standalone profile editor (avatar, name, bio)
 │   ├── PreloadManager.kt             ExoPlayer preload pool
 │   ├── QRScanScreen.kt / QRShareSheet.kt  CameraX+MLKit QR pairing
 │   ├── TorWarningPanel.kt            Tor-not-ready UI card + F-Droid/Orbot deep links
 │   ├── UnifiedFeedTab.kt             VerticalPager feed (mesh + clearnet unified)
 │   ├── components/                  FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen,
 │   │                                 CommentsBottomSheet, PeerItem
-│   ├── tabs/                        ApiKeysScreen, DMsTab, HubSetupScreen, LogsViewerScreen, ReportIssueScreen, SettingsTab
+│   ├── tabs/                        ApiKeysScreen, DMsTab, FeedMixSettingsSection, HubSetupScreen, LogsViewerScreen, ReportIssueScreen, SettingsTab
 │   └── theme/                       Color.kt, Theme.kt, Type.kt (Material3 + custom palette)
 └── util/
     └── Constants.kt                 MESH_PORT = 9999
@@ -463,7 +464,7 @@ the outgoing gate in `MeshSocialRepository.reactToChat`. Direct messages and
 their reactions are never affected by mesh filter settings.
 
 **UI**: `MeshFiltersScreen.kt` (Material 3) — accessible from Settings →
-Account & Preferences → Mesh Filters. 6 content-type cards, each with
+Content tab → Filtering & Content Mix → Mesh Filters button. 6 content-type cards, each with
 Incoming/Outgoing toggle columns.
 
 ---
