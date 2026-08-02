@@ -29,6 +29,15 @@ private data class HeroBlock(
     @SerializedName("githubUrl") val githubUrl: String?
 )
 
+private data class GithubRelease(
+    @SerializedName("tag_name") val tagName: String?,
+    @SerializedName("assets") val assets: List<GithubAsset>?
+)
+
+private data class GithubAsset(
+    @SerializedName("browser_download_url") val browserDownloadUrl: String?
+)
+
 /**
  * Checks the NoSlop website's `content.json` once a day for a newer APK than the one
  * currently installed, and tracks when the user was last notified about it.
@@ -68,33 +77,53 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
      */
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder().url(Constants.UPDATE_CHECK_URL).build()
-            val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    Logger.warn(TAG, "content.json fetch failed: HTTP ${response.code}")
-                    return@withContext null
-                }
-                response.body?.string()
-            } ?: return@withContext null
+            var apkUrl: String? = null
+            var latestVersion: String? = null
 
-            val content = Gson().fromJson(body, ContentJson::class.java)
-            val apkUrl = content?.hero?.apkUrl
-            if (apkUrl.isNullOrBlank()) {
-                Logger.warn(TAG, "content.json had no hero.apkUrl")
-                return@withContext null
+            // 1. Try official website
+            try {
+                val request = Request.Builder().url(Constants.UPDATE_CHECK_URL).build()
+                // MUST use rawClearnetClient so update checks don't fail if Tor is not bootstrapped yet
+                val body = HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) response.body?.string() else null
+                }
+                if (body != null) {
+                    val content = Gson().fromJson(body, ContentJson::class.java)
+                    apkUrl = content.hero?.apkUrl
+                    if (apkUrl != null) latestVersion = extractVersion(apkUrl)
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "noslop.me fetch failed: ${e.message}")
             }
 
-            val latestVersion = extractVersion(apkUrl)
-            if (latestVersion == null) {
-                Logger.warn(TAG, "Could not extract a version string from apkUrl: $apkUrl")
+            // 2. Fallback to GitHub API
+            if (apkUrl.isNullOrBlank() || latestVersion == null) {
+                Logger.info(TAG, "Falling back to GitHub API for update check...")
+                try {
+                    val request = Request.Builder().url("https://api.github.com/repos/gaborkukucska/NoSlop/releases/latest").build()
+                    val body = HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
+                        if (response.isSuccessful) response.body?.string() else null
+                    }
+                    if (body != null) {
+                        val release = Gson().fromJson(body, GithubRelease::class.java)
+                        latestVersion = release.tagName?.removePrefix("v")
+                        apkUrl = release.assets?.firstOrNull { it.browserDownloadUrl?.endsWith(".apk") == true }?.browserDownloadUrl
+                    }
+                } catch (e: Exception) {
+                    Logger.error(TAG, "GitHub API fetch failed: ${e.message}")
+                }
+            }
+
+            if (apkUrl.isNullOrBlank() || latestVersion == null) {
+                Logger.warn(TAG, "Could not find apkUrl or version from either source.")
                 return@withContext null
             }
 
             appSettingDao.insertSetting(AppSetting(KEY_LAST_CHECK_MS, System.currentTimeMillis().toString()))
 
             val currentVersion = BuildConfig.VERSION_NAME
-            val info = if (isNewer(latestVersion, currentVersion)) {
-                UpdateInfo(latestVersion = latestVersion, currentVersion = currentVersion, downloadUrl = apkUrl)
+            val info = if (isNewer(latestVersion!!, currentVersion)) {
+                UpdateInfo(latestVersion = latestVersion!!, currentVersion = currentVersion, downloadUrl = apkUrl!!)
             } else {
                 null
             }
@@ -155,9 +184,10 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
     }
 
     private fun splitVersion(version: String): Pair<List<Int>, String> {
-        val dashIndex = version.indexOfFirst { it == '-' }
-        val numericPart = if (dashIndex >= 0) version.substring(0, dashIndex) else version
-        val suffix = if (dashIndex >= 0) version.substring(dashIndex + 1) else ""
+        val cleanVersion = version.removePrefix("v")
+        val dashIndex = cleanVersion.indexOfFirst { it == '-' }
+        val numericPart = if (dashIndex >= 0) cleanVersion.substring(0, dashIndex) else cleanVersion
+        val suffix = if (dashIndex >= 0) cleanVersion.substring(dashIndex + 1) else ""
         val nums = numericPart.split(".").mapNotNull { it.toIntOrNull() }
         return nums to suffix
     }
