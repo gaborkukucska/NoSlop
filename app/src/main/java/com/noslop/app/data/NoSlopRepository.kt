@@ -1022,4 +1022,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
      * ANNOUNCE_PEER staleness timeout.
      */
     fun broadcastUserExitAsync() = meshSocialRepository.broadcastUserExitAsync()
+
+    suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
+        meshSocialRepository.deleteDirectMessages(messageIds, peerPubB64)
+    }
+
+    suspend fun clearChat(peerPubB64: String) {
+        meshSocialRepository.clearChat(peerPubB64)
+    }
 }

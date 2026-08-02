@@ -1414,6 +1414,15 @@ fun toggleAggregator() {
         if (peerPub != null) viewModelScope.launch { repository.markMessagesAsRead(peerPub) }
     }
 
+
+    fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
+        viewModelScope.launch { repository.deleteDirectMessages(messageIds, peerPubB64) }
+    }
+
+    fun clearChat(peerPubB64: String) {
+        viewModelScope.launch { repository.clearChat(peerPubB64) }
+    }
+
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
         viewModelScope.launch { 

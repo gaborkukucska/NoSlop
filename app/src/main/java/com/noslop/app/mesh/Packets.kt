@@ -238,6 +238,14 @@ data class DeleteCommentPayload(
     val signature: String
 )
 
+
+data class DeleteMessagePayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class DeletePostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -418,5 +426,9 @@ data class NetworkPacket(
 
     fun getDeleteCommentPayload(): DeleteCommentPayload? = if (type == "DELETE_COMMENT" && payload != null) {
         Gson().fromJson(payload, DeleteCommentPayload::class.java)
+    } else null
+
+    fun getDeleteMessagePayload(): DeleteMessagePayload? = if (type == "DELETE_MESSAGE" && payload != null) {
+        Gson().fromJson(payload, DeleteMessagePayload::class.java)
     } else null
 }

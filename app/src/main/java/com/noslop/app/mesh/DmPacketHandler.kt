@@ -125,4 +125,22 @@ class DmPacketHandler(
         }
         return false
     }
+
+    suspend fun handleDeleteMessage(packet: NetworkPacket): Boolean {
+        val deletePay = packet.getDeleteMessagePayload() ?: return false
+        val signature = packet.signature ?: return false
+
+        // Verify signature
+        val payloadToVerify = "${deletePay.messageId}|${deletePay.authorId}|${deletePay.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, signature, deletePay.authorId)) return false
+
+        // Only the sender of the message can delete it across the mesh
+        if (deletePay.authorId != packet.senderId) return false
+
+        // Locally delete the message where id and sender match
+        messageDao.deleteMessageByIdAndSender(deletePay.messageId, deletePay.authorId)
+        Logger.info(TAG, "Deleted E2EE message ${deletePay.messageId} by request of sender ${deletePay.authorId}")
+        repo.triggerDmSync()
+        return true
+    }
 }

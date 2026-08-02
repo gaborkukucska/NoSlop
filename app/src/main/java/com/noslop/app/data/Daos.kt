@@ -117,6 +117,15 @@ interface MessageDao {
     @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub ORDER BY timestamp ASC")
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>>
 
+    @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub ORDER BY timestamp ASC")
+    suspend fun getMessagesWithPeerList(peerPub: String): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessageById(id: String): ChatMessage?
+
+    @Query("DELETE FROM chat_messages WHERE id = :id AND senderPub = :senderPub")
+    suspend fun deleteMessageByIdAndSender(id: String, senderPub: String)
+
     @Query("SELECT COUNT(*) FROM chat_messages WHERE id = :id")
     suspend fun hasMessage(id: String): Int
 

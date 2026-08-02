@@ -61,6 +61,8 @@ fun ChatThreadScreen(
 ) {
     val burnableKeys by viewModel.burnableKeys.collectAsState()
     var replyingToMessageId by remember { mutableStateOf<String?>(null) }
+    var selectedMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val isSelectionMode = selectedMessageIds.isNotEmpty()
     
     // ── Media attachment state ──
     var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
@@ -72,8 +74,6 @@ fun ChatThreadScreen(
 
     val context = LocalContext.current
     val captureManager = remember { MediaCaptureManager(context) }
-
-
 
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
@@ -141,7 +141,6 @@ fun ChatThreadScreen(
         
         var finalFile = file
         
-        // Compress large videos (> 20MB)
         if (type == "video" && file.length() > 20 * 1024 * 1024) {
             val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}")
             com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile).collect { state ->
@@ -160,7 +159,6 @@ fun ChatThreadScreen(
                 }
             }
         }
-        // Compress large images (> 500KB)
         else if (type == "image" && file.length() > 500 * 1024) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 compressionProgress = 0
@@ -270,8 +268,21 @@ fun ChatThreadScreen(
         return
     }
 
-        Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
-            // Header
+    Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
+        // Header
+        if (isSelectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedMessageIds = emptySet() }) { Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight) }
+                Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { 
+                    viewModel.deleteDirectMessages(selectedMessageIds.toList(), peer.publicKeyB64)
+                    selectedMessageIds = emptySet()
+                }) { Icon(Icons.Default.Delete, contentDescription = "Delete".tr, tint = DestructiveRed) }
+            }
+        } else {
             Row(
                 modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -279,7 +290,7 @@ fun ChatThreadScreen(
                 IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, contentDescription = "Close chat thread".tr, tint = AccentGreen) }
                 Icon(imageVector = Icons.Default.Lock, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(text = peer.handle, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight)
                         if (peer.isTemporary) {
@@ -291,66 +302,128 @@ fun ChatThreadScreen(
                     }
                     Text(text = "Direct E2EE session with ECDH agreement active".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
                 }
-            }
 
-            if (peer.isTemporary) {
-                Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
-                    Button(
-                        onClick = { viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false) },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
-                        border = BorderStroke(1.dp, AccentGreen)
-                    ) { Text("Share Permanent Identity") }
-                }
-            }
-
-            // Message List
-            val downloadProgress by viewModel.downloadProgress.collectAsState()
-            val listState = rememberLazyListState()
-
-            LaunchedEffect(messages.size) {
-                if (messages.isNotEmpty()) {
-                    listState.animateScrollToItem(messages.size - 1)
-                }
-            }
-
-            LazyColumn(
-                state = listState,
-                contentPadding = PaddingValues(bottom = 20.dp),
-                modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(messages, key = { it.id }) { msg ->
-                    val isSelf = msg.senderPub != peer.publicKeyB64
-                    val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys, burnableKeys) {
-                        var text = msg.ciphertext
-                        var meta: MediaMetadata? = null
-                        if (localKeys != null) {
-                            val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
-                            val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) 
-                                ?: burnableKeys?.let { CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, it.encPrivateKeyB64) }
-                                ?: msg.ciphertext
-                            try {
-                                val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
-                                if (obj.has("media")) meta = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
-                                text = if (obj.has("content")) obj.get("content").asString else plaintext
-                            } catch (e: Exception) { text = plaintext }
-                        }
-                        Pair(text, meta)
+                var showMenu by remember { mutableStateOf(false) }
+                var showClearConfirm by remember { mutableStateOf(false) }
+                Box {
+                    IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options", tint = TextMuted) }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, modifier = Modifier.background(SurfaceDark)) {
+                        DropdownMenuItem(
+                            text = { Text("Clear Chat".tr, color = DestructiveRed) },
+                            onClick = { 
+                                showMenu = false
+                                showClearConfirm = true
+                            }
+                        )
                     }
+                }
+                if (showClearConfirm) {
+                    AlertDialog(
+                        onDismissRequest = { showClearConfirm = false },
+                        containerColor = SurfaceDark,
+                        title = { Text("Clear Chat?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                        text = { Text("This will delete all messages locally, and remove your own messages from the peer's device.".tr, color = TextLight) },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    viewModel.clearChat(peer.publicKeyB64)
+                                    showClearConfirm = false
+                                    onBack()
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                            ) { Text("Clear".tr, fontWeight = FontWeight.Bold) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showClearConfirm = false }) { Text("Cancel".tr, color = TextMuted) }
+                        }
+                    )
+                }
+            }
+        }
 
-                    val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
-                    var showReactionPicker by remember { mutableStateOf(false) }
+        if (peer.isTemporary) {
+            Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
+                Button(
+                    onClick = { viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                    border = BorderStroke(1.dp, AccentGreen)
+                ) { Text("Share Permanent Identity") }
+            }
+        }
 
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
-                    ) {
+        // Message List
+        val downloadProgress by viewModel.downloadProgress.collectAsState()
+        val listState = rememberLazyListState()
+
+        LaunchedEffect(messages.size) {
+            if (messages.isNotEmpty()) {
+                listState.animateScrollToItem(messages.size - 1)
+            }
+        }
+
+        LazyColumn(
+            state = listState,
+            contentPadding = PaddingValues(bottom = 20.dp),
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(messages, key = { it.id }) { msg ->
+                val isSelf = msg.senderPub != peer.publicKeyB64
+                val isSelected = selectedMessageIds.contains(msg.id)
+
+                val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys, burnableKeys) {
+                    var text = msg.ciphertext
+                    var meta: MediaMetadata? = null
+                    if (localKeys != null) {
+                        val opponentEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else peer.publicKeyB64
+                        val plaintext = CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, localKeys.encPrivateKeyB64) 
+                            ?: burnableKeys?.let { CryptoService.decryptDM(msg.ciphertext, msg.nonce, opponentEncPub, it.encPrivateKeyB64) }
+                            ?: msg.ciphertext
+                        try {
+                            val obj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                            if (obj.has("media")) meta = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
+                            text = if (obj.has("content")) obj.get("content").asString else plaintext
+                        } catch (e: Exception) { text = plaintext }
+                    }
+                    Pair(text, meta)
+                }
+
+                val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
+                var showReactionPicker by remember { mutableStateOf(false) }
+
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .background(if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color.Transparent)
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onLongPress = {
+                                    if (!isSelectionMode) selectedMessageIds += msg.id
+                                },
+                                onTap = {
+                                    if (isSelectionMode) {
+                                        if (isSelected) selectedMessageIds -= msg.id else selectedMessageIds += msg.id
+                                    }
+                                }
+                            )
+                        }
+                        .padding(vertical = 4.dp),
+                    contentAlignment = if (isSelf) Alignment.CenterEnd else Alignment.CenterStart
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isSelectionMode && !isSelf) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = null,
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+
                         Column(horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(if (isSelf) AccentGreen else SurfaceDark)
-                                    .pointerInput(Unit) { detectTapGestures(onLongPress = { showReactionPicker = true }) }
                                     .padding(12.dp)
                                     .widthIn(max = 260.dp)
                             ) {
@@ -532,99 +605,110 @@ fun ChatThreadScreen(
                                 }
                             }
                         }
-                    }
-                }
-            }
 
-            // Attached file preview
-            if (attachedFile != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Attached: ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                    Icon(Icons.Default.Close, contentDescription = "Remove attachment".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { attachedFile = null })
-                }
-            }
-
-            // Reply banner
-            if (replyingToMessageId != null) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Replying to message...".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                    Icon(Icons.Default.Close, contentDescription = "Cancel reply".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyingToMessageId = null })
-                }
-            }
-
-            // Compression progress banner
-            if (isProcessingMedia) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentGreen, strokeWidth = 2.dp)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        if (compressionProgress != null && compressionProgress!! > 0) "Compressing... ${compressionProgress}%".tr else "Processing media...".tr,
-                        color = TextLight, style = MaterialTheme.typography.labelSmall
-                    )
-                }
-            }
-
-            // ISOLATED INPUT BAR (Fixes UI Lag)
-            ChatInputBar(
-                viewModel = viewModel,
-                hasAttachment = attachedFile != null,
-                onMediaAttached = { file -> attachedFile = file },
-                onSendMessage = { text ->
-                    val fileToProcess = attachedFile
-                    val replyId = replyingToMessageId
-                    attachedFile = null
-                    replyingToMessageId = null
-                    if (fileToProcess != null) {
-                        isProcessingMedia = true
-                        compressionProgress = null
-                        coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            val mediaMetadata = buildMediaMetadata(fileToProcess)
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                                isProcessingMedia = false
-                                compressionProgress = null
-                                onSendMessage(text, mediaMetadata, replyId)
-                            }
-                        }
-                    } else {
-                        onSendMessage(text, null, replyId)
-                    }
-                },
-                onLaunchFilePicker = { filePickerLauncher.launch("*/*") },
-                onLaunchCamera = {
-                    if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-                        showCamera = true
-                    } else {
-                        cameraPermissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
-                    }
-                }
-            )
-
-            fullscreenImage?.let { path -> com.noslop.app.ui.ZoomableImageDialog(url = "file://$path", onDismiss = { fullscreenImage = null }) }
-            fullscreenVideo?.let { path ->
-                androidx.compose.ui.window.Dialog(onDismissRequest = { fullscreenVideo = null }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-                    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-                        VideoPlayer(url = "file://$path", isVisible = true)
-                        IconButton(onClick = { fullscreenVideo = null }, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color.Black.copy(alpha=0.5f), androidx.compose.foundation.shape.CircleShape)) {
-                            Icon(Icons.Default.Close, contentDescription="Close".tr, tint=Color.White)
+                        if (isSelectionMode && isSelf) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = null,
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
                         }
                     }
                 }
             }
         }
+
+        // Attached file preview
+        if (attachedFile != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Attached: ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.Close, contentDescription = "Remove attachment".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { attachedFile = null })
+            }
+        }
+
+        // Reply banner
+        if (replyingToMessageId != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Replying to message...".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.Close, contentDescription = "Cancel reply".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyingToMessageId = null })
+            }
+        }
+
+        // Compression progress banner
+        if (isProcessingMedia) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentGreen, strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    if (compressionProgress != null && compressionProgress!! > 0) "Compressing... ${compressionProgress}%".tr else "Processing media...".tr,
+                    color = TextLight, style = MaterialTheme.typography.labelSmall
+                )
+            }
+        }
+
+        // ISOLATED INPUT BAR
+        ChatInputBar(
+            viewModel = viewModel,
+            hasAttachment = attachedFile != null,
+            onMediaAttached = { file -> attachedFile = file },
+            onSendMessage = { text ->
+                val fileToProcess = attachedFile
+                val replyId = replyingToMessageId
+                attachedFile = null
+                replyingToMessageId = null
+                if (fileToProcess != null) {
+                    isProcessingMedia = true
+                    compressionProgress = null
+                    coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val mediaMetadata = buildMediaMetadata(fileToProcess)
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            isProcessingMedia = false
+                            compressionProgress = null
+                            onSendMessage(text, mediaMetadata, replyId)
+                        }
+                    }
+                } else {
+                    onSendMessage(text, null, replyId)
+                }
+            },
+            onLaunchFilePicker = { filePickerLauncher.launch("*/*") },
+            onLaunchCamera = {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                    showCamera = true
+                } else {
+                    cameraPermissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
+                }
+            }
+        )
+
+        fullscreenImage?.let { path -> com.noslop.app.ui.ZoomableImageDialog(url = "file://$path", onDismiss = { fullscreenImage = null }) }
+        fullscreenVideo?.let { path ->
+            androidx.compose.ui.window.Dialog(onDismissRequest = { fullscreenVideo = null }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+                    VideoPlayer(url = "file://$path", isVisible = true)
+                    IconButton(onClick = { fullscreenVideo = null }, modifier = Modifier.align(Alignment.TopEnd).padding(16.dp).background(Color.Black.copy(alpha=0.5f), androidx.compose.foundation.shape.CircleShape)) {
+                        Icon(Icons.Default.Close, contentDescription="Close".tr, tint=Color.White)
+                    }
+                }
+            }
+        }
+    }
 }
+
 @Composable
 fun ChatInputBar(
     viewModel: NoSlopViewModel,
@@ -634,7 +718,6 @@ fun ChatInputBar(
     onLaunchFilePicker: () -> Unit,
     onLaunchCamera: () -> Unit
 ) {
-    // State is strictly isolated to this composable! Typing will no longer lag the whole screen!
     var rawText by remember { mutableStateOf("") }
     val isSendOnEnterEnabled by viewModel.isSendOnEnterEnabled.collectAsState()
 
