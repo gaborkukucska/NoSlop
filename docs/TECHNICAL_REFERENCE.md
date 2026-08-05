@@ -667,7 +667,8 @@ identifier like `"youtube:trending"`, `"reddit:multi"`, `"nasa:apod"` —
 
 | Client | Auth | Notes |
 |---|---|---|
-| `InvidiousApiClient` | none | YouTube via Invidious instance pool, replaces official YouTube Data API per architecture proposal §2 |
+| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
+| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool |
 | `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query)` |
 | `InternetArchiveClient` | none | `getPopularVideos()`, `searchAudio(query)` |
 | `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
@@ -780,6 +781,7 @@ gossiped multiple times by different originating peers.
 - Per milestone 90, clearnet feed items themselves have Like/Comment buttons
   **removed** from the unified feed — engagement is funneled through the
   mesh anchor post instead ("Interaction Isolation").
+- Mesh broadcasts in the composer default to `friends` privacy. Explicitly selecting `public` triggers a warning dialog to educate the user that public posts will be gossiped over daisy-chained peers beyond direct friends.
 
 ---
 

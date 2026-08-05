@@ -680,19 +680,32 @@ fun TutorialSpotlight(
             val density = LocalDensity.current
             val config = LocalConfiguration.current
             val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
+            val screenWidthPx = with(density) { config.screenWidthDp.dp.toPx() }
             val yOffset = with(density) { if (targetRect.top > screenHeightPx / 2) targetRect.top.toDp() - 48.dp else targetRect.bottom.toDp() + 16.dp }
-            val xOffset = with(density) { maxOf(0.dp, targetRect.left.toDp() - 8.dp) }
             
-            Text(
-                text = text,
-                color = PrimaryBlack,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
+            val isRightAligned = targetRect.center.x > (screenWidthPx / 2)
+            val xOffset = if (!isRightAligned) {
+                with(density) { maxOf(0.dp, targetRect.left.toDp() - 8.dp) }
+            } else 0.dp // Not used when right aligned
+
+            Box(
                 modifier = Modifier
-                    .offset(x = xOffset, y = yOffset)
-                    .background(Color(0xFFFFCA28), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            )
+                    .fillMaxWidth()
+                    .offset(y = yOffset)
+                    .padding(horizontal = 16.dp),
+                contentAlignment = if (isRightAligned) Alignment.CenterEnd else Alignment.TopStart
+            ) {
+                Text(
+                    text = text,
+                    color = PrimaryBlack,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .then(if (!isRightAligned) Modifier.offset(x = xOffset) else Modifier)
+                        .background(Color(0xFFFFCA28), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
         }
     }
 }

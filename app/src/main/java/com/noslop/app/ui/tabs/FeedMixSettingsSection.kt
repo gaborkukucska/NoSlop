@@ -1,6 +1,8 @@
 package com.noslop.app.ui.tabs
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -33,7 +35,7 @@ fun FeedMixSettingsSection(viewModel: NoSlopViewModel) {
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, BorderSubtle)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
             Text("Content Ratio Mix".tr, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.padding(bottom = 8.dp))
             Text(
                 "Adjust what types of content appear in your Live Feed. The sliders dynamically balance so they always total 100%.".tr,
@@ -42,14 +44,43 @@ fun FeedMixSettingsSection(viewModel: NoSlopViewModel) {
                 modifier = Modifier.padding(bottom = 16.dp)
             )
 
+            fun getEnabledStates() = booleanArrayOf(
+                mixSettings.videoEnabled, mixSettings.audioEnabled, mixSettings.imageEnabled, mixSettings.articleEnabled, mixSettings.meshEnabled
+            )
+
+            fun updateValues(values: FloatArray, enabledStates: BooleanArray) {
+                // Normalize to exactly 100
+                val total = values.sum()
+                if (total > 0) {
+                    for (i in values.indices) {
+                        values[i] = (values[i] / total) * 100f
+                    }
+                }
+                
+                val newSettings = mixSettings.copy(
+                    videoEnabled = enabledStates[0],
+                    audioEnabled = enabledStates[1],
+                    imageEnabled = enabledStates[2],
+                    articleEnabled = enabledStates[3],
+                    meshEnabled = enabledStates[4],
+                    videoPercent = if (enabledStates[0]) Math.round(values[0]) else 20,
+                    audioPercent = if (enabledStates[1]) Math.round(values[1]) else 20,
+                    imagePercent = if (enabledStates[2]) Math.round(values[2]) else 20,
+                    articlePercent = if (enabledStates[3]) Math.round(values[3]) else 20,
+                    meshPercent = if (enabledStates[4]) Math.round(values[4]) else 20
+                )
+                scope.launch { viewModel.updateFeedMixSettings(newSettings) }
+            }
+
             // Function to handle the auto-balancing of sliders
             fun onValueChange(index: Int, newValue: Float) {
+                val enabledStates = getEnabledStates()
                 val values = floatArrayOf(
-                    if (mixSettings.videoEnabled) mixSettings.videoPercent.toFloat() else 0f,
-                    if (mixSettings.audioEnabled) mixSettings.audioPercent.toFloat() else 0f,
-                    if (mixSettings.imageEnabled) mixSettings.imagePercent.toFloat() else 0f,
-                    if (mixSettings.articleEnabled) mixSettings.articlePercent.toFloat() else 0f,
-                    if (mixSettings.meshEnabled) mixSettings.meshPercent.toFloat() else 0f
+                    if (enabledStates[0]) mixSettings.videoPercent.toFloat() else 0f,
+                    if (enabledStates[1]) mixSettings.audioPercent.toFloat() else 0f,
+                    if (enabledStates[2]) mixSettings.imagePercent.toFloat() else 0f,
+                    if (enabledStates[3]) mixSettings.articlePercent.toFloat() else 0f,
+                    if (enabledStates[4]) mixSettings.meshPercent.toFloat() else 0f
                 )
                 
                 val oldVal = values[index]
@@ -78,36 +109,25 @@ fun FeedMixSettingsSection(viewModel: NoSlopViewModel) {
                     }
                 }
                 
-                // Normalize to exactly 100
-                val total = values.sum()
-                if (total > 0) {
-                    for (i in values.indices) {
-                        values[i] = (values[i] / total) * 100f
-                    }
-                }
-                
-                val newSettings = mixSettings.copy(
-                    videoPercent = if (mixSettings.videoEnabled) Math.round(values[0]) else 20,
-                    audioPercent = if (mixSettings.audioEnabled) Math.round(values[1]) else 20,
-                    imagePercent = if (mixSettings.imageEnabled) Math.round(values[2]) else 20,
-                    articlePercent = if (mixSettings.articleEnabled) Math.round(values[3]) else 20,
-                    meshPercent = if (mixSettings.meshEnabled) Math.round(values[4]) else 20
-                )
-                scope.launch { viewModel.updateFeedMixSettings(newSettings) }
+                updateValues(values, enabledStates)
             }
 
             fun toggleItem(index: Int, enabled: Boolean) {
-                var newSettings = mixSettings
-                when (index) {
-                    0 -> newSettings = mixSettings.copy(videoEnabled = enabled)
-                    1 -> newSettings = mixSettings.copy(audioEnabled = enabled)
-                    2 -> newSettings = mixSettings.copy(imageEnabled = enabled)
-                    3 -> newSettings = mixSettings.copy(articleEnabled = enabled)
-                    4 -> newSettings = mixSettings.copy(meshEnabled = enabled)
+                val enabledStates = getEnabledStates()
+                enabledStates[index] = enabled
+                val values = floatArrayOf(
+                    if (enabledStates[0]) mixSettings.videoPercent.toFloat() else 0f,
+                    if (enabledStates[1]) mixSettings.audioPercent.toFloat() else 0f,
+                    if (enabledStates[2]) mixSettings.imagePercent.toFloat() else 0f,
+                    if (enabledStates[3]) mixSettings.articlePercent.toFloat() else 0f,
+                    if (enabledStates[4]) mixSettings.meshPercent.toFloat() else 0f
+                )
+                
+                if (enabled) {
+                    values[index] = 20f
                 }
-                scope.launch { viewModel.updateFeedMixSettings(newSettings) }
-                // Re-balance remaining active sliders
-                onValueChange(index, if (enabled) 20f else 0f)
+                
+                updateValues(values, enabledStates)
             }
 
             @Composable

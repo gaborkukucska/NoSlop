@@ -669,10 +669,13 @@ fun UnifiedFeedTab(
         val endPreload = minOf(unifiedItems.size - 1, pagerState.currentPage + 2)
         for (i in startPreload..endPreload) {
             if (i == pagerState.currentPage) continue
-            val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
-            if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context) ?: continue
+            val rawUrl = preloadData.first
+            val forcedUrl = preloadData.second
+            val urlToCheck = forcedUrl ?: rawUrl
+            if (urlToCheck.startsWith("file://")) continue // Prevent MediaCodec exhaustion
             // Launch in the broader scope so fast scrolling doesn't cancel the preload!
-            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
+            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
         }
     }
 
@@ -1099,7 +1102,8 @@ fun UnifiedFeedTab(
 
     if (isComposing) {
         var postContent by remember { mutableStateOf("") }
-        var selectedPrivacy by remember { mutableStateOf("public") }
+        var selectedPrivacy by remember { mutableStateOf("friends") }
+        var showPublicWarning by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
         var isProcessingAttachment by remember { mutableStateOf(false) }
         var compressionProgress by remember { mutableStateOf<Int?>(null) }
@@ -1220,6 +1224,27 @@ fun UnifiedFeedTab(
             }
         }
 
+        if (showPublicWarning) {
+            AlertDialog(
+                onDismissRequest = { showPublicWarning = false },
+                containerColor = SurfaceDark,
+                title = { Text("Public Broadcast".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
+                text = { Text("Are you sure? Public posts will be gossiped over the daisy-chained peers beyond your direct friends.".tr, color = TextLight) },
+                confirmButton = {
+                    Button(
+                        onClick = { 
+                            selectedPrivacy = "public"
+                            showPublicWarning = false 
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) { Text("Make Public".tr, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPublicWarning = false }) { Text("Cancel".tr, color = TextMuted) }
+                }
+            )
+        }
+
         if (!showCamera) {
             AlertDialog(
                 onDismissRequest = handleDismiss, containerColor = SurfaceDark,
@@ -1272,7 +1297,18 @@ fun UnifiedFeedTab(
                         Text("Privacy".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             listOf("public", "friends").forEach { priv ->
-                                FilterChip(selected = selectedPrivacy == priv, onClick = { selectedPrivacy = priv }, label = { Text(priv.replaceFirstChar { it.uppercase() }) }, colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted))
+                                FilterChip(
+                                    selected = selectedPrivacy == priv, 
+                                    onClick = { 
+                                        if (priv == "public" && selectedPrivacy != "public") {
+                                            showPublicWarning = true
+                                        } else {
+                                            selectedPrivacy = priv
+                                        }
+                                    }, 
+                                    label = { Text(priv.replaceFirstChar { it.uppercase() }) }, 
+                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
+                                )
                             }
                         }
                     }
@@ -1476,15 +1512,20 @@ fun UnifiedFeedTab(
     }
 }
 
-private fun getPreloadUrlFromItem(item: UnifiedItem, context: android.content.Context): String? {
+private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.Context): Pair<String, String?>? {
     return when (item) {
         is UnifiedItem.Feed -> {
             val mediaUrl = item.item.mediaUrl ?: return null
-            if (item.item.mediaType == "video" || item.item.mediaType == "audio") mediaUrl else null
+            if (item.item.mediaType == "video" || item.item.mediaType == "audio") Pair(mediaUrl, null) else null
         }
         is UnifiedItem.Mesh -> {
             val type = item.post.mediaType ?: item.post.clearnetMediaType
-            if (type == "video" || type == "audio") resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl else null
+            if (type == "video" || type == "audio") {
+                val resolvedUrl = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl ?: return null
+                val rawUrl = item.post.mediaUrl ?: item.post.clearnetUrl ?: return null
+                val forced = if (resolvedUrl != rawUrl) resolvedUrl else null
+                Pair(rawUrl, forced)
+            } else null
         }
         is UnifiedItem.Tutorial -> null
     }

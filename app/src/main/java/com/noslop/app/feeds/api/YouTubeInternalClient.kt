@@ -14,9 +14,6 @@ import kotlinx.coroutines.withContext
 /**
  * Client for YouTube's internal "InnerTube" API (youtubei/v1).
  * Uses a Cloudflare Worker proxy to bypass IP blocks over Tor.
- * 
- * Uses the ANDROID_TESTSUITE client identity which does not require
- * Proof-of-Origin tokens, unlike the regular ANDROID client.
  */
 object YouTubeInternalClient {
     private const val TAG = "YT_INTERNAL_API"
@@ -28,9 +25,6 @@ object YouTubeInternalClient {
     private const val CLIENT_VERSION = "2.20240717.01.00"
     
     private val gson = Gson()
-    // Always use clearnet for the proxy — the Worker itself provides privacy
-    // (no direct YouTube contact from the app). Routing through Tor would fail
-    // because Cloudflare blocks most Tor exit nodes.
     private val client get() = com.noslop.app.net.HttpClientProvider.rawClearnetClient
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -61,7 +55,7 @@ object YouTubeInternalClient {
                 .build()
 
             var response = client.newCall(request).execute()
-            if (response.code == 403 || response.code == 429) {
+            if (response.code == 403 || response.code == 429 || response.code == 400) {
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
@@ -84,8 +78,6 @@ object YouTubeInternalClient {
             
             val items = mutableListOf<FeedItem>()
             
-            // WEB response structure:
-            // contents.twoColumnSearchResultsRenderer.primaryContents.sectionListRenderer.contents[].itemSectionRenderer.contents[]
             val primaryContents = root.getAsJsonObject("contents")
                 ?.getAsJsonObject("twoColumnSearchResultsRenderer")
                 ?.getAsJsonObject("primaryContents")
@@ -103,17 +95,14 @@ object YouTubeInternalClient {
                         
                         val videoId = videoRenderer.get("videoId")?.asString ?: continue
                         
-                        // Title
                         val title = videoRenderer.getAsJsonObject("title")
                             ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
                             ?.get("text")?.asString ?: continue
                         
-                        // Author
                         val author = videoRenderer.getAsJsonObject("ownerText")
                             ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
                             ?.get("text")?.asString ?: "YouTube"
                         
-                        // Get best thumbnail
                         val thumbnails = videoRenderer.getAsJsonObject("thumbnail")?.getAsJsonArray("thumbnails")
                         val bestThumb = if (thumbnails != null && thumbnails.size() > 0) {
                             val thumbUrl = thumbnails.get(thumbnails.size() - 1).asJsonObject.get("url").asString
@@ -122,18 +111,15 @@ object YouTubeInternalClient {
                             "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
                         }
                         
-                        // Extract length text
                         val lengthText = videoRenderer.getAsJsonObject("lengthText")
                             ?.get("simpleText")?.asString
                             ?: videoRenderer.getAsJsonObject("lengthText")
                                 ?.getAsJsonArray("runs")?.get(0)?.asJsonObject
                                 ?.get("text")?.asString ?: "Video"
                             
-                        // Extract view count
                         val viewsText = videoRenderer.getAsJsonObject("viewCountText")
                             ?.get("simpleText")?.asString ?: ""
                             
-                        // Extract published time
                         val publishedTimeText = videoRenderer.getAsJsonObject("publishedTimeText")
                             ?.get("simpleText")?.asString
                             ?: videoRenderer.getAsJsonObject("publishedTimeText")
@@ -178,7 +164,7 @@ object YouTubeInternalClient {
     suspend fun searchChannels(query: String, maxResults: Int = 10): List<String> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
-            payload.addProperty("params", "EgIQAg==") // channels filter (raw base64, not URL-encoded)
+            payload.addProperty("params", "EgIQAg==") 
             
             val requestBody = payload.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()
@@ -188,7 +174,7 @@ object YouTubeInternalClient {
                 .build()
 
             var response = client.newCall(request).execute()
-            if (response.code == 403 || response.code == 429) {
+            if (response.code == 403 || response.code == 429 || response.code == 400) {
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
@@ -272,6 +258,11 @@ object YouTubeInternalClient {
 
     private fun extractUrlFromPlayerResponse(root: JsonObject): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
+        
+        // HLS streams are extremely reliable, never ciphered, and natively supported by ExoPlayer.
+        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
+        if (hlsUrl != null) return hlsUrl
+        
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
             val url = formats.get(formats.size() - 1).asJsonObject.get("url")?.asString
@@ -294,58 +285,79 @@ object YouTubeInternalClient {
             }
             if (bestUrl != null) return bestUrl
         }
-        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        return hlsUrl
+        return null
     }
 
     suspend fun resolveStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         val clients = listOf(
-            Pair("ANDROID_TESTSUITE", "1.9") to "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip",
-            Pair("IOS", "19.29.1") to "com.google.ios.youtube/19.29.1 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X)"
+            Pair("ANDROID", "21.02.35") to "com.google.android.youtube/21.02.35 (Linux; U; Android 14; en_US) gzip",
+            Pair("IOS", "19.29.1") to "com.google.ios.youtube/19.29.1 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X)",
+            Pair("TVHTML5", "7.20240501.00.00") to "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/63.0.3239.84 TV Safari/537.36"
         )
+        
         for ((clientInfo, userAgent) in clients) {
             try {
                 val (cName, cVer) = clientInfo
                 val payload = buildPlayerPayload(videoId, cName, cVer)
+                
+                // TVHTML5 requires signatureTimestamp in playbackContext to bypass PoToken checks
+                if (cName.startsWith("TVHTML5")) {
+                    val playbackContext = JsonObject()
+                    val contentPlaybackContext = JsonObject()
+                    contentPlaybackContext.addProperty("signatureTimestamp", (System.currentTimeMillis() / 1000 - 86400).toInt())
+                    playbackContext.add("contentPlaybackContext", contentPlaybackContext)
+                    payload.add("playbackContext", playbackContext)
+                }
+                
                 val requestBody = payload.toString().toRequestBody(jsonMediaType)
-                val request = Request.Builder()
+                val requestBuilder = Request.Builder()
                     .url("$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
                     .header("X-Proxy-Secret", PROXY_SECRET)
                     .header("Content-Type", "application/json")
                     .header("User-Agent", userAgent)
                     .post(requestBody)
-                    .build()
 
-                var response = client.newCall(request).execute()
-                if (response.code == 403 || response.code == 429) {
-                    Logger.warn(TAG, "Proxy blocked (403/429), trying direct to youtube.com for player...")
-                    val directReq = request.newBuilder()
+                // CRITICAL: Only send Origin and Referer for web-based clients.
+                // If we send web headers while masquerading as an Android/iOS native app,
+                // YouTube WAF detects the spoof and immediately returns 400 Bad Request.
+                if (!cName.startsWith("ANDROID") && !cName.startsWith("IOS")) {
+                    requestBuilder.header("Origin", "https://www.youtube.com")
+                    requestBuilder.header("Referer", "https://www.youtube.com/")
+                }
+
+                var response = client.newCall(requestBuilder.build()).execute()
+                if (response.code == 403 || response.code == 429 || response.code == 400) {
+                    Logger.warn(TAG, "Proxy blocked (${response.code}), trying direct to youtube.com for player...")
+                    val directReqBuilder = requestBuilder
                         .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
                         .removeHeader("X-Proxy-Secret")
-                        .header("Origin", "https://www.youtube.com")
-                        .header("Referer", "https://www.youtube.com/")
-                        .header("User-Agent", userAgent)
-                        .build()
+                        
                     response.close()
-                    response = client.newCall(directReq).execute()
+                    response = client.newCall(directReqBuilder.build()).execute()
                 }
                 
                 if (response.isSuccessful) {
                     val bodyStr = response.body?.string()
                     if (!bodyStr.isNullOrBlank()) {
                         val root = gson.fromJson(bodyStr, JsonObject::class.java)
-                        val url = extractUrlFromPlayerResponse(root)
-                        if (url != null) {
-                            Logger.info(TAG, "Resolved direct video stream using $cName for $videoId")
-                            return@withContext url
+                        val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
+                        
+                        if (playability == "OK") {
+                            val url = extractUrlFromPlayerResponse(root)
+                            if (url != null) {
+                                Logger.info(TAG, "Resolved direct video stream using $cName for $videoId")
+                                return@withContext url
+                            } else {
+                                Logger.warn(TAG, "No URL found in player response for $cName despite OK status")
+                            }
                         } else {
-                            val status = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
-                            Logger.warn(TAG, "No URL found in player response for $cName. Status: $status")
+                            Logger.warn(TAG, "Video unplayable for $cName. Status: $playability")
                         }
                     }
                 } else {
                     Logger.warn(TAG, "Player endpoint failed for $cName with HTTP ${response.code}: ${response.body?.string()?.take(500)}")
                 }
+                response.close()
             } catch (e: Exception) {
                 Logger.warn(TAG, "resolveStreamUrl failed for client ${clientInfo.first}: ${e.message}")
             }

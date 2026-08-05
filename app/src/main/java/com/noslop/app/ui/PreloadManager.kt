@@ -58,11 +58,15 @@ object PreloadManager {
      * calls from this coroutine and from VideoPlayer's own LaunchedEffect are safe.
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    suspend fun preWarm(context: Context, rawUrl: String) {
+    suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
         if (rawUrl.isBlank()) return
 
         val resolved = try {
-            resolveSource(rawUrl)
+            if (forcedResolvedUrl != null && forcedResolvedUrl != rawUrl) {
+                VideoSource.Direct(forcedResolvedUrl)
+            } else {
+                resolveSource(rawUrl)
+            }
         } catch (e: Exception) {
             Logger.warn("PRELOAD", "preWarm: resolveSource failed for $rawUrl: ${e.message}")
             return

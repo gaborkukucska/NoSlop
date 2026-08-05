@@ -2,6 +2,15 @@
 
 ## Completed Changes (2026-08-05) - Part 2
 
+### 8. UI Polish, Privacy Defaults & YouTube HLS Extraction (August 5, 2026)
+*   **YouTube PoToken & WAF Bypass**: Fixed stream extraction failures caused by YouTube's WAF rejecting native mobile clients (`ANDROID`, `IOS`) that were incorrectly sending web headers (`Origin`, `Referer`). Upgraded the Android client version to `21.02.35` and introduced the `TVHTML5` client with dynamic `signatureTimestamp` injection to bypass Proof of Origin (PoToken) checks.
+*   **HLS Stream Prioritization**: Instructed the YouTube parser to explicitly prioritize `hlsManifestUrl` un-ciphered streams for immediate, native ExoPlayer playback, avoiding the 3-second WebView fallback delay.
+*   **Preloader URL Keying**: Fixed cache-misses in `PreloadManager` by introducing `forcedResolvedUrl`. The preloader now correctly keys cached `ExoPlayer` instances by their raw identifiers while performing prewarm operations against the resolved proxy endpoints, ensuring instant handoff when the user swipes.
+*   **Broadcast Privacy Defaults**: Mesh broadcasts now default to "Friends Only" privacy. Selecting "Public" triggers an explicit warning dialog educating the user that public posts will be gossiped over daisy-chained peers beyond their direct friends.
+*   **UI/UX Polish**: 
+    *   Fixed the Content Ratio Mix layout in `FeedMixSettingsSection.kt` by making it vertically scrollable and resolved race conditions in the slider auto-balancing math.
+    *   Fixed the DM tutorial overlay (Step 3: Add new peer) getting cropped on smaller screens by dynamically calculating layout bounds and anchoring the spotlight to the right edge.
+
 ### 7. Feed Reliability, Search, and Media Preloading (August 5, 2026)
 *   **Search Engine Optimization**: Upgraded `PublicApiService` from sequential blocks to use a `supervisorScope` with `async/awaitAll`. Content fetching is now fully parallelized, preventing slow instances from bottlenecking the entire category search.
 *   **Infinite Search Feed**: Added infinite continuous scrolling functionality to `NoSlopViewModel.loadMoreFeedItems`. If the user exhausts their search results, the app automatically appends random modifiers (e.g., "latest", "interview", "podcast") and fires sequential background API requests to keep the feed scrolling indefinitely.
