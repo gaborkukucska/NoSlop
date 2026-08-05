@@ -433,7 +433,7 @@ private fun ExoVideoPlayer(
         hasError = false
         isBuffering = true
 
-        val preloaded = PreloadManager.claim(url)
+        val preloaded = PreloadManager.claim(rawUrl)
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = true

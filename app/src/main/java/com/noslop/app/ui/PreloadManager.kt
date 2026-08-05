@@ -18,7 +18,7 @@ object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
     // player for the currently-playing item (claimed via claim()) doesn't get
     // evicted before VideoPlayer has a chance to take it.
-    private const val MAX_PRELOAD = 3
+    private const val MAX_PRELOAD = 4
 
     // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
     // from the main thread: preWarm() is called via launch{} from a Composable
@@ -75,7 +75,7 @@ object PreloadManager {
                 // ExoPlayer keyed by the *resolved* URL, since that's the URL
                 // ExoVideoPlayer will call claim() with.
                 withContext(Dispatchers.Main) {
-                    warmUp(context, resolved.url)
+                    warmUp(context, rawUrl, resolved.url)
                 }
             }
             is VideoSource.Embed -> {
@@ -91,10 +91,10 @@ object PreloadManager {
     }
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    fun warmUp(context: Context, url: String) {
-        if (preloadedPlayers.containsKey(url)) return
+    fun warmUp(context: Context, rawUrl: String, resolvedUrl: String) {
+        if (preloadedPlayers.containsKey(rawUrl)) return
         
-        Logger.info("PRELOAD", "Warming up media: $url")
+        Logger.info("PRELOAD", "Warming up media: $rawUrl -> $resolvedUrl")
         
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.activeClearnetClient)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
@@ -122,23 +122,23 @@ object PreloadManager {
             .build()
             
         val mimeType = when {
-            url.endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
-            url.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
-            url.endsWith(".wav", ignoreCase = true) -> MimeTypes.AUDIO_WAV
-            url.endsWith(".m4a", ignoreCase = true) -> MimeTypes.AUDIO_MP4
-            url.endsWith(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
-            url.endsWith(".ogg", ignoreCase = true) -> MimeTypes.AUDIO_OGG
-            url.endsWith(".flac", ignoreCase = true) -> MimeTypes.AUDIO_FLAC
+            resolvedUrl.endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8
+            resolvedUrl.endsWith(".mp3", ignoreCase = true) -> MimeTypes.AUDIO_MPEG
+            resolvedUrl.endsWith(".wav", ignoreCase = true) -> MimeTypes.AUDIO_WAV
+            resolvedUrl.endsWith(".m4a", ignoreCase = true) -> MimeTypes.AUDIO_MP4
+            resolvedUrl.endsWith(".aac", ignoreCase = true) -> MimeTypes.AUDIO_AAC
+            resolvedUrl.endsWith(".ogg", ignoreCase = true) -> MimeTypes.AUDIO_OGG
+            resolvedUrl.endsWith(".flac", ignoreCase = true) -> MimeTypes.AUDIO_FLAC
             else -> MimeTypes.VIDEO_MP4
         }
-        val mediaItem = MediaItem.Builder().setUri(url).setMimeType(mimeType).build()
+        val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
         
         player.setMediaItem(mediaItem)
         player.prepare()
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
         
-        preloadedPlayers[url] = player
+        preloadedPlayers[rawUrl] = player
     }
 
     fun claim(url: String): ExoPlayer? {

@@ -824,7 +824,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun refreshFeeds() = feedRepository.refreshFeeds()
     suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
 
-    suspend fun searchCustomFeed(query: String, filterMode: String?) =
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
         feedRepository.searchCustomFeed(query, filterMode)
 
     // --- User Preferences for API Pipeline (delegated to PreferencesRepository) ---

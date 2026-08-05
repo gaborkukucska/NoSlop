@@ -59,7 +59,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
     } else if (selectedSettingsScreen == 6) {
         ReportIssueScreen(onBack = { selectedSettingsScreen = 0 })
     } else if (selectedSettingsScreen == 7) {
-        MeshFiltersScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+        MeshFiltersScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 5 })
     } else if (selectedSettingsScreen == 8) {
         ProfileScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {

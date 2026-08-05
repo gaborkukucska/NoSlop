@@ -49,7 +49,7 @@ object YouTubeInternalClient {
         return payload
     }
 
-    suspend fun searchVideos(query: String, maxResults: Int = 15): List<FeedItem> = withContext(Dispatchers.IO) {
+    suspend fun searchVideos(query: String, maxResults: Int = 30): List<FeedItem> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
             val requestBody = payload.toString().toRequestBody(jsonMediaType)
@@ -60,7 +60,19 @@ object YouTubeInternalClient {
                 .post(requestBody)
                 .build()
 
-            val response = client.newCall(request).execute()
+            var response = client.newCall(request).execute()
+            if (response.code == 403 || response.code == 429) {
+                val directReq = request.newBuilder()
+                    .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                    .removeHeader("X-Proxy-Secret")
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .build()
+                response.close()
+                response = client.newCall(directReq).execute()
+            }
+            
             val bodyStr = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 Logger.error(TAG, "Search failed: HTTP ${response.code}, Body: $bodyStr")
@@ -163,9 +175,6 @@ object YouTubeInternalClient {
         }
     }
 
-    /**
-     * Search for YouTube channels by name. Returns a list of channel names.
-     */
     suspend fun searchChannels(query: String, maxResults: Int = 10): List<String> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
@@ -178,7 +187,19 @@ object YouTubeInternalClient {
                 .post(requestBody)
                 .build()
 
-            val response = client.newCall(request).execute()
+            var response = client.newCall(request).execute()
+            if (response.code == 403 || response.code == 429) {
+                val directReq = request.newBuilder()
+                    .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                    .removeHeader("X-Proxy-Secret")
+                    .header("Origin", "https://www.youtube.com")
+                    .header("Referer", "https://www.youtube.com/")
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .build()
+                response.close()
+                response = client.newCall(directReq).execute()
+            }
+            
             val bodyStr = response.body?.string() ?: ""
             if (!response.isSuccessful) {
                 Logger.error(TAG, "Channel search failed: HTTP ${response.code}, Body: $bodyStr")
@@ -229,65 +250,109 @@ object YouTubeInternalClient {
         return searchVideos("trending latest")
     }
     
-    suspend fun resolveStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
-        try {
-            val payload = buildPayload("")
-            payload.addProperty("videoId", videoId)
-            
-            val requestBody = payload.toString().toRequestBody(jsonMediaType)
-            val request = Request.Builder()
-                .url("$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
-                .header("X-Proxy-Secret", PROXY_SECRET)
-                .header("Content-Type", "application/json")
-                .header("User-Agent", "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip")
-                .post(requestBody)
-                .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Logger.error(TAG, "Player failed: HTTP ${response.code}")
-                return@withContext null
-            }
-            
-            val bodyStr = response.body?.string() ?: return@withContext null
-            val root = gson.fromJson(bodyStr, JsonObject::class.java)
-            
-            // YouTube streaming URLs are inside streamingData -> formats or adaptiveFormats
-            val streamingData = root.getAsJsonObject("streamingData")
-            
-            // Try muxed formats first (audio + video together)
-            val formats = streamingData?.getAsJsonArray("formats")
-            if (formats != null && formats.size() > 0) {
-                // Return best muxed format (usually 720p)
-                return@withContext formats.get(formats.size() - 1).asJsonObject.get("url")?.asString
-            }
-            
-            // Fallback to adaptive (sometimes Android client only returns adaptive)
-            val adaptiveFormats = streamingData?.getAsJsonArray("adaptiveFormats")
-            if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-                var bestUrl: String? = null
-                var bestBitrate = 0
-                for (el in adaptiveFormats) {
-                    val obj = el.asJsonObject
-                    val mimeType = obj.get("mimeType")?.asString ?: continue
-                    if (!mimeType.startsWith("video/mp4")) continue
-                    
-                    val streamUrl = obj.get("url")?.asString ?: continue
-                    val bitrate = obj.get("bitrate")?.asInt ?: 0
-                    if (bitrate > bestBitrate) {
-                        bestBitrate = bitrate
-                        bestUrl = streamUrl
-                    }
-                }
-                return@withContext bestUrl
-            }
-            
-            return@withContext null
-        } catch (e: Exception) {
-            Logger.error(TAG, "resolveStreamUrl failed: ${e.message}")
-            return@withContext null
+    private fun buildPlayerPayload(videoId: String, clientNameStr: String, clientVerStr: String): JsonObject {
+        val payload = JsonObject()
+        val context = JsonObject()
+        val clientNode = JsonObject()
+        clientNode.addProperty("clientName", clientNameStr)
+        clientNode.addProperty("clientVersion", clientVerStr)
+        clientNode.addProperty("hl", "en")
+        clientNode.addProperty("gl", "US")
+        clientNode.addProperty("utcOffsetMinutes", -240)
+        if (clientNameStr.startsWith("ANDROID")) {
+            clientNode.addProperty("androidSdkVersion", 34)
         }
+        context.add("client", clientNode)
+        payload.add("context", context)
+        payload.addProperty("videoId", videoId)
+        payload.addProperty("racyCheckOk", true)
+        payload.addProperty("contentCheckOk", true)
+        return payload
     }
+
+    private fun extractUrlFromPlayerResponse(root: JsonObject): String? {
+        val streamingData = root.getAsJsonObject("streamingData") ?: return null
+        val formats = streamingData.getAsJsonArray("formats")
+        if (formats != null && formats.size() > 0) {
+            val url = formats.get(formats.size() - 1).asJsonObject.get("url")?.asString
+            if (url != null) return url
+        }
+        val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
+        if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
+            var bestUrl: String? = null
+            var bestBitrate = 0
+            for (el in adaptiveFormats) {
+                val obj = el.asJsonObject
+                val mimeType = obj.get("mimeType")?.asString ?: continue
+                if (!mimeType.startsWith("video/mp4")) continue
+                val streamUrl = obj.get("url")?.asString ?: continue
+                val bitrate = obj.get("bitrate")?.asInt ?: 0
+                if (bitrate > bestBitrate) {
+                    bestBitrate = bitrate
+                    bestUrl = streamUrl
+                }
+            }
+            if (bestUrl != null) return bestUrl
+        }
+        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
+        return hlsUrl
+    }
+
+    suspend fun resolveStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
+        val clients = listOf(
+            Pair("ANDROID_TESTSUITE", "1.9") to "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US) gzip",
+            Pair("IOS", "19.29.1") to "com.google.ios.youtube/19.29.1 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X)"
+        )
+        for ((clientInfo, userAgent) in clients) {
+            try {
+                val (cName, cVer) = clientInfo
+                val payload = buildPlayerPayload(videoId, cName, cVer)
+                val requestBody = payload.toString().toRequestBody(jsonMediaType)
+                val request = Request.Builder()
+                    .url("$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
+                    .header("X-Proxy-Secret", PROXY_SECRET)
+                    .header("Content-Type", "application/json")
+                    .header("User-Agent", userAgent)
+                    .post(requestBody)
+                    .build()
+
+                var response = client.newCall(request).execute()
+                if (response.code == 403 || response.code == 429) {
+                    Logger.warn(TAG, "Proxy blocked (403/429), trying direct to youtube.com for player...")
+                    val directReq = request.newBuilder()
+                        .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
+                        .removeHeader("X-Proxy-Secret")
+                        .header("Origin", "https://www.youtube.com")
+                        .header("Referer", "https://www.youtube.com/")
+                        .header("User-Agent", userAgent)
+                        .build()
+                    response.close()
+                    response = client.newCall(directReq).execute()
+                }
+                
+                if (response.isSuccessful) {
+                    val bodyStr = response.body?.string()
+                    if (!bodyStr.isNullOrBlank()) {
+                        val root = gson.fromJson(bodyStr, JsonObject::class.java)
+                        val url = extractUrlFromPlayerResponse(root)
+                        if (url != null) {
+                            Logger.info(TAG, "Resolved direct video stream using $cName for $videoId")
+                            return@withContext url
+                        } else {
+                            val status = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
+                            Logger.warn(TAG, "No URL found in player response for $cName. Status: $status")
+                        }
+                    }
+                } else {
+                    Logger.warn(TAG, "Player endpoint failed for $cName with HTTP ${response.code}: ${response.body?.string()?.take(500)}")
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "resolveStreamUrl failed for client ${clientInfo.first}: ${e.message}")
+            }
+        }
+        return@withContext null
+    }
+    
     private fun parseRelativeTime(publishedTimeText: String?): Long {
         if (publishedTimeText == null) return System.currentTimeMillis()
         val now = System.currentTimeMillis()
@@ -310,9 +375,7 @@ object YouTubeInternalClient {
                     return now - (amount * multiplier)
                 }
             }
-        } catch (e: Exception) {
-            // fallback to current time
-        }
+        } catch (e: Exception) {}
         return now
     }
 }

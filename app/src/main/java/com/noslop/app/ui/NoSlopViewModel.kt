@@ -153,6 +153,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var isSearchModeActive = false
     private var savedFeedItemId: String? = null
     private val sessionLoadedIds = mutableSetOf<String>()
+    private var lastSearchResultIds = emptySet<String>()
+    private var searchExhaustedCount = 0
 
     fun saveFeedPosition(itemId: String) {
         if (_isRefreshingFeeds.value) return
@@ -162,7 +164,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val currentIndex = _unifiedFeed.value.indexOfFirst { it.id == itemId }
             if (currentIndex >= 0) {
                 val startIndex = maxOf(0, currentIndex - 3)
-                cachedDefaultFeed = _unifiedFeed.value.subList(startIndex, currentIndex + 1)
+                cachedDefaultFeed = _unifiedFeed.value.subList(startIndex, _unifiedFeed.value.size)
             } else {
                 cachedDefaultFeed = _unifiedFeed.value.toList()
             }
@@ -449,10 +451,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _isContactsCollapsed.value = repository.getAppSetting("dms_contacts_collapsed") == "true"
             _isTemporaryContactsCollapsed.value = repository.getAppSetting("temporary_contacts_collapsed") == "true"
         }
-        viewModelScope.launch { refreshExclusionCaches() }
-
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
         viewModelScope.launch {
+            refreshExclusionCaches()
             combine(feedItems, meshPosts, localKeys) { feeds, meshes, keys ->
                 Triple(feeds, meshes, keys)
             }.collect { (feeds, meshes, keys) ->
@@ -516,16 +517,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
-                
                 isSearchModeActive = true
+                searchExhaustedCount = 0
                 activeSearchQuery = query
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
-                repository.searchCustomFeed(query, filterMode)
+                lastSearchResultIds = repository.searchCustomFeed(query, filterMode).toSet()
 
-                // Give Room's Flow a moment to emit the newly-inserted items
-                // into allFeeds, then explicitly populate the feed.
-                kotlinx.coroutines.delay(300)
+                var waitCount = 0
+                while (waitCount < 15) {
+                    if (allFeeds.any { it.id in lastSearchResultIds }) break
+                    kotlinx.coroutines.delay(100)
+                    waitCount++
+                }
                 loadMoreFeedItems()
             } catch (e: Exception) {
                 Logger.error("VM", "Custom search exception: ${e.message}")
@@ -620,14 +624,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (isSearchActive) {
             val terms = activeSearchQuery.lowercase().split("\\s+".toRegex()).filter { it.isNotEmpty() }
             unseenFeeds = unseenFeeds.filter { item ->
-                terms.all { term ->
+                item.id in lastSearchResultIds || terms.any { term ->
                     item.title.lowercase().contains(term) || 
                     item.excerpt?.lowercase()?.contains(term) == true || 
                     item.author?.lowercase()?.contains(term) == true
                 }
             }
             unseenMeshes = unseenMeshes.filter { item ->
-                terms.all { term ->
+                terms.any { term ->
                     item.content.lowercase().contains(term) || 
                     item.clearnetTitle?.lowercase()?.contains(term) == true || 
                     item.authorHandle.lowercase().contains(term)
@@ -654,9 +658,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // In feed-centric modes, also exclude viewed items and swiped mesh posts
         // so the feed feels fresh. NOT applied in Mesh / My Content / History modes
         // where the user expects to see everything.
-        if (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
+        if (!isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
             actualFilter == "Videos" || actualFilter == "Audio" || 
-            actualFilter == "Images" || actualFilter == "Articles") {
+            actualFilter == "Images" || actualFilter == "Articles")) {
             val hiddenIds = cachedViewedIds + cachedExcludedIds
             if (hiddenIds.isNotEmpty()) {
                 unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
@@ -676,9 +680,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             unseenMeshes = emptyList() 
         }
 
-        if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) return
+        if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) {
+            if (isSearchActive && searchExhaustedCount < 3) {
+                searchExhaustedCount++
+                val modifiers = listOf("review", "latest", "update", "new", "guide", "analysis", "explained", "interview", "podcast", "vlog")
+                val randomMod = modifiers.random()
+                val newQuery = "$activeSearchQuery $randomMod"
+                Logger.info("VM", "Search results exhausted. Fetching more with query: $newQuery")
+                viewModelScope.launch {
+                    val newIds = repository.searchCustomFeed(newQuery, actualFilter)
+                    if (newIds.isNotEmpty()) {
+                        lastSearchResultIds = lastSearchResultIds + newIds
+                    }
+                    loadMoreFeedItems(actualFilter, isInjection = false)
+                }
+            }
+            return
+        }
 
-        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && actualFilter != "History" && actualFilter != "Liked" && !actualFilter.startsWith("Author:")
+        val isSpecificFilter = actualFilter != null && actualFilter != "Live Feed" && actualFilter != "Random" && !actualFilter.startsWith("Author:")
 
         val creators = _creatorKeywords.value.split(",").map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         val isCreatorMatch = { item: FeedItem ->
@@ -692,7 +712,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        val specificNeeded = if (isSearchActive) 15 else if (isInitialLoad) 3 else 10
+        val specificNeeded = if (isSearchActive) 30 else if (isInitialLoad) 3 else 10
 
         if (isSpecificFilter || isSearchActive) {
             val specificFeeds = unseenFeeds.filter {
@@ -702,6 +722,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     "Audio" -> it.mediaType?.contains("audio") == true
                     "Images" -> it.mediaType?.contains("image") == true
                     "Articles" -> it.mediaType.isNullOrEmpty()
+                    "History" -> true
+                    "Liked" -> true
                     else -> false
                 }
             }
@@ -714,6 +736,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     "Audio" -> (it.mediaType == "audio" || it.clearnetMediaType == "audio")
                     "Images" -> (it.mediaType == "image" || it.clearnetMediaType == "image")
                     "Articles" -> (it.mediaType.isNullOrEmpty() && it.clearnetMediaType.isNullOrEmpty())
+                    "History" -> true
+                    "Liked" -> true
                     else -> !isSpecificFilter
                 }
             }
@@ -724,15 +748,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
                 batch.addAll(allMatches.sortedByDescending { it.timestamp }.take(specificNeeded))
             } else {
-                val sortedSpecificFeeds = specificFeeds.partition(isCreatorMatch).let { (c, o) ->
-                    c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
-                }
+                if (actualFilter == "History") {
+                    val viewedIdsList = viewedHistoryIds.value.toList()
+                    val allHistoryItems = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
+                    val sortedHistory = allHistoryItems.sortedBy { viewedIdsList.indexOf(it.id) }
+                    batch.addAll(sortedHistory.take(specificNeeded))
+                } else if (actualFilter == "Liked") {
+                    val sortedLiked = specificFeeds.sortedByDescending { it.publishedAt }.map { UnifiedItem.Feed(it) }
+                    batch.addAll(sortedLiked.take(specificNeeded))
+                } else {
+                    val sortedSpecificFeeds = specificFeeds.partition(isCreatorMatch).let { (c, o) ->
+                        c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
+                    }
 
-                batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
-                batch.addAll(specificMeshes.sortedByDescending { it.timestamp }.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
-                
-                if (isInitialLoad && actualFilter != "Mesh" && actualFilter != "My Content" && actualFilter != "History" && actualFilter != "Liked") {
-                    batch.shuffle()
+                    batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
+                    batch.addAll(specificMeshes.sortedByDescending { it.timestamp }.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
+                    
+                    if (isInitialLoad && actualFilter != "Mesh" && actualFilter != "My Content") {
+                        batch.shuffle()
+                    }
                 }
             }
             

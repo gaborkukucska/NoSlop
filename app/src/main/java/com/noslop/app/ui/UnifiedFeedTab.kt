@@ -575,7 +575,6 @@ fun UnifiedFeedTab(
     }
 
     val pagerState = rememberPagerState { unifiedItems.size }
-    val preWarmedUrls = remember { mutableSetOf<String>() }
     val preloadScope = rememberCoroutineScope()
 
     // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
@@ -664,17 +663,16 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage, filterMode) {
-        if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
-        val preloadAheadCount = 2
-        val lookAheadLimit = minOf(pagerState.settledPage + 1 + preloadAheadCount, unifiedItems.size)
-        for (i in (pagerState.settledPage + 1) until lookAheadLimit) {
+    LaunchedEffect(pagerState.currentPage, filterMode) {
+        if (pagerState.currentPage !in unifiedItems.indices) return@LaunchedEffect
+        val startPreload = maxOf(0, pagerState.currentPage - 1)
+        val endPreload = minOf(unifiedItems.size - 1, pagerState.currentPage + 2)
+        for (i in startPreload..endPreload) {
+            if (i == pagerState.currentPage) continue
             val preloadUrl = getPreloadUrlFromItem(unifiedItems[i], context) ?: continue
             if (preloadUrl.startsWith("file://")) continue // Prevent MediaCodec exhaustion
-            if (preWarmedUrls.add(preloadUrl)) {
-                // Launch in the broader scope so fast scrolling doesn't cancel the preload!
-                preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
-            }
+            // Launch in the broader scope so fast scrolling doesn't cancel the preload!
+            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, preloadUrl) }
         }
     }
 

@@ -296,7 +296,7 @@ fun ContentPreferencesScreen(
                     isSearchingChannels = true
                     kotlinx.coroutines.delay(500) // Increase debounce to 500ms
                     try {
-                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(3) }
+                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(10) }
                         if (ytChannels.isNotEmpty()) {
                             searchedChannels = ytChannels
                         } else {
@@ -311,7 +311,7 @@ fun ContentPreferencesScreen(
                                 com.noslop.app.feeds.api.RedditApiClient.searchReddit(channelSearchQuery, "relevance")
                                     .mapNotNull { it.author }
                                     .distinct()
-                                    .take(3)
+                                    .take(10)
                             }
                             searchedChannels = fallback
                         } catch (e2: kotlinx.coroutines.CancellationException) {

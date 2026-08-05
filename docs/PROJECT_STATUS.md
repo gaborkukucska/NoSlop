@@ -1,6 +1,16 @@
 # Project Status - NoSlop
 
-## Completed Changes (2026-08-02) - Part 2
+## Completed Changes (2026-08-05) - Part 2
+
+### 7. Feed Reliability, Search, and Media Preloading (August 5, 2026)
+*   **Search Engine Optimization**: Upgraded `PublicApiService` from sequential blocks to use a `supervisorScope` with `async/awaitAll`. Content fetching is now fully parallelized, preventing slow instances from bottlenecking the entire category search.
+*   **Infinite Search Feed**: Added infinite continuous scrolling functionality to `NoSlopViewModel.loadMoreFeedItems`. If the user exhausts their search results, the app automatically appends random modifiers (e.g., "latest", "interview", "podcast") and fires sequential background API requests to keep the feed scrolling indefinitely.
+*   **Search Yields & Exclusions**: Fixed a strict substring matching rule that discarded valid API search results locally. Additionally, active Search feeds now explicitly bypass the `viewedHistoryIds` cache, ensuring that videos you've already seen are successfully shown when you explicitly search for them.
+*   **YouTube IP Proxy Block Mitigation**: Added dynamic `403 Forbidden` detection to the Cloudflare Worker proxy inside `YouTubeInternalClient.kt`. If Google blocks the proxy, NoSlop instantly intercepts the failure and silently falls back to pinging `youtube.com` directly using `ANDROID_TESTSUITE` and `IOS` user-agents to successfully harvest raw `.mp4`/`.m3u8` payloads without a proxy.
+*   **Instant Playback & Preload Fixes**: Fixed a severe cache-thrashing bug in `PreloadManager` where `MAX_PRELOAD` sizing was evicting `ExoPlayer` instances immediately. Preloading now correctly tracks `rawUrl` vs `resolvedUrl` arrays to accurately buffer upcoming videos while swiping in `UnifiedFeedTab`.
+*   **History Feed Sorting**: Fixed a bug where the `History` and `Liked` lists were incorrectly applying "Smart Interleaving" logic. They now bypass the interleavers and perfectly respect exact chronological list sorting.
+
+
 
 ### 6. Contact Management & Peer Deletion
 *   **Zombie Connection Guard**: Fixed a bug where deleting a peer could result in them being silently resurrected as a pending request. `GossipService` now maintains a `recentlyDeletedPeers` cache (7-day TTL), and `HandshakePacketHandler` strictly rejects any incoming `CONNECTION_REQUEST` from these keys, closing the 1-hour vulnerability window.

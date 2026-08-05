@@ -203,7 +203,7 @@ class FeedRepository(
         kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
 
         // --- Phase 2: Background Sync ---
-        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()
 
         var rssIndex = 1
         for (source in rssSources) {
@@ -327,8 +327,8 @@ class FeedRepository(
     }
 
     /** Custom Feed Search Pipeline — used by manual search and the per-sync creator sampling. */
-    suspend fun searchCustomFeed(query: String, filterMode: String?) = withContext(Dispatchers.IO) {
-        if (!isAggregatorEnabled()) return@withContext
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext emptyList()
         Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
 
         try {
@@ -367,11 +367,13 @@ class FeedRepository(
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)
                     Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '$query'")
+                    return@withContext filteredApiItems.map { it.id }
                 }
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Search pipeline failed for query '$query'", e.message)
         }
+        return@withContext emptyList()
     }
 
     /** Check if the clearnet aggregator is enabled (true by default). */

@@ -5,14 +5,18 @@ import com.noslop.app.data.ApiKeyRepository
 import com.noslop.app.data.FeedItem
 import com.noslop.app.debug.Logger
 import com.noslop.app.feeds.api.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.Dispatchers
 
 /**
  * Orchestrator that maps user interest categories to API client calls.
  * Sits alongside the existing RSS pipeline — called after RSS sync.
  *
+ * All API calls within a category are executed concurrently via async/awaitAll.
  * No-auth APIs (Reddit, Internet Archive, NASA) work out of the box.
- * Key-requiring APIs (YouTube, Pexels, NewsAPI, Guardian, Vimeo, Podcast Index)
- * are optional — skipped silently if the user hasn't configured a key.
+ * Key-requiring APIs are optional — skipped silently if the user hasn't configured a key.
  */
 object PublicApiService {
 
@@ -24,120 +28,123 @@ object PublicApiService {
         apiKeyRepo: ApiKeyRepository,
         activeApiSourceIds: List<String>,
         language: String = "en"
-    ): List<FeedItem> {
-        val items = mutableListOf<FeedItem>()
+    ): List<FeedItem> = supervisorScope {
         val query = if (userKeywords.isNotEmpty()) userKeywords.joinToString(" ") else category
+        val deferredItems = mutableListOf<kotlinx.coroutines.Deferred<List<FeedItem>>>()
+
+        fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>) {
+            if (activeApiSourceIds.contains(sourceId)) {
+                deferredItems.add(async(Dispatchers.IO) {
+                    try {
+                        block()
+                    } catch (e: Exception) {
+                        Logger.error(TAG, "API call failed for $sourceId", e.message)
+                        emptyList()
+                    }
+                })
+            }
+        }
 
         try {
             when (category) {
                 "Technology", "Open Source", "Self-Hosting" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, "technology", apiKeyRepo, language = language) }
-                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchArticles(query, "technology", apiKeyRepo) }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("technology", "hot") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, "technology", apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, "technology", apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "hot") }
                 }
                 "Privacy & Security" -> {
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("privacy", "hot") }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("netsec", "hot") }
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles("cybersecurity privacy", null, apiKeyRepo, language = language) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("privacy", "hot") }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("netsec", "hot") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles("cybersecurity privacy", null, apiKeyRepo, language = language) }
                 }
                 "Science" -> {
-                    items += safeCall("api-nasa-apod", activeApiSourceIds) { NasaApiClient.fetchAPOD(apiKeyRepo) }
-                    items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query science $language") }
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.getTopHeadlines("science", apiKeyRepo, language = language) }
-                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchSection("science", apiKeyRepo) }
+                    fetchAsync("api-nasa-apod") { NasaApiClient.fetchAPOD(apiKeyRepo) }
+                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query science") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.getTopHeadlines("science", apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchSection("science", apiKeyRepo) }
                 }
                 "World News" -> {
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.getTopHeadlines("general", apiKeyRepo, language = language) }
-                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchSection("world", apiKeyRepo) }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("worldnews", "hot") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.getTopHeadlines("general", apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchSection("world", apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("worldnews", "hot") }
                 }
                 "Video Platforms" -> {
-                    items += safeCall("api-yt-trending", activeApiSourceIds) { YouTubeInternalClient.getTrendingVideos() }
-                    items += safeCall("api-vimeo-featured", activeApiSourceIds) { VimeoApiClient.fetchFeatured(apiKeyRepo) }
-                    items += safeCall("api-archive-video", activeApiSourceIds) { InternetArchiveClient.getPopularVideos() }
+                    fetchAsync("api-yt-trending") { YouTubeInternalClient.getTrendingVideos() }
+                    fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                    fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
-                    items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
-                    items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query music $language") }
-                    items += safeCall("api-pexels-video", activeApiSourceIds) { PexelsApiClient.searchVideos(query, apiKeyRepo) }
-                    items += safeCall("api-archive-audio", activeApiSourceIds) { InternetArchiveClient.searchAudio(query) }
+                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
+                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music") }
+                    fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
+                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
                 }
                 "Art", "Photography" -> {
-                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
-                    items += safeCall("api-vimeo-featured", activeApiSourceIds) { VimeoApiClient.fetchFeatured(apiKeyRepo) }
-                    items += safeCall("api-wikimedia-featured", activeApiSourceIds) { WikimediaApiClient.fetchFeaturedPictures() }
+                    fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
+                    fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
                 }
                 "Health" -> {
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.getTopHeadlines("health", apiKeyRepo, language = language) }
-                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchSection("society", apiKeyRepo) }
-                    items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo, language = language) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.getTopHeadlines("health", apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchSection("society", apiKeyRepo) }
+                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo, language = language) }
                 }
                 "Gaming" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query gaming $language") }
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles("gaming", null, apiKeyRepo, language = language) }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("gaming", "hot") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query gaming") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles("gaming", null, apiKeyRepo, language = language) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("gaming", "hot") }
                 }
                 "Lifestyle" -> {
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
-                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.getCuratedPhotos(apiKeyRepo) }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("LifeProTips", "hot") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    fetchAsync("api-pexels-photo") { PexelsApiClient.getCuratedPhotos(apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("LifeProTips", "hot") }
                 }
                 "Automotive" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query cars automotive $language") }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("cars", "hot") }
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo, language = language) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query cars automotive") }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("cars", "hot") }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo, language = language) }
                 }
                 "Reddit" -> {
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("popular", "hot") }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("popular", "hot") }
                 }
                 "Social Clearnet" -> {
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.fetchSubreddit("technology", "new") }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
                 "Search Videos" -> {
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
                 }
                 "Search Audio" -> {
-                    items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
-                    items += safeCall("api-podcast-trending", activeApiSourceIds) { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    items += safeCall("api-archive-audio", activeApiSourceIds) { InternetArchiveClient.searchAudio(query) }
+                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
+                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
+                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
                 }
                 "Search Images" -> {
-                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    items += safeCall("api-nasa-library", activeApiSourceIds) { NasaApiClient.searchImageLibrary(query) }
+                    fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
                 }
                 "Search Articles" -> {
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
-                    items += safeCall("api-guardian", activeApiSourceIds) { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
                 }
                 else -> {
-                    items += safeCall("api-newsapi-headlines", activeApiSourceIds) { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
-                    items += safeCall("api-yt-search", activeApiSourceIds) { YouTubeInternalClient.searchVideos("$query $language") }
-                    items += safeCall("api-jamendo-music", activeApiSourceIds) { JamendoApiClient.searchTracks(query) }
-                    items += safeCall("api-pexels-photo", activeApiSourceIds) { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    items += safeCall("api-reddit-hot", activeApiSourceIds) { RedditApiClient.searchReddit(query) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
+                    fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                 }
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Error in category dispatch for '$category'", e.message)
         }
 
+        val items = deferredItems.awaitAll().flatten()
         val deduplicated = items.distinctBy { it.id }
         Logger.info(TAG, "Category '$category': ${deduplicated.size} items (${items.size} before dedup)")
-        return deduplicated
-    }
-
-    /** Wraps each API call so one failure doesn't block others */
-    private inline fun safeCall(sourceId: String, activeApiSourceIds: List<String>, block: () -> List<FeedItem>): List<FeedItem> {
-        if (!activeApiSourceIds.contains(sourceId)) return emptyList()
-        return try {
-            block()
-        } catch (e: Exception) {
-            Logger.error(TAG, "API call failed in safeCall for $sourceId", e.message)
-            emptyList()
-        }
+        deduplicated
     }
 }
