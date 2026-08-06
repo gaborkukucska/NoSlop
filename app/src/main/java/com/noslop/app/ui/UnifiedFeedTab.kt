@@ -937,8 +937,10 @@ fun UnifiedFeedTab(
                                     if (searchResultsActive) {
                                         searchResultsActive = false
                                         viewModel.clearSearchAndRestoreFeed()
+                                    } else {
+                                        // Only sync filter mode if not clearing search
+                                        viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
                                     }
-                                    viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
                                 }
                                 showSearchModal = false
                             }
@@ -1093,8 +1095,10 @@ fun UnifiedFeedTab(
                             if (searchResultsActive) {
                                 searchResultsActive = false
                                 viewModel.clearSearchAndRestoreFeed()
+                            } else {
+                                // Only sync filter mode if not clearing search
+                                viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
                             }
-                            viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
                         }
                         showSearchModal = false 
                     },
