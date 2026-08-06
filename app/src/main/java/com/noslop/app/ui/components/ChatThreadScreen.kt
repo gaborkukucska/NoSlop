@@ -143,7 +143,7 @@ fun ChatThreadScreen(
         
         if (type == "video" && file.length() > 20 * 1024 * 1024) {
             val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}")
-            val quality = viewModel.mediaSettings.value.mediaQuality
+            val quality = viewModel.mediaSettings.value.videoQuality
                                 com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
                 when(state) {
                     is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
@@ -167,9 +167,10 @@ fun ChatThreadScreen(
             try {
                 val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                 if (bitmap != null) {
-                    val quality = viewModel.mediaSettings.value.mediaQuality
-                                                val maxDim = when(quality) { "low" -> 640; "medium" -> 960; else -> 1280 }
-                                                val compressQuality = when(quality) { "low" -> 60; "medium" -> 75; else -> 85 }
+                    val quality = viewModel.mediaSettings.value.videoQuality
+                                                val imageQuality = viewModel.mediaSettings.value.imageQuality
+                                                val maxDim = when(imageQuality) { "low" -> 640; "medium" -> 960; else -> 1280 }
+                                                val compressQuality = when(imageQuality) { "low" -> 60; "medium" -> 75; else -> 85 }
                     val width = bitmap.width
                     val height = bitmap.height
                     var newWidth = width

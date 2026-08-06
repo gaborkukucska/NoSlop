@@ -41,11 +41,24 @@ object RedditApiClient {
     suspend fun searchReddit(
         query: String,
         sourceId: String = "api-reddit-hot",
-        limit: Int = 25
+        limit: Int = 100,
+        requiredMediaType: String? = null
     ): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
         val url = "https://www.reddit.com/search.json?q=$encodedQuery&sort=relevance&limit=$limit&raw_json=1"
-        return fetchAndParse(url, sourceId)
+        val items = fetchAndParse(url, sourceId)
+        
+        if (requiredMediaType != null) {
+            val filtered = items.filter { 
+                if (requiredMediaType == "article") {
+                    it.mediaType == null || it.mediaType == "article"
+                } else {
+                    it.mediaType == requiredMediaType 
+                }
+            }
+            return filtered.take(25)
+        }
+        return items.take(25)
     }
 
     private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> {

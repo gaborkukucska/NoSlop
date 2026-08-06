@@ -403,14 +403,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     retryCount = 0
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {
-                    if (retryCount < 3) {
-                        retryCount++
-                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor ($retryCount/3)...")
-                        kotlinx.coroutines.delay(5000)
-                        startTor()
-                    } else {
-                        com.noslop.app.debug.Logger.error("VM", "Tor FAILED permanently after 3 retries.")
-                    }
+                    com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor...")
+                    kotlinx.coroutines.delay(10000)
+                    startTor()
                 }
             }
         }
@@ -522,15 +517,23 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 activeSearchQuery = query
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
-                lastSearchResultIds = repository.searchCustomFeed(query, filterMode).toSet()
+                
+                val isLocalOnly = filterMode in listOf("History", "Liked", "My Content", "Mesh")
+                if (!isLocalOnly) {
+                    lastSearchResultIds = repository.searchCustomFeed(query, filterMode).toSet()
 
-                var waitCount = 0
-                while (waitCount < 15) {
-                    if (allFeeds.any { it.id in lastSearchResultIds }) break
-                    kotlinx.coroutines.delay(100)
-                    waitCount++
+                    var waitCount = 0
+                    while (waitCount < 15) {
+                        if (allFeeds.any { it.id in lastSearchResultIds }) break
+                        kotlinx.coroutines.delay(100)
+                        waitCount++
+                    }
+                } else {
+                    lastSearchResultIds = emptySet()
                 }
-                loadMoreFeedItems()
+                
+                currentFilterMode = filterMode ?: "Live Feed"
+                loadMoreFeedItems(filterMode)
             } catch (e: Exception) {
                 Logger.error("VM", "Custom search exception: ${e.message}")
             } finally {
@@ -618,7 +621,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val isSearchActive = activeSearchQuery.isNotBlank()
         
         val exclusionIds = currentIds + sessionLoadedIds
-        var unseenFeeds = allFeeds.filter { it.id !in exclusionIds }
+        
+        // DEDUPLICATION: Prevent articles/videos with the exact same title from reappearing
+        val readTitles = allFeeds.filter { it.isRead || it.id in cachedViewedIds || it.id in cachedExcludedIds }
+            .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
+            .toSet()
+
+        var unseenFeeds = allFeeds.filter { 
+            it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles 
+        }
         var unseenMeshes = allMeshes.filter { it.id !in exclusionIds }
 
         if (isSearchActive) {
@@ -683,16 +694,30 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (unseenFeeds.isEmpty() && unseenMeshes.isEmpty()) {
             if (isSearchActive && searchExhaustedCount < 3) {
                 searchExhaustedCount++
-                val modifiers = listOf("review", "latest", "update", "new", "guide", "analysis", "explained", "interview", "podcast", "vlog")
+                val modifiers = when (actualFilter) {
+                    "Images" -> listOf("photo", "picture", "art", "gallery", "wallpaper", "high res")
+                    "Videos" -> listOf("video", "clip", "watch", "trailer", "vlog", "gameplay")
+                    "Audio" -> listOf("podcast", "music", "song", "audio", "track", "interview")
+                    "Articles" -> listOf("article", "news", "blog", "post", "story", "read")
+                    else -> listOf("review", "latest", "update", "new", "guide", "analysis", "explained", "interview", "podcast", "vlog")
+                }
                 val randomMod = modifiers.random()
                 val newQuery = "$activeSearchQuery $randomMod"
                 Logger.info("VM", "Search results exhausted. Fetching more with query: $newQuery")
                 viewModelScope.launch {
-                    val newIds = repository.searchCustomFeed(newQuery, actualFilter)
-                    if (newIds.isNotEmpty()) {
-                        lastSearchResultIds = lastSearchResultIds + newIds
+                    _isRefreshingFeeds.value = true
+                    try {
+                        val isLocalOnly = actualFilter in listOf("History", "Liked", "My Content", "Mesh")
+                        if (!isLocalOnly) {
+                            val newIds = repository.searchCustomFeed(newQuery, actualFilter)
+                            if (newIds.isNotEmpty()) {
+                                lastSearchResultIds = lastSearchResultIds + newIds
+                            }
+                        }
+                        loadMoreFeedItems(actualFilter, isInjection = false)
+                    } finally {
+                        _isRefreshingFeeds.value = false
                     }
-                    loadMoreFeedItems(actualFilter, isInjection = false)
                 }
             }
             return
