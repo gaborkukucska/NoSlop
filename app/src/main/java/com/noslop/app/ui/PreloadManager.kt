@@ -13,6 +13,11 @@ import com.noslop.app.ui.components.VideoSource
 import com.noslop.app.ui.components.resolveSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
@@ -94,10 +99,29 @@ object PreloadManager {
         }
     }
 
+    private val preloadScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private data class PreloadTask(val context: Context, val rawUrl: String, val resolvedUrl: String)
+    private val preloadQueue = Channel<PreloadTask>(Channel.UNLIMITED)
+
+    init {
+        preloadScope.launch {
+            for (task in preloadQueue) {
+                if (!preloadedPlayers.containsKey(task.rawUrl)) {
+                    doWarmUp(task.context, task.rawUrl, task.resolvedUrl)
+                    delay(800L) // Stagger initializations by 800ms to prevent MediaCodec choking!
+                }
+            }
+        }
+    }
+
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun warmUp(context: Context, rawUrl: String, resolvedUrl: String) {
         if (preloadedPlayers.containsKey(rawUrl)) return
-        
+        preloadQueue.trySend(PreloadTask(context, rawUrl, resolvedUrl))
+    }
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun doWarmUp(context: Context, rawUrl: String, resolvedUrl: String) {
         Logger.info("PRELOAD", "Warming up media: $rawUrl -> $resolvedUrl")
         
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.activeClearnetClient)

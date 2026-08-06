@@ -116,19 +116,24 @@ object PublicApiService {
                 }
                 "Search Videos" -> {
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
                 }
                 "Search Audio" -> {
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                 }
                 "Search Images" -> {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
                 }
                 "Search Articles" -> {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                 }
                 else -> {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }

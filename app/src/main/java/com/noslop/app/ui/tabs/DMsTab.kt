@@ -188,7 +188,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 }
             }
 
-            TorWarningPanel(viewModel)
 
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
             val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable }

@@ -47,24 +47,26 @@ internal fun isSourceCached(url: String): Boolean = sourceCache.containsKey(url)
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
 internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false, context: android.content.Context): VideoSource {
+    val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+    val cacheKey = "$rawUrl||$quality"
+
     if (!forceRefresh) {
-        sourceCache[rawUrl]?.let { return it }
+        sourceCache[cacheKey]?.let { return it }
     }
 
-    val mutex = resolveMutexes.computeIfAbsent(rawUrl) { kotlinx.coroutines.sync.Mutex() }
+    val mutex = resolveMutexes.computeIfAbsent(cacheKey) { kotlinx.coroutines.sync.Mutex() }
     
     return mutex.withLock {
         if (!forceRefresh) {
-            sourceCache[rawUrl]?.let { return@withLock it }
+            sourceCache[cacheKey]?.let { return@withLock it }
         }
         
         try {
-            val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.mediaQuality
             val result = doResolve(rawUrl, quality)
-            sourceCache[rawUrl] = result
+            sourceCache[cacheKey] = result
             result
         } finally {
-            resolveMutexes.remove(rawUrl)
+            resolveMutexes.remove(cacheKey)
         }
     }
 }

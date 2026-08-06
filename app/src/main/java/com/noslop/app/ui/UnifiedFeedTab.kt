@@ -490,13 +490,7 @@ fun UnifiedFeedTab(
     var searchResultsActive by remember { mutableStateOf(false) }
     var forceScrollToTop by remember { mutableStateOf(false) }
 
-    val applySearchQuery: (String) -> Unit = { newQuery ->
-        if (newQuery.isBlank() && searchResultsActive) {
-            searchResultsActive = false
-            viewModel.clearSearchAndRestoreFeed()
-        }
-        searchQuery = newQuery
-    }
+
 
     val activeFilterLabel = remember(filterMode, searchQuery) {
         buildString {
@@ -841,7 +835,13 @@ fun UnifiedFeedTab(
                                     .size(14.dp)
                                     .clickable {
                                         filterMode = "Live Feed"
-                                        applySearchQuery("")
+                                        searchQuery = ""
+                                        if (searchResultsActive) {
+                                            searchResultsActive = false
+                                            viewModel.clearSearchAndRestoreFeed()
+                                        } else {
+                                            viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                        }
                                     }
                             )
                         }
@@ -922,46 +922,30 @@ fun UnifiedFeedTab(
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
                         keyboardActions = androidx.compose.foundation.text.KeyboardActions(
                             onSearch = {
-                                if (localSearchQuery.isNotBlank()) {
-                                    if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
-                                    searchQuery = localSearchQuery
-                                    filterMode = localFilterMode
-                                    searchResultsActive = true
-                                    viewModel.searchAndCreateCustomFeed(localSearchQuery, localFilterMode)
-                                    showSearchModal = false
+                                val q = localSearchQuery.trim()
+                                if (unifiedItems.isNotEmpty() && filterMode == "Live Feed" && searchQuery.isBlank()) {
+                                    viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                 }
+                                
+                                searchQuery = q
+                                filterMode = localFilterMode
+                                
+                                if (q.isNotBlank()) {
+                                    searchResultsActive = true
+                                    viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                                } else {
+                                    if (searchResultsActive) {
+                                        searchResultsActive = false
+                                        viewModel.clearSearchAndRestoreFeed()
+                                    }
+                                    viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
+                                }
+                                showSearchModal = false
                             }
                         )
                     )
 
-                    Button(
-                        onClick = { 
-                            val q = localSearchQuery.trim()
-                            if (unifiedItems.isNotEmpty()) viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
-                            
-                            val force = (localFilterMode == "Mesh" || localFilterMode == "My Content")
-                            if (force && filterMode == localFilterMode && q == searchQuery) {
-                                viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
-                            }
-                            
-                            searchQuery = q
-                            filterMode = localFilterMode
-                            if (q.isNotBlank()) {
-                                searchResultsActive = true
-                                viewModel.searchAndCreateCustomFeed(q, localFilterMode)
-                            }
-                            showSearchModal = false
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                        modifier = Modifier.fillMaxWidth().height(40.dp), shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        val searchText = if (localSearchQuery.isNotBlank()) "Search Online for".tr + " \"$localSearchQuery\"" else "Search Online".tr
-                        Text(searchText, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                    }
-
-                    Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
+                    Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
                     
                     val liveFeedSelected = localFilterMode == "Live Feed"
                     Box(
@@ -1094,12 +1078,24 @@ fun UnifiedFeedTab(
             confirmButton = {
                 Button(
                     onClick = { 
-                        val force = (localFilterMode == "Mesh" || localFilterMode == "My Content")
-                        if (force && filterMode == localFilterMode && localSearchQuery == searchQuery) {
+                        val q = localSearchQuery.trim()
+                        if (unifiedItems.isNotEmpty() && filterMode == "Live Feed" && searchQuery.isBlank()) {
+                            viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                        }
+                        
+                        searchQuery = q
+                        filterMode = localFilterMode
+                        
+                        if (q.isNotBlank()) {
+                            searchResultsActive = true
+                            viewModel.searchAndCreateCustomFeed(q, localFilterMode)
+                        } else {
+                            if (searchResultsActive) {
+                                searchResultsActive = false
+                                viewModel.clearSearchAndRestoreFeed()
+                            }
                             viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
                         }
-                        applySearchQuery(localSearchQuery)
-                        filterMode = localFilterMode
                         showSearchModal = false 
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack), shape = RoundedCornerShape(8.dp)
@@ -1110,7 +1106,19 @@ fun UnifiedFeedTab(
                     TextButton(onClick = { showSearchModal = false }) { Text("Close".tr, color = TextMuted) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = { applySearchQuery(""); filterMode = "Live Feed"; showSearchModal = false },
+                        onClick = { 
+                            localSearchQuery = ""
+                            localFilterMode = "Live Feed"
+                            searchQuery = ""
+                            filterMode = "Live Feed"
+                            if (searchResultsActive) {
+                                searchResultsActive = false
+                                viewModel.clearSearchAndRestoreFeed()
+                            } else {
+                                viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                            }
+                            showSearchModal = false 
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
                         shape = RoundedCornerShape(8.dp)
                     ) { Text("Clear All".tr, fontWeight = FontWeight.Bold) }
@@ -1348,10 +1356,11 @@ fun UnifiedFeedTab(
                                     }
                                     
                                     var finalFile = file
-                                    val quality = viewModel.mediaSettings.value.mediaQuality
+                                    val videoQuality = viewModel.mediaSettings.value.videoQuality
+                                    val imageQuality = viewModel.mediaSettings.value.imageQuality
                                     if (type == "video" && file.length() > 20 * 1024 * 1024) {
                                         val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}")
-                                        com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
+                                        com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile, videoQuality).collect { state ->
                                             when(state) {
                                                 is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
                                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -1373,12 +1382,12 @@ fun UnifiedFeedTab(
                                         try {
                                             val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                             if (bitmap != null) {
-                                                val maxDim = when(quality) {
+                                                val maxDim = when(imageQuality) {
                                                     "low" -> 640
                                                     "medium" -> 960
                                                     else -> 1280
                                                 }
-                                                val compressQuality = when(quality) {
+                                                val compressQuality = when(imageQuality) {
                                                     "low" -> 60
                                                     "medium" -> 75
                                                     else -> 85

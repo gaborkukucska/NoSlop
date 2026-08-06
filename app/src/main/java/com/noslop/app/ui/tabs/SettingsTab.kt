@@ -233,13 +233,25 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     )
                                 }
 
-                                Button(
-                                    onClick = { viewModel.refreshTorStatus() },
-                                    enabled = !isTorChecking,
-                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text("Test Tor".tr, fontWeight = FontWeight.Bold)
+                                Column(horizontalAlignment = Alignment.End) {
+                                    Button(
+                                        onClick = { viewModel.refreshTorStatus() },
+                                        enabled = !isTorChecking,
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text("Test Tor".tr, fontWeight = FontWeight.Bold)
+                                    }
+                                    if (!torState.first) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Button(
+                                            onClick = { viewModel.startTor() },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text("Reconnect Tor".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -607,44 +619,52 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         border = BorderStroke(1.dp, BorderSubtle)
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                    Text("Media Quality".tr, color = TextLight, fontWeight = FontWeight.Bold)
-                                    Text("Affects clearnet streams and mesh upload compression.".tr, color = TextMuted, fontSize = 12.sp)
-                                }
-                                var expandedQuality by remember { mutableStateOf(false) }
-                                Box {
-                                    OutlinedButton(
-                                        onClick = { expandedQuality = true },
-                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
-                                        border = BorderStroke(1.dp, BorderSubtle),
-                                        contentPadding = PaddingValues(horizontal = 12.dp)
-                                    ) {
-                                        Text(mediaSettings.mediaQuality.uppercase().tr)
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
-                                    }
-                                    DropdownMenu(
-                                        expanded = expandedQuality,
-                                        onDismissRequest = { expandedQuality = false },
-                                        modifier = Modifier.background(SurfaceDark)
-                                    ) {
-                                        listOf("high", "medium", "low").forEach { q ->
-                                            DropdownMenuItem(
-                                                text = { Text(q.uppercase().tr, color = TextLight) },
-                                                onClick = {
-                                                    viewModel.updateMediaSettings(mediaSettings.copy(mediaQuality = q))
-                                                    expandedQuality = false
-                                                }
-                                            )
+                            @Composable
+                            fun QualitySelector(label: String, currentValue: String, onSelected: (String) -> Unit) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(label.tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    var expanded by remember { mutableStateOf(false) }
+                                    Box {
+                                        OutlinedButton(
+                                            onClick = { expanded = true },
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                                            border = BorderStroke(1.dp, BorderSubtle),
+                                            contentPadding = PaddingValues(horizontal = 12.dp),
+                                            modifier = Modifier.height(36.dp)
+                                        ) {
+                                            Text(currentValue.uppercase().tr, fontSize = 12.sp)
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        }
+                                        DropdownMenu(
+                                            expanded = expanded,
+                                            onDismissRequest = { expanded = false },
+                                            modifier = Modifier.background(SurfaceDark)
+                                        ) {
+                                            listOf("high", "medium", "low").forEach { q ->
+                                                DropdownMenuItem(
+                                                    text = { Text(q.uppercase().tr, color = TextLight) },
+                                                    onClick = {
+                                                        onSelected(q)
+                                                        expanded = false
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
+
+                            Text("Media Quality".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                            Text("Affects clearnet streams and mesh upload compression.".tr, color = TextMuted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 12.dp))
+                            QualitySelector("Video Quality", mediaSettings.videoQuality) { viewModel.updateMediaSettings(mediaSettings.copy(videoQuality = it)) }
+                            QualitySelector("Audio Quality", mediaSettings.audioQuality) { viewModel.updateMediaSettings(mediaSettings.copy(audioQuality = it)) }
+                            QualitySelector("Image Quality", mediaSettings.imageQuality) { viewModel.updateMediaSettings(mediaSettings.copy(imageQuality = it)) }
+
                             HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(bottom = 16.dp))
 
                             Row(
