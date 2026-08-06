@@ -608,6 +608,46 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Media Quality".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                    Text("Affects clearnet streams and mesh upload compression.".tr, color = TextMuted, fontSize = 12.sp)
+                                }
+                                var expandedQuality by remember { mutableStateOf(false) }
+                                Box {
+                                    OutlinedButton(
+                                        onClick = { expandedQuality = true },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                                        border = BorderStroke(1.dp, BorderSubtle),
+                                        contentPadding = PaddingValues(horizontal = 12.dp)
+                                    ) {
+                                        Text(mediaSettings.mediaQuality.uppercase().tr)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = expandedQuality,
+                                        onDismissRequest = { expandedQuality = false },
+                                        modifier = Modifier.background(SurfaceDark)
+                                    ) {
+                                        listOf("high", "medium", "low").forEach { q ->
+                                            DropdownMenuItem(
+                                                text = { Text(q.uppercase().tr, color = TextLight) },
+                                                onClick = {
+                                                    viewModel.updateMediaSettings(mediaSettings.copy(mediaQuality = q))
+                                                    expandedQuality = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(bottom = 16.dp))
+
+                            Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically

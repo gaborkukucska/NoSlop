@@ -35,7 +35,7 @@ fun FeedMixSettingsSection(viewModel: NoSlopViewModel) {
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
         border = BorderStroke(1.dp, BorderSubtle)
     ) {
-        Column(modifier = Modifier.padding(16.dp).verticalScroll(rememberScrollState())) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Text("Content Ratio Mix".tr, fontWeight = FontWeight.Bold, color = TextLight, modifier = Modifier.padding(bottom = 8.dp))
             Text(
                 "Adjust what types of content appear in your Live Feed. The sliders dynamically balance so they always total 100%.".tr,

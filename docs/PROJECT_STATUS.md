@@ -1,5 +1,22 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-06)
+
+### 1. Global Media Quality Control
+*   **Bandwidth Optimization**: Added a global "Media Quality" setting (High, Medium, Low) to `MediaSettings.kt`.
+*   **Adaptive Streaming**: `YouTubeInternalClient` and Vimeo API resolvers now dynamically select 1080p, 720p, or 480p streams based on the user's active quality preference.
+*   **Dynamic Compression**: Wired the quality preference into the Mesh broadcast upload pipeline. `VideoCompressor` now aggressively downscales target dimensions (1080p -> 720p -> 480p), and image uploads dynamically scale maximum dimensions (1280px -> 960px -> 640px) and JPEG compression ratios (85% -> 75% -> 60%) to drastically save Tor mesh bandwidth for users on Low quality settings.
+
+### 2. Memory Leaks & Stability Fixes
+*   **OkHttp Connection Leaks**: Patched a massive connection leak in `FeedParser.kt`, `RedditApiClient.kt`, and the Invidious/Archive/Vimeo APIs. Added strict `use { }` blocks and explicit `.close()` calls on early network returns to prevent the background sync worker from exhausting the OkHttp connection pool.
+*   **Compose Nested Scroll Crash**: Fixed a fatal `IllegalStateException` ("infinity maximum height constraints") that crashed the app when opening the Filtering & Content Mix page. Removed an accidental nested `verticalScroll` modifier from `FeedMixSettingsSection.kt`.
+
+### 3. Media & Feed UX Polish
+*   **Wikimedia Thumbnails**: Fixed a bug where Wikimedia Featured Images failed to load. `WikimediaApiClient` now explicitly requests the `iiurlwidth=1280` thumbnail generation from the API, and `MediaComponents.kt` was updated to securely prepend `https:` to protocol-relative `//` URLs.
+*   **RSS Image Sanitization**: `MediaComponents.kt` now automatically decodes HTML entities (e.g. `&amp;`) in image URLs to prevent Coil from silently failing on malformed RSS tags.
+*   **Ghost Mesh Posts**: Fixed an issue where swiping past Mesh broadcasts without pausing for 5 seconds left them marked as 'unseen', causing them to repeatedly appear in the Live Feed. Mesh items now instantly record a swipe event on scroll.
+*   **Deleted Peer Cleanup**: `MeshSocialRepository.deletePeer()` now explicitly executes an SQLite update to orphan all non-public mesh posts from the deleted user, and `NoSlopViewModel` proactively sweeps them from the active UI state.
+
 ## Completed Changes (2026-08-05) - Part 2
 
 ### 8. UI Polish, Privacy Defaults & YouTube HLS Extraction (August 5, 2026)

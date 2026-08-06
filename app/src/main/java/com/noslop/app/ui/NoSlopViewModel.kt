@@ -1721,7 +1721,16 @@ fun toggleAggregator() {
         }
     }
     fun togglePeerTrust(peer: Peer) { viewModelScope.launch { repository.togglePeerTrust(peer) } }
-    fun removePeer(peerPub: String) { viewModelScope.launch { repository.deletePeer(peerPub) } }
+    fun removePeer(peerPub: String) { 
+        viewModelScope.launch { 
+            repository.deletePeer(peerPub) 
+            
+            // Instantly clear their private posts from the active UI
+            val currentFeed = _unifiedFeed.value.toMutableList()
+            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub && it.post.privacy != "public" }
+            _unifiedFeed.value = currentFeed
+        } 
+    }
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {

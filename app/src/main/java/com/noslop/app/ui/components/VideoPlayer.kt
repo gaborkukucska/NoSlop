@@ -46,7 +46,7 @@ internal fun isSourceCached(url: String): Boolean = sourceCache.containsKey(url)
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
-internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false): VideoSource {
+internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false, context: android.content.Context): VideoSource {
     if (!forceRefresh) {
         sourceCache[rawUrl]?.let { return it }
     }
@@ -59,7 +59,8 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         }
         
         try {
-            val result = doResolve(rawUrl)
+            val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.mediaQuality
+            val result = doResolve(rawUrl, quality)
             sourceCache[rawUrl] = result
             result
         } finally {
@@ -68,7 +69,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     }
 }
 
-private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatchers.IO) {
+private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = withContext(Dispatchers.IO) {
     if (rawUrl.isBlank()) return@withContext VideoSource.Unavailable
 
     if ((rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) && 
@@ -96,8 +97,8 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
             }
             VideoSource.Direct(rawUrl)
         }
-        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl)
-        isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl)
+        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl, quality)
+        isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl, quality)
         rawUrl.contains("archive.org/embed") || rawUrl.contains("archive.org/details") -> {
             val id = if (rawUrl.contains("/details/")) {
                 rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
@@ -107,7 +108,7 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
             try {
                 val metadataUrl = "https://archive.org/metadata/$id"
                 val request = okhttp3.Request.Builder().url(metadataUrl).build()
-                val response = HttpClientProvider.activeClearnetClient.newCall(request).execute()
+                HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (body != null) {
@@ -135,6 +136,7 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
                         }
                     }
                 }
+                } // end use
             } catch (e: Exception) {
                 Logger.warn("VIDEO_RESOLVE", "Archive.org metadata resolution failed: ${e.message}")
             }
@@ -179,13 +181,13 @@ private fun extractVimeoId(url: String): String? = when {
     else -> url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() && it.all { c -> c.isDigit() } }
 }
 
-private suspend fun resolveYouTubeSource(url: String): VideoSource {
+private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
 
-    val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId)
+    val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality)
     if (streamUrl != null) {
         return VideoSource.Direct(streamUrl)
     }
@@ -194,7 +196,7 @@ private suspend fun resolveYouTubeSource(url: String): VideoSource {
     return VideoSource.Embed(embedUrl)
 }
 
-private fun resolveVimeoSource(url: String): VideoSource {
+private fun resolveVimeoSource(url: String, quality: String): VideoSource {
     val videoId = extractVimeoId(url) ?: run {
         return fallbackVimeoEmbed(url)
     }
@@ -208,11 +210,10 @@ private fun resolveVimeoSource(url: String): VideoSource {
             .build()
 
         val response = HttpClientProvider.activeClearnetClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            return fallbackVimeoEmbed(url)
-        }
-
-        val body = response.body?.string() ?: return fallbackVimeoEmbed(url)
+        val body = response.use { res ->
+            if (!res.isSuccessful) return fallbackVimeoEmbed(url)
+            res.body?.string()
+        } ?: return fallbackVimeoEmbed(url)
         val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
 
         val progressive = root
@@ -221,20 +222,14 @@ private fun resolveVimeoSource(url: String): VideoSource {
             ?.getAsJsonArray("progressive")
 
         if (progressive != null && progressive.size() > 0) {
-            var bestUrl: String? = null
-            var bestQuality = 0
-            for (el in progressive) {
-                val obj = el.asJsonObject
-                val quality = obj.get("quality")?.asString?.removeSuffix("p")?.toIntOrNull() ?: 0
-                val streamUrl = obj.get("url")?.asString ?: continue
-                if (quality > bestQuality) {
-                    bestQuality = quality
-                    bestUrl = streamUrl
-                }
+            val sortedFormats = progressive.map { it.asJsonObject }.sortedBy { it.get("quality")?.asString?.removeSuffix("p")?.toIntOrNull() ?: 0 }
+            val chosenFormat = when (quality) {
+                "low" -> sortedFormats.first()
+                "medium" -> sortedFormats[sortedFormats.size / 2]
+                else -> sortedFormats.last()
             }
-            if (bestUrl != null) {
-                return VideoSource.Direct(bestUrl)
-            }
+            val bestUrl = chosenFormat.get("url")?.asString
+            if (bestUrl != null) return VideoSource.Direct(bestUrl)
         }
         fallbackVimeoEmbed(url)
     } catch (e: Exception) {
@@ -281,7 +276,7 @@ fun VideoPlayer(
     LaunchedEffect(url, retryTrigger) {
         source = null 
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
-        source = resolveSource(url, forceRefresh = retryTrigger > 0)
+        source = resolveSource(url, forceRefresh = retryTrigger > 0, context = context)
         Logger.info("VIDEO", "Resolved source for $url → ${source?.javaClass?.simpleName}")
     }
 

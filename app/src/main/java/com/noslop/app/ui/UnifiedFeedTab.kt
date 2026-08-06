@@ -655,6 +655,9 @@ fun UnifiedFeedTab(
 
                 if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                     viewModel.markItemReadState(currentItem.item.id, true)
+                } else if (currentItem is UnifiedItem.Mesh) {
+                    // Instantly record the swipe to prevent it from getting stuck as 'unseen'
+                    viewModel.recordItemSwiped(currentItem.id)
                 }
 
                 kotlinx.coroutines.delay(5000L)
@@ -665,17 +668,33 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(pagerState.currentPage, filterMode) {
         if (pagerState.currentPage !in unifiedItems.indices) return@LaunchedEffect
-        val startPreload = maxOf(0, pagerState.currentPage - 1)
-        val endPreload = minOf(unifiedItems.size - 1, pagerState.currentPage + 2)
-        for (i in startPreload..endPreload) {
-            if (i == pagerState.currentPage) continue
-            val preloadData = getPreloadDataFromItem(unifiedItems[i], context) ?: continue
-            val rawUrl = preloadData.first
-            val forcedUrl = preloadData.second
-            val urlToCheck = forcedUrl ?: rawUrl
-            if (urlToCheck.startsWith("file://")) continue // Prevent MediaCodec exhaustion
-            // Launch in the broader scope so fast scrolling doesn't cancel the preload!
-            preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+        
+        // 1. Scan backwards to preload the immediate previous video
+        for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+            if (preloadData != null) {
+                val (rawUrl, forcedUrl) = preloadData
+                val urlToCheck = forcedUrl ?: rawUrl
+                if (!urlToCheck.startsWith("file://")) {
+                    preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                }
+                break // Only keep 1 previous video warm
+            }
+        }
+
+        // 2. Scan forwards to preload upcoming videos, skipping non-media slides
+        var preloadedForwardCount = 0
+        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 15)) {
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+            if (preloadData != null) {
+                val (rawUrl, forcedUrl) = preloadData
+                val urlToCheck = forcedUrl ?: rawUrl
+                if (!urlToCheck.startsWith("file://")) {
+                    preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                }
+                preloadedForwardCount++
+                if (preloadedForwardCount >= 2) break // Keep up to 2 forward videos warm
+            }
         }
     }
 
@@ -1329,9 +1348,10 @@ fun UnifiedFeedTab(
                                     }
                                     
                                     var finalFile = file
+                                    val quality = viewModel.mediaSettings.value.mediaQuality
                                     if (type == "video" && file.length() > 20 * 1024 * 1024) {
                                         val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}")
-                                        com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile).collect { state ->
+                                        com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
                                             when(state) {
                                                 is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
                                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -1353,7 +1373,16 @@ fun UnifiedFeedTab(
                                         try {
                                             val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
                                             if (bitmap != null) {
-                                                val maxDim = 1280
+                                                val maxDim = when(quality) {
+                                                    "low" -> 640
+                                                    "medium" -> 960
+                                                    else -> 1280
+                                                }
+                                                val compressQuality = when(quality) {
+                                                    "low" -> 60
+                                                    "medium" -> 75
+                                                    else -> 85
+                                                }
                                                 val width = bitmap.width
                                                 val height = bitmap.height
                                                 var newWidth = width
@@ -1369,7 +1398,7 @@ fun UnifiedFeedTab(
                                                 
                                                 val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}.jpg")
                                                 val out = java.io.FileOutputStream(compressedFile)
-                                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, out)
+                                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, compressQuality, out)
                                                 out.close()
                                                 
                                                 if (compressedFile.length() < file.length()) {

@@ -256,39 +256,44 @@ object YouTubeInternalClient {
         return payload
     }
 
-    private fun extractUrlFromPlayerResponse(root: JsonObject): String? {
+    private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
         
-        // HLS streams are extremely reliable, never ciphered, and natively supported by ExoPlayer.
         val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        if (hlsUrl != null) return hlsUrl
+        if (hlsUrl != null && quality == "high") return hlsUrl
         
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
-            val url = formats.get(formats.size() - 1).asJsonObject.get("url")?.asString
-            if (url != null) return url
+            val sortedFormats = formats.map { it.asJsonObject }.sortedBy { it.get("bitrate")?.asInt ?: 0 }
+            val chosenFormat = when (quality) {
+                "low" -> sortedFormats.first()
+                "medium" -> sortedFormats[sortedFormats.size / 2]
+                else -> sortedFormats.last()
+            }
+            val url = chosenFormat.get("url")?.asString
+            if (url != null && quality != "high") return url
         }
+        
         val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
         if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-            var bestUrl: String? = null
-            var bestBitrate = 0
-            for (el in adaptiveFormats) {
-                val obj = el.asJsonObject
-                val mimeType = obj.get("mimeType")?.asString ?: continue
-                if (!mimeType.startsWith("video/mp4")) continue
-                val streamUrl = obj.get("url")?.asString ?: continue
-                val bitrate = obj.get("bitrate")?.asInt ?: 0
-                if (bitrate > bestBitrate) {
-                    bestBitrate = bitrate
-                    bestUrl = streamUrl
+            val videoFormats = adaptiveFormats.map { it.asJsonObject }.filter { it.get("mimeType")?.asString?.startsWith("video/mp4") == true }
+            if (videoFormats.isNotEmpty()) {
+                val sortedVideo = videoFormats.sortedBy { it.get("bitrate")?.asInt ?: 0 }
+                val chosenFormat = when (quality) {
+                    "low" -> sortedVideo.first()
+                    "medium" -> sortedVideo[sortedVideo.size / 2]
+                    else -> sortedVideo.last()
                 }
+                val url = chosenFormat.get("url")?.asString
+                if (url != null) return url
             }
-            if (bestUrl != null) return bestUrl
         }
+        
+        if (hlsUrl != null) return hlsUrl
         return null
     }
 
-    suspend fun resolveStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
+    suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
         val clients = listOf(
             Pair("ANDROID", "21.02.35") to "com.google.android.youtube/21.02.35 (Linux; U; Android 14; en_US) gzip",
             Pair("IOS", "19.29.1") to "com.google.ios.youtube/19.29.1 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X)",
@@ -343,7 +348,7 @@ object YouTubeInternalClient {
                         val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
                         
                         if (playability == "OK") {
-                            val url = extractUrlFromPlayerResponse(root)
+                            val url = extractUrlFromPlayerResponse(root, quality)
                             if (url != null) {
                                 Logger.info(TAG, "Resolved direct video stream using $cName for $videoId")
                                 return@withContext url

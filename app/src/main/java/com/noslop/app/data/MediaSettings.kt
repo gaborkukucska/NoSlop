@@ -9,7 +9,8 @@ data class MediaSettings(
     val autoDownloadPublic: Boolean = false,
     val cacheRelayedMedia: Boolean = false,
     val backgroundPlayEnabled: Boolean = false,
-    val backgroundPlayOutsideApp: Boolean = false
+    val backgroundPlayOutsideApp: Boolean = false,
+    val mediaQuality: String = "high"
 ) {
     fun toJson(): String = Gson().toJson(this)
 

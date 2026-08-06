@@ -65,7 +65,7 @@ object PreloadManager {
             if (forcedResolvedUrl != null && forcedResolvedUrl != rawUrl) {
                 VideoSource.Direct(forcedResolvedUrl)
             } else {
-                resolveSource(rawUrl)
+                resolveSource(rawUrl, false, context)
             }
         } catch (e: Exception) {
             Logger.warn("PRELOAD", "preWarm: resolveSource failed for $rawUrl: ${e.message}")

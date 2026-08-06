@@ -659,7 +659,18 @@ class MeshSocialRepository(
             peerDao.deletePeer(peer)
             // Also clean up messages
             messageDao.deleteMessagesWithPeer(publicKeyB64)
-            Logger.info(TAG, "Deleted peer and all associated messages: ${peer.handle}")
+            
+            // Orphan their non-public mesh posts
+            try {
+                db.openHelper.writableDatabase.execSQL(
+                    "UPDATE mesh_posts SET isOrphaned = 1 WHERE authorPublicKeyB64 = ? AND privacy != 'public'",
+                    arrayOf(publicKeyB64)
+                )
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to orphan private posts: ${e.message}")
+            }
+            
+            Logger.info(TAG, "Deleted peer, messages, and orphaned private posts: ${peer.handle}")
         }
     }
 

@@ -55,12 +55,13 @@ object RedditApiClient {
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Logger.warn(TAG, "Reddit API returned ${response.code} for $url")
-                return emptyList()
-            }
-
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Reddit API returned ${res.code} for $url")
+                    return emptyList()
+                }
+                res.body?.string()
+            } ?: return emptyList()
             val root = gson.fromJson(body, JsonObject::class.java)
             val children = root.getAsJsonObject("data")
                 ?.getAsJsonArray("children") ?: return emptyList()

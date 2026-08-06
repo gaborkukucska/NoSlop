@@ -27,7 +27,7 @@ object VideoCompressor {
         data class Error(val exception: Exception) : CompressState()
     }
 
-    fun compressVideo(context: Context, inputUri: Uri, outputFile: File): Flow<CompressState> = callbackFlow {
+    fun compressVideo(context: Context, inputUri: Uri, outputFile: File, quality: String = "medium"): Flow<CompressState> = callbackFlow {
         var transformer: Transformer? = null
 
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
@@ -51,7 +51,12 @@ object VideoCompressor {
                 })
                 .build()
 
-            val presentation = Presentation.createForHeight(720)
+            val targetHeight = when(quality) {
+                "low" -> 480
+                "medium" -> 720
+                else -> 1080
+            }
+            val presentation = Presentation.createForHeight(targetHeight)
 
             val effects = Effects(
                 emptyList(),

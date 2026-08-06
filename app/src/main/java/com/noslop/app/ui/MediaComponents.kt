@@ -56,6 +56,24 @@ import com.noslop.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloat
 
+private fun sanitizeImageUrl(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    var cleanUrl = url.trim()
+    // Decode HTML entities (e.g. &amp; -> &) which are common in RSS image URLs
+    cleanUrl = android.text.Html.fromHtml(cleanUrl, android.text.Html.FROM_HTML_MODE_COMPACT).toString()
+    
+    if (cleanUrl.startsWith("http://")) {
+        cleanUrl = "https://" + cleanUrl.substring(7)
+    }
+    if (cleanUrl.startsWith("//")) {
+        cleanUrl = "https:" + cleanUrl
+    }
+    if (cleanUrl.contains(" ")) {
+        cleanUrl = cleanUrl.replace(" ", "%20")
+    }
+    return cleanUrl
+}
+
 @Composable
 fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null, fallbackUrl: String? = null) {
     var showZoom by remember { mutableStateOf(false) }
@@ -71,11 +89,13 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
-        val activeUrl = if (isError && fallbackUrl != null) fallbackUrl else url
-        val isProxy = activeUrl.toString().contains("127.0.0.1") || activeUrl.toString().contains("localhost")
+        val safeUrl = sanitizeImageUrl(url)
+        val safeFallback = sanitizeImageUrl(fallbackUrl)
+        val activeUrl = if (isError && safeFallback != null) safeFallback else safeUrl
+        val isProxy = activeUrl?.contains("127.0.0.1") == true || activeUrl?.contains("localhost") == true
         
         // If url is a File object, pass it directly. If proxy, pass null to force the placeholder.
-        val actualModel = if (isProxy) null else if (activeUrl is String && activeUrl.startsWith("file://")) java.io.File(activeUrl.removePrefix("file://")) else activeUrl
+        val actualModel = if (isProxy) null else if (activeUrl != null && activeUrl.startsWith("file://")) java.io.File(activeUrl.removePrefix("file://")) else activeUrl
         
         val request = coil.request.ImageRequest.Builder(context)
             .data(actualModel)
@@ -217,6 +237,7 @@ fun SegmentedArticleReader(
 
     var showWebView by remember { mutableStateOf(false) }
     val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
+    val safeThumbnailUrl = sanitizeImageUrl(thumbnailUrl)
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -232,7 +253,7 @@ fun SegmentedArticleReader(
 
                     if (!imageLoadFailed) {
                         AsyncImage(
-                            model = thumbnailUrl ?: fallbackImage,
+                            model = safeThumbnailUrl ?: fallbackImage,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
