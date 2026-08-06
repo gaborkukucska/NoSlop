@@ -55,7 +55,13 @@ data class Peer(
     val isTrusted: Boolean = false,
     val isOnline: Boolean = false,
     val lastSeenAt: Long = System.currentTimeMillis(),
-    val authorAvatarB64: String? = null
+    val authorAvatarB64: String? = null,
+    val customFolder: String? = null,
+    val isTemporary: Boolean = false,
+    val isDiscoverable: Boolean = false,
+    val isCreator: Boolean = false,
+    val fundMeLink: String? = null,
+    val bio: String? = null
 )
 
 @Entity(tableName = "mesh_posts")
@@ -77,7 +83,8 @@ data class MeshPost(
     val clearnetTitle: String? = null,
     val clearnetThumbnailUrl: String? = null,
     val clearnetMediaType: String? = null, // "video", "audio", "image", or null for article
-    val isOrphaned: Boolean = false
+    val isOrphaned: Boolean = false,
+    val mediaSize: Long = 0L
 )
 
 @Entity(

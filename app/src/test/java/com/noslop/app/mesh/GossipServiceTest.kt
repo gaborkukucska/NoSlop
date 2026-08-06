@@ -43,6 +43,12 @@ class GossipServiceTest {
         val limits = cls.getDeclaredField("senderRateLimits")
             .apply { isAccessible = true }.get(GossipService) as MutableMap<String, *>
         limits.clear()
+        
+        cls.getDeclaredField("peerDao").apply { isAccessible = true }.set(GossipService, null)
+        cls.getDeclaredField("transport").apply { isAccessible = true }.set(GossipService, null)
+        cls.getDeclaredField("localPublicKeyB64").apply { isAccessible = true }.set(GossipService, "")
+        cls.getDeclaredField("getMeshFilterSettings").apply { isAccessible = true }.set(GossipService, null)
+        cls.getDeclaredField("checkEntityExists").apply { isAccessible = true }.set(GossipService, null)
     }
 
     // --- TTL / hops ---
@@ -131,5 +137,62 @@ class GossipServiceTest {
         // A different sender is unaffected by the noisy peer's limit.
         assertTrue("a quiet sender still passes",
             GossipService.processIncoming(post("q-0", "quiet")))
+    }
+
+    // --- Firewall & Mesh Filters ---
+
+    @Test
+    fun firewall_dropsUntrustedSender_butAllowsConnectionPackets() = runBlocking {
+        val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted") } returns com.noslop.app.data.Peer("trusted", "", "", "", isTrusted = true)
+        io.mockk.coEvery { mockDao.getPeerByPublicKey("untrusted") } returns com.noslop.app.data.Peer("untrusted", "", "", "", isTrusted = false)
+        io.mockk.coEvery { mockDao.getPeerByPublicKey("unknown") } returns null
+
+        val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+        GossipService.initialize(mockDao, mockTx, "local-key")
+
+        assertTrue("Trusted sender allowed for POST", GossipService.processIncoming(post("fw-1", "trusted")))
+        assertFalse("Untrusted sender dropped for POST", GossipService.processIncoming(post("fw-2", "untrusted")))
+        assertFalse("Unknown sender dropped for POST", GossipService.processIncoming(post("fw-3", "unknown")))
+
+        // Connection packets should bypass trust check
+        val connReq = NetworkPacket(id = "fw-4", hops = 6, senderId = "unknown", type = "CONNECTION_REQUEST")
+        assertTrue("CONNECTION_REQUEST allowed from unknown sender", GossipService.processIncoming(connReq))
+    }
+
+    @Test
+    fun firewall_respectsMeshFilters() = runBlocking {
+        val mockDao = io.mockk.mockk<com.noslop.app.data.PeerDao>(relaxed = true)
+        io.mockk.coEvery { mockDao.getPeerByPublicKey("trusted") } returns com.noslop.app.data.Peer("trusted", "", "", "", isTrusted = true)
+        
+        val mockTx = io.mockk.mockk<MeshTransport>(relaxed = true)
+        
+        // Setup strict filters
+        val strictFilters = com.noslop.app.data.MeshFilterSettings(
+            allowIncomingReactions = false,
+            allowIncomingComments = false,
+            allowIncomingClearnetShares = false,
+            allowIncomingTextPosts = false
+        )
+        
+        GossipService.initialize(
+            peerDao = mockDao,
+            transport = mockTx,
+            localPublicKeyB64 = "local-key",
+            getMeshFilterSettings = { strictFilters },
+            checkEntityExists = { _, _ -> false } // No anchors exist
+        )
+
+        val reactionPacket = NetworkPacket(
+            id = "mf-1", hops = 6, senderId = "trusted", type = "REACTION",
+            payload = com.google.gson.JsonObject().apply { addProperty("postId", "missing-post") }
+        )
+        assertFalse("Reaction dropped due to strict filter + missing anchor", GossipService.processIncoming(reactionPacket))
+
+        val textPost = NetworkPacket(
+            id = "mf-2", hops = 6, senderId = "trusted", type = "POST",
+            payload = com.google.gson.JsonObject().apply { addProperty("content", "hello") }
+        )
+        assertFalse("Text post dropped due to strict filter", GossipService.processIncoming(textPost))
     }
 }

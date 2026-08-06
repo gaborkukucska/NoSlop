@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.1.0`, Room schema version 23 — see §10, compileSdk/targetSdk
+versionName `0.1.0`, Room schema version 5 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -45,8 +45,8 @@ mnemonic, onion address).
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ UI Layer (Jetpack Compose, MainScreen.kt + tabs/*)                │
-│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ContentPreferencesScreen  │
+│ UI Layer (Jetpack Compose, tabs/*)                                  │
+│  UnifiedFeedTab │ DMsTab │ SettingsTab │ ProfileScreen │ ContentPreferencesScreen  │
 └───────────────────────────┬───────────────────────────────────────┘
                              │ NoSlopViewModel (StateFlow)
 ┌───────────────────────────▼───────────────────────────────────────┐
@@ -54,8 +54,8 @@ mnemonic, onion address).
 │  ├─ IdentityRepository (keys, mnemonic, onion, lock state)          │
 │  ├─ MeshPacketHandler  (incoming packet dispatch)                   │
 │  ├─ FeedDao / PostDao / PeerDao / MessageDao / CommentDao /         │
-│  │   MeshVoteDao / CommentVoteDao (Room, v23)                       │
-│  │   ReactionDao / AppSettingDao (Room, v23)                        │
+│  │   MeshVoteDao / CommentVoteDao (Room, v5)                       │
+│  │   ReactionDao / AppSettingDao (Room, v5)                        │
 │  └─ ApiKeyRepository (user-supplied API keys, EncryptedSharedPrefs) │
 └──────┬─────────────────────────────┬───────────────────────────────┘
        │                              │
@@ -67,7 +67,7 @@ mnemonic, onion address).
 │  api/*Client (10x)     │      │  MediaManager / MediaProxyService        │
 │  -> clearnetClient     │      │  CryptoService (Ed25519/X25519/ChaCha20) │
 │     (no proxy)          │      │  TorService (embedded tor-android)       │
-└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:9050)    │
+└─────────────────────┘      │  -> torClient (SOCKS5 127.0.0.1:TOR_SOCKS_PORT) │
                               └─────────────────────────────────────────┘
 ```
 
@@ -84,12 +84,13 @@ com.noslop.app
 │   └── MnemonicGenerator.kt      BIP39 12-word mnemonic (full 2048-word list per milestone 85)
 ├── data/
 │   ├── ApiKeyRepository.kt       User API keys (EncryptedSharedPreferences)
-│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media)
+│   ├── BackupManager.kt           AES-256-CBC encrypted export/import (DB + media) via SAF streams
 │   ├── Daos.kt                    Room DAOs (Feed, Peer, Post, Message, Comment, Reaction, Vote, AppSetting)
 │   ├── Entities.kt                Room @Entity data classes
 │   ├── IdentityRepository.kt      Identity persistence (EncryptedSharedPreferences + Room)
-│   ├── MediaSettings.kt           Auto-download policy (JSON in app_settings)
-│   ├── NoSlopDatabase.kt          Room database, version 23
+│   ├── MediaSettings.kt           Auto-download policy: trust-based (friends/public), file exclusion (JSON in app_settings)
+│   ├── MeshFilterSettings.kt      Mesh broadcast filter toggles (JSON in app_settings)
+│   ├── NoSlopDatabase.kt          Room database, version 5
 │   ├── NoSlopRepository.kt        Central data/business logic facade (~1,470 LOC — large; LOC will keep drifting, treat as approximate)
 │   └── UserProfile.kt             Display name / bio / avatar data class
 ├── debug/
@@ -109,23 +110,26 @@ com.noslop.app
 │   ├── MeshTransport.kt             SOCKS5 TCP transport, send retries
 │   └── Packets.kt                   NetworkPacket + all payload data classes
 ├── net/
-│   └── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   ├── HttpClientProvider.kt        clearnetClient vs torClient OkHttpClient instances
+│   └── SshDeployer.kt               HAI-Net Hub SSH deployment (JSch + JSONObject config injection)
 ├── tor/
 │   └── TorService.kt                Embedded Tor lifecycle, hidden service registration
 ├── ui/
-│   ├── ContentPreferencesScreen.kt  Unified profile/categories/genres/languages/sources
-│   ├── HaiNetTab.kt                 Mesh feed / peers tab
-│   ├── MainScreen.kt                Top-level Compose host (god file, 2,889 LOC pre-refactor)
+│   ├── ContentPreferencesScreen.kt  Content filtering/categories/genres/languages/sources/mix ratios
+│   ├── HaiNetTab.kt                 Home Hub deployment + control interface (delegates to HubSetupScreen)
+│   ├── MeshFiltersScreen.kt         Granular incoming/outgoing mesh filter toggles
+│   ├── MediaUtils.kt                Top-level media resolution utility (formerly MainScreen)
 │   ├── MediaComponents.kt           Shared media UI helpers
 │   ├── NoSlopViewModel.kt            ViewModel exposing repository as StateFlow
-│   ├── OnboardingScreen.kt           6-step onboarding flow
+│   ├── OnboardingScreen.kt           9-step onboarding flow (includes Content Mix step)
+│   ├── ProfileScreen.kt              Standalone profile editor (avatar, name, bio)
 │   ├── PreloadManager.kt             ExoPlayer preload pool
 │   ├── QRScanScreen.kt / QRShareSheet.kt  CameraX+MLKit QR pairing
 │   ├── TorWarningPanel.kt            Tor-not-ready UI card + F-Droid/Orbot deep links
 │   ├── UnifiedFeedTab.kt             VerticalPager feed (mesh + clearnet unified)
 │   ├── components/                  FeedCard, VideoPlayer, AudioPlayer, ChatThreadScreen,
 │   │                                 CommentsBottomSheet, PeerItem
-│   ├── tabs/                        ApiKeysScreen, DMsTab, LogsViewerScreen, SettingsTab
+│   ├── tabs/                        ApiKeysScreen, DMsTab, FeedMixSettingsSection, HubSetupScreen, LogsViewerScreen, ReportIssueScreen, SettingsTab
 │   └── theme/                       Color.kt, Theme.kt, Type.kt (Material3 + custom palette)
 └── util/
     └── Constants.kt                 MESH_PORT = 9999
@@ -151,14 +155,8 @@ com.noslop.app
 
 ### 3.2 Key Generation (`CryptoService.generateIdentity`)
 
-- **API 33+ (Tiramisu and above)**: `KeyPairGenerator.getInstance("Ed25519")`
-  using the platform Conscrypt provider, **no explicit `initialize()` call**
-  (Conscrypt has a fixed key size).
-- **API 24–32**: `KeyPairGenerator.getInstance("Ed25519", BC_PROVIDER)` with
-  `initialize(255, SecureRandom())` — the `255` is a corrected value (see
-  milestone 48: "Key size corrected to 255 for compatibility with Android's
-  Conscrypt cryptographic provider to prevent onboarding page crashes on
-  actual devices").
+- **Lazysodium Primary Path**: By default, `cryptoSignKeypair()` from Lazysodium (libsodium via JNA) is used to generate the Ed25519 keypair. Libsodium produces high-quality keys consistently across all platforms, returning raw 32-byte seed/public keys. These are manually wrapped in standard ASN.1 PKCS#8 / X.509 headers before saving to ensure backwards compatibility with existing mesh peers.
+- **Bouncy Castle Fallback**: If JNA fails to load or Lazysodium throws an error, generation falls back to Bouncy Castle's lightweight `Ed25519KeyPairGenerator`.
 - X25519 keys are always generated via Bouncy Castle
   (`KeyPairGenerator.getInstance("X25519", BC_PROVIDER)`), regardless of API
   level.
@@ -195,10 +193,9 @@ net).
 
 ### 3.4 Signing & Verification
 
-- `sign(payload: String, privateKeyB64)` — `Signature.getInstance("Ed25519")`
-  (Conscrypt on API 33+, BC otherwise), signs the **UTF-8 bytes of the literal
+- `sign(payload: String, privateKeyB64)` — Uses Bouncy Castle's lightweight `Ed25519Signer` directly (bypassing the JCA `Signature` API). Signs the **UTF-8 bytes of the literal
   string** `payload`, returns Base64 (no-wrap).
-- `verify(payload, signatureB64, publicKeyB64)` — mirrors `sign`; returns
+- `verify(payload, signatureB64, publicKeyB64)` — Also uses `Ed25519Signer`; returns
   `false` (never throws) on any exception.
 - **Signed payload formats are pipe-delimited string concatenations**, not
   the JSON object itself. Examples found in `NoSlopRepository`:
@@ -249,6 +246,8 @@ command expects:
      expanded[31] |= 0b01000000   (or 64)
 5. Base64-encode the 64 bytes -> "ED25519-V3:<base64>"
 ```
+
+> **Critical Implementation Note:** Tor explicitly expects the 64-byte *expanded secret scalar + PRF secret*. It does **not** accept the 64-byte `libsodium` format (`seed || pubkey`). Passing the `libsodium` format to `ADD_ONION` will cause Tor to re-expand the key incorrectly, resulting in a completely mismatched public key and `.onion` address that breaks all peer routing.
 This produces a **persistent** onion address tied to the same key used for
 post signatures — i.e., a node's mesh identity and its network address are
 cryptographically the same key.
@@ -271,7 +270,7 @@ to determine which backend is actually active at runtime.
 2048-word official BIP39 English wordlist (milestone 85 — earlier versions
 used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 `docs/ANALYSiS.md`). The mnemonic seeds the AES-256-CBC key used by
-`BackupManager` for encrypted export/import.
+`BackupManager` for encrypted export/import using Android's Storage Access Framework.
 
 ---
 
@@ -289,25 +288,19 @@ used a truncated ~700–800-word list, flagged as non-BIP39-compliant in
 - **Outbound sends** (`sendPacket(onionAddress, port, packet)`):
   1. `TorService.waitForProxy(timeoutSeconds = 5)` — abort if SOCKS5 not
      reachable.
-  2. Up to **5 attempts**. Each attempt opens a fresh
-     `Socket(Proxy(SOCKS, 127.0.0.1:9050))`, calls
+    2. Up to **3 attempts** (for critical packets; 2 for background). Each attempt opens a fresh
+     `Socket(Proxy(SOCKS, 127.0.0.1:TOR_SOCKS_PORT))`, calls
      `socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), 30000)`
-     (30s connect timeout — onion circuit builds can be slow), writes one
+     (30s connect timeout — forces a fast-fail so we can fallback to Gossip Relay if the HSDir hasn't propagated yet), writes one
      line via `PrintWriter(autoFlush=true)`, then closes the socket.
-  3. Backoff between attempts: `delay(attempt * 3000L)` ms (3s, 6s, 9s, 12s).
-  4. Returns `true` on first successful write, `false` if all 5 attempts
-     fail.
-
-  Note: `docs/PROJECT_STATUS.md` milestone 14 describes "3 retries with 2s/4s
-  backoff" — the current code (`MeshTransport.kt`, read directly) implements
-  **5 attempts with `attempt*3000ms` backoff** (3s/6s/9s/12s for attempts
-  2–5). The status doc appears to predate a later tuning pass.
+  3. Backoff between attempts: `delay(attempt * 4000L)` ms for critical packets, or `2000L` otherwise.
+  4. Returns `true` on first successful write, `false` if all attempts fail.
 
 ### 4.2 Gossip Protocol (`GossipService.kt`)
 
 `GossipService` is a Kotlin `object` (process-wide singleton), initialized via
-`initialize(peerDao, transport, localPublicKeyB64)` from
-`NoSlopRepository.saveLocalIdentity`.
+`initialize(peerDao, transport, localPublicKeyB64, getMeshFilterSettings, checkEntityExists)` from
+`NoSlopRepository.saveLocalIdentity` and `NoSlopApp.onCreate`.
 
 **`processIncoming(packet)` pipeline** (returns `true` if the packet should be
 processed locally by `MeshPacketHandler`):
@@ -431,6 +424,49 @@ algorithm, the extended `SyncResponsePayload` with `comments`/`reactions`,
 and verification rules — is in
 [WIRE_PROTOCOL_REFERENCE.md §4](WIRE_PROTOCOL_REFERENCE.md#4-inventory-based-sync-inventory_sync_request).
 
+### 4.6 Mesh Broadcast Filters
+
+User-configurable content-type filters that gate which packets are pushed to
+and pulled from the mesh network. Filters operate **exclusively at the network
+sync layer** — all local database writes (reactions, comments, votes, posts)
+always succeed regardless of filter state.
+
+**Data model** (`MeshFilterSettings.kt`): 12 boolean flags (6 content types ×
+2 directions). Persisted as JSON in `app_settings["mesh_filter_settings"]` via
+`SettingsRepository`, exposed reactively as a `StateFlow<MeshFilterSettings>`.
+
+| Filter | Default | Outgoing gate | Incoming gate |
+|---|---|---|---|
+| Reactions | **off** | `MeshSocialRepository`: wraps `GossipService.broadcast()` call after local `reactionDao`/`voteDao` insert | `GossipService.processIncoming`: step 4.5, checks `allowIncomingReactions` |
+| Comments | on | `MeshSocialRepository.composeAndBroadcastComment`: wraps broadcast after `commentDao.insertComment` | `GossipService.processIncoming`: step 4.5, checks `allowIncomingComments` |
+| Text Posts | on | `MeshSocialRepository.composeAndBroadcastPost`: wraps broadcast after `postDao.insertPost` (when no `clearnetUrl` and no `mediaMetadata`) | `GossipService.processIncoming`: step 4.5, inspects `POST` payload |
+| Clearnet Shares | on | Same as above (when `clearnetUrl != null`) | Same as above (when `postPay.clearnetUrl != null`) |
+| Image Posts | on | Same as above (when `mediaMetadata.type == "image"`) | Same as above (when `postPay.mediaMetadata.type == "image"`) |
+| Video Posts | on | Same as above (when `mediaMetadata.type == "video"`) | Same as above (when `postPay.mediaMetadata.type == "video"`) |
+
+**"Already shared" exemption** (incoming): When a reaction, vote, or comment
+packet targets a post or comment that **already exists** in the local database
+(verified via `NoSlopRepository.checkEntityExistsLocally(type, id)` → queries
+`postDao.hasPost` / `commentDao.hasComment` / `messageDao.hasMessage`), the
+packet is exempt from the incoming filter and is always accepted. This ensures
+engagement on tracked content is never silently dropped.
+
+**Clearnet bridging guard** (outgoing): `reactToMeshPost` accepts an
+`isBridging: Boolean` parameter. When `reactToFeedItemWithType` calls it for a
+newly-created clearnet anchor post (`existingCount == 0`), `isBridging = true`
+causes the reaction broadcast to respect `allowOutgoingReactions`. For
+reactions on posts already in the database, `isBridging = false` and the
+broadcast always fires.
+
+**DM chat exemption**: `CHAT_REACTION` packets are completely excluded from
+both the incoming firewall filter check in `GossipService.processIncoming` and
+the outgoing gate in `MeshSocialRepository.reactToChat`. Direct messages and
+their reactions are never affected by mesh filter settings.
+
+**UI**: `MeshFiltersScreen.kt` (Material 3) — accessible from Settings →
+Content tab → Filtering & Content Mix → Mesh Filters button. 6 content-type cards, each with
+Incoming/Outgoing toggle columns.
+
 ---
 
 ## 5. Wire Protocol — `NetworkPacket` and Payloads
@@ -455,36 +491,36 @@ just to the wire protocol:
 ### 6.1 Chunking Constants (`MediaManager.kt`)
 
 ```kotlin
-private const val CHUNK_SIZE = 256 * 1024       // 256 KB
-private const val MAX_CONCURRENCY = 4
-private const val DOWNLOAD_TIMEOUT_MS = 60000L  // 60s
+const val MIN_CHUNK_SIZE = 128 * 1024        // 128 KB (Tor-optimized minimum)
+const val MAX_CHUNK_SIZE = 1024 * 1024       // 1 MB (maximizes per-circuit throughput)
+private const val MAX_CONCURRENCY = 2        // Max 2 concurrent SOCKS5 sockets
+const val DOWNLOAD_TIMEOUT_MS = 300000L      // 5 minutes (accommodates Tor latency)
 ```
-256 KB matches gChat's documented chunk size exactly (`docs/ARCHITECTURE.md`
-§2: "Files are split into 256KB chunks").
+These values are specifically tuned for Tor Hidden Service circuits. The previous
+values (64KB min, 256KB max, 4 concurrent, 120s timeout) caused excessive SOCKS5
+handshake overhead and frequent timeouts on high-latency Tor circuits.
 
-**Concurrency is no longer a flat cap.** `MAX_CONCURRENCY = 4` remains in the
-file, but only as the *initial* AIMD (Additive-Increase/Multiplicative-
-Decrease) window value — it no longer hard-caps in-flight chunk requests at
-steady state. Each download tracks a per-download AIMD state machine:
+**AIMD Congestion Control.** Each download tracks a per-download AIMD state
+machine tuned for Tor's characteristics:
 
-- `windowSize` starts at `4.0`, `ssthresh` starts at `128.0`.
-- **Slow start**: while `windowSize < ssthresh`, each received chunk does
-  `windowSize += 1`.
-- **Congestion avoidance**: once `windowSize >= ssthresh`, each received
-  chunk does `windowSize += 1 / windowSize` (sub-linear growth).
-- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(2.0,
-  windowSize * 0.5)` and `windowSize` resets to `1.0` (classic Reno-style
-  AIMD).
-- `windowSize` is capped at `128.0`.
+- `currentChunkSize` starts at `128 KB`, `currentConcurrency` starts at `1.0`,
+  `ssthresh` starts at `2.0`.
+- **Slow start**: while `currentConcurrency < ssthresh`, each received chunk does
+  `currentConcurrency += 1`.
+- **Congestion avoidance**: once `currentConcurrency >= ssthresh`, each received
+  chunk does `currentConcurrency += 1 / currentConcurrency` (sub-linear growth).
+- **Multiplicative decrease**: on a chunk timeout, `ssthresh = max(1.0,
+  currentConcurrency * 0.5)` and `currentConcurrency` resets to `1.0`.
+- `currentConcurrency` is capped at `2.0` (the `MAX_CONCURRENCY` constant).
+- `currentChunkSize` dynamically grows on success (up to `MAX_CHUNK_SIZE`) and
+  shrinks on timeout (down to `MIN_CHUNK_SIZE`).
 - New `MEDIA_REQUEST`s for additional chunks are only issued while
-  `inflight.size < windowSize.toInt()` — i.e. `windowSize` (rounded down) is
-  the live concurrency cap.
+  `inflight.size < currentConcurrency.toInt()`.
 
 This mirrors the algorithm documented for `hainet-social/src/congestion.rs`
 and directly resolves the gap flagged in
-[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop)
-(that section's prose is now historical — see its own checklist in §12,
-which already marks this item done). For full detail see
+[GAP_ANALYSIS.md §7](GAP_ANALYSIS.md#7-congestion-control-for-media-chunks--absent-in-noslop).
+For full detail see
 [WIRE_PROTOCOL_REFERENCE.md §5](WIRE_PROTOCOL_REFERENCE.md#5-media-packet-family-6-types).
 
 ### 6.2 Storage Layout
@@ -498,13 +534,22 @@ unavailable.
 ### 6.3 Auto-Download Policy (`MediaManager.checkAndAutoDownload`)
 
 Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
-- `settings.enabled` — global kill switch.
-- Context `"friends"`: requires `settings.autoDownloadFriends` **and** the
-  author must be a `peerDao`-known, `isTrusted == true` peer.
-- Context `"private"` (DMs): requires `settings.autoDownloadPrivate`.
+- `settings.enabled` — global kill switch (UI label: "Automatic Media Download").
+- `metadata.type == "file"` — **file attachments are never auto-downloaded**.
+  They must be manually tapped by the user to initiate sync. This guard runs
+  before any trust or size checks.
+- **Trust-based hierarchy** (replaces the earlier context-string approach):
+  1. Look up `repo.peerDao.getPeerByPublicKey(authorId)` to determine trust.
+  2. If `peer?.isTrusted == true` (a contact): requires
+     `settings.autoDownloadFriends` to be enabled.
+  3. If the peer is unknown or untrusted (a public broadcast): requires
+     `settings.autoDownloadPublic` to be enabled. Toggling this ON in the
+     Settings UI triggers a confirmation dialog warning the user that they
+     will download 3rd-party media.
 - `settings.maxFileSizeMB` — if `metadata.size > maxBytes && size > 0`, skip
   (a `size == 0` placeholder, as used by `MediaProxyService`'s synthetic
-  metadata, bypasses this check).
+  metadata, bypasses this check). The Settings UI slider allows values from
+  1MB to 1000MB (1GB), defaulting to 10MB.
 
 ### 6.4 Local Streaming Proxy (`MediaProxyService.kt`)
 
@@ -544,6 +589,55 @@ Mesh posts with media generate a small, high-compression Base64 thumbnail
 peers can render a preview immediately without waiting for the full chunked
 transfer.
 
+The `BlurredImageBackground` composable (in `MediaComponents.kt`) renders
+this thumbnail as both a blurred background fill and a centered foreground
+image. The `error` and `fallback` painters are explicitly set to the Base64
+thumbnail bitmap, ensuring the preview persists permanently if the high-res
+clearnet URL is empty or fails to load (common for mesh-native posts).
+
+### 6.6 Download Resume (`MediaManager.startDownload`)
+
+Downloads survive app restarts. When `startDownload()` is called for a media
+item that already has an existing `.part` file on disk:
+
+1. If `0 < partFile.length() < totalBytes` — the download resumes from the
+   existing byte offset. `contiguousBytes` and `nextRequestOffset` are set to
+   `partFile.length()`, and the progress bar immediately shows the correct
+   percentage.
+2. If `partFile.length() >= totalBytes` — the part file is already complete
+   and is finalized immediately without re-downloading.
+3. If the part file is zero bytes — it is deleted and the download starts
+   fresh.
+
+This replaced the previous behavior where `startDownload()` unconditionally
+called `dl.partFile.delete()`, forcing every download to restart from 0%
+after an app kill/restart.
+
+### 6.7 Media Compression Pipeline
+
+Media attachments are automatically compressed before being stored in the
+mesh media directory and broadcast to peers. This runs in both the feed post
+composer (`UnifiedFeedTab.kt`) and the DM composer (`ChatThreadScreen.kt`):
+
+**Video transcoding** (threshold: > 20MB):
+- Uses `VideoCompressor.compressVideo()` (Media3 Transformer) to transcode
+  the video into a smaller format.
+- A "Compressing... X%" progress indicator is shown during transcoding.
+- The compressed file replaces the original attachment before
+  `copyFileToMediaDirectory` is called.
+
+**Image compression** (threshold: > 500KB):
+- The image is decoded into a bitmap and proportionally scaled down to fit
+  within a 1280×1280 pixel bounding box.
+- Re-compressed as JPEG at 75% quality.
+- The compressed file is only used if it is actually smaller than the
+  original (failsafe for already-optimized images).
+
+In the DM composer, `buildMediaMetadata()` is a `suspend` function that runs
+on `Dispatchers.IO`, with a coroutine launched from `rememberCoroutineScope()`
+on the send button click. This prevents the UI from freezing during
+compression of large files.
+
 ---
 
 ## 7. Clearnet Aggregator
@@ -555,7 +649,7 @@ Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
   `feeds/api/*Client` classes. Configured with `okhttp-dnsoverhttps`
   (Cloudflare `1.1.1.1`) per milestone 51 to avoid DNS resolution failures
   without forcing all traffic through Tor.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:9050`, used exclusively
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used exclusively
   by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)
@@ -573,7 +667,8 @@ identifier like `"youtube:trending"`, `"reddit:multi"`, `"nasa:apod"` —
 
 | Client | Auth | Notes |
 |---|---|---|
-| `InvidiousApiClient` | none | YouTube via Invidious instance pool, replaces official YouTube Data API per architecture proposal §2 |
+| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
+| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool |
 | `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query)` |
 | `InternetArchiveClient` | none | `getPopularVideos()`, `searchAudio(query)` |
 | `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
@@ -675,7 +770,7 @@ gossiped multiple times by different originating peers.
 
 ### 8.3 UI-Level Wiring
 
-- `MainScreen.kt`'s `FullScreenFeedCard` renders Like/Share/Comment overlays
+- `UnifiedFeedTab.kt`'s `FullScreenMeshCardV2` renders Like/Share/Comment overlays
   for both `UnifiedItem.Mesh` and `UnifiedItem.Feed` (clearnet) variants.
 - For clearnet items, `onShare = onShareToMesh` opens the "Share to Mesh"
   confirmation dialog (`showShareDialog` state), which calls
@@ -686,6 +781,7 @@ gossiped multiple times by different originating peers.
 - Per milestone 90, clearnet feed items themselves have Like/Comment buttons
   **removed** from the unified feed — engagement is funneled through the
   mesh anchor post instead ("Interaction Isolation").
+- Mesh broadcasts in the composer default to `friends` privacy. Explicitly selecting `public` triggers a warning dialog to educate the user that public posts will be gossiped over daisy-chained peers beyond direct friends.
 
 ---
 
@@ -719,6 +815,14 @@ launch).
    SOCKS5 proxy, looks for the string "Congratulations. This browser is
    configured to use Tor.") → `READY` + `triggerRegistration()`. This loop
    exists as a fallback for missed `STATUS_ON` broadcasts.
+6. **Connectivity blip resilience**: transient network interruptions (e.g.,
+   Wi-Fi ↔ mobile data switches) no longer force the Tor state to `FAILED`.
+   Previously, the `STATUS_OFF` broadcast handler would set `FAILED` and
+   trigger a full daemon restart, which caused `SIGABRT` crashes in
+   `libtor.so` (the native Tor library does not tolerate being forcefully
+   killed mid-circuit). The handler now allows the daemon to recover
+   gracefully on its own, only surfacing `FAILED` if it cannot re-establish
+   circuits after the bootstrap loop's timeout.
 
 ### 9.2 Hidden Service Registration
 
@@ -751,7 +855,7 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 23)
+## 10. Data Model (Room, version 5)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
@@ -769,10 +873,13 @@ the ephemeral onion with the identity-derived one.
 | `app_settings` | `key` | `value` (string, often JSON) | — |
 
 `app_settings` is the catch-all KV store for: identity public data
-(`local_*`), onboarding/session flags, `media_settings` (JSON), per-category
+(`local_*`), onboarding/session flags, `media_settings` (JSON),
+`mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
-`language_preference`, `enable_aggregator`, `user_profile` (JSON).
+`language_preference`, `enable_aggregator`, `user_profile` (JSON),
+`dm_all_tab_hidden` (`"true"`/`"false"` — persists collapsed state of the
+"All" contacts list on the DMs tab).
 
 Database is opened with `JournalMode.WRITE_AHEAD_LOGGING` and
 `fallbackToDestructiveMigration()` — any schema version bump destroys and
@@ -810,13 +917,15 @@ migration path defined).
 | Compose | enabled, via Compose BOM |
 | Signing | `release` build type reads `NOSLOP_STORE_FILE`/`NOSLOP_STORE_PASSWORD`/`NOSLOP_KEY_ALIAS`/`NOSLOP_KEY_PASSWORD` Gradle properties; `debug` uses the default debug keystore |
 | ProGuard | `release` has `isMinifyEnabled = true`, `isShrinkResources = true`, plus hardened `-keep`/`-dontwarn` rules for `tor-android`, `jtorctl`, `netcipher` (milestone 22) |
+| `GITHUB_PAT` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_PAT`. When non-blank, enables in-app GitHub issue submission via REST API (`POST /repos/gaborkukucska/NoSlop/issues`). When blank, the Submit button in `ReportIssueScreen` is disabled. |
+| `GITHUB_ASSIGNEE` | Read from `local.properties` at build time. Exposed as `BuildConfig.GITHUB_ASSIGNEE`. When non-blank, auto-assigns the specified GitHub user to all submitted issues. |
 
 ### Key Dependencies
 
 - **Tor**: `info.guardianproject:tor-android:0.4.8.16`,
   `info.guardianproject:jtorctl:0.4.5.7`,
   `info.guardianproject.netcipher:netcipher:2.1.0`
-- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`
+- **Crypto**: `org.bouncycastle:bcprov-jdk15to18:1.78.1`, `com.goterl:lazysodium-android:5.1.0`, `net.java.dev.jna:jna:5.13.0`
 - **Networking**: `okhttp:4.10.0` (`gradle/libs.versions.toml`),
   `okhttp-dnsoverhttps:4.12.0` (hardcoded in `app/build.gradle.kts`) — this is
   a genuine, currently-real minor version mismatch between the two OkHttp
@@ -849,7 +958,10 @@ whitelisted cleartext exceptions (milestone 8).
 
 While NoSlop currently operates as a standalone, self-contained node running its own embedded Tor daemon, future iterations of the HAI-Net ecosystem conceptualize a "Local Hub" mesh (e.g., desktops or NAS devices acting as always-on master nodes).
 
-In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); none of its phases are implemented in the current codebase as of this writing.
+In this architecture, NoSlop serves as a `SLAVE_FRONTEND` client to a user's **HUB**. This Home HUB acts as the primary sovereign backup for the user's mesh Identity, encrypted data, and media library. Instead of maintaining a full local mesh stack and embedded Tor daemon on mobile, the app connects directly to the user's remote HUB via a private, authenticated onion address. This model aligns with gChat's dual hidden service architecture and is the planned avenue for long-term scalability and data persistence. The concrete, phased implementation plan for this transition lives in [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md); Phases 1 and 2 (Headless Deployment, Authentication, and Active-Passive Tor Routing) are fully implemented:
+- **Active-Passive Identity**: NoSlop dynamically disables its local Tor hidden service when a Hub is linked, falling back to treating its embedded Tor daemon purely as an outbound SOCKS5 proxy to reach the Hub's persistent `.onion` API endpoint (`invokeHubApi`).
+- **Intelligent Edge Relay**: The Hub is *not* a dumb buffer. NoSlop periodically pushes its Contacts list to the Hub (`sync_push_peers`). The Hub listens on Port 9999, runs incoming traffic through its native `GossipEngine` and `TrustFirewall` (dropping spam and expired TTLs at the edge), and holds only valid packets in memory for the mobile app to securely poll (`sync_pull_packets`).
+- **Phase 3 (Active)**: SQLite persistence is now active on the Hub (`social.db`). NoSlop performs bi-directional sync, pushing live mesh packets and pulling historical DMs, Posts, and Contacts down to the mobile client on connect. The mobile app automatically injects an `Admin AI` peer contact mapped to the Hub's node ID, allowing seamless E2EE interaction with the Hub's persona agent.
 
 ---
 
@@ -892,8 +1004,8 @@ is traceable rather than silently disappearing:
    skew worth aligning at some point.
 9. ~~This document's §2 package-layout table and architecture diagram listed
    `NoSlopDatabase.kt` as Room "version 16" / "version 20" in two places,
-   while §10 and the header correctly said v23.~~ **Fixed** — both now read
-   v23, matching `@Database(version = 23, ...)`.
+   while §10 and the header correctly said v5.~~ **Fixed** — both now read
+   v5, matching `@Database(version = 5, ...)`.
 10. ~~§4.4's dispatch table and §5.2's payload-type table described an
     earlier ~11-handler, single-file version of `MeshPacketHandler` and were
     marked "Superseded" pointing elsewhere for current info, while

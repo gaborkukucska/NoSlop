@@ -30,15 +30,29 @@ class MeshPacketHandler(
     private val media = MediaPacketHandler(repo, db)
 
     suspend fun handleIncomingPacket(packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
-        val localKeys = repo.getLocalIdentity() ?: return@withContext false
+        val localKeys = repo.getLocalIdentity()
+        val burnableKeys = repo.getBurnableIdentity()
+        if (localKeys == null) {
+            Logger.warn(TAG, "Dropping ${packet.type} packet — local identity not loaded (locked or not created yet)")
+            return@withContext false
+        }
+
+        // Drop packets that originated from our own identities — these are
+        // looped-back packets relayed through the hub or mesh.
+        if (packet.senderId == localKeys.publicKeyB64 || (burnableKeys != null && packet.senderId == burnableKeys.publicKeyB64)) {
+            Logger.debug(TAG, "Dropping self-originated ${packet.type} packet ${packet.id}")
+            return@withContext false
+        }
 
         // Let GossipService decide if this packet needs handling or forwarding
         val shouldProcessLocally = GossipService.processIncoming(packet)
         if (!shouldProcessLocally) {
+            Logger.debug(TAG, "GossipService rejected local processing for ${packet.type} packet ${packet.id} (forwarded or filtered)")
             return@withContext false
         }
 
-        when (packet.type) {
+        Logger.debug(TAG, "Dispatching ${packet.type} packet ${packet.id} from ${packet.senderId.take(16)}... to handler")
+        val success = when (packet.type) {
             "SYNC_REQUEST" -> sync.handleSyncRequest(packet, localKeys)
             "INVENTORY_SYNC_REQUEST" -> sync.handleInventorySyncRequest(packet, localKeys)
             "SYNC_RESPONSE" -> sync.handleSyncResponse(packet)
@@ -55,20 +69,28 @@ class MeshPacketHandler(
                 true
             }
             "MESSAGE" -> dm.handleDirectMessage(packet, localKeys)
+            "DELETE_MESSAGE" -> dm.handleDeleteMessage(packet)
             "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)
             "CONNECTION_REJECTED" -> handshake.handleConnectionRejected(packet)
             "ANNOUNCE_PEER" -> handshake.handleAnnouncePeer(packet)
+            "ANNOUNCE_DISCOVERABLE" -> handshake.handleAnnounceDiscoverable(packet)
+            "SUBSCRIBE" -> handshake.handleSubscribe(packet)
             "CHAT_REACTION" -> reaction.handleChatReaction(packet)
             "COMMENT_REACTION" -> reaction.handleCommentReaction(packet)
             "IDENTITY_UPDATE" -> handshake.handleIdentityUpdate(packet)
             "USER_EXIT" -> handshake.handleUserExit(packet)
             "EDIT_POST" -> post.handleEditPost(packet)
             "DELETE_POST" -> post.handleDeletePost(packet)
+            "EDIT_COMMENT" -> comment.handleEditComment(packet)
+            "DELETE_COMMENT" -> comment.handleDeleteComment(packet)
             else -> {
                 Logger.warn(TAG, "Unknown packet type received: ${packet.type}")
                 false
             }
         }
+        
+        Logger.debug(TAG, "Finished processing ${packet.type} packet ${packet.id} (success=$success)")
+        success
     }
 }

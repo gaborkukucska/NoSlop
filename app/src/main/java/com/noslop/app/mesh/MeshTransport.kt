@@ -14,9 +14,9 @@ import java.net.Socket
 
 class MeshTransport(
     val repository: NoSlopRepository,
-    private val listenPort: Int = Constants.MESH_PORT,
+    private val listenPort: Int = Constants.MESH_LISTEN_PORT,
     private val socksHost: String = "127.0.0.1",
-    private val socksPort: Int = 9050
+    private val socksPort: Int = Constants.TOR_SOCKS_PORT
 ) {
     private val TAG = "MESH_TRANSPORT"
     private var serverSocket: ServerSocket? = null
@@ -91,54 +91,81 @@ class MeshTransport(
     }
 
     suspend fun sendPacket(onionAddress: String, port: Int = Constants.MESH_PORT, packet: NetworkPacket): Boolean = withContext(Dispatchers.IO) {
+        var pushedToHub = false
+        val hubStatus = repository.getAppSetting("hub_deployment_status")
+        if (!hubStatus.isNullOrBlank()) {
+            pushedToHub = com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet) ?: false
+            if (pushedToHub) {
+                com.noslop.app.debug.Logger.info("MESH_TRANSPORT", "Hub linked and reachable. Delegated packet ${packet.id} to Hub.")
+                // We no longer return early here, so we can also attempt direct Tor routing.
+                // This bypasses potential Hub-side Tor DNS negative caching.
+            } else {
+                com.noslop.app.debug.Logger.warn("MESH_TRANSPORT", "Hub linked but UNREACHABLE. Falling back to direct Tor routing for packet ${packet.id}.")
+            }
+        }
+
+        if (onionAddress.isBlank()) {
+            Logger.warn(TAG, "Cannot send ${packet.type} packet: target onion address is blank")
+            return@withContext false
+        }
         Logger.info(TAG, "Sending ${packet.type} packet to $onionAddress:$port via SOCKS5")
         
         // Ensure Tor proxy is ready before attempting send
         val torReady = com.noslop.app.tor.TorService.waitForProxy(timeoutSeconds = 5)
         if (!torReady) {
             Logger.error(TAG, "Cannot send packet: Tor proxy not responding on $socksPort")
-            return@withContext false
+            return@withContext pushedToHub
         }
 
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST"
         if (isBackground) {
             if (!torSemaphore.tryAcquire()) {
                 Logger.warn(TAG, "Dropping background packet ${packet.type} to $onionAddress: Tor circuits busy")
-                return@withContext false
+                return@withContext pushedToHub
             }
         } else {
             torSemaphore.acquire()
         }
         
         try {
-            val connectTimeout = if (packet.type.startsWith("MEDIA_")) 45000 else 20000
-            for (attempt in 1..3) { // Reduced retries to avoid blocking the semaphore
+            // Fresh v3 onion descriptors can take up to 45 seconds to fetch from HSDirs.
+            // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
+            val isCritical = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE"
+            val maxAttempts = if (isCritical) 3 else 2
+            val connectTimeout = 60000
+            for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
                 try {
                     val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(socksHost, socksPort))
                     socket = Socket(proxy)
                     // Onion connections can take time to establish (v3 circuits)
-                    Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms")
+                    Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms (attempt $attempt/$maxAttempts)")
                     socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
                     val writer = PrintWriter(socket.getOutputStream(), true)
-                    writer.println(packet.toJson())
-                    Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt)")
+                    writer.print(packet.toJson() + "\n")
+                    writer.flush()
+                    try { socket.shutdownOutput() } catch (e: Exception) {} // Let Tor proxy know we are done writing
+                    delay(150) // Brief pause to ensure Tor flushes the TCP buffer to the network
+                    Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt/$maxAttempts)")
                     return@withContext true
                 } catch (e: Exception) {
-                    Logger.warn(TAG, "Send attempt $attempt/3 to $onionAddress failed: ${e.message}")
+                    Logger.warn(TAG, "Send attempt $attempt/$maxAttempts to $onionAddress failed: ${e.message}")
                     val msg = e.message ?: ""
                     // Fast-fail if Tor explicitly tells us the peer is dead/unreachable
                     if (msg.contains("Host unreachable") || msg.contains("TTL expired") || msg.contains("general SOCKS server failure")) {
-                        Logger.warn(TAG, "Tor explicitly rejected routing to $onionAddress. Fast-failing to free circuit.")
-                        return@withContext false
+                        Logger.warn(TAG, "Tor rejected routing to $onionAddress. Fast-failing to free circuit.")
+                        break
                     }
-                    if (attempt < 3) delay(attempt * 2000L) // Reduced backoff
+                    if (attempt < maxAttempts) {
+                        val delayMs = if (isCritical) attempt * 4000L else attempt * 2000L
+                        delay(delayMs)
+                    }
                 } finally {
                     try { socket?.close() } catch (_: Exception) {}
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            return@withContext false
+            return@withContext pushedToHub
         } finally {
             torSemaphore.release()
         }

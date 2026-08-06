@@ -23,14 +23,30 @@ class DmPacketHandler(
     private val notificationDao = db.notificationDao()
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
-        if (packet.targetUserId != localKeys.publicKeyB64) {
+        val burnableKeys = repo.getBurnableIdentity()
+        val myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
+            localKeys
+        } else if (burnableKeys != null && packet.targetUserId == burnableKeys.publicKeyB64) {
+            burnableKeys
+        } else {
             return false
         }
+
+        // If this DM hit our burnable identity, strictly associate this peer with the burnable identity 
+        // so our replies don't leak our main identity!
+        if (myKeys.publicKeyB64 == burnableKeys?.publicKeyB64) {
+            db.appSettingDao().insertSetting(AppSetting("contact_identity_${packet.senderId}", "burnable"))
+        }
+
         val msgPay = packet.getMessagePayload() ?: return false
         val peer = peerDao.getPeerByPublicKey(packet.senderId)
-        val opponentEncPub = peer?.encPublicKeyB64 ?: packet.senderId
+        val opponentEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: packet.senderId
 
-        val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, localKeys.encPrivateKeyB64)
+        val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
+        if (plaintext == null) {
+            Logger.error(TAG, "FATAL: DM Decryption failed for sender ${packet.senderId}. Expected an X25519 key but got: ${opponentEncPub.take(16)}...")
+            return false
+        }
         if (plaintext != null) {
             var finalContent = plaintext
             var mediaId: String? = null
@@ -47,11 +63,6 @@ class DmPacketHandler(
                     mediaMetadata = com.google.gson.Gson().fromJson(obj.get("media"), MediaMetadata::class.java)
                     mediaId = mediaMetadata.id
                     mediaType = mediaMetadata.type
-                    
-                    // Robustness: If the ID looks like a GIF but type is generic, fix it for the renderer
-                    if (mediaId?.endsWith(".gif", ignoreCase = true) == true && mediaType == "image") {
-                        mediaType = "gif"
-                    }
                 }
                 if (obj.has("replyTo")) {
                     replyToMessageId = obj.get("replyTo").asString
@@ -72,9 +83,12 @@ class DmPacketHandler(
                 replyToMessageId = replyToMessageId
             )
             messageDao.insertMessage(msg)
+            repo.triggerDmSync()
             
-            val title = "New Direct Message"
-            val msgBody = "Message from ${peer?.handle ?: "Anonymous"}"
+            val title = com.noslop.app.util.LanguageManager.translate("New Direct Message")
+            val anon = com.noslop.app.util.LanguageManager.translate("Anonymous")
+            val msgBody = com.noslop.app.util.LanguageManager.translate("Message from {author}")
+                .replace("{author}", peer?.handle ?: anon)
             val route = "chat/${packet.senderId}"
             
             notificationDao.insertNotification(
@@ -110,5 +124,23 @@ class DmPacketHandler(
             return true
         }
         return false
+    }
+
+    suspend fun handleDeleteMessage(packet: NetworkPacket): Boolean {
+        val deletePay = packet.getDeleteMessagePayload() ?: return false
+        val signature = packet.signature ?: return false
+
+        // Verify signature
+        val payloadToVerify = "${deletePay.messageId}|${deletePay.authorId}|${deletePay.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, signature, deletePay.authorId)) return false
+
+        // Only the sender of the message can delete it across the mesh
+        if (deletePay.authorId != packet.senderId) return false
+
+        // Locally delete the message where id and sender match
+        messageDao.deleteMessageByIdAndSender(deletePay.messageId, deletePay.authorId)
+        Logger.info(TAG, "Deleted E2EE message ${deletePay.messageId} by request of sender ${deletePay.authorId}")
+        repo.triggerDmSync()
+        return true
     }
 }

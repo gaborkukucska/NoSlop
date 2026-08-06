@@ -13,6 +13,7 @@ import com.noslop.app.ui.MainScreen
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
 import com.noslop.app.ui.theme.MyApplicationTheme
+import com.noslop.app.util.tr
 
 class MainActivity : ComponentActivity() {
     private lateinit var viewModel: NoSlopViewModel
@@ -25,7 +26,7 @@ class MainActivity : ComponentActivity() {
         val factory = NoSlopViewModel.Factory(application)
         viewModel = ViewModelProvider(this, factory).get(NoSlopViewModel::class.java)
 
-        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it }
+        intent?.getStringExtra("target_route")?.let { _routeFlow.value = it + "-" + System.currentTimeMillis() }
 
         setContent {
             MyApplicationTheme {
@@ -64,6 +65,7 @@ class MainActivity : ComponentActivity() {
                                                     val type = firstItem.post.mediaType ?: firstItem.post.clearnetMediaType
                                                     if (type == "video" || type == "audio") firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl else null
                                                 }
+                                                is com.noslop.app.ui.UnifiedItem.Tutorial -> null
                                             }
                                             
                                             // Safely resolve local mesh media proxies natively to avoid import issues
@@ -104,8 +106,45 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (showSplash) {
-                        com.noslop.app.ui.SplashScreen()
+                        val buildStatus by viewModel.feedBuildStatus.collectAsState()
+                        com.noslop.app.ui.SplashScreen(statusMessage = buildStatus)
                     } else {
+                        val prefs = applicationContext.getSharedPreferences("noslop_system", android.content.Context.MODE_PRIVATE)
+                        var showRestoreHubPrompt by rememberSaveable { mutableStateOf(prefs.getBoolean("prompt_hub_after_restore", false)) }
+                        val hubStatus by viewModel.hubDeploymentStatus.collectAsState()
+
+                        if (showRestoreHubPrompt && hubStatus.isNullOrBlank()) {
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { 
+                                    prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                    showRestoreHubPrompt = false 
+                                },
+                                containerColor = com.noslop.app.ui.theme.SurfaceDark,
+                                title = { androidx.compose.material3.Text("Connect Home Hub?".tr, color = com.noslop.app.ui.theme.TextLight, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold) },
+                                text = { androidx.compose.material3.Text("Your profile was restored, but you don't have a Home Hub connected. Would you like to set one up now?".tr, color = com.noslop.app.ui.theme.TextMuted) },
+                                confirmButton = {
+                                    androidx.compose.material3.Button(
+                                        onClick = {
+                                            prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                            showRestoreHubPrompt = false
+                                            _routeFlow.value = "hubs"
+                                        },
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = com.noslop.app.ui.theme.AccentGreen, contentColor = com.noslop.app.ui.theme.PrimaryBlack)
+                                    ) {
+                                        androidx.compose.material3.Text("Setup Hub".tr)
+                                    }
+                                },
+                                dismissButton = {
+                                    androidx.compose.material3.TextButton(onClick = { 
+                                        prefs.edit().putBoolean("prompt_hub_after_restore", false).apply()
+                                        showRestoreHubPrompt = false 
+                                    }) {
+                                        androidx.compose.material3.Text("Not Now".tr, color = com.noslop.app.ui.theme.TextMuted)
+                                    }
+                                }
+                            )
+                        }
+
                         MainScreen(viewModel = viewModel, initialRoute = targetRoute)
                     }
                 } else {

@@ -69,6 +69,17 @@ class FakeViewedHistoryDao : ViewedHistoryDao {
             .forEach { items.remove(it) }
         publish()
     }
+    
+    override suspend fun deleteOlderThan(timestamp: Long) {
+        val toRemove = items.values.filter { it.viewedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { items.remove(it) }
+        publish()
+    }
+    
+    override suspend fun clearAllViewedHistory() {
+        items.clear()
+        publish()
+    }
 }
 
 /** Fake [SwipeTrackerDao] with REPLACE-on-conflict upsert and the >=2 exclusion query. */
@@ -78,6 +89,11 @@ class FakeSwipeTrackerDao : SwipeTrackerDao {
         swipes.values.filter { it.swipeCount >= 2 }.map { it.itemId }
     override suspend fun upsertSwipe(tracker: SwipeTracker) { swipes[tracker.itemId] = tracker }
     override suspend fun getSwipeForItem(itemId: String): SwipeTracker? = swipes[itemId]
+    override suspend fun deleteOldSwipes(timestamp: Long) {
+        val toRemove = swipes.values.filter { it.lastSwipedAt < timestamp }.map { it.itemId }
+        toRemove.forEach { swipes.remove(it) }
+    }
+    override suspend fun clearAllSwipeHistory() { swipes.clear() }
 }
 
 /** Fake [ReactionDao] with the get-by-id / insert / delete semantics the toggle logic relies on. */
@@ -115,6 +131,9 @@ class FakePeerDao : PeerDao {
     override suspend fun getAllPeersList(): List<Peer> = peers.values.toList()
     override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
     override fun getTrustedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTrusted })
+    override fun getTemporaryPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTemporary })
+    override fun getPeersByFolder(folder: String): Flow<List<Peer>> = flowOf(peers.values.filter { it.customFolder == folder })
+    override fun getDiscoverablePeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isDiscoverable })
 }
 
 /** Fake [PostDao] keyed by id (REPLACE on insert). */
@@ -126,13 +145,15 @@ class FakePostDao : PostDao {
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
     override suspend fun markPostOrphaned(id: String) {}
-    override suspend fun updatePostContent(id: String, newContent: String) {}
+    override suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String) {}
+    override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
 }
 
 /** Fake [MessageDao] collecting stored messages. */
 class FakeMessageDao : MessageDao {
     val messages = mutableListOf<ChatMessage>()
     override suspend fun insertMessage(message: ChatMessage) { messages.add(message) }
+    override suspend fun hasMessage(id: String): Int = if (messages.any { it.id == id }) 1 else 0
     override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         flowOf(messages.filter { it.chatWithPeerPub == peerPub })
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())

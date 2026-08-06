@@ -128,12 +128,9 @@ Notes:
 - Row 15 (`IDENTITY_UPDATE`): the payload's field is named `handle` (not
   `displayName`), and the signed string uses that same field name —
   `userId|handle|timestamp`.
-- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) remain the one documented
-  verification gap: `PeerHandshakePayload.signature` is populated by the
-  sender (`NoSlopRepository.sendConnectionRequest`/`acceptConnectionRequest`
-  both call `CryptoService.sign`) but `MeshPacketHandler` does not verify it
-  on receipt. Still open — tracked in `docs/PROJECT_STATUS.md`'s "Handshake
-  Signature Verification Gap" item.
+- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) verify the signature
+  on receipt covering `fromUserId|fromUsername|fromHomeNode|timestamp`
+  (+ optional `authorAvatarB64` and `bio`). The verification gap has been closed.
 
 ---
 
@@ -190,10 +187,11 @@ text if parsing fails.
 | `from_username` | String | Sender's handle |
 | `from_display_name` | String | Sender's display name |
 | `author_avatar_b64`? | String | Sender's avatar, if set |
+| `bio`? | String | Sender's bio, if set |
 | `from_home_node` | String | Sender's onion address |
 | `from_encryption_public_key`? | String | Sender's X25519 public key |
 | `timestamp` | Long | Epoch timestamp |
-| `signature`? | String | Computed and sent, but **not verified on receipt** — see §2 row 3–4 |
+| `signature`? | String | Signature over `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (and optional avatar/bio) |
 
 ### ANNOUNCE_PEER
 **Type:** `ANNOUNCE_PEER` · class `AnnouncePeerPayload`
@@ -204,6 +202,22 @@ text if parsing fails.
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Ed25519 signature over `authorId\|timestamp` |
 
+### ANNOUNCE_DISCOVERABLE
+**Type:** `ANNOUNCE_DISCOVERABLE` · class `AnnounceDiscoverablePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `author_id` | String | Sender's public key |
+| `handle` | String | Sender's handle |
+| `onion_address` | String | Sender's onion address |
+| `enc_public_key` | String | Sender's X25519 public key |
+| `is_creator` | Boolean | True if the node is a creator |
+| `fund_me_link`? | String | Donation link, if set |
+| `author_avatar_b64`? | String | Sender's avatar, if set |
+| `bio`? | String | Sender's bio, if set |
+| `timestamp` | Long | Epoch timestamp |
+| `signature` | String | Signature over payload (using colons `:`) |
+
 ### IDENTITY_UPDATE
 **Type:** `IDENTITY_UPDATE` · class `IdentityUpdatePayload`
 
@@ -212,6 +226,7 @@ text if parsing fails.
 | `user_id` | String | Subject's public key (verifying key) |
 | `handle` | String | New handle/display name |
 | `author_avatar_b64`? | String | New avatar, if changed |
+| `bio`? | String | New bio, if changed |
 | `timestamp` | Long | Epoch timestamp |
 | `signature` | String | Signature over `userId\|handle\|timestamp` (+`\|authorAvatarB64` if present) |
 
@@ -405,11 +420,13 @@ before insertion via `commentDao`/`reactionDao`.
 | Type | Payload | Role |
 |---|---|---|
 | `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, access_key?, hls_file?}` | Requests a specific chunk of a media item by index |
-| `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64)}` | Carries one chunk's bytes |
+| `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64), total_size?}` | Carries one chunk's bytes. `total_size` (optional Long) communicates the sender's known file size so receivers with indeterminate metadata can compute accurate download progress. |
 | `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id, origin_node?, owner_id?, access_key?, metadata?}` | Broadcast to trusted peers when the direct author is unreachable/unknown |
 | `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id}` | Sent back along the relay chain once the media's source node is located |
 | `MEDIA_PENDING` | `MediaPendingPayload {media_id, chunk_index}` | Signals an in-flight/awaited chunk — used by the AIMD inflight-tracking state in `MediaManager` |
 | `MEDIA_TRANSFER_ACK` | `MediaTransferAckPayload {media_id}` | Transfer-completion acknowledgement |
+
+> **Note on Temporary Contacts and Media Routing:** Media packets exchanged with a peer designated as a "Temporary Contact" (e.g., from a Discoverable connection) must explicitly use the local node's **burnable identity** public key as the `senderId` instead of the main identity. Because the temporary contact's gossip firewall is only aware of the burnable identity that performed the handshake, any media response or chunk request signed by the main identity will be immediately dropped as an unknown sender.
 
 `MediaMetadata` (embedded in `PostPayload.media_metadata` and
 `MediaRelayRequestPayload.metadata`): `id, type ("audio"|"video"|"file"|
@@ -490,12 +507,13 @@ and still accurate.
 | `VOTE` | `postId\|voteType\|authorId\|timestamp` |
 | `COMMENT_VOTE` | `commentId\|voteType\|authorId\|timestamp` |
 | `ANNOUNCE_PEER` | `authorId\|timestamp` |
-| `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) |
+| `IDENTITY_UPDATE` | `userId\|handle\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 | `USER_EXIT` | `userId\|timestamp` |
+| `ANNOUNCE_DISCOVERABLE` | `authorId:handle:onionAddress:encPublicKey:isCreator:fundMeLink:authorAvatarB64:bio:timestamp` (using colons `:` instead of pipes) |
 | `EDIT_POST` | `postId\|authorId\|content\|timestamp` |
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` |
-| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | computed and sent (`PeerHandshakePayload.signature`) but **never verified on receipt** — see §2 row 3–4 |
+| `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64
 no-wrap encoding, over the UTF-8 bytes of the literal pipe-delimited string.

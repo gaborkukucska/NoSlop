@@ -36,13 +36,30 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            .okHttpClient { HttpClientProvider.clearnetClient }
+            // Always use clearnet for images — thumbnail URLs are public CDN links
+            // (ytimg.com, pexels, etc.) that don't reveal user identity.
+            // Routing them through Tor causes slow loads and black images.
+            .okHttpClient { HttpClientProvider.rawClearnetClient }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())
                 } else {
                     add(coil.decode.GifDecoder.Factory())
                 }
+                add(object : coil.intercept.Interceptor {
+                    override suspend fun intercept(chain: coil.intercept.Interceptor.Chain): coil.request.ImageResult {
+                        val request = chain.request
+                        val url = request.data.toString()
+                        if (url.startsWith("noslop://")) {
+                            val resolved = com.noslop.app.ui.resolveMediaUrl(url, this@NoSlopApp)
+                            if (resolved != null) {
+                                val newData = if (resolved.startsWith("file://")) java.io.File(resolved.removePrefix("file://")) else resolved
+                                return chain.proceed(request.newBuilder().data(newData).build())
+                            }
+                        }
+                        return chain.proceed(request)
+                    }
+                })
             }
             .build()
     }
@@ -74,6 +91,15 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // so that file copies and auto-downloads don't fail with "not initialized" errors.
         com.noslop.app.mesh.MediaManager.initialize(repository)
 
+        // Hydrate the playback-position store from disk so videos resume where
+        // the user left off, even after a cold start.
+        com.noslop.app.ui.components.PlaybackPositionStore.init(this)
+
+        repositoryScope.launch {
+            val appLang = repository.getAppLanguage()
+            com.noslop.app.util.LanguageManager.init(this@NoSlopApp, appLang)
+        }
+
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
 
@@ -81,7 +107,14 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()
             if (identity != null) {
-                GossipService.initialize(repository.peerDao, repository.meshTransport, identity.publicKeyB64)
+                GossipService.initialize(
+                    repository.peerDao, 
+                    repository.meshTransport, 
+                    identity.publicKeyB64,
+                    getMeshFilterSettings = { repository.getMeshFilterSettings() },
+                    checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) },
+            checkIsLocalUser = { pub -> repository.isLocalUser(pub) }
+                )
                 repository.startPresenceHeartbeat()
             }
         }

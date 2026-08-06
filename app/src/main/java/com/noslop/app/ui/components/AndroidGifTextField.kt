@@ -1,9 +1,6 @@
 // app/src/main/java/com/noslop/app/ui/components/AndroidGifTextField.kt
 package com.noslop.app.ui.components
 
-import android.content.ClipDescription
-import android.net.Uri
-import android.os.Bundle
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.EditText
@@ -23,8 +20,7 @@ import androidx.core.view.inputmethod.InputConnectionCompat
 import androidx.core.widget.addTextChangedListener
 import com.noslop.app.debug.Logger
 import java.io.File
-
-@Composable
+	@Composable
 fun AndroidGifTextField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -40,7 +36,7 @@ fun AndroidGifTextField(
             .heightIn(min = 50.dp, max = 120.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(Color(0xFF0F172A)) // SurfaceDark
-            .padding(horizontal = 4.dp), // Let EditText handle inner padding
+            .padding(horizontal = 4.dp),
         factory = { context ->
             object : EditText(context) {
                 override fun onCreateInputConnection(editorInfo: EditorInfo): InputConnection? {
@@ -56,14 +52,13 @@ fun AndroidGifTextField(
                             try {
                                 inputContentInfo.requestPermission()
                             } catch (e: Exception) {
-                                Logger.error("GIF_INPUT", "Failed to get permission for rich content", e.message)
+                                Logger.error("GIF_INPUT", "Failed to get permission for rich content: ${e.message}")
                                 return@OnCommitContentListener false
                             }
                         }
                         
                         val uri = inputContentInfo.contentUri
-                        // Determine extension based on MIME type rather than URI string
-                        val mime = inputContentInfo.description.getMimeType(0)
+                        val mime = inputContentInfo.description.getMimeType(0) ?: ""
                         val ext = when {
                             mime.contains("gif") -> ".gif"
                             mime.contains("png") -> ".png"
@@ -81,12 +76,12 @@ fun AndroidGifTextField(
                             }
                             onMediaAttached(tempFile)
                         } catch (e: Exception) {
-                            Logger.error("GIF_INPUT", "Failed to process Gboard content", e.message)
+                            Logger.error("GIF_INPUT", "Failed to process Gboard content: ${e.message}")
                             return@OnCommitContentListener false
                         } finally {
                             inputContentInfo.releasePermission()
                         }
-                        true
+                        return@OnCommitContentListener true
                     }
                     return InputConnectionCompat.createWrapper(ic, editorInfo, callback)
                 }
@@ -97,7 +92,6 @@ fun AndroidGifTextField(
                 this.setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 this.setPadding(32, 24, 32, 24)
                 
-                // Allow multiline if sendOnEnter is false
                 if (sendOnEnter) {
                     this.inputType = android.text.InputType.TYPE_CLASS_TEXT
                     this.imeOptions = EditorInfo.IME_ACTION_SEND
@@ -124,8 +118,14 @@ fun AndroidGifTextField(
         },
         update = { view ->
             if (view.text.toString() != value) {
+                val selectionStart = view.selectionStart
+                val selectionEnd = view.selectionEnd
                 view.setText(value)
-                view.setSelection(view.length())
+                if (selectionStart <= value.length && selectionEnd <= value.length && selectionStart > -1) {
+                    view.setSelection(selectionStart, selectionEnd)
+                } else {
+                    view.setSelection(value.length)
+                }
             }
         }
     )

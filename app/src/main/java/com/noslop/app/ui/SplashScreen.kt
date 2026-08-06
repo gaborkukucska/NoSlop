@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -21,7 +23,7 @@ import com.noslop.app.ui.theme.TextMuted
 import kotlinx.coroutines.delay
 
 @Composable
-fun SplashScreen() {
+fun SplashScreen(statusMessage: String = "") {
     var startAnimation by remember { mutableStateOf(false) }
 
     val alphaAnim by animateFloatAsState(
@@ -52,7 +54,7 @@ fun SplashScreen() {
                 .scale(scaleAnim)
         ) {
             Text(
-                text = "NO_SLOP",
+                text = "NO_SLOP".tr,
                 style = MaterialTheme.typography.headlineLarge.copy(
                     color = AccentGreen,
                     fontWeight = FontWeight.Bold,
@@ -64,7 +66,7 @@ fun SplashScreen() {
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
-                text = "Welcome Back",
+                text = "Welcome Back".tr,
                 style = MaterialTheme.typography.titleMedium.copy(
                     color = TextMuted,
                     letterSpacing = 2.sp
@@ -94,35 +96,46 @@ fun SplashScreen() {
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            val loadingMessages = listOf(
-                "Waking up Tor...",
-                "Building Tor circuits...",
-                "Finding mesh peers...",
-                "Pre-loading media...",
-                "Almost there..."
-            )
-            var currentMessageIndex by remember { mutableStateOf(0) }
-            
-            LaunchedEffect(Unit) {
-                while(true) {
-                    kotlinx.coroutines.delay(2500)
-                    currentMessageIndex = (currentMessageIndex + 1) % loadingMessages.size
-                }
-            }
-
-            Crossfade(
-                targetState = currentMessageIndex,
-                animationSpec = tween(500),
-                label = "loadingText"
-            ) { targetIndex ->
+            if (statusMessage.isNotBlank()) {
                 Text(
-                    text = loadingMessages[targetIndex],
+                    text = statusMessage,
                     style = MaterialTheme.typography.labelSmall.copy(
                         color = AccentGreen.copy(alpha = pulseAlpha),
                         letterSpacing = 1.sp,
                         fontWeight = FontWeight.Bold
                     )
                 )
+            } else {
+                val loadingMessages = listOf(
+                    "Waking up Tor...",
+                    "Building Tor circuits...",
+                    "Finding mesh peers...",
+                    "Pre-loading media...",
+                    "Almost there..."
+                )
+                var currentMessageIndex by remember { mutableStateOf(0) }
+                
+                LaunchedEffect(Unit) {
+                    while(true) {
+                        kotlinx.coroutines.delay(2500)
+                        currentMessageIndex = (currentMessageIndex + 1) % loadingMessages.size
+                    }
+                }
+
+                Crossfade(
+                    targetState = currentMessageIndex,
+                    animationSpec = tween(500),
+                    label = "loadingText"
+                ) { targetIndex ->
+                    Text(
+                        text = loadingMessages[targetIndex],
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = AccentGreen.copy(alpha = pulseAlpha),
+                            letterSpacing = 1.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
             }
         }
     }

@@ -17,7 +17,7 @@ object RedditApiClient {
     private const val TAG = "REDDIT_API"
     private val gson = Gson()
 
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
      * Fetch posts from a subreddit with a given sort order.
@@ -52,16 +52,16 @@ object RedditApiClient {
         return try {
             val request = Request.Builder()
                 .url(url)
-                .header("User-Agent", "NoSlop-Android/1.0 (privacy-first aggregator)")
                 .build()
 
             val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Logger.warn(TAG, "Reddit API returned ${response.code} for $url")
-                return emptyList()
-            }
-
-            val body = response.body?.string() ?: return emptyList()
+            val body = response.use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Reddit API returned ${res.code} for $url")
+                    return emptyList()
+                }
+                res.body?.string()
+            } ?: return emptyList()
             val root = gson.fromJson(body, JsonObject::class.java)
             val children = root.getAsJsonObject("data")
                 ?.getAsJsonArray("children") ?: return emptyList()

@@ -12,7 +12,7 @@ To build and run NoSlop locally, ensure your development environment has the fol
 *   **Android Studio (Koala or newer)**: Standard IDE for Android developers. It supplies the required compilation Android SDK, tools, and virtual emulators.
 *   **Android SDK (API Level 35)**:
     *   `compileSdk = 35`
-    *   `minSdk = 24` (Android 7.0 Nougat — see [`app/build.gradle.kts`](../app/build.gradle.kts) for the authoritative value; cryptographic APIs and `EncryptedSharedPreferences` are available from API 23+, with the Ed25519 KeyPairGenerator path using Bouncy Castle on API 24–32 and the platform Conscrypt provider on API 33+, see [TECHNICAL_REFERENCE.md §3.2](TECHNICAL_REFERENCE.md#32-key-generation-cryptoservicegenerateidentity))
+    *   `minSdk = 24` (Android 7.0 Nougat — see [`app/build.gradle.kts`](../app/build.gradle.kts) for the authoritative value; cryptographic APIs and `EncryptedSharedPreferences` are available from API 23+, with the Ed25519 KeyPairGenerator path using Lazysodium with a Bouncy Castle fallback on all API levels, see [TECHNICAL_REFERENCE.md §3.2](TECHNICAL_REFERENCE.md#32-key-generation-cryptoservicegenerateidentity))
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
@@ -139,6 +139,33 @@ This is the new Kotlin Multiplatform application currently under development in 
 
 ---
 
+## 6.1. GitHub Issue Submission (Optional)
+
+The app includes a built-in **File a Report** screen (accessible from Settings) that submits bug reports, feature requests, and questions directly to the GitHub repository via the REST API. This requires two optional keys in `local.properties`:
+
+```properties
+# local.properties (never commit this file!)
+GITHUB_PAT=ghp_your_personal_access_token_here
+GITHUB_ASSIGNEE=gaborkukucska
+```
+
+| Property | Required | Description |
+|---|---|---|
+| `GITHUB_PAT` | **Yes** (for in-app submission) | A GitHub [Personal Access Token](https://github.com/settings/tokens) with **`repo`** scope. Without this, the Submit button is disabled and users see an "unavailable" message. |
+| `GITHUB_ASSIGNEE` | No | The GitHub username to auto-assign as the issue owner. If blank, issues are created without an assignee. |
+
+The app maps the user's "Issue Type" dropdown to standard GitHub labels:
+- **Bug** → `bug`
+- **Feature Request** → `enhancement`
+- **Question** → `question`
+
+> [!IMPORTANT]
+> These labels must already exist in your GitHub repository. If they don't, create them at:
+> `https://github.com/<owner>/<repo>/labels`
+> GitHub repositories created after 2020 include `bug` and `enhancement` by default, but `question` may need to be added manually.
+
+---
+
 ## 7. Common Errors and Fixes
 
 Here are the top 5 common build/runtime issues and how to resolve them:
@@ -150,7 +177,7 @@ Here are the top 5 common build/runtime issues and how to resolve them:
 
 ### 2. SOCKS5 Proxy SocketException (Tor Connection Failure)
 *   **Symptom**: Diagnostic logs print `Connection refused` or `Socket timeout` during "Test Tor" pings.
-*   **Cause**: The embedded Tor daemon is either still bootstrapping circuits or failed to bind to port 9050.
+*   **Cause**: The embedded Tor daemon is either still bootstrapping circuits or failed to bind to its SOCKS proxy port (`Constants.TOR_SOCKS_PORT`).
 *   **Fix**: Wait an additional 30 seconds for the internal daemon to achieve 100% bootstrap. If it continues to fail, fully force-close the app and reopen it to restart the native Tor process.
 
 ### 3. SQLite Database Migration Crash

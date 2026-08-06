@@ -8,6 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 
 /**
@@ -46,6 +49,9 @@ class FeedRepository(
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
     val allFeedItems: Flow<List<FeedItem>> = feedDao.getAllItems()
     val savedFeedItems: Flow<List<FeedItem>> = feedDao.getSavedItems()
+    
+    private val _feedBuildStatus = MutableStateFlow("")
+    val feedBuildStatus: StateFlow<String> = _feedBuildStatus.asStateFlow()
 
     // --- Source / item CRUD ---
     suspend fun insertSource(source: FeedSource) = withContext(Dispatchers.IO) {
@@ -79,6 +85,12 @@ class FeedRepository(
     suspend fun clearFeedData() = withContext(Dispatchers.IO) {
         feedDao.clearUnsavedItems()
         Logger.info(TAG, "Cleared previous feed items and sources")
+    }
+
+    /** Purge YouTube items so they are re-fetched with correct dates */
+    suspend fun deleteYouTubeItems() = withContext(Dispatchers.IO) {
+        feedDao.deleteYouTubeItems()
+        Logger.info(TAG, "Purged stale YouTube items from DB")
     }
 
     /**
@@ -147,6 +159,8 @@ class FeedRepository(
             return@withContext
         }
 
+        _feedBuildStatus.value = "Loading your preferences..."
+
         // Load preferences
         val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
         val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
@@ -169,7 +183,10 @@ class FeedRepository(
         val firstRss = rssSources.firstOrNull()
         if (firstRss != null) {
             rssSources.remove(firstRss)
-            rampUpJobs.add(async(dispatcher) { fetchRssSource(firstRss, allNegative) })
+            rampUpJobs.add(async(dispatcher) { 
+                _feedBuildStatus.value = "Fetching RSS feeds (1/${rssSources.size + 1})..."
+                fetchRssSource(firstRss, allNegative) 
+            })
         }
 
         val priorityCats = listOf("Video Platforms", "Music", "Photography").mapNotNull { cat -> activeCategories.find { it == cat } }
@@ -177,7 +194,8 @@ class FeedRepository(
         if (firstApiCat != null) {
             activeCategories.remove(firstApiCat)
             rampUpJobs.add(async(dispatcher) {
-                fetchApiCategory(firstApiCat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                _feedBuildStatus.value = "Searching $firstApiCat content..."
+                fetchApiCategory(firstApiCat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
             })
         }
 
@@ -185,21 +203,30 @@ class FeedRepository(
         kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
 
         // --- Phase 2: Background Sync ---
-        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
+        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()
 
+        var rssIndex = 1
         for (source in rssSources) {
-            backgroundJobs.add(async(dispatcher) { fetchRssSource(source, allNegative) })
+            backgroundJobs.add(async(dispatcher) { 
+                _feedBuildStatus.value = "Syncing RSS sources... ($rssIndex/${rssSources.size})"
+                rssIndex++
+                fetchRssSource(source, allNegative) 
+            })
         }
 
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
-                fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
+                _feedBuildStatus.value = "Fetching $category videos & articles..."
+                fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
             })
         }
 
         // --- Phase 3: Creator Specific API searches ---
         // We pick 5 random creators per sync to avoid massive API spikes
         val sampledCreators = creatorKeywordList.shuffled().take(5)
+        if (sampledCreators.isNotEmpty()) {
+            _feedBuildStatus.value = "Finding your creators..."
+        }
         for (creator in sampledCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
@@ -209,7 +236,11 @@ class FeedRepository(
         }
 
         kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
+        
+        _feedBuildStatus.value = "Applying your filters..."
         Logger.info(TAG, "Feed synchronization completed.")
+        kotlinx.coroutines.delay(200)
+        _feedBuildStatus.value = ""
     }
 
     private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
@@ -239,10 +270,21 @@ class FeedRepository(
         userCategories: List<String>,
         langPref: String,
         allNegative: List<String>,
-        apiKeyRepo: ApiKeyRepository
+        apiKeyRepo: ApiKeyRepository,
+        creatorKeywordList: List<String>
     ) {
         try {
             val keywords = preferencesRepository.getUserKeywordsForCategory(category).toMutableList()
+            
+            // Enrich with creator keywords relevant to this category
+            val relevantCreators = com.noslop.app.feeds.SourceLibrary.creatorSuggestionsByCategory[category]
+            if (relevantCreators != null) {
+                val matchedCreators = creatorKeywordList.filter { it in relevantCreators }
+                if (matchedCreators.isNotEmpty()) {
+                    keywords.addAll(matchedCreators.shuffled().take(3)) // Take a few relevant ones
+                }
+            }
+
             if (category == "Music") {
                 val genres = preferencesRepository.getSelectedMusicGenres()
                 if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
@@ -258,13 +300,15 @@ class FeedRepository(
                     .map { it.id }
             }
 
-            if (categoryApiSourceIds.isEmpty()) return
+            // Combine category specific fallbacks with ALL other active API sources
+            // so cross-category plugins (like YouTube search) execute correctly
+            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds).distinct()
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                 category = category,
                 userKeywords = keywords,
                 apiKeyRepo = apiKeyRepo,
-                activeApiSourceIds = categoryApiSourceIds,
+                activeApiSourceIds = allActiveIds,
                 language = langPref
             )
             if (apiItems.isNotEmpty()) {
@@ -283,8 +327,8 @@ class FeedRepository(
     }
 
     /** Custom Feed Search Pipeline — used by manual search and the per-sync creator sampling. */
-    suspend fun searchCustomFeed(query: String, filterMode: String?) = withContext(Dispatchers.IO) {
-        if (!isAggregatorEnabled()) return@withContext
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> = withContext(Dispatchers.IO) {
+        if (!isAggregatorEnabled()) return@withContext emptyList()
         Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
 
         try {
@@ -323,11 +367,13 @@ class FeedRepository(
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)
                     Logger.info(TAG, "Search pipeline: fetched ${filteredApiItems.size} items for query '$query'")
+                    return@withContext filteredApiItems.map { it.id }
                 }
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Search pipeline failed for query '$query'", e.message)
         }
+        return@withContext emptyList()
     }
 
     /** Check if the clearnet aggregator is enabled (true by default). */

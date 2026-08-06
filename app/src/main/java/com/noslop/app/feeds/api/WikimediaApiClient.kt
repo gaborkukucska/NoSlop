@@ -16,7 +16,7 @@ object WikimediaApiClient {
 
     private const val TAG = "WIKIMEDIA_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private var lastContinueToken: String? = null
 
@@ -24,7 +24,7 @@ object WikimediaApiClient {
         return try {
             var url = "https://commons.wikimedia.org/w/api.php?action=query&generator=categorymembers" +
                       "&gcmtitle=Category:Featured_pictures_on_Wikimedia_Commons&gcmlimit=25" +
-                      "&prop=imageinfo&iiprop=url|extmetadata&format=json"
+                      "&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=1280&format=json"
 
             if (lastContinueToken != null) {
                 url += "&gcmcontinue=$lastContinueToken"
@@ -62,6 +62,7 @@ object WikimediaApiClient {
                     val info = imageInfoArr[0].asJsonObject
                     
                     val imageUrl = info.get("url")?.asString ?: continue
+                    val thumbUrl = info.get("thumburl")?.asString ?: imageUrl
                     val descriptionUrl = info.get("descriptionurl")?.asString ?: imageUrl
                     
                     val metadata = info.getAsJsonObject("extmetadata")
@@ -79,7 +80,7 @@ object WikimediaApiClient {
                         url = descriptionUrl,
                         author = cleanArtist,
                         excerpt = cleanDesc.take(200),
-                        thumbnailUrl = imageUrl,
+                        thumbnailUrl = thumbUrl,
                         publishedAt = System.currentTimeMillis(),
                         mediaUrl = imageUrl,
                         mediaType = "image",

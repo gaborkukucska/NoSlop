@@ -29,7 +29,7 @@ enum class TorState { IDLE, STARTING, PROXY_READY, READY, FAILED }
 object TorService {
 
     private const val TAG = "TOR"
-    const val SOCKS_PORT = 9050
+    val SOCKS_PORT = Constants.TOR_SOCKS_PORT
     const val PROXY_HOST = "127.0.0.1"
 
     var onAddressCallback: ((String) -> Unit)? = null
@@ -45,6 +45,14 @@ object TorService {
 
     private var bootstrapJob: kotlinx.coroutines.Job? = null
     private var currentPrivateKeyB64: String? = null
+    private var currentBurnablePrivateKeyB64: String? = null
+    var currentBurnableOnionAddress: String? = null
+    var onBurnableAddressCallback: ((String) -> Unit)? = null
+    
+    // Store active service IDs to allow unregistering
+    private var activeMainServiceId: String? = null
+    private var activeBurnableServiceId: String? = null
+
 
     private val torStatusReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: android.content.Intent?) {
@@ -59,7 +67,9 @@ object TorService {
                     }
                 }
                 org.torproject.jni.TorService.STATUS_OFF -> {
-                    _torState.value = TorState.FAILED
+                    if (_torState.value != TorState.STARTING) {
+                        _torState.value = TorState.FAILED
+                    }
                 }
                 org.torproject.jni.TorService.STATUS_STARTING -> {
                     _torState.value = TorState.STARTING
@@ -78,19 +88,29 @@ object TorService {
      * true (user has external Orbot) — in that case the daemon may already
      * be running on 9050.
      */
-    fun startTor(context: Context, privateKeyB64: String? = null) {
+    fun startTor(context: Context, privateKeyB64: String? = null, burnablePrivateKeyB64: String? = null) {
         // FIX: Guard now excludes IDLE — IDLE means "not started yet" and must
         // always proceed. FAILED also now falls through so the Retry button works.
         if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
-            // Still update the key in case it changed (e.g. after onboarding)
+            // FIX: Detect when a real identity key is provided for the first time
+            // (e.g. after onboarding completes, or on a warm restart with identity loaded).
+            // The previous code updated the key but never re-triggered registration,
+            // leaving wrong ephemeral hidden services published permanently.
+            val keyChanged = privateKeyB64 != null && privateKeyB64 != currentPrivateKeyB64
             currentPrivateKeyB64 = privateKeyB64
+            currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
+            if (keyChanged && _torState.value == TorState.READY) {
+                Logger.info(TAG, "Identity key changed while Tor is READY. Re-registering hidden service with correct key.")
+                triggerRegistration()
+            }
             return
         }
 
         Logger.info(TAG, "Starting embedded Tor daemon via native Intent (previous state=${_torState.value})...")
         _torState.value = TorState.STARTING
         currentPrivateKeyB64 = privateKeyB64
+        currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
         
         bootstrapJob?.cancel()
 
@@ -110,8 +130,14 @@ object TorService {
 
         try {
             val intent = android.content.Intent(context, org.torproject.jni.TorService::class.java)
+            
             intent.action = org.torproject.jni.TorService.ACTION_START
-            context.startService(intent)
+            
+            try {
+                context.startService(intent)
+            } catch (e: IllegalStateException) {
+                Logger.warn(TAG, "startService threw IllegalStateException: ${e.message}")
+            }
 
             // Unified self-healing bootstrap loop
             bootstrapJob = scope.launch {
@@ -127,9 +153,11 @@ object TorService {
                         
                         val (isTor, _) = checkTorConnection()
                         if (isTor) {
-                            Logger.info(TAG, "Self-healing bootstrap: Connectivity verified. Moving to READY.")
-                            _torState.value = TorState.READY
-                            triggerRegistration()
+                            if (_torState.value != TorState.READY) {
+                                Logger.info(TAG, "Self-healing bootstrap: Connectivity verified. Moving to READY.")
+                                _torState.value = TorState.READY
+                                triggerRegistration()
+                            }
                             break
                         }
                         delay(5000)
@@ -150,13 +178,100 @@ object TorService {
         }
     }
 
+    var skipHiddenServiceRegistration: Boolean = false
+
     private fun triggerRegistration() {
         scope.launch {
-            // Small delay to ensure ControlPort is fully receptive
-            delay(3000)
-            registerHiddenService(currentPrivateKeyB64) { onionAddress ->
-                onAddressCallback?.invoke(onionAddress)
+            if (skipHiddenServiceRegistration) {
+                Logger.info(TAG, "Skipping hidden service registration (Hub connected mode). Using Tor strictly as an outbound SOCKS5 proxy.")
+            } else if (currentPrivateKeyB64 != null) {
+                // FIX: Clean up any stale hidden service from a previous session or
+                // a prior registration with the wrong key (e.g. ephemeral NEW key
+                // registered before identity was loaded during onboarding).
+                if (activeMainServiceId != null) {
+                    Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering with correct key.")
+                    unregisterHiddenService(activeMainServiceId!!)
+                    activeMainServiceId = null
+                }
+                // Small delay to ensure ControlPort is fully receptive
+                delay(3000)
+                registerHiddenService(currentPrivateKeyB64) { onionAddress ->
+                    onAddressCallback?.invoke(onionAddress)
+                }
+            } else {
+                if (activeMainServiceId != null) {
+                    Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering ephemeral key.")
+                    unregisterHiddenService(activeMainServiceId!!)
+                    activeMainServiceId = null
+                }
+                delay(3000)
+                registerHiddenService(null) { onionAddress ->
+                    onAddressCallback?.invoke(onionAddress)
+                }
             }
+            
+            if (currentBurnablePrivateKeyB64 != null) {
+                // FIX: Also clean up stale burnable service
+                if (activeBurnableServiceId != null) {
+                    unregisterHiddenService(activeBurnableServiceId!!)
+                    activeBurnableServiceId = null
+                }
+                // Short delay between control port commands
+                delay(1000)
+                registerHiddenService(currentBurnablePrivateKeyB64) { onionAddress ->
+                    currentBurnableOnionAddress = onionAddress
+                    onBurnableAddressCallback?.invoke(onionAddress)
+                }
+            }
+        }
+    }
+
+    /**
+     * Unregisters the currently active hidden services.
+     * This is critical when transitioning to a Hub, to prevent descriptor flapping
+     * where both the Hub and the mobile app publish the same .onion address.
+     */
+    fun unregisterHiddenServices() {
+        scope.launch {
+            if (activeMainServiceId != null) {
+                unregisterHiddenService(activeMainServiceId!!)
+                activeMainServiceId = null
+            }
+            if (activeBurnableServiceId != null) {
+                unregisterHiddenService(activeBurnableServiceId!!)
+                activeBurnableServiceId = null
+            }
+        }
+    }
+
+    private suspend fun unregisterHiddenService(serviceId: String) = withContext(Dispatchers.IO) {
+        Logger.info(TAG, "Unregistering hidden service $serviceId...")
+        try {
+            val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
+            val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
+
+            writer.print("AUTHENTICATE\r\n")
+            writer.flush()
+            val authResp = reader.readLine()
+            if (authResp == null || !authResp.startsWith("250")) {
+                controlSocket.close()
+                return@withContext
+            }
+
+            val cmd = "DEL_ONION $serviceId"
+            writer.print("$cmd\r\n")
+            writer.flush()
+            
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                Logger.debug(TAG, "DEL_ONION response: $line")
+                if (line!!.startsWith("250 ") || line!!.startsWith("5")) break
+            }
+            controlSocket.close()
+            Logger.info(TAG, "Successfully unregistered hidden service $serviceId")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to unregister hidden service $serviceId: ${e.message}")
         }
     }
 
@@ -164,8 +279,9 @@ object TorService {
      * Updates the private key and re-registers the hidden service.
      * Used when transitioning from onboarding to an active identity.
      */
-    fun updateKeyAndRegister(privateKeyB64: String) {
+    fun updateKeyAndRegister(privateKeyB64: String, burnablePrivateKeyB64: String? = null) {
         currentPrivateKeyB64 = privateKeyB64
+        currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
         if (_torState.value == TorState.READY) {
             triggerRegistration()
         }
@@ -181,7 +297,7 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
             
-            val content = "ControlPort 9051\nCookieAuthentication 1\n"
+            val content = "SocksPort $SOCKS_PORT\nControlPort ${Constants.TOR_CONTROL_PORT}\nCookieAuthentication 1\n"
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {
@@ -197,7 +313,7 @@ object TorService {
             for (attempt in 1..timeoutSeconds) {
                 try {
                     Socket().use { socket ->
-                        socket.connect(InetSocketAddress(PROXY_HOST, 9051), 500)
+                        socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 500)
                         return@withContext true
                     }
                 } catch (e: Exception) {
@@ -255,15 +371,15 @@ object TorService {
                     val detail = if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed"
                     Logger.info(TAG, "Tor check complete — isTor=$isTor")
                     if (!isTor && _torState.value == TorState.READY) {
-                        _torState.value = TorState.FAILED
+                        // Do NOT set FAILED here, the daemon is still running
+                        Logger.warn(TAG, "Tor check failed: Proxy responded but not Tor-routed")
                     }
                     Pair(isTor, detail)
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Tor check failed: ${e.message}")
-                if (_torState.value == TorState.READY) {
-                    _torState.value = TorState.FAILED
-                }
+                // Do NOT set FAILED here, the daemon is still running
+                Logger.warn(TAG, "Tor check failed: Proxy unreachable")
                 Pair(false, "Proxy unreachable: ${e.message}")
             }
         }
@@ -278,10 +394,10 @@ object TorService {
         withContext(Dispatchers.IO) {
             Logger.info(TAG, "Registering Tor hidden service on port ${Constants.MESH_PORT} (persistent=${privateKeyB64 != null})...")
             try {
-                // Wait for control port 9051 to be ready
+                // Wait for control port to be ready
                 waitForControlPort(timeoutSeconds = 10)
 
-                val controlSocket = Socket(PROXY_HOST, 9051)
+                val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
                 val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
                 val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
 
@@ -311,8 +427,8 @@ object TorService {
 
                 // Build and send ADD_ONION command as raw text
                 // Syntax: ADD_ONION KeyType:KeyBlob [Flags=Detach] Port=VirtPort[,Target]
-                val cmd = "ADD_ONION $keyParam Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}"
-                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_PORT}")
+                val cmd = "ADD_ONION $keyParam Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_LISTEN_PORT}"
+                Logger.info(TAG, "Executing raw HS registration: ADD_ONION *** Flags=Detach Port=${Constants.MESH_PORT},127.0.0.1:${Constants.MESH_LISTEN_PORT}")
                 writer.print("$cmd\r\n")
                 writer.flush()
 
@@ -337,6 +453,11 @@ object TorService {
 
                 if (serviceId != null) {
                     val onionAddress = "$serviceId.onion"
+                    if (privateKeyB64 == currentPrivateKeyB64) {
+                        activeMainServiceId = serviceId
+                    } else {
+                        activeBurnableServiceId = serviceId
+                    }
                     Logger.info(TAG, "Hidden service registered: $onionAddress")
                     onAddressReady(onionAddress)
                 } else if (responseLines.any { it.contains("550 Onion address collision") }) {

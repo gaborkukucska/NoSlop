@@ -1,5 +1,7 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,17 +44,17 @@ fun LogsViewerScreen(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
                 }
-                Text("System Logs", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
+                Text("System Logs".tr, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
             }
 
             Row {
                 IconButton(onClick = { viewModel.copyLogToClipboard(context) }) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs", tint = AccentGreen)
+                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy logs".tr, tint = AccentGreen)
                 }
                 IconButton(onClick = { viewModel.clearLogFile() }) {
-                    Icon(Icons.Default.Delete, contentDescription = "Clear logs", tint = DestructiveRed)
+                    Icon(Icons.Default.Delete, contentDescription = "Clear logs".tr, tint = DestructiveRed)
                 }
             }
         }

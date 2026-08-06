@@ -11,7 +11,7 @@ import java.net.Socket
 
 object MediaProxyService {
     private const val TAG = "MEDIA_PROXY"
-    private const val LOCAL_PORT = 8080
+    private val LOCAL_PORT = com.noslop.app.BuildConfig.MEDIA_PROXY_PORT
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var serverSocket: ServerSocket? = null

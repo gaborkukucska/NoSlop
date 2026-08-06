@@ -45,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 3,
+    version = 6,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -84,6 +84,31 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Discoverable Mode: add contact classification and folder fields to peers
+                database.execSQL("ALTER TABLE peers ADD COLUMN customFolder TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE peers ADD COLUMN isTemporary INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE peers ADD COLUMN isDiscoverable INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE peers ADD COLUMN isCreator INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE peers ADD COLUMN fundMeLink TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Discoverability: Add bio field to peers
+                database.execSQL("ALTER TABLE peers ADD COLUMN bio TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // Add mediaSize to mesh_posts
+                database.execSQL("ALTER TABLE mesh_posts ADD COLUMN mediaSize INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -92,10 +117,17 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build()
                 INSTANCE = instance
                 instance
+            }
+        }
+
+        fun closeInstance() {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
             }
         }
     }

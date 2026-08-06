@@ -13,7 +13,7 @@ import okhttp3.Request
 object NewsApiClient {
     private const val TAG = "NEWSAPI"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchArticles(query: String, category: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-search", language: String = "en"): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("newsapi")

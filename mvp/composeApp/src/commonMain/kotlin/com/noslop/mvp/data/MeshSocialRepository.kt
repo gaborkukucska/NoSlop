@@ -104,7 +104,7 @@ class MeshSocialRepository(
                         
                         val packet = NetworkPacket(
                             id = randomId(),
-                            hops = 1,
+                            hops = 3,
                             senderId = pubKeyB64,
                             type = "ANNOUNCE_PEER",
                             payload = NetworkPacket.payloadOf(announcePay, AnnouncePeerPayload.serializer()),

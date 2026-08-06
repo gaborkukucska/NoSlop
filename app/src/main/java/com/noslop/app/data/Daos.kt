@@ -42,6 +42,9 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE sourceId LIKE 'api_%'")
     suspend fun clearApiItems()
 
+    @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%'")
+    suspend fun deleteYouTubeItems()
+
     @Query("DELETE FROM feed_items WHERE isSaved = 0")
     suspend fun clearUnsavedItems()
 
@@ -59,6 +62,15 @@ interface PeerDao {
 
     @Query("SELECT * FROM peers WHERE isTrusted = 1")
     fun getTrustedPeers(): Flow<List<Peer>>
+
+    @Query("SELECT * FROM peers WHERE isTemporary = 1 ORDER BY lastSeenAt DESC")
+    fun getTemporaryPeers(): Flow<List<Peer>>
+
+    @Query("SELECT * FROM peers WHERE customFolder = :folder AND isTrusted = 1 ORDER BY lastSeenAt DESC")
+    fun getPeersByFolder(folder: String): Flow<List<Peer>>
+
+    @Query("SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 AND isOnline = 1 AND isTemporary = 1 ORDER BY lastSeenAt DESC")
+    fun getDiscoverablePeers(): Flow<List<Peer>>
 
     @Query("SELECT * FROM peers WHERE publicKeyB64 = :pubKey LIMIT 1")
     suspend fun getPeerByPublicKey(pubKey: String): Peer?
@@ -96,14 +108,26 @@ interface PostDao {
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 
-    @Query("UPDATE mesh_posts SET content = :newContent WHERE id = :id")
-    suspend fun updatePostContent(id: String, newContent: String)
+    @Query("UPDATE mesh_posts SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature WHERE id = :id")
+    suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
 }
 
 @Dao
 interface MessageDao {
     @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub ORDER BY timestamp ASC")
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>>
+
+    @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub ORDER BY timestamp ASC")
+    suspend fun getMessagesWithPeerList(peerPub: String): List<ChatMessage>
+
+    @Query("SELECT * FROM chat_messages WHERE id = :id LIMIT 1")
+    suspend fun getMessageById(id: String): ChatMessage?
+
+    @Query("DELETE FROM chat_messages WHERE id = :id AND senderPub = :senderPub")
+    suspend fun deleteMessageByIdAndSender(id: String, senderPub: String)
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE id = :id")
+    suspend fun hasMessage(id: String): Int
 
     @Query("""
         SELECT * FROM chat_messages 
@@ -127,6 +151,9 @@ interface CommentDao {
     @Query("SELECT * FROM mesh_comments WHERE postId = :postId ORDER BY timestamp ASC")
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>>
 
+    @Query("SELECT COUNT(*) FROM mesh_comments WHERE id = :id")
+    suspend fun hasComment(id: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComment(comment: MeshComment)
 
@@ -135,6 +162,15 @@ interface CommentDao {
 
     @Query("SELECT * FROM mesh_comments WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getCommentsSince(since: Long): List<MeshComment>
+
+    @Query("SELECT * FROM mesh_comments WHERE id = :id LIMIT 1")
+    suspend fun getCommentById(id: String): MeshComment?
+
+    @Query("UPDATE mesh_comments SET content = :newContent, timestamp = :newTimestamp, signature = :newSignature WHERE id = :id")
+    suspend fun updateCommentContent(id: String, newContent: String, newTimestamp: Long, newSignature: String)
+
+    @Query("UPDATE mesh_comments SET content = '[Deleted]', mediaId = null, mediaType = null WHERE id = :id")
+    suspend fun markCommentDeleted(id: String)
 }
 
 @Dao
@@ -287,6 +323,9 @@ interface ViewedHistoryDao {
 
     @Query("DELETE FROM viewed_history WHERE viewedAt < :timestamp")
     suspend fun deleteOlderThan(timestamp: Long)
+
+    @Query("DELETE FROM viewed_history")
+    suspend fun clearAllViewedHistory()
 }
 
 @Dao
@@ -302,4 +341,7 @@ interface SwipeTrackerDao {
 
     @Query("SELECT * FROM swipe_tracker WHERE itemId = :itemId LIMIT 1")
     suspend fun getSwipeForItem(itemId: String): SwipeTracker?
+
+    @Query("DELETE FROM swipe_tracker")
+    suspend fun clearAllSwipeHistory()
 }

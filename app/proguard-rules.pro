@@ -1,6 +1,12 @@
-# Bouncy Castle — required for Ed25519 on API 24-32
+# Bouncy Castle — required for Ed25519 signing across all API levels
 -keep class org.bouncycastle.** { *; }
 -dontwarn org.bouncycastle.**
+
+# Lazysodium + JNA — required for Ed25519 key generation
+-keep class com.goterl.lazysodium.** { *; }
+-keep class com.sun.jna.** { *; }
+-dontwarn com.goterl.lazysodium.**
+-dontwarn com.sun.jna.**
 
 # Room — keep entity and DAO classes
 -keep class com.noslop.app.data.** { *; }

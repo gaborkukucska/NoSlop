@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.RotateRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -173,7 +176,14 @@ fun AvatarCropper(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             IconButton(onClick = onCancel) {
-                Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextLight)
+                Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
+            }
+            IconButton(onClick = {
+                val matrix = android.graphics.Matrix()
+                matrix.postRotate(90f)
+                bitmap = android.graphics.Bitmap.createBitmap(bitmap!!, 0, 0, bitmap!!.width, bitmap!!.height, matrix, true)
+            }) {
+                Icon(Icons.Default.RotateRight, contentDescription = "Rotate".tr, tint = TextLight)
             }
             IconButton(onClick = {
                 coroutineScope.launch(Dispatchers.IO) {
@@ -238,7 +248,7 @@ fun AvatarCropper(
                     }
                 }
             }) {
-                Icon(Icons.Default.Check, contentDescription = "Crop", tint = AccentGreen)
+                Icon(Icons.Default.Check, contentDescription = "Crop".tr, tint = AccentGreen)
             }
         }
     }

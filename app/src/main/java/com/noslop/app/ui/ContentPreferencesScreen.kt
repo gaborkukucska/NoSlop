@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,33 +33,19 @@ import androidx.compose.ui.graphics.asImageBitmap
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
-    // Profile state
-    val currentProfile by viewModel.userProfile.collectAsState()
+fun ContentPreferencesScreen(
+    viewModel: NoSlopViewModel,
+    onBack: () -> Unit,
+    onNavigateToMeshFilters: () -> Unit
+) {
     val currentNegativeKeywords by viewModel.negativeKeywords.collectAsState()
     val currentLanguage by viewModel.languagePreference.collectAsState()
     val currentCreatorKeywords by viewModel.creatorKeywords.collectAsState()
     val isUsingInsecureStorage by viewModel.isUsingInsecureStorage.collectAsState()
 
-    var displayName by remember { mutableStateOf(currentProfile.displayName) }
-    var bio by remember { mutableStateOf(currentProfile.bio) }
-    var avatarB64 by remember { mutableStateOf(currentProfile.avatarB64) }
     var negativeKeywords by remember { mutableStateOf(currentNegativeKeywords) }
     var language by remember { mutableStateOf(currentLanguage) }
     var creatorKeywords by remember { mutableStateOf(currentCreatorKeywords) }
-    var cropUri by remember { mutableStateOf<android.net.Uri?>(null) }
-
-    if (cropUri != null) {
-        com.noslop.app.ui.components.AvatarCropper(
-            uri = cropUri!!,
-            onCropSuccess = { b64 ->
-                avatarB64 = b64
-                cropUri = null
-            },
-            onCancel = { cropUri = null }
-        )
-        return
-    }
 
     // Categories & genres state
     val interests by viewModel.selectedInterests.collectAsState()
@@ -86,10 +75,10 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
             Text(
-                text = "Settings",
+                text = "Settings".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -108,97 +97,44 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         border = BorderStroke(1.dp, DestructiveRed)
                     ) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = DestructiveRed, modifier = Modifier.size(32.dp))
+                            Icon(Icons.Default.Warning, contentDescription = "Warning".tr, tint = DestructiveRed, modifier = Modifier.size(32.dp))
                             Spacer(modifier = Modifier.width(16.dp))
                             Column {
-                                Text("SECURITY WARNING", color = DestructiveRed, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                Text("SECURITY WARNING".tr, color = DestructiveRed, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Text("Hardware-backed Keystore is unavailable on this device. Your identity and private keys are currently stored in PLAINTEXT. Do not use this device for sensitive communication.", color = TextLight, style = MaterialTheme.typography.bodySmall)
+                                Text("Hardware-backed Keystore is unavailable on this device. Your identity and private keys are currently stored in PLAINTEXT. Do not use this device for sensitive communication.".tr, color = TextLight, style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                 }
             }
 
-            // ────────────────── PROFILE ──────────────────
+            // ────────────────── CONTENT MIX RATIO ──────────────────
             item {
-                val context = LocalContext.current
-                val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
-                    contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
-                ) { uri: android.net.Uri? ->
-                    cropUri = uri
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(80.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(SurfaceDark)
-                        .clickable { launcher.launch("image/*") },
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (avatarB64 != null) {
-                        val bitmap = remember(avatarB64) {
-                            try {
-                                val bytes = android.util.Base64.decode(avatarB64, android.util.Base64.DEFAULT)
-                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                            } catch (e: Exception) { null }
-                        }
-                        if (bitmap != null) {
-                            androidx.compose.foundation.Image(
-                                bitmap = bitmap,
-                                contentDescription = "Profile Avatar",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        } else {
-                            Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
-                        }
-                    } else {
-                        Icon(Icons.Default.Face, contentDescription = null, tint = TextMuted, modifier = Modifier.size(40.dp))
-                    }
-                }
+                com.noslop.app.ui.tabs.FeedMixSettingsSection(viewModel = viewModel)
                 Spacer(modifier = Modifier.height(16.dp))
-            }
 
-            item {
-                Text("PROFILE", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it },
-                    label = { Text("Display Name") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
+                Button(
+                    onClick = onNavigateToMeshFilters,
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                    border = BorderStroke(1.dp, BorderSubtle),
                     modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                OutlinedTextField(
-                    value = bio,
-                    onValueChange = { bio = it },
-                    label = { Text("Bio") },
-                    maxLines = 3,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
+                ) {
+                    Icon(Icons.Default.FilterAlt, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Mesh Filters".tr, fontWeight = FontWeight.Bold)
+                }
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
             // ────────────────── CONTENT SOURCES ──────────────────
             item {
-                Text("CONTENT SOURCES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Text("CONTENT SOURCES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
 
                 val activeSources = sources.filter { it.isActive }
                 if (activeSources.isEmpty()) {
-                    Text("No active sources.", color = TextMuted, style = MaterialTheme.typography.bodySmall)
+                    Text("No active sources.".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 } else {
                     Text(
                         text = activeSources.joinToString(", ") { it.title },
@@ -214,14 +150,32 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     border = BorderStroke(1.dp, BorderSubtle),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Manage Sources", fontWeight = FontWeight.Bold)
+                    Text("Manage Sources".tr, fontWeight = FontWeight.Bold)
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── NEGATIVE KEYWORDS ──────────────────
+            item {
+                Text("FILTERING".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = negativeKeywords,
+                    onValueChange = { negativeKeywords = it },
+                    label = { Text("Negative Keywords (comma separated)".tr) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
             // ────────────────── CATEGORIES ──────────────────
             item {
-                Text("CATEGORIES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                Text("CATEGORIES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
             }
 
             items(SourceLibrary.selectableCategories) { category ->
@@ -238,7 +192,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(category, color = TextLight)
+                        Text(category.tr, color = TextLight)
                         Checkbox(
                             checked = isSelected,
                             onCheckedChange = {
@@ -254,7 +208,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             if (localInterests.contains("Music")) {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("MUSIC GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("MUSIC GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allMusicGenres) { genre ->
                     val isSelected = localMusicGenres.contains(genre)
@@ -270,7 +224,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight)
+                            Text(genre.tr, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = {
@@ -288,7 +242,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             run {
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
-                    Text("VIDEO GENRES", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
+                    Text("VIDEO GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
                 }
                 items(allVideoGenres) { genre ->
                     val isSelected = localVideoGenres.contains(genre)
@@ -304,7 +258,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre, color = TextLight)
+                            Text(genre.tr, color = TextLight)
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = {
@@ -317,24 +271,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             }
             }
 
-            // ────────────────── NEGATIVE KEYWORDS ──────────────────
-            item {
-                Spacer(modifier = Modifier.height(24.dp))
-                Text("FILTERING", style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
-                Spacer(modifier = Modifier.height(8.dp))
 
-                OutlinedTextField(
-                    value = negativeKeywords,
-                    onValueChange = { negativeKeywords = it },
-                    label = { Text("Negative Keywords (comma separated)") },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-            }
 
             // Creator word-cloud suggestion chips (derived from current selected interests)
             // Shown ABOVE the text field so users pick from suggestions first
@@ -343,6 +280,13 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
                 var isSearchingChannels by remember { mutableStateOf(false) }
 
+                // Pre-warm the Invidious instance cache so the first search is fast
+                LaunchedEffect(Unit) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        try { com.noslop.app.feeds.api.InvidiousApiClient.preWarmInstances() } catch (_: Exception) {}
+                    }
+                }
+
                 LaunchedEffect(channelSearchQuery) {
                     if (channelSearchQuery.isBlank()) {
                         searchedChannels = emptyList()
@@ -350,14 +294,35 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         return@LaunchedEffect
                     }
                     isSearchingChannels = true
-                    kotlinx.coroutines.delay(600) // Debounce typing
+                    kotlinx.coroutines.delay(500) // Increase debounce to 500ms
                     try {
-                        searchedChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.InvidiousApiClient.searchChannels(channelSearchQuery).take(3) }
+                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(10) }
+                        if (ytChannels.isNotEmpty()) {
+                            searchedChannels = ytChannels
+                        } else {
+                            throw Exception("YouTube returned empty")
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
                     } catch (e: Exception) {
-                        com.noslop.app.debug.Logger.error("SETTINGS", "Channel search failed: ${e.message}")
-                    } finally {
-                        isSearchingChannels = false
+                        com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Channel search failed: ${e.message}, trying fallback")
+                        try {
+                            val fallback = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.noslop.app.feeds.api.RedditApiClient.searchReddit(channelSearchQuery, "relevance")
+                                    .mapNotNull { it.author }
+                                    .distinct()
+                                    .take(10)
+                            }
+                            searchedChannels = fallback
+                        } catch (e2: kotlinx.coroutines.CancellationException) {
+                            throw e2
+                        } catch (e2: Exception) {
+                            com.noslop.app.debug.Logger.error("CONTENT_PREFS", "Fallback search failed: ${e2.message}")
+                            searchedChannels = emptyList()
+                        }
                     }
+                    // Only clear the spinner if we weren't cancelled
+                    isSearchingChannels = false
                 }
                 
                 val suggestions = SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
@@ -367,14 +332,14 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                     OutlinedTextField(
                         value = channelSearchQuery,
                         onValueChange = { channelSearchQuery = it },
-                        label = { Text("Search channel names...") },
+                        label = { Text("Search channel names...".tr) },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
                         trailingIcon = {
                             if (isSearchingChannels) {
                                 CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
                             } else if (channelSearchQuery.isNotBlank()) {
                                 IconButton(onClick = { channelSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear", tint = TextMuted)
+                                    Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted)
                                 }
                             }
                         },
@@ -394,7 +359,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
 
                     if (combinedSuggestions.isNotEmpty()) {
                         Text(
-                            "SUGGESTED CHANNELS & CREATORS",
+                            "SUGGESTED CHANNELS & CREATORS".tr,
                             style = MaterialTheme.typography.labelSmall,
                             color = TextMuted,
                             fontWeight = FontWeight.Bold,
@@ -449,8 +414,8 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                 OutlinedTextField(
                     value = creatorKeywords,
                     onValueChange = { creatorKeywords = it },
-                    label = { Text("Creators / channels (comma separated)") },
-                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...") },
+                    label = { Text("Creators / channels (comma separated)".tr) },
+                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...".tr) },
                     minLines = 2,
                     maxLines = 4,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -484,7 +449,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                         value = displayLanguage,
                         onValueChange = { },
                         readOnly = true,
-                        label = { Text("Content Languages") },
+                        label = { Text("Content Languages".tr) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
@@ -562,9 +527,6 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
         // Save button
         Button(
             onClick = {
-                viewModel.updateUserProfile(
-                    UserProfile(displayName = displayName, bio = bio, avatarB64 = avatarB64)
-                )
                 viewModel.updateContentPreferences(
                     selectedCategories = localInterests.toList(),
                     selectedMusicGenres = localMusicGenres.toList(),
@@ -578,7 +540,7 @@ fun ContentPreferencesScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
             modifier = Modifier.fillMaxWidth().padding(16.dp).height(50.dp)
         ) {
-            Text("Save Settings", fontWeight = FontWeight.Bold)
+            Text("Save Settings".tr, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -604,7 +566,7 @@ fun ManageSourcesDialog(
         onDismissRequest = onDismiss,
         containerColor = PrimaryBlack,
         title = {
-            Text("Manage Sources", color = AccentGreen, fontWeight = FontWeight.Bold)
+            Text("Manage Sources".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth().fillMaxHeight(0.8f)) {
@@ -673,7 +635,7 @@ fun ManageSourcesDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = AccentGreen)
+                Text("Done".tr, color = AccentGreen)
             }
         }
     )
@@ -681,11 +643,11 @@ fun ManageSourcesDialog(
     if (showApiWarningFor != null) {
         AlertDialog(
             onDismissRequest = { showApiWarningFor = null },
-            title = { Text("API Key Required", color = AccentGreen) },
+            title = { Text("API Key Required".tr, color = AccentGreen) },
             text = { Text("To enable ${showApiWarningFor}, you must first configure its API key in Settings -> API Keys.", color = TextLight) },
             confirmButton = {
                 TextButton(onClick = { showApiWarningFor = null }) {
-                    Text("OK", color = AccentGreen)
+                    Text("OK".tr, color = AccentGreen)
                 }
             },
             containerColor = SurfaceDark

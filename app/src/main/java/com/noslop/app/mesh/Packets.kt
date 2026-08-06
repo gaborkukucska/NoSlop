@@ -80,6 +80,7 @@ data class MediaChunkPayload(
     @SerializedName("chunk_index") val chunkIndex: Int,
     @SerializedName("total_chunks") val totalChunks: Int,
     @SerializedName("byte_offset") val byteOffset: Long? = null,
+    @SerializedName("total_size") val totalSize: Long? = null,
     val data: String // Base64 encoded
 )
 
@@ -110,6 +111,7 @@ data class PeerHandshakePayload(
     @SerializedName("from_username") val fromUsername: String,
     @SerializedName("from_display_name") val fromDisplayName: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     @SerializedName("from_home_node") val fromHomeNode: String,
     @SerializedName("from_encryption_public_key") val fromEncryptionPublicKey: String? = null,
     val timestamp: Long,
@@ -118,6 +120,27 @@ data class PeerHandshakePayload(
 
 data class AnnouncePeerPayload(
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("onion_address") val onionAddress: String? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class AnnounceDiscoverablePayload(
+    @SerializedName("author_id") val authorId: String,
+    val handle: String,
+    @SerializedName("onion_address") val onionAddress: String,
+    @SerializedName("enc_public_key") val encPublicKey: String,
+    @SerializedName("is_creator") val isCreator: Boolean = false,
+    @SerializedName("fund_me_link") val fundMeLink: String? = null,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class SubscribePayload(
+    @SerializedName("creator_id") val creatorId: String,
+    @SerializedName("subscriber_id") val subscriberId: String,
     val timestamp: Long,
     val signature: String
 )
@@ -171,6 +194,7 @@ data class IdentityUpdatePayload(
     @SerializedName("user_id") val userId: String,
     val handle: String,
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    @SerializedName("bio") val bio: String? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -190,7 +214,34 @@ data class ConnectionRejectedPayload(
 data class EditPostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class EditCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
+    @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class DeleteCommentPayload(
+    @SerializedName("post_id") val postId: String,
+    @SerializedName("comment_id") val commentId: String,
+    @SerializedName("author_id") val authorId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+
+data class DeleteMessagePayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
     val signature: String
 )
@@ -337,6 +388,14 @@ data class NetworkPacket(
         Gson().fromJson(payload, AnnouncePeerPayload::class.java)
     } else null
 
+    fun getAnnounceDiscoverablePayload(): AnnounceDiscoverablePayload? = if (type == "ANNOUNCE_DISCOVERABLE" && payload != null) {
+        Gson().fromJson(payload, AnnounceDiscoverablePayload::class.java)
+    } else null
+
+    fun getSubscribePayload(): SubscribePayload? = if (type == "SUBSCRIBE" && payload != null) {
+        Gson().fromJson(payload, SubscribePayload::class.java)
+    } else null
+
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
         Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
     } else null
@@ -359,5 +418,17 @@ data class NetworkPacket(
 
     fun getDeletePostPayload(): DeletePostPayload? = if (type == "DELETE_POST" && payload != null) {
         Gson().fromJson(payload, DeletePostPayload::class.java)
+    } else null
+
+    fun getEditCommentPayload(): EditCommentPayload? = if (type == "EDIT_COMMENT" && payload != null) {
+        Gson().fromJson(payload, EditCommentPayload::class.java)
+    } else null
+
+    fun getDeleteCommentPayload(): DeleteCommentPayload? = if (type == "DELETE_COMMENT" && payload != null) {
+        Gson().fromJson(payload, DeleteCommentPayload::class.java)
+    } else null
+
+    fun getDeleteMessagePayload(): DeleteMessagePayload? = if (type == "DELETE_MESSAGE" && payload != null) {
+        Gson().fromJson(payload, DeleteMessagePayload::class.java)
     } else null
 }

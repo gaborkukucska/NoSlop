@@ -1,6 +1,8 @@
 // app/src/main/java/com/noslop/app/ui/components/CommentsBottomSheet.kt
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,6 +20,8 @@ import androidx.compose.material.icons.filled.Gif
 import androidx.compose.material.icons.filled.AddReaction
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +44,7 @@ import com.noslop.app.ui.resolveMediaUrl
 fun CommentsBottomSheet(
     postId: String,
     viewModel: NoSlopViewModel,
+    highlightCommentId: String? = null,
     onDismiss: () -> Unit
 ) {
     val comments by viewModel.getCommentsForPost(postId).collectAsState(initial = emptyList())
@@ -66,7 +71,7 @@ fun CommentsBottomSheet(
                 .padding(bottom = 16.dp)
         ) {
             Text(
-                "Mesh Comments",
+                "Mesh Comments".tr,
                 style = MaterialTheme.typography.titleLarge,
                 color = TextLight,
                 fontWeight = FontWeight.Bold
@@ -74,7 +79,19 @@ fun CommentsBottomSheet(
             
             Spacer(modifier = Modifier.height(16.dp))
             
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+            LaunchedEffect(comments, highlightCommentId) {
+                if (highlightCommentId != null && comments.isNotEmpty()) {
+                    val index = comments.indexOfFirst { it.id == highlightCommentId }
+                    if (index >= 0) {
+                        listState.animateScrollToItem(index)
+                    }
+                }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = 120.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -82,7 +99,7 @@ fun CommentsBottomSheet(
                 if (comments.isEmpty()) {
                     item {
                         Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No comments yet. Be the first to gossip!", color = TextMuted)
+                            Text("No comments yet. Be the first to gossip!".tr, color = TextMuted)
                         }
                     }
                 }
@@ -100,8 +117,8 @@ fun CommentsBottomSheet(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Replying to comment...", color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                    Icon(Icons.Default.Close, contentDescription = "Cancel reply", tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
+                    Text("Replying to comment...".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                    Icon(Icons.Default.Close, contentDescription = "Cancel reply".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { replyToCommentId = null })
                 }
             }
 
@@ -156,7 +173,7 @@ fun CommentsBottomSheet(
                     enabled = commentText.isNotBlank() || attachedGifFile != null,
                     modifier = Modifier.background(AccentGreen, CircleShape)
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post", tint = PrimaryBlack)
+                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Post".tr, tint = PrimaryBlack)
                 }
             }
 
@@ -170,14 +187,14 @@ fun CommentsBottomSheet(
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "Attachment Ready",
+                        "Attachment Ready".tr,
                         color = TextLight,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.weight(1f)
                     )
                     Icon(
                         Icons.Default.Close,
-                        contentDescription = "Remove attachment",
+                        contentDescription = "Remove attachment".tr,
                         tint = TextMuted,
                         modifier = Modifier.size(16.dp).clickable { attachedGifFile = null }
                     )
@@ -217,35 +234,160 @@ fun CommentItem(
             .background(PrimaryBlack.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
             .padding(12.dp)
     ) {
+        var showUserInfoDialog by remember { mutableStateOf(false) }
+
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (comment.authorAvatarB64 != null) {
-                val bitmap = remember(comment.authorAvatarB64) {
-                    try {
-                        val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
-                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                    } catch (e: Exception) { null }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { showUserInfoDialog = true }.padding(end = 8.dp)
+            ) {
+                if (comment.authorAvatarB64 != null) {
+                    val bitmap = remember(comment.authorAvatarB64) {
+                        try {
+                            val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        } catch (e: Exception) { null }
+                    }
+                    if (bitmap != null) {
+                        androidx.compose.foundation.Image(
+                            bitmap = bitmap,
+                            contentDescription = "Avatar".tr,
+                            modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50)),
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                 }
-                if (bitmap != null) {
-                    androidx.compose.foundation.Image(
-                        bitmap = bitmap,
-                        contentDescription = "Avatar",
-                        modifier = Modifier.size(24.dp).clip(RoundedCornerShape(50))
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
+                Text(
+                    comment.authorHandle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Text(
-                comment.authorHandle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.width(8.dp))
             Text(
                 java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(comment.timestamp),
                 style = MaterialTheme.typography.bodySmall,
                 color = TextMuted
             )
+        }
+
+        if (showUserInfoDialog) {
+            val discPeers by viewModel.discoverablePeers.collectAsState(initial = emptyList())
+            val peer = peers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }
+            val discPeer = discPeers.find { it.publicKeyB64 == comment.authorPublicKeyB64 }
+            val isTrusted = peer?.isTrusted == true
+            val isSelf = comment.authorPublicKeyB64 == localKeys?.publicKeyB64
+
+            var showConnectWarning by remember { mutableStateOf(false) }
+            
+            val targetOnion = discPeer?.onionAddress ?: peer?.onionAddress
+            val targetEncPub = discPeer?.encPublicKeyB64 ?: peer?.encPublicKeyB64 ?: ""
+            val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: ""
+            val displayHandle = if (tripcode.isNotBlank() && comment.authorHandle.endsWith(".$tripcode")) {
+                comment.authorHandle.removeSuffix(".$tripcode")
+            } else comment.authorHandle
+            val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
+
+            AlertDialog(
+                onDismissRequest = { showUserInfoDialog = false },
+                title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        if (comment.authorAvatarB64 != null) {
+                            val bitmap = remember(comment.authorAvatarB64) {
+                                try {
+                                    val bytes = android.util.Base64.decode(comment.authorAvatarB64, android.util.Base64.DEFAULT)
+                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                } catch (e: Exception) { null }
+                            }
+                            if (bitmap != null) {
+                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    androidx.compose.foundation.Image(
+                                        bitmap = bitmap,
+                                        contentDescription = "Avatar".tr,
+                                        modifier = Modifier.size(80.dp).clip(CircleShape),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(16.dp))
+                            }
+                        }
+                        
+                        Text(if (isTrusted || isSelf) fullName else displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        
+                        val bio = peer?.bio ?: discPeer?.bio
+                        if (!bio.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        }
+                        
+                        if (isTrusted && peer?.isTemporary == true) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (isTrusted) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+
+                        if (!isSelf && !isTrusted && targetOnion != null) {
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { showConnectWarning = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                            ) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Connect".tr, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { showUserInfoDialog = false }) { Text("Close".tr, color = AccentGreen) }
+                },
+                containerColor = SurfaceDark
+            )
+
+            if (showConnectWarning && targetOnion != null) {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                AlertDialog(
+                    onDismissRequest = { showConnectWarning = false },
+                    title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                    text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.requestConnection(
+                                    handle = displayHandle,
+                                    publicKeyB64 = comment.authorPublicKeyB64,
+                                    onionAddress = targetOnion,
+                                    encPublicKeyB64 = targetEncPub,
+                                    useBurnableIdentity = true
+                                )
+                                showConnectWarning = false
+                                showUserInfoDialog = false
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), android.widget.Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                        ) {
+                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
+                    },
+                    containerColor = SurfaceDark
+                )
+            }
         }
         Spacer(modifier = Modifier.height(4.dp))
         if (comment.parentCommentId != null) {
@@ -258,7 +400,7 @@ fun CommentItem(
                     .padding(4.dp)
             ) {
                 Text(
-                    text = "Replying to previous comment...",
+                    text = "Replying to previous comment...".tr,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted
                 )
@@ -298,7 +440,7 @@ fun CommentItem(
             if (canRender) {
                 coil.compose.AsyncImage(
                     model = resolvedMediaUrl,
-                    contentDescription = "Comment Media",
+                    contentDescription = "Comment Media".tr,
                     modifier = Modifier
                         .padding(top = 8.dp)
                         .fillMaxWidth()
@@ -330,14 +472,14 @@ fun CommentItem(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.Gif, contentDescription = "Download GIF", tint = AccentGreen, modifier = Modifier.size(48.dp))
+                        Icon(Icons.Default.Gif, contentDescription = "Download GIF".tr, tint = AccentGreen, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         if (progress > 0) {
                             LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(100.dp))
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Downloading $progress%", color = TextLight, fontSize = 12.sp)
                         } else {
-                            Text("Tap to Download GIF", color = TextLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Tap to Download GIF".tr, color = TextLight, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -352,14 +494,14 @@ fun CommentItem(
         ) {
             Icon(
                 Icons.Default.AddReaction,
-                contentDescription = "React",
+                contentDescription = "React".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(16.dp).clickable { showReactionPicker = true }
             )
             Spacer(modifier = Modifier.width(12.dp))
             Icon(
                 Icons.AutoMirrored.Filled.Reply,
-                contentDescription = "Reply",
+                contentDescription = "Reply".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(16.dp).clickable { onReply(comment.id) }
             )
@@ -425,13 +567,13 @@ fun CommentItem(
                 }
                 Icon(
                     Icons.Default.Close, 
-                    contentDescription = "Close", 
+                    contentDescription = "Close".tr, 
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { showReactionPicker = false }
                 )
                 Icon(
                     Icons.AutoMirrored.Filled.Reply,
-                    contentDescription = "Reply",
+                    contentDescription = "Reply".tr,
                     tint = TextMuted,
                     modifier = Modifier.size(20.dp).clickable { 
                         onReply(comment.id)

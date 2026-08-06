@@ -1,5 +1,7 @@
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -9,6 +11,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -32,16 +35,32 @@ import com.noslop.app.data.Peer
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
+fun PeerItem(
+    peer: Peer, 
+    lastMsg: ChatMessage?, 
+    viewModel: NoSlopViewModel,
+    onLongPress: (() -> Unit)? = null
+) {
     var showContactCard by remember { mutableStateOf(false) }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { viewModel.selectChatPeer(peer.publicKeyB64) },
+            .combinedClickable(
+                onClick = { viewModel.selectChatPeer(peer.publicKeyB64) },
+                onLongClick = onLongPress
+            ),
         colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-        border = BorderStroke(1.dp, if (peer.isTrusted) AccentGreen.copy(alpha = 0.3f) else DestructiveRed.copy(alpha = 0.3f))
+        border = BorderStroke(1.dp, when {
+            peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.3f)
+            peer.isTrusted -> AccentGreen.copy(alpha = 0.3f)
+            else -> DestructiveRed.copy(alpha = 0.3f)
+        })
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -75,15 +94,18 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "${peer.handle}.${peer.tripcode}",
+                        text = peer.handle,
                         fontWeight = FontWeight.Bold,
                         color = TextLight,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 14.sp
                     )
-                    if (peer.isTrusted) {
+                    if (peer.isTrusted && peer.isTemporary) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted", tint = AccentGreen, modifier = Modifier.size(14.dp))
+                        Icon(Icons.Default.AccessTime, contentDescription = "Temporary Contact".tr, tint = TemporaryAmber, modifier = Modifier.size(14.dp))
+                    } else if (peer.isTrusted) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(Icons.Default.CheckCircle, contentDescription = "Trusted".tr, tint = AccentGreen, modifier = Modifier.size(14.dp))
                     }
                 }
 
@@ -99,13 +121,8 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
 
             // Actions
             Row {
-                if (!peer.isTrusted) {
-                    IconButton(onClick = { viewModel.togglePeerTrust(peer) }) {
-                        Icon(Icons.Default.PersonAdd, contentDescription = "Trust Peer", tint = AccentGreen)
-                    }
-                }
                 IconButton(onClick = { showContactCard = true }) {
-                    Icon(Icons.Default.Info, contentDescription = "Contact Info", tint = TextMuted)
+                    Icon(Icons.Default.Info, contentDescription = "Contact Info".tr, tint = TextMuted)
                 }
             }
         }
@@ -116,7 +133,8 @@ fun PeerItem(peer: Peer, lastMsg: ChatMessage?, viewModel: NoSlopViewModel) {
         ContactCardDialog(
             peer = peer,
             onDismiss = { showContactCard = false },
-            onDelete = { viewModel.removePeer(peer.publicKeyB64) }
+            onDelete = { viewModel.removePeer(peer.publicKeyB64) },
+            onConnect = { viewModel.acceptHandshake(peer) }
         )
     }
 }
@@ -149,7 +167,11 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
         ) {
             Text(
                 text = peer.handle.take(1).uppercase(),
-                color = if (peer.isTrusted) AccentGreen else TextMuted,
+                color = when {
+                    peer.isTrusted && peer.isTemporary -> TemporaryAmber
+                    peer.isTrusted -> AccentGreen
+                    else -> TextMuted
+                },
                 fontWeight = FontWeight.Bold,
                 fontSize = (size / 2.2).sp
             )
@@ -161,7 +183,8 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
 private fun ContactCardDialog(
     peer: Peer,
     onDismiss: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onConnect: () -> Unit = {}
 ) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -187,7 +210,11 @@ private fun ContactCardDialog(
                         .clip(RoundedCornerShape(16.dp))
                         .border(
                             2.dp,
-                            if (peer.isTrusted) AccentGreen.copy(alpha = 0.5f) else BorderSubtle,
+                            when {
+                                peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
+                                peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
+                                else -> BorderSubtle
+                            },
                             RoundedCornerShape(16.dp)
                         )
                 ) {
@@ -231,7 +258,29 @@ private fun ContactCardDialog(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 // Trust badge
-                if (peer.isTrusted) {
+                if (peer.isTrusted && peer.isTemporary) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(TemporaryAmber.copy(alpha = 0.1f))
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.AccessTime,
+                            contentDescription = null,
+                            tint = TemporaryAmber,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Temporary Contact".tr,
+                            color = TemporaryAmber,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else if (peer.isTrusted) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -247,7 +296,7 @@ private fun ContactCardDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Trusted Contact",
+                            text = "Trusted Contact".tr,
                             color = AccentGreen,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -269,7 +318,7 @@ private fun ContactCardDialog(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Pending Trust",
+                            text = "Pending Trust".tr,
                             color = DestructiveRed,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
@@ -288,7 +337,7 @@ private fun ContactCardDialog(
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "ONION ADDRESS",
+                        text = "ONION ADDRESS".tr,
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
@@ -312,6 +361,22 @@ private fun ContactCardDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    if (!peer.isTrusted) {
+                        Button(
+                            onClick = {
+                                onConnect()
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     // Close button
                     OutlinedButton(
                         onClick = onDismiss,
@@ -320,26 +385,28 @@ private fun ContactCardDialog(
                         border = BorderStroke(1.dp, BorderSubtle),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                     ) {
-                        Text("Close", fontWeight = FontWeight.Bold)
+                        Text("Close".tr, fontWeight = FontWeight.Bold)
                     }
 
                     // Delete button
-                    Button(
-                        onClick = { showDeleteConfirmation = true },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = DestructiveRed.copy(alpha = 0.15f),
-                            contentColor = DestructiveRed
-                        )
-                    ) {
-                        Icon(
-                            Icons.Default.Delete,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Remove", fontWeight = FontWeight.Bold)
+                    if (peer.isTrusted) {
+                        Button(
+                            onClick = { showDeleteConfirmation = true },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed.copy(alpha = 0.15f),
+                                contentColor = DestructiveRed
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Remove".tr, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -362,7 +429,7 @@ private fun ContactCardDialog(
             },
             title = {
                 Text(
-                    "Are you sure?",
+                    "Are you sure?".tr,
                     fontWeight = FontWeight.Bold,
                     color = TextLight,
                     textAlign = TextAlign.Center
@@ -370,7 +437,7 @@ private fun ContactCardDialog(
             },
             text = {
                 Text(
-                    "You are about to remove ${peer.handle}.${peer.tripcode} from your contacts. " +
+                    "You are about to remove ${peer.handle} from your contacts. " +
                             "All messages with this peer will be lost. This cannot be undone.",
                     color = TextMuted,
                     textAlign = TextAlign.Center,
@@ -390,7 +457,7 @@ private fun ContactCardDialog(
                     ),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Yes, Remove", fontWeight = FontWeight.Bold)
+                    Text("Yes, Remove".tr, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -400,7 +467,7 @@ private fun ContactCardDialog(
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight)
                 ) {
-                    Text("Cancel", fontWeight = FontWeight.Bold)
+                    Text("Cancel".tr, fontWeight = FontWeight.Bold)
                 }
             }
         )

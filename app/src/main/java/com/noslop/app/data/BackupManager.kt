@@ -19,28 +19,53 @@ import javax.crypto.spec.SecretKeySpec
  */
 object BackupManager {
     private const val TAG = "BACKUP_MANAGER"
-    private const val DB_NAME = "noslop_db"
+    private const val DB_NAME = "mesh.db"
     private const val PREFS_NAME = "noslop_identity_secure" // This might vary if fallback was used
 
-    fun exportData(context: Context, mnemonic: String, targetFile: File): Boolean {
+    fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {
         Logger.info(TAG, "Starting data export...")
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
-            // Note: In production, we should close the DB or use checkpointing.
-            // For now, we'll assume the DB is in a consistent state or use VACUUM INTO if we had a raw handle.
-            
+
+            // Checkpoint WAL to ensure all data is flushed to the main DB file
+            try {
+                val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                    dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
+                )
+                db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
+                db.close()
+                Logger.info(TAG, "WAL checkpoint completed before export")
+            } catch (e: Exception) {
+                Logger.warn(TAG, "WAL checkpoint skipped: ${e.message}")
+            }
+
             val tempZip = File(context.cacheDir, "noslop_backup.zip")
             ZipOutputStream(FileOutputStream(tempZip)).use { zos ->
-                // Add DB
+                // Add DB (includes hub_deployment_status, peers, feeds, mesh posts, all app_settings)
                 if (dbFile.exists()) {
                     addToZip(zos, dbFile, "database.db")
                 }
                 
-                // Add SharedPreferences (XML file)
-                // Note: EncryptedSharedPreferences stores data in a standard XML file in /shared_prefs/
+                // Add SharedPreferences - primary (EncryptedSharedPreferences)
+                // Contains: Ed25519/X25519 private keys, mnemonic, onion address, handle, tripcode
                 val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                 if (prefsFile.exists()) {
                     addToZip(zos, prefsFile, "preferences.xml")
+                }
+
+                // Add fallback identity prefs (used when hardware keystore unavailable)
+                val fallbackPrefsFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml")
+                if (fallbackPrefsFile.exists()) {
+                    addToZip(zos, fallbackPrefsFile, "preferences_fallback.xml")
+                }
+
+                // Add API keys prefs (encrypted or fallback)
+                val apiKeysFiles = listOf("noslop_api_keys.xml", "noslop_api_keys_fallback.xml")
+                for (apiFileName in apiKeysFiles) {
+                    val apiFile = File(context.filesDir.parentFile, "shared_prefs/$apiFileName")
+                    if (apiFile.exists()) {
+                        addToZip(zos, apiFile, "api_keys/$apiFileName")
+                    }
                 }
 
                 // Add Media Directories
@@ -72,7 +97,7 @@ object BackupManager {
             cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
 
             FileInputStream(tempZip).use { input ->
-                FileOutputStream(targetFile).use { output ->
+                targetStream.use { output ->
                     output.write(iv) // Prepend IV
                     val buffer = ByteArray(8192)
                     var read: Int
@@ -86,7 +111,7 @@ object BackupManager {
             }
             
             tempZip.delete()
-            Logger.info(TAG, "Export completed: ${targetFile.absolutePath}")
+            Logger.info(TAG, "Export completed to OutputStream")
             true
         } catch (e: Exception) {
             Logger.error(TAG, "Export failed: ${e.message}")
@@ -94,7 +119,7 @@ object BackupManager {
         }
     }
 
-    fun importData(context: Context, mnemonic: String, sourceFile: File): Boolean {
+    fun importData(context: Context, mnemonic: String, sourceStream: InputStream): Boolean {
         Logger.info(TAG, "Starting data import...")
         return try {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
@@ -102,7 +127,7 @@ object BackupManager {
             val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
             
             val tempZip = File(context.cacheDir, "noslop_restore.zip")
-            FileInputStream(sourceFile).use { input ->
+            sourceStream.use { input ->
                 val iv = ByteArray(16)
                 input.read(iv)
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(iv))
@@ -123,26 +148,33 @@ object BackupManager {
             ZipInputStream(FileInputStream(tempZip)).use { zis ->
                 var entry: ZipEntry?
                 while (zis.nextEntry.also { entry = it } != null) {
-                    when (entry!!.name) {
-                        "database.db" -> {
+                    when {
+                        entry!!.name == "database.db" -> {
                             val dbFile = context.getDatabasePath(DB_NAME)
                             restoreFile(zis, dbFile)
                         }
-                        "preferences.xml" -> {
+                        entry!!.name == "preferences.xml" -> {
                             val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                             restoreFile(zis, prefsFile)
                         }
-                        else -> {
-                            if (entry!!.name.startsWith("media/")) {
-                                val parts = entry!!.name.split("/")
-                                if (parts.size == 3) {
-                                    val dirType = parts[1]
-                                    val fileName = parts[2]
-                                    val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
-                                    val noSlopDir = File(baseDir, "NoSlop")
-                                    val targetFile = File(noSlopDir, fileName)
-                                    restoreFile(zis, targetFile)
-                                }
+                        entry!!.name == "preferences_fallback.xml" -> {
+                            val fallbackFile = File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml")
+                            restoreFile(zis, fallbackFile)
+                        }
+                        entry!!.name.startsWith("api_keys/") -> {
+                            val fileName = entry!!.name.removePrefix("api_keys/")
+                            val apiFile = File(context.filesDir.parentFile, "shared_prefs/$fileName")
+                            restoreFile(zis, apiFile)
+                        }
+                        entry!!.name.startsWith("media/") -> {
+                            val parts = entry!!.name.split("/")
+                            if (parts.size == 3) {
+                                val dirType = parts[1]
+                                val fileName = parts[2]
+                                val baseDir = context.getExternalFilesDir(dirType) ?: context.filesDir
+                                val noSlopDir = File(baseDir, "NoSlop")
+                                val targetFile = File(noSlopDir, fileName)
+                                restoreFile(zis, targetFile)
                             }
                         }
                     }

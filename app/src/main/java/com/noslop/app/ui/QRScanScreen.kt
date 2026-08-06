@@ -1,5 +1,8 @@
+// FILE: app/src/main/java/com/noslop/app/ui/QRScanScreen.kt
 @file:kotlin.OptIn(com.google.accompanist.permissions.ExperimentalPermissionsApi::class)
 package com.noslop.app.ui
+
+import com.noslop.app.util.tr
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -23,6 +26,13 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.geometry.Rect
+
+
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -37,6 +47,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -60,6 +72,8 @@ data class QRScannedPeer(
 @Composable
 fun QRScanScreen(
     onPeerScannedAndAccepted: (handle: String, publicKeyB64: String, onionAddress: String, encPublicKeyB64: String) -> Unit,
+    dmStep: Int = 4,
+    viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -71,6 +85,7 @@ fun QRScanScreen(
     
     var showManualEntry by remember { mutableStateOf(false) }
     var manualEntryText by remember { mutableStateOf("") }
+    var galleryRect by remember { mutableStateOf(Rect.Zero) }
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -80,7 +95,7 @@ fun QRScanScreen(
                 if (result != null) {
                     scannedRawData = result
                 } else {
-                    Toast.makeText(context, "No QR code found in this image", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("No QR code found in this image"), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -90,15 +105,35 @@ fun QRScanScreen(
         val raw = scannedRawData
         if (raw != null) {
             try {
+                // First, check if it's a HAI-Net Hub Web Login QR code
+                try {
+                    val authJson = org.json.JSONObject(raw)
+                    if (authJson.optString("type") == "hainet_auth") {
+                        val sessionId = authJson.optString("session")
+                        val ip = authJson.optString("ip")
+                        
+                        if (sessionId.isNotBlank() && ip.isNotBlank()) {
+                            viewModel?.handleQrLogin(sessionId, ip)
+                            Toast.makeText(context, "Authenticating with Hub...", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                            return@LaunchedEffect
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Not a JSON object or not a login QR, fall through to peer parsing
+                }
+
                 val peer = Gson().fromJson(raw, QRScannedPeer::class.java)
                 if (peer.handle.isNotBlank() && peer.publicKey.isNotBlank() && peer.onionAddress.isNotBlank()) {
                     parsedPeer = peer
                     showConfirmDialog = true
                 } else {
+                    Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
                     scannedRawData = null
                 }
             } catch (e: Exception) {
                 Logger.warn("QR_SCAN", "Scanned raw data is not a valid peer payload: $raw")
+                Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
                 scannedRawData = null
             }
         }
@@ -128,7 +163,7 @@ fun QRScanScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Scan Mesh Peer",
+                        text = "Scan Mesh Peer".tr,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextLight
@@ -137,7 +172,7 @@ fun QRScanScreen(
                         onClick = onDismiss,
                         modifier = Modifier.background(SurfaceDark, RoundedCornerShape(12.dp))
                     ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = AccentGreen)
+                        Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = AccentGreen)
                     }
                 }
 
@@ -172,7 +207,7 @@ fun QRScanScreen(
                                     )
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Text(
-                                        text = "Center the peer's QR code in the grid",
+                                        text = "Center the peer's QR code in the grid".tr,
                                         color = AccentGreen,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
@@ -183,6 +218,7 @@ fun QRScanScreen(
                                     
                                     Spacer(modifier = Modifier.height(24.dp))
                                     
+
                                     // Bottom Controls Row (Padded beneath the grid to guarantee visibility)
                                     Row(
                                         modifier = Modifier
@@ -191,15 +227,18 @@ fun QRScanScreen(
                                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Button(
-                                            onClick = { imagePickerLauncher.launch("image/*") },
-                                            modifier = Modifier.weight(1f).height(50.dp),
+                                            onClick = { 
+                                                if (dmStep == 3) viewModel?.completeDmTutorial()
+                                                imagePickerLauncher.launch("image/*") 
+                                            },
+                                            modifier = Modifier.weight(1f).height(50.dp).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                             colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
                                             border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                             shape = RoundedCornerShape(12.dp)
                                         ) {
                                             Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Gallery", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Gallery".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         }
                                         
                                         Button(
@@ -211,7 +250,7 @@ fun QRScanScreen(
                                         ) {
                                             Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(18.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Paste Raw", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                            Text("Paste Raw".tr, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                         }
                                     }
                                 }
@@ -231,10 +270,10 @@ fun QRScanScreen(
                     ) {
                         Icon(Icons.Default.CameraAlt, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text("Camera Permission Required", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextLight)
+                        Text("Camera Permission Required".tr, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = TextLight)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "NoSlop needs access to the camera to scan contact node QR codes and initiate handshakes.",
+                            text = "NoSlop needs access to the camera to scan contact node QR codes and initiate handshakes.".tr,
                             style = MaterialTheme.typography.bodyMedium, color = TextMuted, textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(24.dp))
@@ -242,19 +281,22 @@ fun QRScanScreen(
                             onClick = { cameraPermissionState.launchPermissionRequest() },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
-                            Text("Grant Access", fontWeight = FontWeight.Bold)
+                            Text("Grant Access".tr, fontWeight = FontWeight.Bold)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
-                                onClick = { imagePickerLauncher.launch("image/*") },
-                                modifier = Modifier.weight(1f),
+                                onClick = { 
+                                    if (dmStep == 3) viewModel?.completeDmTutorial()
+                                    imagePickerLauncher.launch("image/*") 
+                                },
+                                modifier = Modifier.weight(1f).onGloballyPositioned { galleryRect = it.boundsInRoot() },
                                 border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
                             ) {
-                                Text("Gallery", fontWeight = FontWeight.Bold)
+                                Text("Gallery".tr, fontWeight = FontWeight.Bold)
                             }
                             OutlinedButton(
                                 onClick = { showManualEntry = true },
@@ -262,7 +304,7 @@ fun QRScanScreen(
                                 border = BorderStroke(1.dp, AccentGreen.copy(alpha = 0.5f)),
                                 colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen)
                             ) {
-                                Text("Paste", fontWeight = FontWeight.Bold)
+                                Text("Paste".tr, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -274,13 +316,13 @@ fun QRScanScreen(
                 AlertDialog(
                     onDismissRequest = { showManualEntry = false },
                     containerColor = SurfaceDark,
-                    title = { Text("Paste Identity String", color = TextLight, fontWeight = FontWeight.Bold) },
+                    title = { Text("Paste Identity String".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                     text = {
                         OutlinedTextField(
                             value = manualEntryText,
                             onValueChange = { manualEntryText = it },
                             modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp),
-                            placeholder = { Text("Paste the raw JSON identity payload here...", color = TextMuted) },
+                            placeholder = { Text("Paste the raw JSON identity payload here...".tr, color = TextMuted) },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = TextLight,
                                 unfocusedTextColor = TextLight,
@@ -297,12 +339,12 @@ fun QRScanScreen(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                         ) {
-                            Text("Process", fontWeight = FontWeight.Bold)
+                            Text("Process".tr, fontWeight = FontWeight.Bold)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { showManualEntry = false }) {
-                            Text("Cancel", color = TextMuted)
+                            Text("Cancel".tr, color = TextMuted)
                         }
                     }
                 )
@@ -317,59 +359,113 @@ fun QRScanScreen(
                         },
                         properties = DialogProperties(dismissOnClickOutside = false),
                         containerColor = SurfaceDark,
-                        title = { Text("Send Connection Request?", color = TextLight, fontWeight = FontWeight.Bold) },
+                        title = { Text("Send Connection Request?".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                         text = {
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text("Handle: ${peer.handle}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("ONION ADDRESS:", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                Text("ONION ADDRESS:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 Text(peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text("PUBLIC KEY:", color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                Text("PUBLIC KEY:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                                 Text(peer.publicKey.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.", style = MaterialTheme.typography.bodySmall, color = TextMuted, modifier = Modifier.padding(top = 12.dp))
+                                Text("Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted, modifier = Modifier.padding(top = 12.dp))
                             }
                         },
                         confirmButton = {
                             Button(
                                 onClick = {
                                     onPeerScannedAndAccepted(peer.handle, peer.publicKey, peer.onionAddress, peer.encPublicKey ?: "")
-                                    Toast.makeText(context, "Connection request sent!", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent!"), Toast.LENGTH_LONG).show()
                                     showConfirmDialog = false
                                     onDismiss()
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                             ) {
-                                Text("Send Request", fontWeight = FontWeight.Bold)
+                                Text("Send Request".tr, fontWeight = FontWeight.Bold)
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = {
                                 scannedRawData = null
                                 showConfirmDialog = false
-                            }) { Text("Reject", color = DestructiveRed) }
+                            }) { Text("Reject".tr, color = DestructiveRed) }
                         }
                     )
                 }
             }
         }
+
+        if (dmStep == 3) {
+            com.noslop.app.ui.tabs.TutorialSpotlight(
+                targetRect = galleryRect, 
+                text = "4. Scan or select from Gallery", 
+                onClickTarget = { 
+                    viewModel?.completeDmTutorial()
+                    imagePickerLauncher.launch("image/*") 
+                }
+            )
+        }
     }
 }
 
 private fun decodeQrFromUri(context: Context, uri: Uri, onResult: (String?) -> Unit) {
-    try {
-        val inputImage = InputImage.fromFilePath(context, uri)
-        val scanner = BarcodeScanning.getClient()
-        scanner.process(inputImage)
-            .addOnSuccessListener { barcodes ->
-                onResult(barcodes.firstOrNull()?.rawValue)
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        try {
+            val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, uri)) { decoder, _, _ ->
+                    decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = true
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
             }
-            .addOnFailureListener {
-                onResult(null)
+
+            if (bitmap == null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+                return@launch
             }
-    } catch (e: Exception) {
-        onResult(null)
+
+            val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+            val scanner = com.google.mlkit.vision.barcode.BarcodeScanning.getClient(
+                com.google.mlkit.vision.barcode.BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_ALL_FORMATS)
+                    .build()
+            )
+            
+            scanner.process(inputImage)
+                .addOnSuccessListener { barcodes ->
+                    val value = barcodes.firstOrNull()?.rawValue
+                    if (value != null) {
+                        onResult(value)
+                    } else {
+                        tryZxingFallback(bitmap, onResult)
+                    }
+                }
+                .addOnFailureListener {
+                    tryZxingFallback(bitmap, onResult)
+                }
+        } catch (e: Exception) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+        }
+    }
+}
+
+private fun tryZxingFallback(bitmap: android.graphics.Bitmap, onResult: (String?) -> Unit) {
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+        try {
+            val intArray = IntArray(bitmap.width * bitmap.height)
+            bitmap.getPixels(intArray, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+            val source = com.google.zxing.RGBLuminanceSource(bitmap.width, bitmap.height, intArray)
+            val binaryBitmap = com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(source))
+            val reader = com.google.zxing.MultiFormatReader()
+            val result = reader.decode(binaryBitmap)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(result.text) }
+        } catch (e: Exception) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null) }
+        }
     }
 }
 

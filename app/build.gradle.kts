@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
+}
+
+// Read GitHub config from local.properties (outside android{} to avoid DSL scope issues)
+val localProps = Properties()
+val localPropsFile = rootProject.file("local.properties")
+if (localPropsFile.exists()) {
+    localPropsFile.reader().use { localProps.load(it) }
 }
 
 android {
@@ -13,8 +22,8 @@ android {
         applicationId = "com.noslop.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.2.1-alpha"
+        versionCode = 36
+        versionName = "0.3.6-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
@@ -40,6 +49,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Local bind port — Tor maps external 9999 → this port.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9999")
+            buildConfigField("int", "MEDIA_PROXY_PORT", "8080")
+            // Tor proxy ports
+            buildConfigField("int", "TOR_SOCKS_PORT", "9050")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9051")
+            
+            val showSensitiveLogs = System.getenv("NOSLOP_SHOW_SENSITIVE_LOGS") == "true"
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", showSensitiveLogs.toString())
         }
         debug {
             isDebuggable = true
@@ -50,6 +68,15 @@ android {
             // Release build instead of overwriting it.
             applicationIdSuffix = ".debug"
             resValue("string", "app_name", "NoSlop Debug")
+            // Different local bind ports so debug and release can run side-by-side.
+            // Tor will map external 9999 → local 9998 for this build.
+            buildConfigField("int", "MESH_LISTEN_PORT", "9998")
+            buildConfigField("int", "MEDIA_PROXY_PORT", "8081")
+            // Tor proxy ports for debug build
+            buildConfigField("int", "TOR_SOCKS_PORT", "9052")
+            buildConfigField("int", "TOR_CONTROL_PORT", "9053")
+            
+            buildConfigField("boolean", "SHOW_SENSITIVE_LOGS", "true")
         }
     }
 
@@ -135,6 +162,8 @@ dependencies {
 
     // --- Media (ExoPlayer) ---
     implementation("androidx.media3:media3-exoplayer:1.3.1")
+    implementation("androidx.media3:media3-transformer:1.3.1")
+    implementation("androidx.media3:media3-effect:1.3.1")
     implementation("androidx.media3:media3-exoplayer-hls:1.3.1")
     implementation("androidx.media3:media3-exoplayer-dash:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
@@ -142,6 +171,10 @@ dependencies {
 
     // --- Bouncy Castle ---
     implementation("org.bouncycastle:bcprov-jdk15to18:1.78.1")
+
+    // --- Lazysodium ---
+    implementation("net.java.dev.jna:jna:5.13.0")
+    implementation("com.goterl:lazysodium-android:5.1.0@aar")
 
     // --- Tor ---
     implementation("info.guardianproject:tor-android:0.4.8.16")
@@ -164,6 +197,9 @@ dependencies {
     // --- QR Scanning and QR Code Generation ---
     implementation(libs.google.mlkit.barcode.scanning)
     implementation(libs.zxing.core)
+
+    // --- SSH Client ---
+    implementation("com.jcraft:jsch:0.1.55")
 
     // --- Testing ---
     testImplementation(libs.junit)

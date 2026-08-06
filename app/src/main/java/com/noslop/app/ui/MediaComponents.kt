@@ -1,5 +1,7 @@
 package com.noslop.app.ui
 
+import com.noslop.app.util.tr
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -54,10 +56,29 @@ import com.noslop.app.ui.theme.TextMuted
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.animateFloat
 
+private fun sanitizeImageUrl(url: String?): String? {
+    if (url.isNullOrBlank()) return null
+    var cleanUrl = url.trim()
+    // Decode HTML entities (e.g. &amp; -> &) which are common in RSS image URLs
+    cleanUrl = android.text.Html.fromHtml(cleanUrl, android.text.Html.FROM_HTML_MODE_COMPACT).toString()
+    
+    if (cleanUrl.startsWith("http://")) {
+        cleanUrl = "https://" + cleanUrl.substring(7)
+    }
+    if (cleanUrl.startsWith("//")) {
+        cleanUrl = "https:" + cleanUrl
+    }
+    if (cleanUrl.contains(" ")) {
+        cleanUrl = cleanUrl.replace(" ", "%20")
+    }
+    return cleanUrl
+}
+
 @Composable
-fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null) {
+fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null, fallbackUrl: String? = null) {
     var showZoom by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    var isError by remember { mutableStateOf(false) }
     val thumbBitmap = remember(thumbnailB64) {
         thumbnailB64?.let {
             try {
@@ -68,15 +89,21 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
-        val isProxy = url.toString().contains("127.0.0.1") || url.toString().contains("localhost")
+        val safeUrl = sanitizeImageUrl(url)
+        val safeFallback = sanitizeImageUrl(fallbackUrl)
+        val activeUrl = if (isError && safeFallback != null) safeFallback else safeUrl
+        val isProxy = activeUrl?.contains("127.0.0.1") == true || activeUrl?.contains("localhost") == true
         
         // If url is a File object, pass it directly. If proxy, pass null to force the placeholder.
-        val actualModel = if (isProxy) null else if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
+        val actualModel = if (isProxy) null else if (activeUrl != null && activeUrl.startsWith("file://")) java.io.File(activeUrl.removePrefix("file://")) else activeUrl
         
         val request = coil.request.ImageRequest.Builder(context)
             .data(actualModel)
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
+            .listener(
+                onError = { _, _ -> if (!isError) isError = true }
+            )
             .build()
             
         // Background blurred layer
@@ -88,7 +115,9 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                 .blur(20.dp),
             contentScale = ContentScale.Crop,
             alpha = 0.5f,
-            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            error = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            fallback = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
         
         // Foreground uncropped layer
@@ -99,7 +128,9 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                 .fillMaxWidth()
                 .align(Alignment.Center),
             contentScale = ContentScale.Fit,
-            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
+            placeholder = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            error = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
+            fallback = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
     }
 
@@ -143,7 +174,7 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
             val actualModel = if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
             AsyncImage(
                 model = actualModel,
-                contentDescription = "Zoomable View",
+                contentDescription = "Zoomable View".tr,
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
@@ -176,7 +207,7 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                     .padding(16.dp)
                     .background(Color.Black.copy(alpha = 0.5f), CircleShape)
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = Color.White)
             }
         }
     }
@@ -206,6 +237,7 @@ fun SegmentedArticleReader(
 
     var showWebView by remember { mutableStateOf(false) }
     val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
+    val safeThumbnailUrl = sanitizeImageUrl(thumbnailUrl)
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -217,12 +249,48 @@ fun SegmentedArticleReader(
             if (page == 0) {
                 // Page 0: Hero Layout (Magazine Style)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    AsyncImage(
-                        model = thumbnailUrl ?: fallbackImage,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
+                    var imageLoadFailed by remember { mutableStateOf(false) }
+
+                    if (!imageLoadFailed) {
+                        AsyncImage(
+                            model = safeThumbnailUrl ?: fallbackImage,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                            onError = { imageLoadFailed = true }
+                        )
+                    } else {
+                        // Fallback for Tor-blocked images
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF1A1A1A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(32.dp)
+                            ) {
+                                Icon(Icons.Default.BrokenImage, contentDescription = null, tint = TextMuted, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    title,
+                                    color = TextLight,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center
+                                )
+                                if (!author.isNullOrBlank()) {
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Text(
+                                        author,
+                                        color = TextMuted,
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                            }
+                        }
+                    }
 
                     // Gradient Scrim (dark -> transparent upward)
                     Box(
@@ -303,7 +371,7 @@ fun SegmentedArticleReader(
                             )
                         } else {
                             Text(
-                                text = "Preview not available.",
+                                text = "Preview not available.".tr,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextMuted,
                                 textAlign = TextAlign.Center,
@@ -322,7 +390,7 @@ fun SegmentedArticleReader(
                             ) {
                                 Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Read Full Article", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("Read Full Article".tr, color = Color.Black, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -380,7 +448,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextLight)
+                        Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = TextLight)
                     }
                     Text(
                         text = title,
@@ -397,7 +465,7 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
                             context.startActivity(intent)
                         } catch (_: Exception) {}
                     }) {
-                        Icon(Icons.Default.Public, contentDescription = "Open in Browser", tint = AccentGreen)
+                        Icon(Icons.Default.Public, contentDescription = "Open in Browser".tr, tint = AccentGreen)
                     }
                 }
 
@@ -461,7 +529,7 @@ fun OverlayInteractions(
     showComment: Boolean = true,
     onLike: () -> Unit,
     onReaction: (String) -> Unit = {},
-    onShare: () -> Unit,
+    onShare: (() -> Unit)? = null,
     onComment: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     reactionSummary: Map<String, Int> = emptyMap(),
@@ -482,89 +550,104 @@ fun OverlayInteractions(
     Column(
         modifier = modifier
             .padding(end = 12.dp, bottom = 48.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.End,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         if (!isBlocked) {
             // ─── Reaction Pills (gChat-style: each emoji with its own counter) ───
             if (reactionSummary.isNotEmpty()) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                val activeReactions = reactionSummary.entries
+                    .filter { it.value > 0 }
+                    .sortedByDescending { it.value }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    reactionSummary.entries
-                        .filter { it.value > 0 }
-                        .sortedByDescending { it.value }
-                        .forEach { (type, count) ->
-                            val emoji = emojiMap[type] ?: type
-                            Surface(
-                                onClick = { onReaction(type) },
-                                color = SurfaceDark.copy(alpha = 0.7f),
-                                shape = RoundedCornerShape(16.dp),
-                                border = BorderStroke(1.dp, BorderSubtle)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    activeReactions.chunked(3).reversed().forEach { chunk ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            chunk.forEach { (type, count) ->
+                                val emoji = emojiMap[type] ?: type
+                                Surface(
+                                    onClick = { onReaction(type) },
+                                    color = SurfaceDark.copy(alpha = 0.7f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, BorderSubtle)
                                 ) {
-                                    Text(emoji, fontSize = 14.sp)
-                                    Text(
-                                        count.toString(),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentGreen
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(emoji, fontSize = 14.sp)
+                                        Text(
+                                            count.toString(),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AccentGreen
+                                        )
+                                    }
                                 }
                             }
                         }
-                }
-            }
-
-            // ─── Main Action Buttons ───
-            if (showLike) {
-                Box {
-                    // Single tap opens picker (gChat parity), matching user request
-                    InteractionButton(
-                        icon = Icons.Default.AddReaction,
-                        label = "React",
-                        onClick = { showReactionPicker = !showReactionPicker }
-                    )
-
-                    if (showReactionPicker) {
-                        ReactionPicker(
-                            currentReactions = reactionSummary,
-                            onReactionSelect = {
-                                onReaction(it)
-                                showReactionPicker = false
-                            },
-                            onDismiss = { showReactionPicker = false }
-                        )
                     }
                 }
             }
 
-            InteractionButton(
-                icon = Icons.Default.Share,
-                label = "Share",
-                onClick = onShare
-            )
+            // ─── Main Action Buttons (always right-aligned) ───
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (showLike) {
+                    Box {
+                        // Single tap opens picker (gChat parity), matching user request
+                        InteractionButton(
+                            icon = Icons.Default.AddReaction,
+                            label = "React".tr,
+                            onClick = { showReactionPicker = !showReactionPicker }
+                        )
 
-            if (showComment && onComment != null) {
-                InteractionButton(
-                    icon = Icons.Default.Chat,
-                    label = if (commentCount > 0) commentCount.toString() else "Chat",
-                    onClick = onComment
-                )
-            }
+                        if (showReactionPicker) {
+                            ReactionPicker(
+                                currentReactions = reactionSummary,
+                                onReactionSelect = {
+                                    onReaction(it)
+                                    showReactionPicker = false
+                                },
+                                onDismiss = { showReactionPicker = false }
+                            )
+                        }
+                    }
+                }
 
-            if (onDelete != null) {
-                InteractionButton(
-                    icon = Icons.Default.Delete,
-                    label = "Delete",
-                    onClick = onDelete,
-                    tint = DestructiveRed
-                )
+                if (onShare != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Share,
+                        label = "Share".tr,
+                        onClick = onShare
+                    )
+                }
+
+                if (showComment && onComment != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Chat,
+                        label = if (commentCount > 0) commentCount.toString() else "Chat".tr,
+                        onClick = onComment
+                    )
+                }
+
+                if (onDelete != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Delete,
+                        label = "Delete".tr,
+                        onClick = onDelete,
+                        tint = DestructiveRed
+                    )
+                }
             }
         }
     }
@@ -624,7 +707,7 @@ fun ClearnetAttachment(
             
             Icon(
                 Icons.Default.OpenInNew,
-                contentDescription = "Open",
+                contentDescription = "Open".tr,
                 tint = TextMuted,
                 modifier = Modifier.size(18.dp).padding(horizontal = 4.dp)
             )
@@ -797,7 +880,7 @@ fun ContentHealthOverlay(
                     colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark),
                     border = BorderStroke(1.dp, BorderSubtle)
                 ) {
-                    Text("Temporarily View")
+                    Text("Temporarily View".tr)
                 }
             }
         }
@@ -830,7 +913,7 @@ fun LoadingShimmer(modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "Loading...",
+                text = "Loading...".tr,
                 color = AccentGreen.copy(alpha = alpha),
                 style = MaterialTheme.typography.bodyMedium.copy(letterSpacing = 2.sp, fontWeight = FontWeight.Bold)
             )

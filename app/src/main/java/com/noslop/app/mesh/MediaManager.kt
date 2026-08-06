@@ -20,11 +20,11 @@ import java.util.concurrent.LinkedBlockingQueue
 object MediaManager {
     private const val TAG = "MEDIA_MANAGER"
     
-    // Dynamic Chunk Sizing Bounds
-    private const val MIN_CHUNK_SIZE = 32 * 1024  // 32KB
-    private const val MAX_CHUNK_SIZE = 128 * 1024 // 128KB
-    private const val MAX_CONCURRENCY = 4
-    private const val DOWNLOAD_TIMEOUT_MS = 120000L // 120s
+    // Dynamic Chunk Sizing Bounds tuned for Tor (fewer sockets, larger payloads)
+    const val MIN_CHUNK_SIZE = 128 * 1024
+    const val MAX_CHUNK_SIZE = 1024 * 1024
+    const val DOWNLOAD_TIMEOUT_MS = 300000L // 5 minutes
+    private const val MAX_CONCURRENCY = 2
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var repository: NoSlopRepository? = null
@@ -62,7 +62,7 @@ object MediaManager {
         enum class Status { ACTIVE, RECOVERING, COMPLETED, ERROR }
 
         val partFile = File(mediaDir, "${metadata.id}.part")
-        val totalBytes = metadata.size
+        var totalBytes = metadata.size
         
         var contiguousBytes = 0L
         var nextRequestOffset = 0L
@@ -74,11 +74,12 @@ object MediaManager {
         val retryQueue = LinkedBlockingQueue<Pair<Long, Int>>() // <offset, length>
 
         // AIMD State for chunk size and concurrency
-        var currentChunkSize = 16 * 1024 // 16KB start for slow start
+        var currentChunkSize = 128 * 1024 // Start with 128KB
         var currentConcurrency = 1.0 // Start with 1 inflight chunk
-        var ssthresh = 16.0 // threshold for concurrency
+        var ssthresh = 2.0 // threshold for concurrency
         var consecutiveTimeouts = 0
         var lastAttemptAt = 0L
+        var savedPeerOnion: String? = null // Remembered for fallback during recovery
 
         fun updateContiguous() {
             while (writtenOffsets.containsKey(contiguousBytes)) {
@@ -150,8 +151,8 @@ object MediaManager {
             }
             
             for (file in sortedFiles) {
-                // Skip files protected by a .mine sentinel
-                if (File(file.parentFile, "${file.name}.mine").exists()) {
+                // Skip files protected by a .mine or .creator_locked sentinel
+                if (File(file.parentFile, "${file.name}.mine").exists() || File(file.parentFile, "${file.name}.creator_locked").exists()) {
                     currentSize += file.length()
                     continue
                 }
@@ -165,8 +166,8 @@ object MediaManager {
             
             for (file in sortedFiles) {
                 if (!file.exists()) continue
-                // Skip files protected by a .mine sentinel
-                if (File(file.parentFile, "${file.name}.mine").exists()) continue
+                // Skip files protected by a .mine or .creator_locked sentinel
+                if (File(file.parentFile, "${file.name}.mine").exists() || File(file.parentFile, "${file.name}.creator_locked").exists()) continue
                 
                 if (currentSize <= maxBytes) break
                 val len = file.length()
@@ -210,6 +211,26 @@ object MediaManager {
         }
     }
 
+    fun cacheCreatorMedia(source: File, type: String?, id: String): File? {
+        val repo = repository ?: return null
+        return try {
+            val destDir = getMediaDirectory(type)
+            val destFile = File(destDir, id)
+            if (source.canonicalPath != destFile.canonicalPath) {
+                source.copyTo(destFile, overwrite = true)
+            }
+            // Update timestamp
+            destFile.setLastModified(System.currentTimeMillis())
+            // Drop a sentinel file to lock creator media
+            File(destDir, "$id.creator_locked").createNewFile()
+            Logger.info(TAG, "Cached and locked creator media: $id")
+            destFile
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to cache creator media", e.message)
+            null
+        }
+    }
+
     fun isMediaDownloaded(id: String, type: String?): Boolean {
         return getLocalFile(id, type) != null
     }
@@ -227,19 +248,24 @@ object MediaManager {
             return
         }
 
-        if (context == "friends") {
+        if (metadata.type == "file") {
+            Logger.info(TAG, "Skipping auto-download for ${metadata.id}: attachments must be manually synced")
+            return
+        }
+
+        val peer = repo.peerDao.getPeerByPublicKey(authorId)
+        val isTrusted = peer?.isTrusted == true
+
+        if (isTrusted) {
             if (!settings.autoDownloadFriends) {
                 Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadFriends is disabled")
                 return
             }
-            val peer = repo.peerDao.getPeerByPublicKey(authorId)
-            if (peer == null || !peer.isTrusted) {
-                Logger.info(TAG, "Skipping auto-download for ${metadata.id}: peer not trusted or unknown")
+        } else {
+            if (!settings.autoDownloadPublic) {
+                Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadPublic is disabled for non-contacts")
                 return
             }
-        } else if (context == "private" && !settings.autoDownloadPrivate) {
-            Logger.info(TAG, "Skipping auto-download for ${metadata.id}: autoDownloadPrivate is disabled")
-            return
         }
 
         val maxBytes = settings.maxFileSizeMB.toLong() * 1024 * 1024
@@ -272,13 +298,71 @@ object MediaManager {
         
         if (peerOnion == null) {
             dl.status = ActiveDownload.Status.RECOVERING
+        } else {
+            // Ensure target peer knows our burnable identity so they can route chunks back to us
+            scope.launch {
+                val repo = repository ?: return@launch
+                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peerOnion }
+                if (targetPeer == null || !targetPeer.isTrusted) {
+                    val burnable = repo.getBurnableIdentity()
+                    if (burnable != null) {
+                        val handle = repo.getLocalHandle()
+                        val isCreator = repo.getAppSetting("is_creator_enabled") == "true"
+                        val link = repo.getAppSetting("creator_fundme_link")
+                        val bio = repo.getUserProfile().bio
+                        val timestamp = System.currentTimeMillis()
+                        val msgToSign = "${burnable.publicKeyB64}:${handle}:${burnable.onionAddress}:${burnable.encPublicKeyB64}:${isCreator}:${link ?: ""}::${bio ?: ""}:${timestamp}"
+                        val signature = com.noslop.app.crypto.CryptoService.sign(msgToSign, burnable.privateKeyB64)
+                        val payload = AnnounceDiscoverablePayload(
+                            authorId = burnable.publicKeyB64,
+                            handle = handle,
+                            onionAddress = burnable.onionAddress,
+                            encPublicKey = burnable.encPublicKeyB64,
+                            isCreator = isCreator,
+                            fundMeLink = link,
+                            authorAvatarB64 = null,
+                            bio = bio,
+                            timestamp = timestamp,
+                            signature = signature
+                        )
+                        val packet = NetworkPacket(
+                            id = java.util.UUID.randomUUID().toString(),
+                            hops = 1,
+                            senderId = burnable.publicKeyB64,
+                            targetUserId = targetPeer?.publicKeyB64,
+                            type = "ANNOUNCE_DISCOVERABLE",
+                            payload = com.google.gson.Gson().toJsonTree(payload),
+                            signature = signature
+                        )
+                        repo.meshTransport.sendPacket(peerOnion, Constants.MESH_PORT, packet)
+                    }
+                }
+            }
         }
         
-        // Wipe any stale part file from a previously killed run
-        if (dl.partFile.exists()) dl.partFile.delete()
+        // Resume from existing .part file if present
+        if (dl.partFile.exists()) {
+            val existingBytes = dl.partFile.length()
+            if (existingBytes > 0 && (dl.totalBytes == 0L || existingBytes < dl.totalBytes)) {
+                dl.contiguousBytes = existingBytes
+                dl.nextRequestOffset = existingBytes
+                Logger.info(TAG, "Resuming download ${metadata.id} from ${existingBytes} bytes (${if (dl.totalBytes > 0) "${existingBytes * 100 / dl.totalBytes}%" else "unknown total"})")
+            } else if (dl.totalBytes > 0 && existingBytes >= dl.totalBytes) {
+                // Part file is already complete — finalize it
+                Logger.info(TAG, "Part file for ${metadata.id} already complete (${existingBytes} bytes), finalizing")
+                dl.contiguousBytes = existingBytes
+                dl.eofOffset = existingBytes
+            } else {
+                // Zero-byte or corrupt part file — start fresh
+                dl.partFile.delete()
+            }
+        }
         
         activeDownloads[metadata.id] = dl
-        updateProgress(metadata.id, 0)
+        val initialProgress = if (dl.totalBytes > 0 && dl.contiguousBytes > 0) {
+            (dl.contiguousBytes * 100 / dl.totalBytes).toInt().coerceIn(0, 99)
+        } else 0
+        updateProgress(metadata.id, initialProgress)
         updateWakeLock()
         
         if (dl.status == ActiveDownload.Status.ACTIVE) {
@@ -316,22 +400,34 @@ object MediaManager {
                         // AIMD Multiplicative Decrease on timeout
                         dl.ssthresh = Math.max(2.0, dl.currentConcurrency * 0.5)
                         dl.currentConcurrency = 1.0
-                        dl.currentChunkSize = Math.max(16 * 1024, dl.currentChunkSize / 2)
+                        dl.currentChunkSize = Math.max(MIN_CHUNK_SIZE, dl.currentChunkSize / 2)
                         dl.consecutiveTimeouts++
                         
-                        if (dl.consecutiveTimeouts >= 4) {
+                        if (dl.consecutiveTimeouts >= 8) {
                             recoveryNeeded = true
                         }
                     }
                 }
                 
                 if (recoveryNeeded) {
-                    Logger.warn(TAG, "Media $id: persistent timeouts. Recovering.")
-                    dl.peerOnion = null
-                    dl.status = ActiveDownload.Status.RECOVERING
-                    resetDownloadTracking(dl)
-                    dl.lastAttemptAt = now
-                    scope.launch { attemptMeshRecovery(dl) }
+                    Logger.warn(TAG, "Media $id: persistent timeouts (${dl.consecutiveTimeouts}). Recovering.")
+                    scope.launch {
+                        val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
+                        if (isTemp) {
+                            Logger.info(TAG, "Media $id: Not recovering for temporary contact. Retrying direct.")
+                            dl.consecutiveTimeouts = 0
+                            requestNextChunks(dl)
+                        } else {
+                            // Remember original peer for fallback after recovery attempts
+                            val originalPeer = dl.peerOnion
+                            dl.peerOnion = null
+                            dl.status = ActiveDownload.Status.RECOVERING
+                            resetDownloadTracking(dl)
+                            dl.lastAttemptAt = now
+                            dl.savedPeerOnion = originalPeer
+                            attemptMeshRecovery(dl)
+                        }
+                    }
                     continue
                 }
                 
@@ -340,7 +436,17 @@ object MediaManager {
             } else if (dl.status == ActiveDownload.Status.RECOVERING) {
                 if (now - dl.lastAttemptAt > 30000) {
                     dl.lastAttemptAt = now
-                    scope.launch { attemptMeshRecovery(dl) }
+                    dl.consecutiveTimeouts++
+                    // After 3 recovery attempts, try falling back to the original peer
+                    if (dl.consecutiveTimeouts % 3 == 0 && dl.savedPeerOnion != null) {
+                        Logger.info(TAG, "Media $id: recovery stalled, retrying original peer ${dl.savedPeerOnion}")
+                        dl.peerOnion = dl.savedPeerOnion
+                        dl.status = ActiveDownload.Status.ACTIVE
+                        dl.consecutiveTimeouts = 0
+                        scope.launch { requestNextChunks(dl) }
+                    } else {
+                        scope.launch { attemptMeshRecovery(dl) }
+                    }
                 }
                 // Drop entirely if abandoned for 10 mins
                 if (now - dl.lastAttemptAt > 600_000L) {
@@ -404,10 +510,15 @@ object MediaManager {
             )
 
             scope.launch {
+                val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
+                val targetPubKey = targetPeer?.publicKeyB64
+                val isTargetTemp = targetPeer?.isTemporary == true
+                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
-                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    hops = 3, // 3 hops allows successful pass-through if delegated to Hub
+                    senderId = mySenderId,
+                    targetUserId = targetPubKey,
                     type = "MEDIA_REQUEST",
                     payload = com.google.gson.Gson().toJsonTree(payload)
                 )
@@ -425,11 +536,18 @@ object MediaManager {
                     
                     if (dl.consecutiveTimeouts >= 3 && dl.status == ActiveDownload.Status.ACTIVE) {
                         Logger.warn(TAG, "Media ${dl.metadata.id}: send failures. Recovering.")
-                        dl.peerOnion = null
-                        dl.status = ActiveDownload.Status.RECOVERING
-                        resetDownloadTracking(dl)
-                        dl.lastAttemptAt = System.currentTimeMillis()
-                        attemptMeshRecovery(dl)
+                        val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
+                        if (isTemp) {
+                            Logger.info(TAG, "Media ${dl.metadata.id}: Not recovering for temporary contact. Retrying direct.")
+                            dl.consecutiveTimeouts = 0
+                            // Will be retried on next loop
+                        } else {
+                            dl.peerOnion = null
+                            dl.status = ActiveDownload.Status.RECOVERING
+                            resetDownloadTracking(dl)
+                            dl.lastAttemptAt = System.currentTimeMillis()
+                            attemptMeshRecovery(dl)
+                        }
                     }
                 }
             }
@@ -449,6 +567,10 @@ object MediaManager {
         dl.inflight.remove(offset)
         dl.consecutiveTimeouts = 0
 
+        if (payload.totalSize != null && payload.totalSize > dl.totalBytes) {
+            dl.totalBytes = payload.totalSize
+        }
+
         var shouldFinish = false
         synchronized(dl) {
             if (data.isNotEmpty()) {
@@ -467,8 +589,10 @@ object MediaManager {
             // EOF Detection: 
             // 1. Data length returned was smaller than requested (end of file)
             // 2. Or we know the total size and have crossed it
-            if (data.size < requestedLength || (dl.totalBytes > 0 && dl.contiguousBytes >= dl.totalBytes)) {
+            if (data.size < requestedLength) {
                 dl.eofOffset = offset + data.size
+            } else if (dl.totalBytes > 0 && dl.contiguousBytes >= dl.totalBytes) {
+                dl.eofOffset = dl.totalBytes
             }
             
             if (dl.eofOffset != -1L && dl.contiguousBytes >= dl.eofOffset) {
@@ -496,7 +620,7 @@ object MediaManager {
                 } else {
                     dl.currentConcurrency += 1.0 / Math.floor(dl.currentConcurrency) // Congestion avoidance
                 }
-                dl.currentConcurrency = Math.min(8.0, dl.currentConcurrency) // Max 8 concurrent requests over Tor
+                dl.currentConcurrency = Math.min(2.0, dl.currentConcurrency) // Max 2 concurrent requests over Tor
             }
             requestNextChunks(dl)
         }
@@ -524,10 +648,14 @@ object MediaManager {
             val peer = dl.peerOnion
             if (peer != null) {
                 scope.launch {
+                    val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
+                    val isTargetTemp = targetPeer?.isTemporary == true
+                    val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 1,
-                        senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        hops = 3,
+                        senderId = mySenderId,
+                        targetUserId = targetPeer?.publicKeyB64,
                         type = "MEDIA_TRANSFER_ACK",
                         payload = com.google.gson.Gson().toJsonTree(ack)
                     )
@@ -543,6 +671,7 @@ object MediaManager {
 
     private suspend fun attemptMeshRecovery(dl: ActiveDownload) {
         val repo = repository ?: return
+        
         val myIdentity = repo.getLocalIdentity() ?: return
         
         val payload = MediaRelayRequestPayload(
@@ -568,11 +697,19 @@ object MediaManager {
     fun handleRecoveryFound(senderId: String, mediaId: String) {
         val dl = activeDownloads[mediaId] ?: return
         if (dl.status == ActiveDownload.Status.RECOVERING) {
-            Logger.info(TAG, "Media $mediaId found at $senderId")
-            dl.peerOnion = senderId
-            dl.status = ActiveDownload.Status.ACTIVE
-            dl.consecutiveTimeouts = 0 
-            requestNextChunks(dl)
+            scope.launch {
+                val recoveryPeer = repository?.peerDao?.getPeerByPublicKey(senderId)
+                val onion = recoveryPeer?.onionAddress
+                if (onion != null) {
+                    Logger.info(TAG, "Media $mediaId found at $senderId (onion: $onion)")
+                    dl.peerOnion = onion
+                    dl.status = ActiveDownload.Status.ACTIVE
+                    dl.consecutiveTimeouts = 0 
+                    requestNextChunks(dl)
+                } else {
+                    Logger.error(TAG, "Received MEDIA_RECOVERY_FOUND from $senderId but cannot find their onion address")
+                }
+            }
         }
     }
 
@@ -589,8 +726,9 @@ object MediaManager {
                     val metadata = getMetadataSync(payload.mediaId)
                     val packet = NetworkPacket(
                         id = UUID.randomUUID().toString(),
-                        hops = 1,
+                        hops = 3,
                         senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                        targetUserId = senderId,
                         type = "MEDIA_METADATA_RESPONSE", 
                         payload = com.google.gson.Gson().toJsonTree(metadata)
                     )
@@ -623,18 +761,23 @@ object MediaManager {
                     }
                 }
 
+                val isTargetTemp = repo.peerDao.getPeerByPublicKey(senderId)?.isTemporary == true
+                val mySenderId = if (isTargetTemp) repo.getBurnableIdentity()?.publicKeyB64 ?: repo.getLocalIdentity()?.publicKeyB64 ?: "" else repo.getLocalIdentity()?.publicKeyB64 ?: ""
+
                 val chunkPay = MediaChunkPayload(
                     mediaId = payload.mediaId,
                     chunkIndex = payload.chunkIndex,
                     totalChunks = if (payload.byteOffset == null) ((totalSize / payload.chunkSize).toInt() + 1) else 999,
                     byteOffset = offset,
+                    totalSize = totalSize,
                     data = Base64.encodeToString(buffer, Base64.NO_WRAP)
                 )
 
                 val packet = NetworkPacket(
                     id = UUID.randomUUID().toString(),
-                    hops = 1,
-                    senderId = repo.getLocalIdentity()?.publicKeyB64 ?: "",
+                    hops = 3,
+                    senderId = mySenderId,
+                    targetUserId = senderId,
                     type = "MEDIA_CHUNK",
                     payload = com.google.gson.Gson().toJsonTree(chunkPay)
                 )
@@ -688,17 +831,7 @@ object MediaManager {
         val file = findLocalFile(repo, mediaId)
         val ext = mediaId.substringAfterLast('.', "").lowercase()
         
-        val mimeType = when (ext) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "webp" -> "image/webp"
-            "gif" -> "image/gif"
-            "mp4" -> "video/mp4"
-            "mkv" -> "video/x-matroska"
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            else -> "application/octet-stream"
-        }
+        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream" 
 
         return MediaMetadata(
             id = mediaId,
@@ -734,6 +867,48 @@ object MediaManager {
         } catch (e: Exception) {
             Logger.warn(TAG, "Thumbnail generation failed: ${e.message}")
             null
+        }
+    }
+
+    fun exportToPublicDownloads(context: Context, mediaId: String, fileName: String): Boolean {
+        return try {
+            val srcFile = getLocalFile(mediaId) ?: return false
+            var safeName = fileName
+            if (!safeName.contains(".") || safeName.endsWith(".bin")) {
+                val meta = getMetadataSync(mediaId)
+                val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(meta?.mimeType)
+                val ext = if (mimeExt != null) ".$mimeExt" else {
+                    if (mediaId.contains(".") && !mediaId.endsWith(".bin")) mediaId.substring(mediaId.lastIndexOf(".")) else ".bin"
+                }
+                safeName = if (safeName.endsWith(".bin")) safeName.replace(".bin", ext) else safeName + ext
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        srcFile.inputStream().use { input -> input.copyTo(out) }
+                    }
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    true
+                } else false
+            } else {
+                val publicDownloads = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (!publicDownloads.exists()) publicDownloads.mkdirs()
+                val destFile = java.io.File(publicDownloads, safeName)
+                srcFile.copyTo(destFile, overwrite = true)
+                true
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to export file to Downloads: ${e.message}")
+            false
         }
     }
 }

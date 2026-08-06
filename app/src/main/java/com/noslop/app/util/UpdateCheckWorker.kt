@@ -20,12 +20,12 @@ class UpdateCheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorke
             val info = updateChecker.checkForUpdate()
 
             if (info != null && updateChecker.shouldNotifyNow()) {
-                NotificationHelper.showNotification(
+                NotificationHelper.showOngoingUpdateNotification(
                     context = applicationContext,
                     title = "NoSlop update available",
-                    message = "Version ${info.latestVersion} is available (you have ${info.currentVersion}). Open Settings to download.",
-                    deepLinkRoute = "settings",
-                    notificationId = 918273 // fixed id: replaces any earlier "update available" notification
+                    message = "Version ${info.latestVersion} is available. Tap to start the update.",
+                    downloadUrl = info.downloadUrl,
+                    version = info.latestVersion
                 )
                 updateChecker.markNotifiedNow()
                 Logger.info("UPDATE_CHECK", "Notified user of update ${info.latestVersion}")

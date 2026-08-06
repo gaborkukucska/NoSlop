@@ -1,6 +1,8 @@
 // FILE: app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt
 package com.noslop.app.ui.components
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -9,6 +11,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -18,11 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import com.noslop.app.debug.Logger
-import com.noslop.app.feeds.api.InvidiousApiClient
+import com.noslop.app.feeds.api.YouTubeInternalClient
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import kotlinx.coroutines.Dispatchers
 import com.noslop.app.net.HttpClientProvider
 import com.noslop.app.ui.PreloadManager
 import com.noslop.app.ui.theme.*
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -39,7 +46,7 @@ internal fun isSourceCached(url: String): Boolean = sourceCache.containsKey(url)
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
-internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false): VideoSource {
+internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false, context: android.content.Context): VideoSource {
     if (!forceRefresh) {
         sourceCache[rawUrl]?.let { return it }
     }
@@ -52,7 +59,8 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         }
         
         try {
-            val result = doResolve(rawUrl)
+            val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.mediaQuality
+            val result = doResolve(rawUrl, quality)
             sourceCache[rawUrl] = result
             result
         } finally {
@@ -61,7 +69,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     }
 }
 
-private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatchers.IO) {
+private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = withContext(Dispatchers.IO) {
     if (rawUrl.isBlank()) return@withContext VideoSource.Unavailable
 
     if ((rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) && 
@@ -89,8 +97,8 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
             }
             VideoSource.Direct(rawUrl)
         }
-        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl)
-        isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl)
+        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl, quality)
+        isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl, quality)
         rawUrl.contains("archive.org/embed") || rawUrl.contains("archive.org/details") -> {
             val id = if (rawUrl.contains("/details/")) {
                 rawUrl.substringAfter("/details/").substringBefore("?").substringBefore("/")
@@ -100,7 +108,7 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
             try {
                 val metadataUrl = "https://archive.org/metadata/$id"
                 val request = okhttp3.Request.Builder().url(metadataUrl).build()
-                val response = HttpClientProvider.clearnetClient.newCall(request).execute()
+                HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                 if (response.isSuccessful) {
                     val body = response.body?.string()
                     if (body != null) {
@@ -128,6 +136,7 @@ private suspend fun doResolve(rawUrl: String): VideoSource = withContext(Dispatc
                         }
                     }
                 }
+                } // end use
             } catch (e: Exception) {
                 Logger.warn("VIDEO_RESOLVE", "Archive.org metadata resolution failed: ${e.message}")
             }
@@ -172,13 +181,13 @@ private fun extractVimeoId(url: String): String? = when {
     else -> url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() && it.all { c -> c.isDigit() } }
 }
 
-private fun resolveYouTubeSource(url: String): VideoSource {
+private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
 
-    val streamUrl = InvidiousApiClient.resolveStreamUrl(videoId)
+    val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality)
     if (streamUrl != null) {
         return VideoSource.Direct(streamUrl)
     }
@@ -187,7 +196,7 @@ private fun resolveYouTubeSource(url: String): VideoSource {
     return VideoSource.Embed(embedUrl)
 }
 
-private fun resolveVimeoSource(url: String): VideoSource {
+private fun resolveVimeoSource(url: String, quality: String): VideoSource {
     val videoId = extractVimeoId(url) ?: run {
         return fallbackVimeoEmbed(url)
     }
@@ -200,12 +209,11 @@ private fun resolveVimeoSource(url: String): VideoSource {
             .header("Referer", "https://vimeo.com/")
             .build()
 
-        val response = HttpClientProvider.clearnetClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            return fallbackVimeoEmbed(url)
-        }
-
-        val body = response.body?.string() ?: return fallbackVimeoEmbed(url)
+        val response = HttpClientProvider.activeClearnetClient.newCall(request).execute()
+        val body = response.use { res ->
+            if (!res.isSuccessful) return fallbackVimeoEmbed(url)
+            res.body?.string()
+        } ?: return fallbackVimeoEmbed(url)
         val root = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
 
         val progressive = root
@@ -214,20 +222,14 @@ private fun resolveVimeoSource(url: String): VideoSource {
             ?.getAsJsonArray("progressive")
 
         if (progressive != null && progressive.size() > 0) {
-            var bestUrl: String? = null
-            var bestQuality = 0
-            for (el in progressive) {
-                val obj = el.asJsonObject
-                val quality = obj.get("quality")?.asString?.removeSuffix("p")?.toIntOrNull() ?: 0
-                val streamUrl = obj.get("url")?.asString ?: continue
-                if (quality > bestQuality) {
-                    bestQuality = quality
-                    bestUrl = streamUrl
-                }
+            val sortedFormats = progressive.map { it.asJsonObject }.sortedBy { it.get("quality")?.asString?.removeSuffix("p")?.toIntOrNull() ?: 0 }
+            val chosenFormat = when (quality) {
+                "low" -> sortedFormats.first()
+                "medium" -> sortedFormats[sortedFormats.size / 2]
+                else -> sortedFormats.last()
             }
-            if (bestUrl != null) {
-                return VideoSource.Direct(bestUrl)
-            }
+            val bestUrl = chosenFormat.get("url")?.asString
+            if (bestUrl != null) return VideoSource.Direct(bestUrl)
         }
         fallbackVimeoEmbed(url)
     } catch (e: Exception) {
@@ -246,7 +248,8 @@ fun VideoPlayer(
     url: String,
     isVisible: Boolean = true,
     thumbnailUrl: String? = null,
-    thumbnailB64: String? = null
+    thumbnailB64: String? = null,
+    stableKey: String? = null
 ) {
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
@@ -273,7 +276,7 @@ fun VideoPlayer(
     LaunchedEffect(url, retryTrigger) {
         source = null 
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
-        source = resolveSource(url, forceRefresh = retryTrigger > 0)
+        source = resolveSource(url, forceRefresh = retryTrigger > 0, context = context)
         Logger.info("VIDEO", "Resolved source for $url → ${source?.javaClass?.simpleName}")
     }
 
@@ -287,8 +290,9 @@ fun VideoPlayer(
                 if (activeVisible) {
                     ExoVideoPlayer(
                         url = resolved.url,
-                        rawUrl = url,
+                        rawUrl = stableKey ?: url,
                         isLandscape = isLandscape,
+                        isVisible = isVisible,
                         thumbnailUrl = thumbnailUrl,
                         thumbnailB64 = thumbnailB64,
                         onRetry = { retryTrigger++ },
@@ -301,6 +305,7 @@ fun VideoPlayer(
                 if (activeVisible) {
                     EmbedWebViewPlayer(
                         url = resolved.url,
+                        rawUrl = stableKey ?: url,
                         onRetry = { retryTrigger++ },
                         onReady = { isVideoReady = true }
                     )
@@ -321,9 +326,9 @@ fun VideoPlayer(
                         modifier = Modifier.size(48.dp)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Text("Video unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+                    Text("Video unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
                     Text(
-                        "Could not resolve a playable stream.",
+                        "Could not resolve a playable stream.".tr,
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
@@ -334,7 +339,7 @@ fun VideoPlayer(
                         onClick = { retryTrigger++ },
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
                     ) {
-                        Text("Retry", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                        Text("Retry".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -352,12 +357,26 @@ fun VideoPlayer(
         }
         
         if (showThumbnail && (thumbnailUrl != null || decodedB64 != null)) {
-            AsyncImage(
-                model = thumbnailUrl ?: decodedB64,
-                contentDescription = "Video Thumbnail",
-                modifier = Modifier.fillMaxSize().zIndex(1f),
-                contentScale = ContentScale.Crop
-            )
+            Box(modifier = Modifier.fillMaxSize().zIndex(1f).clipToBounds()) {
+                // Blurred background layer to prevent black bars
+                AsyncImage(
+                    model = thumbnailUrl ?: decodedB64,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize().scale(1.35f).blur(24.dp),
+                    contentScale = ContentScale.Crop,
+                    colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(
+                        PrimaryBlack.copy(alpha = 0.5f),
+                        androidx.compose.ui.graphics.BlendMode.Darken
+                    )
+                )
+                // Proper, uncropped thumbnail in front
+                AsyncImage(
+                    model = thumbnailUrl ?: decodedB64,
+                    contentDescription = "Video Thumbnail".tr,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+            }
         } else if (source == null && thumbnailUrl == null && thumbnailB64 == null && !isVideoReady) {
             Box(modifier = Modifier.fillMaxSize().zIndex(1f)) {
                 com.noslop.app.ui.LoadingShimmer()
@@ -372,6 +391,7 @@ private fun ExoVideoPlayer(
     url: String,
     rawUrl: String,
     isLandscape: Boolean,
+    isVisible: Boolean,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
     onRetry: () -> Unit,
@@ -383,32 +403,51 @@ private fun ExoVideoPlayer(
     var errorMessage by remember { mutableStateOf("") }
     var isBuffering by remember { mutableStateOf(true) }
 
+    LaunchedEffect(isVisible, exoPlayer) {
+        exoPlayer?.let { player ->
+            player.playWhenReady = isVisible
+            if (!isVisible) {
+                player.pause()
+                try {
+                    val currentPos = player.currentPosition
+                    Logger.debug("VIDEO_DEBUG", "LaunchedEffect isVisible=false. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
+                    if (currentPos > 0L) {
+                        PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                    }
+                } catch (e: Exception) {
+                    Logger.debug("VIDEO_DEBUG", "Failed to save playback position on pause: ${e.message}")
+                }
+            }
+        }
+    }
+
+    var videoSizeState by remember { mutableStateOf(androidx.media3.common.VideoSize.UNKNOWN) }
+
     DisposableEffect(url) {
         Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
         hasError = false
         isBuffering = true
 
-        val preloaded = PreloadManager.claim(url)
+        val preloaded = PreloadManager.claim(rawUrl)
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = true
+                
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 if (resumeMs > 0L) {
                     Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $rawUrl")
                     seekTo(resumeMs)
                 }
+
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                            onReady()
-                        }
-                    }
-                    override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        if (isPlaying) onReady()
                     }
                     override fun onRenderedFirstFrame() {
                         onReady()
+                    }
+                    override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                        videoSizeState = videoSize
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                         hasError = true
@@ -417,12 +456,9 @@ private fun ExoVideoPlayer(
                     }
                 })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                    onReady()
-                }
             }
         } else {
-            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.clearnetClient)
+            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeClearnetClient)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
@@ -439,25 +475,23 @@ private fun ExoVideoPlayer(
                         .setMimeType(mimeType)
                         .build()
                     setMediaItem(mediaItem)
+                    repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
+                    
                     val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                     if (resumeMs > 0L) {
                         Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $rawUrl")
                         seekTo(resumeMs)
                     }
-                    repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
 
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
-                            if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                                onReady()
-                            }
-                        }
-                        override fun onIsPlayingChanged(isPlaying: Boolean) {
-                            if (isPlaying) onReady()
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
+                        }
+                        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                            videoSizeState = videoSize
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
                             val cause = error.cause
@@ -479,8 +513,14 @@ private fun ExoVideoPlayer(
 
         onDispose {
             try {
-                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
-            } catch (e: Exception) {}
+                val currentPos = player.currentPosition
+                Logger.debug("VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
+                if (currentPos > 0L) {
+                    PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                }
+            } catch (e: Exception) {
+                Logger.debug("VIDEO_DEBUG", "Failed to save playback position during dispose: ${e.message}")
+            }
             player.release()
             exoPlayer = null
         }
@@ -491,7 +531,10 @@ private fun ExoVideoPlayer(
         while (true) {
             kotlinx.coroutines.delay(1000L)
             try {
-                PlaybackPositionStore.save(rawUrl, player.currentPosition, player.duration)
+                val currentPos = player.currentPosition
+                if (currentPos > 0L) {
+                    PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                }
             } catch (e: Exception) {
                 break
             }
@@ -513,12 +556,17 @@ private fun ExoVideoPlayer(
                         )
                         player = exoPlayer
                         useController = true
+                        useArtwork = false
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
                 update = { view ->
+                    val temp = videoSizeState
                     view.player = exoPlayer
                     view.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    if (temp.width > 0 && temp.height > 0) {
+                        view.requestLayout()
+                    }
                 },
                 onRelease = { view ->
                     view.player = null
@@ -534,7 +582,7 @@ private fun ExoVideoPlayer(
             ) {
                 Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
                 Spacer(modifier = Modifier.height(16.dp))
-                Text("Video unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+                Text("Video unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
                 Text(
                     errorMessage,
                     color = TextMuted,
@@ -547,7 +595,7 @@ private fun ExoVideoPlayer(
                     onClick = onRetry,
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
                 ) {
-                    Text("Retry Playback", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                    Text("Retry Playback".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -555,8 +603,7 @@ private fun ExoVideoPlayer(
 }
 
 @Composable
-private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> Unit) {
-    Logger.info("VIDEO", "Loading embed in WebView: $url")
+private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit, onReady: () -> Unit) {
     var webError by remember { mutableStateOf<String?>(null) }
 
     if (webError != null) {
@@ -570,7 +617,7 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
         ) {
             Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(48.dp))
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Embed unavailable", color = TextLight, fontWeight = FontWeight.Bold)
+            Text("Embed unavailable".tr, color = TextLight, fontWeight = FontWeight.Bold)
             Text(
                 webError!!,
                 color = TextMuted,
@@ -583,7 +630,7 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                 onClick = onRetry,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
             ) {
-                Text("Retry Embed", color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                Text("Retry Embed".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
             }
         }
     } else {
@@ -622,6 +669,21 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                         url.contains("vimeo") -> "https://vimeo.com/"
                         else -> "https://archive.org/"
                     }
+
+                    addJavascriptInterface(object {
+                        @android.webkit.JavascriptInterface
+                        fun onPlaying() {
+                            post { onReady() }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun savePosition(timeSeconds: Float) {
+                            val timeMs = (timeSeconds * 1000).toLong()
+                            if (timeMs > 0) {
+                                PlaybackPositionStore.save(rawUrl, timeMs, 0L)
+                            }
+                        }
+                    }, "NoSlopJS")
 
                     webViewClient = object : android.webkit.WebViewClient() {
                         override fun shouldOverrideUrlLoading(
@@ -663,7 +725,11 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
-                            view?.postDelayed({ onReady() }, 800)
+                            
+                            val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                            if (!isYouTube) {
+                                view?.postDelayed({ onReady() }, 800)
+                            }
                         }
 
                         override fun onReceivedError(
@@ -677,7 +743,64 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                         }
                     }
 
-                    val htmlContent = """
+                    val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                    
+                    val htmlContent = if (isYouTube) {
+                        val videoId = url.substringAfter("/embed/").substringBefore("?")
+                        val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
+                        val startSeconds = (resumeMs / 1000).toInt()
+                        """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                            <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
+                        </head>
+                        <body>
+                            <div id="player"></div>
+                            <script>
+                              var tag = document.createElement('script');
+                              tag.src = "https://www.youtube.com/iframe_api";
+                              var firstScriptTag = document.getElementsByTagName('script')[0];
+                              firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                              var player;
+                              function onYouTubeIframeAPIReady() {
+                                player = new YT.Player('player', {
+                                  height: '100%',
+                                  width: '100%',
+                                  videoId: '$videoId',
+                                  playerVars: { 'playsinline': 1, 'autoplay': 1, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
+                                  events: {
+                                    'onReady': function(event) { event.target.playVideo(); },
+                                    'onStateChange': function(event) {
+                                      if (event.data == 1) { // PLAYING state
+                                          window.NoSlopJS.onPlaying();
+                                          if (!window.posInterval) {
+                                              window.posInterval = setInterval(function() {
+                                                  if (player && player.getCurrentTime) {
+                                                      window.NoSlopJS.savePosition(player.getCurrentTime());
+                                                  }
+                                              }, 1000);
+                                          }
+                                      } else {
+                                          if (window.posInterval) {
+                                              clearInterval(window.posInterval);
+                                              window.posInterval = null;
+                                              if (player && player.getCurrentTime) {
+                                                  window.NoSlopJS.savePosition(player.getCurrentTime());
+                                              }
+                                          }
+                                      }
+                                    }
+                                  }
+                                });
+                              }
+                            </script>
+                        </body>
+                        </html>
+                        """.trimIndent()
+                    } else {
+                        """
                         <!DOCTYPE html>
                         <html>
                         <head>
@@ -689,7 +812,8 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                             <iframe width="100%" height="100%" src="$url" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
                         </body>
                         </html>
-                    """.trimIndent()
+                        """.trimIndent()
+                    }
                     
                     loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
                 }
@@ -703,6 +827,7 @@ private fun EmbedWebViewPlayer(url: String, onRetry: () -> Unit, onReady: () -> 
                 """.trimIndent(), null)
             },
             onRelease = { view ->
+                view.evaluateJavascript("if (typeof player !== 'undefined' && player.getCurrentTime) { window.NoSlopJS.savePosition(player.getCurrentTime()); }", null)
                 view.stopLoading()
                 view.loadUrl("about:blank")
                 view.destroy()

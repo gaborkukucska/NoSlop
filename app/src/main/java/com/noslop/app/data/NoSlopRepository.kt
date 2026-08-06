@@ -7,8 +7,17 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.mesh.MeshPacketHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
 
 class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
@@ -16,7 +25,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
     val peerDao = db.peerDao()
-    private val postDao = db.postDao()
+    internal val postDao = db.postDao()
     private val messageDao = db.messageDao()
     private val appSettingDao = db.appSettingDao()
     private val commentDao = db.commentDao()
@@ -48,7 +57,21 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val mediaSettingsFlow = settingsRepository.mediaSettingsFlow
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
+    val useTorForClearnet: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.useTorForClearnet
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
+    val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
+    val feedMixSettingsFlow = settingsRepository.feedMixSettingsFlow
+
+    init {
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
+    }
+
+    @Volatile
+    var shouldSyncDms = true
+
+    fun triggerDmSync() {
+        shouldSyncDms = true
+    }
 
     val meshTransport = com.noslop.app.mesh.MeshTransport(this)
 
@@ -58,19 +81,520 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val meshSocialRepository = MeshSocialRepository(
         db, meshTransport, repositoryScope,
         getLocalIdentity = { getLocalIdentity() },
+        getBurnableIdentity = { getBurnableIdentity() },
         getLocalHandle = { getLocalHandle() },
         getUserProfile = { getUserProfile() },
+        getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() }
     )
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
+
+        // --- Hub API Client ---
+
+    suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val jsonStr = packet.toJson()
+            val jsonObj = org.json.JSONObject(jsonStr)
+            val arr = org.json.JSONArray().put(jsonObj)
+            val args = org.json.JSONObject().put("packets", arr)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) {
+                com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed packet ${packet.id} to Hub.")
+                return@withContext true
+            } else {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to push packet ${packet.id} to Hub (API returned null).")
+                return@withContext false
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to push packet to Hub: ${e.message}")
+            return@withContext false
+        }
+    }
+
+    suspend fun invokeHubApi(cmd: String, args: JSONObject): JSONObject? = withContext(Dispatchers.IO) {
+        val hubStatus = getAppSetting("hub_deployment_status") ?: return@withContext null
+        val isLegacy = hubStatus == "Active (Legacy Connection)"
+        val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
+        
+        if (lanIp != null) {
+            try {
+                val url = "http://$lanIp:8080/api/invoke"
+                val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+                val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
+                val client = com.noslop.app.net.HttpClientProvider.rawClearnetClient.newBuilder()
+                    .connectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    val respBody = response.body?.string() ?: "{}"
+                    if (response.isSuccessful) {
+                        return@withContext JSONObject(respBody)
+                    } else {
+                        com.noslop.app.debug.Logger.warn("HUB_API", "LAN request failed with code ${response.code} for cmd $cmd: $respBody")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.warn("HUB_API", "LAN request failed: ${e.message}. Falling back to Tor...")
+            }
+        }
+        
+        val identity = getLocalIdentity() ?: return@withContext null
+        val onionAddress = identity.onionAddress
+        try {
+            val url = "http://$onionAddress:8080/api/invoke"
+            val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()
+            val request = Request.Builder().url(url).post(payload.toRequestBody("application/json".toMediaType())).build()
+            com.noslop.app.net.HttpClientProvider.torClient.newCall(request).execute().use { response ->
+                val respBody = response.body?.string() ?: "{}"
+                if (response.isSuccessful) {
+                    return@withContext JSONObject(respBody)
+                } else {
+                    com.noslop.app.debug.Logger.warn("HUB_API", "Tor request failed with code ${response.code} for cmd $cmd: $respBody")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.error("HUB_API", "Tor fallback request failed: ${e.message}")
+        }
+        return@withContext null
+    }
+
+    
+    suspend fun syncPostsWithHub() = withContext(Dispatchers.IO) {
+        val posts = postDao.getPostsSince(0).take(50)
+        val packetArray = JSONArray()
+        val gson = com.google.gson.Gson()
+        posts.forEach { post ->
+            val meta = if (post.mediaUrl != null) com.noslop.app.mesh.MediaMetadata(
+                id = post.mediaUrl,
+                type = post.mediaType ?: "file",
+                mimeType = "application/octet-stream", 
+                size = 0,
+                chunkCount = 999,
+                thumbnailB64 = post.thumbnailB64
+            ) else null
+
+            val payload = com.noslop.app.mesh.PostPayload(
+                id = post.id,
+                authorId = post.authorPublicKeyB64,
+                authorName = post.authorHandle,
+                authorPublicKey = post.authorPublicKeyB64,
+                authorAvatarB64 = post.authorAvatarB64,
+                originNode = "",
+                content = post.content,
+                timestamp = post.timestamp,
+                signature = post.signature,
+                privacy = post.privacy,
+                mediaId = post.mediaUrl,
+                mediaMetadata = meta,
+                clearnetUrl = post.clearnetUrl,
+                clearnetTitle = post.clearnetTitle,
+                clearnetThumbnailUrl = post.clearnetThumbnailUrl,
+                clearnetMediaType = post.clearnetMediaType
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = post.authorPublicKeyB64,
+                type = "POST",
+                payload = gson.toJsonTree(payload),
+                signature = post.signature
+            )
+            packetArray.put(JSONObject(packet.toJson()))
+        }
+        if (packetArray.length() > 0) {
+            val args = JSONObject().put("packets", packetArray)
+            val res = invokeHubApi("sync_push_packets", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${packetArray.length()} local posts to Hub.")
+        }
+    }
+
+    suspend fun syncPeersWithHub() = withContext(Dispatchers.IO) {
+        val peers = peerDao.getAllPeersList()
+        val peerArray = JSONArray()
+        peers.forEach { peer ->
+            val obj = JSONObject()
+            obj.put("public_key", peer.publicKeyB64)
+            obj.put("is_trusted", peer.isTrusted)
+            obj.put("handle", peer.handle)
+            obj.put("onion_address", peer.onionAddress)
+            obj.put("enc_public_key", peer.encPublicKeyB64)
+            peerArray.put(obj)
+        }
+        val args = JSONObject().put("peers", peerArray)
+        val res = invokeHubApi("sync_push_peers", args)
+        if (res != null) Logger.info("HUB_SYNC", "Pushed ${peers.size} contacts to Hub Firewall.")
+    }
+
+        suspend fun syncDmsWithHub() = withContext(Dispatchers.IO) {
+        if (!shouldSyncDms) return@withContext
+        shouldSyncDms = false
+        val identity = getLocalIdentity() ?: return@withContext
+        val peers = peerDao.getAllPeersList()
+        val dmArray = JSONArray()
+        
+        peers.forEach { peer ->
+            try {
+                // Room flows emit the initial list immediately, so we can grab the first snapshot
+                // Take only the last 30 messages to save battery on decryption overhead!
+                val messages = kotlinx.coroutines.withTimeoutOrNull(2000L) {
+                    messageDao.getMessagesWithPeer(peer.publicKeyB64).first()
+                }?.takeLast(30) ?: emptyList()
+                messages.forEach { msg ->
+                    val plaintext = com.noslop.app.crypto.CryptoService.decryptDM(
+                        msg.ciphertext, msg.nonce, peer.encPublicKeyB64, identity.encPrivateKeyB64
+                    )
+                    var contentStr = plaintext ?: "..."
+                    val obj = JSONObject()
+                    var hasMedia = false
+                    try {
+                        val json = JSONObject(contentStr)
+                        if (json.has("content")) {
+                            contentStr = json.getString("content")
+                        }
+                        if (json.has("media")) {
+                            val mediaJson = json.getJSONObject("media")
+                            obj.put("mediaId", mediaJson.optString("id"))
+                            obj.put("mediaType", mediaJson.optString("type"))
+                            obj.put("media", mediaJson)
+                            hasMedia = true
+                        }
+                    } catch (e: Exception) {}
+                    
+                    obj.put("id", msg.id)
+                    obj.put("peer", peer.publicKeyB64)
+                    obj.put("sender", msg.senderPub)
+                    obj.put("content", contentStr)
+                    obj.put("timestamp", msg.timestamp)
+                    
+                    if (!hasMedia && msg.mediaId != null) {
+                        obj.put("mediaId", msg.mediaId)
+                        obj.put("mediaType", msg.mediaType)
+                    }
+                    
+                    dmArray.put(obj)
+                }
+            } catch (e: Exception) {
+                com.noslop.app.debug.Logger.error("HUB_SYNC", "Failed to sync DMs for ${peer.handle}: ${e.message}")
+            }
+        }
+        if (dmArray.length() > 0) {
+            val args = JSONObject().put("dms", dmArray)
+            val res = invokeHubApi("sync_push_dms", args)
+            if (res != null) com.noslop.app.debug.Logger.info("HUB_SYNC", "Pushed ${dmArray.length()} DMs to Hub.")
+        }
+    }
+
+    suspend fun ensureAdminPeerExists() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val adminPubKey = "admin_${myKeys.publicKeyB64}"
+        val existing = peerDao.getPeerByPublicKey(adminPubKey)
+        if (existing == null) {
+            peerDao.insertPeer(com.noslop.app.data.Peer(
+                publicKeyB64 = adminPubKey,
+                handle = "Admin AI (Hub)",
+                tripcode = "admin",
+                onionAddress = myKeys.onionAddress,
+                encPublicKeyB64 = myKeys.encPublicKeyB64,
+                isTrusted = true,
+                lastSeenAt = System.currentTimeMillis()
+            ))
+        }
+    }
+
+    @Volatile
+    private var hasPulledHistoricalData = false
+
+    suspend fun syncPullHistoricalDataFromHub() = withContext(Dispatchers.IO) {
+        val hubStatus = getAppSetting("hub_deployment_status")
+        if (hubStatus.isNullOrBlank()) return@withContext
+        if (hasPulledHistoricalData) return@withContext
+        hasPulledHistoricalData = true
+
+        ensureAdminPeerExists()
+
+        val myKeys = getLocalIdentity() ?: return@withContext
+
+        // 1. Pull DMs
+        val resDms = invokeHubApi("get_dms", JSONObject())
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        val metadata = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                        map["media"] = metadata
+                    }
+                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = dm.optLong("timestamp", System.currentTimeMillis()),
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                    }
+                }
+            }
+        }
+        
+        // 2. Pull Posts
+        val resPosts = invokeHubApi("get_social_feed", JSONObject())
+        if (resPosts != null && resPosts.has("posts")) {
+            val postsArray = resPosts.getJSONArray("posts")
+            for (i in 0 until postsArray.length()) {
+                val postObj = postsArray.getJSONObject(i)
+                val id = postObj.optString("id")
+                if (!checkEntityExistsLocally("POST", id)) {
+                    val author = postObj.optString("author")
+                    val content = postObj.optString("content")
+                    val timestampStr = postObj.optString("timestamp")
+                    val timestamp = try {
+                        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).parse(timestampStr)?.time ?: System.currentTimeMillis()
+                    } catch (e: Exception) { System.currentTimeMillis() }
+                    
+                    val mediaId = postObj.optString("media_id").takeIf { it.isNotBlank() }
+                    val mediaType = postObj.optString("media_type").takeIf { it.isNotBlank() }
+                    
+                    val localPost = com.noslop.app.data.MeshPost(
+                        id = id,
+                        authorPublicKeyB64 = "unknown",
+                        authorHandle = author,
+                        authorTripcode = "hub",
+                        authorAvatarB64 = null,
+                        content = content,
+                        timestamp = timestamp,
+                        signature = "synced_from_hub",
+                        mediaUrl = mediaId?.let { "noslop://${myKeys.onionAddress}/$it" },
+                        mediaType = mediaType,
+                        privacy = "public",
+                        thumbnailB64 = null,
+                        clearnetUrl = null,
+                        clearnetTitle = null,
+                        clearnetThumbnailUrl = null,
+                        clearnetMediaType = null
+                    )
+                    postDao.insertPost(localPost)
+                }
+            }
+        }
+        
+        // 3. Pull Peers
+        val resPeers = invokeHubApi("get_mesh_peers", JSONObject())
+        if (resPeers != null && resPeers.has("peers")) {
+            val peersArray = resPeers.getJSONArray("peers")
+            for (i in 0 until peersArray.length()) {
+                val peerObj = peersArray.getJSONObject(i)
+                val pubKey = peerObj.optString("public_key")
+                val myKeys = getLocalIdentity()
+                if (pubKey.isNotBlank() && pubKey != myKeys?.publicKeyB64 && peerDao.getPeerByPublicKey(pubKey) == null) {
+                    val encPubKey = peerObj.optString("enc_public_key").takeIf { it.isNotBlank() } ?: ""
+                    peerDao.insertPeer(com.noslop.app.data.Peer(
+                        publicKeyB64 = pubKey,
+                        handle = peerObj.optString("handle"),
+                        tripcode = "sync",
+                        onionAddress = peerObj.optString("onion_address", ""),
+                        encPublicKeyB64 = encPubKey,
+                        isTrusted = peerObj.optBoolean("is_trusted", false),
+                        lastSeenAt = System.currentTimeMillis()
+                    ))
+                }
+            }
+        }
+    }
+
+    private var lastDmSyncTimestamp: Long = 0
+
+    private suspend fun syncPullIncrementalDMsFromHub() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val args = JSONObject().put("since", lastDmSyncTimestamp)
+        val resDms = invokeHubApi("sync_pull_dms", args)
+        
+        if (resDms != null && resDms.has("dms")) {
+            val dmsArray = resDms.getJSONArray("dms")
+            var latestTimestamp = lastDmSyncTimestamp
+            
+            for (i in 0 until dmsArray.length()) {
+                val dm = dmsArray.getJSONObject(i)
+                val id = dm.optString("id")
+                val timestamp = dm.optLong("timestamp", 0)
+                if (timestamp > latestTimestamp) {
+                    latestTimestamp = timestamp
+                }
+                
+                if (!checkEntityExistsLocally("MESSAGE", id)) {
+                    val contentStr = dm.optString("content")
+                    val sender = dm.optString("sender")
+                    val peerPub = dm.optString("peer")
+                    
+                    val peer = peerDao.getPeerByPublicKey(peerPub)
+                    val peerEncPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() } ?: peerPub
+                    
+                    val map = mutableMapOf<String, Any>("content" to contentStr)
+                    val mediaId = dm.optString("mediaId").takeIf { it.isNotBlank() }
+                    val mediaType = dm.optString("mediaType").takeIf { it.isNotBlank() }
+                    if (mediaId != null) {
+                        map["media"] = com.noslop.app.mesh.MediaMetadata(
+                            id = mediaId,
+                            type = mediaType ?: "file",
+                            mimeType = "application/octet-stream",
+                            size = 0,
+                            chunkCount = 999,
+                            thumbnailB64 = null
+                        )
+                    }
+                    val contentToSend = com.google.gson.Gson().toJson(map)
+                    val (ciphertext, nonce) = CryptoService.encryptDM(contentToSend, peerEncPub, myKeys.encPrivateKeyB64)
+                    
+                    if (ciphertext != null && nonce != null) {
+                        val localMsg = com.noslop.app.data.ChatMessage(
+                            id = id,
+                            chatWithPeerPub = peerPub,
+                            senderPub = sender,
+                            ciphertext = ciphertext,
+                            nonce = nonce,
+                            timestamp = timestamp,
+                            mediaId = mediaId,
+                            mediaType = mediaType,
+                            replyToMessageId = null
+                        )
+                        messageDao.insertMessage(localMsg)
+                        
+                        // If WE sent this DM (via Hub Web UI), we must push it back to the Hub so it routes over Tor!
+                        if (sender == myKeys.publicKeyB64) {
+                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = java.util.UUID.randomUUID().toString(),
+                                hops = 3,
+                                senderId = myKeys.publicKeyB64,
+                                targetUserId = peerPub,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+                        } else {
+                            // If we received this DM from a peer, we must process it locally to update the UI
+                            val payloadJson = com.google.gson.Gson().toJsonTree(
+                                com.noslop.app.mesh.EncryptedPayload(
+                                    id = id,
+                                    nonce = nonce,
+                                    ciphertext = ciphertext,
+                                    timestamp = timestamp
+                                )
+                            )
+                            val packet = com.noslop.app.mesh.NetworkPacket(
+                                id = id,
+                                senderId = sender,
+                                targetUserId = myKeys.publicKeyB64,
+                                type = "MESSAGE",
+                                payload = payloadJson
+                            )
+                            handleIncomingPacket(packet)
+                        }
+                    }
+                }
+            }
+            lastDmSyncTimestamp = latestTimestamp
+        }
+    }
+
+    suspend fun pullMeshPacketsFromHub() = withContext(Dispatchers.IO) {
+        // 0. Ensure our onion address matches the Hub's true native onion address to fix asymmetric routing
+        try {
+            val resInfo = invokeHubApi("get_node_info", org.json.JSONObject())
+            if (resInfo != null && resInfo.has("onion_address")) {
+                val hubOnion = resInfo.getString("onion_address")
+                if (hubOnion.isNotBlank() && hubOnion.endsWith(".onion")) {
+                    val myKeys = getLocalIdentity()
+                    if (myKeys != null && myKeys.onionAddress != hubOnion) {
+                        com.noslop.app.debug.Logger.info("HUB_SYNC", "Healing asymmetric routing: Updating local onion from ${myKeys.onionAddress} to Hub's true onion $hubOnion")
+                        updateOnionAddress(hubOnion)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("HUB_SYNC", "Failed to fetch Hub node info: ${e.message}")
+        }
+
+        syncPullHistoricalDataFromHub()
+        syncPullIncrementalDMsFromHub()
+        
+        val res = invokeHubApi("sync_pull_packets", JSONObject())
+        if (res != null && res.has("packets")) {
+            val packetsArray = res.optJSONArray("packets")
+            if (packetsArray != null && packetsArray.length() > 0) {
+                Logger.info("HUB_SYNC", "Pulled ${packetsArray.length()} valid mesh packets from Hub")
+                val gson = com.google.gson.Gson()
+                for (i in 0 until packetsArray.length()) {
+                    try {
+                        val packetJson = packetsArray.getJSONObject(i).toString()
+                        val packet = gson.fromJson(packetJson, com.noslop.app.mesh.NetworkPacket::class.java)
+                        handleIncomingPacket(packet)
+                    } catch (e: Exception) {
+                        Logger.error("HUB_SYNC", "Failed to parse synced packet: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun isLocalUser(pubKey: String): Boolean {
+        val main = getLocalIdentity()?.publicKeyB64
+        val burnable = getBurnableIdentity()?.publicKeyB64
+        return pubKey == main || pubKey == burnable
+    }
+
+    suspend fun checkEntityExistsLocally(type: String, id: String): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        when(type) {
+            "POST" -> db.postDao().hasPost(id) > 0
+            "COMMENT" -> db.commentDao().hasComment(id) > 0
+            "MESSAGE" -> db.messageDao().hasMessage(id) > 0
+            else -> false
+        }
+    }
 
     // --- State Observables ---
     // Feed observables re-exposed from FeedRepository (Stage 0.3) so UI subscribers are unchanged.
     val allSources: Flow<List<FeedSource>> = feedRepository.allSources
     val allFeedItems: Flow<List<FeedItem>> = feedRepository.allFeedItems
     val savedFeedItems: Flow<List<FeedItem>> = feedRepository.savedFeedItems
+    val feedBuildStatus: Flow<String> = feedRepository.feedBuildStatus
     val allPeers: Flow<List<Peer>> = peerDao.getAllPeers()
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
+    val discoverablePeers: Flow<List<Peer>> = peerDao.getDiscoverablePeers()
+    val temporaryPeers: Flow<List<Peer>> = peerDao.getTemporaryPeers()
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
@@ -107,15 +631,55 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun putAppSetting(key: String, value: String) { appSettingDao.insertSetting(AppSetting(key, value)) }
     suspend fun getAppSetting(key: String): String? { return appSettingDao.getSetting(key) }
     
+    suspend fun getAppLanguage(): String = appSettingDao.getSetting("app_language") ?: "en"
+    suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))
+    
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
+    suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
+    suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)
         _identityUpdateFlow.emit(Unit)
+        
+        // Broadcast the new identity so peers know the new onion address!
+        val myKeys = getLocalIdentity()
+        if (myKeys != null) {
+            val timestamp = System.currentTimeMillis()
+            val payload = "${myKeys.publicKeyB64}|${myKeys.displayName}|${address}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payload, myKeys.privateKeyB64)
+            val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
+                id = java.util.UUID.randomUUID().toString(),
+                fromUserId = myKeys.publicKeyB64,
+                fromUsername = myKeys.displayName,
+                fromDisplayName = myKeys.displayName,
+                fromHomeNode = address,
+                fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            val syncPacket = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = myKeys.publicKeyB64,
+                type = "USER_HANDSHAKE",
+                payload = com.google.gson.Gson().toJsonTree(syncReq),
+                signature = signature
+            )
+            com.noslop.app.mesh.GossipService.broadcast(syncPacket)
+        }
     }
 
     suspend fun saveLocalIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
         identityRepository.saveIdentity(handle, keys, mnemonic)
-        com.noslop.app.mesh.GossipService.initialize(peerDao, meshTransport, keys.publicKeyB64)
+        com.noslop.app.mesh.GossipService.initialize(
+            peerDao, 
+            meshTransport, 
+            keys.publicKeyB64,
+            getMeshFilterSettings = { settingsRepository.getMeshFilterSettings() },
+            checkEntityExists = { type, id -> checkEntityExistsLocally(type, id) },
+            checkIsLocalUser = { pub -> isLocalUser(pub) }
+        )
+        com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
         com.noslop.app.mesh.MediaManager.initialize(this)
         startPresenceHeartbeat()
         
@@ -160,13 +724,44 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     val isUsingInsecureStorage = identityRepository.isUsingInsecureStorage
 
-    fun startPresenceHeartbeat() = meshSocialRepository.startPresenceHeartbeat()
+    private var hubSyncJob: kotlinx.coroutines.Job? = null
+
+    fun startPresenceHeartbeat() {
+        meshSocialRepository.startPresenceHeartbeat()
+        
+        if (hubSyncJob?.isActive == true) return
+        hubSyncJob = repositoryScope.launch {
+            while (isActive) {
+                try {
+                    val hubStatus = getAppSetting("hub_deployment_status")
+                    if (!hubStatus.isNullOrBlank()) {
+                        pullMeshPacketsFromHub()
+                    }
+                } catch (e: Exception) {
+                    // Ignore connection timeouts to prevent log spam when offline
+                }
+                delay(3000L)
+            }
+        }
+    }
 
     // --- Media / Notification / Foreground Settings (delegated to SettingsRepository) ---
     suspend fun getMediaSettings(): MediaSettings = settingsRepository.getMediaSettings()
 
     suspend fun updateMediaSettings(settings: MediaSettings) =
         settingsRepository.updateMediaSettings(settings)
+
+    suspend fun getMeshFilterSettings(): MeshFilterSettings =
+        settingsRepository.getMeshFilterSettings()
+
+    suspend fun updateMeshFilterSettings(settings: MeshFilterSettings) =
+        settingsRepository.updateMeshFilterSettings(settings)
+
+    suspend fun getFeedMixSettings(): FeedMixSettings =
+        settingsRepository.getFeedMixSettings()
+
+    suspend fun updateFeedMixSettings(settings: FeedMixSettings) =
+        settingsRepository.updateFeedMixSettings(settings)
 
     suspend fun getNotificationSettings(): NotificationSettings =
         settingsRepository.getNotificationSettings()
@@ -180,7 +775,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         settingsRepository.setForegroundServiceEnabled(enabled)
 
     suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
+    suspend fun initTorForClearnetSetting() = settingsRepository.initTorForClearnetSetting()
 
+    suspend fun setUseTorForClearnet(enabled: Boolean) = settingsRepository.setUseTorForClearnet(enabled)
     suspend fun setSendOnEnterEnabled(enabled: Boolean) =
         settingsRepository.setSendOnEnterEnabled(enabled)
 
@@ -217,14 +814,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun getSwipeExcludedIds(): Set<String> =
         engagementRepository.getSwipeExcludedIds()
 
+    suspend fun clearAllHistory() = engagementRepository.clearAllHistory()
+
     // --- Feed pipeline & toggles (delegated to FeedRepository) ---
     suspend fun clearFeedData() = feedRepository.clearFeedData()
 
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
     suspend fun refreshFeeds() = feedRepository.refreshFeeds()
+    suspend fun deleteYouTubeItems() = feedRepository.deleteYouTubeItems()
 
-    suspend fun searchCustomFeed(query: String, filterMode: String?) =
+    suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> =
         feedRepository.searchCustomFeed(query, filterMode)
 
     // --- User Preferences for API Pipeline (delegated to PreferencesRepository) ---
@@ -331,8 +931,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        encPublicKeyB64: String = ""
-    ): Boolean = meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64)
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false
+    ): Boolean {
+        if (useBurnableIdentity && getBurnableIdentity() == null) {
+            val newBurnable = generateBurnableIdentity()
+            val mainIdentity = getLocalIdentity()
+            if (mainIdentity != null) {
+                com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, newBurnable.privateKeyB64)
+            }
+        }
+        return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
+    }
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean =
         meshSocialRepository.acceptConnectionRequest(peer)
@@ -412,4 +1022,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
      * ANNOUNCE_PEER staleness timeout.
      */
     fun broadcastUserExitAsync() = meshSocialRepository.broadcastUserExitAsync()
+
+    suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
+        meshSocialRepository.deleteDirectMessages(messageIds, peerPubB64)
+    }
+
+    suspend fun clearChat(peerPubB64: String) {
+        meshSocialRepository.clearChat(peerPubB64)
+    }
 }

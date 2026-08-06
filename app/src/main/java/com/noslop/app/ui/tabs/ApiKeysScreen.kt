@@ -1,5 +1,7 @@
 package com.noslop.app.ui.tabs
 
+import com.noslop.app.util.tr
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -32,14 +34,14 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = AccentGreen)
+                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
-            Text("API Keys", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
+            Text("API Keys".tr, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = TextLight)
         }
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            "Some content sources require API keys to function. Keys are stored securely in EncryptedSharedPreferences.",
+            "Some content sources require API keys to function. Keys are stored securely in EncryptedSharedPreferences.".tr,
             style = MaterialTheme.typography.bodySmall,
             color = TextMuted
         )
@@ -61,7 +63,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             Text(service.displayName, fontWeight = FontWeight.Bold, color = TextLight)
                             if (!service.requiresUserKey) {
                                 Box(modifier = Modifier.background(AccentGreen.copy(alpha=0.2f), RoundedCornerShape(4.dp)).padding(horizontal=6.dp, vertical=2.dp)) {
-                                    Text("Optional", color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Optional".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -75,7 +77,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             OutlinedTextField(
                                 value = draftKey,
                                 onValueChange = { draftKey = it },
-                                placeholder = { Text("Enter API Key") },
+                                placeholder = { Text("Enter API Key".tr) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
                                     focusedTextColor = TextLight, unfocusedTextColor = TextLight
@@ -85,7 +87,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                                 TextButton(onClick = { isEditing = false; draftKey = currentKey ?: "" }) {
-                                    Text("Cancel", color = TextMuted)
+                                    Text("Cancel".tr, color = TextMuted)
                                 }
                                 Button(
                                     onClick = {
@@ -99,7 +101,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                                 ) {
-                                    Text("Save", fontWeight = FontWeight.Bold)
+                                    Text("Save".tr, fontWeight = FontWeight.Bold)
                                 }
                             }
                         } else {
@@ -109,7 +111,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                                     border = BorderStroke(1.dp, AccentGreen)
                                 ) {
-                                    Text("Configure Key")
+                                    Text("Configure Key".tr)
                                 }
                             } else {
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
@@ -118,7 +120,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                     
                                     Row {
                                         IconButton(onClick = { isEditing = true }, modifier = Modifier.size(32.dp)) {
-                                            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = AccentGreen, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Default.Edit, contentDescription = "Edit".tr, tint = AccentGreen, modifier = Modifier.size(16.dp))
                                         }
                                         IconButton(
                                             onClick = { 
@@ -127,7 +129,7 @@ fun ApiKeysScreen(viewModel: NoSlopViewModel, onBack: () -> Unit) {
                                             },
                                             modifier = Modifier.size(32.dp)
                                         ) {
-                                            Icon(Icons.Default.Delete, contentDescription = "Remove", tint = DestructiveRed, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed, modifier = Modifier.size(16.dp))
                                         }
                                     }
                                 }

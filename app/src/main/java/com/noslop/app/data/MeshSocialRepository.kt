@@ -36,8 +36,10 @@ class MeshSocialRepository(
     private val meshTransport: MeshTransport,
     private val repositoryScope: CoroutineScope,
     private val getLocalIdentity: suspend () -> CryptoService.IdentityKeys?,
+    private val getBurnableIdentity: suspend () -> CryptoService.IdentityKeys? = { null },
     private val getLocalHandle: suspend () -> String,
     private val getUserProfile: suspend () -> UserProfile,
+    private val getMeshFilterSettings: suspend () -> com.noslop.app.data.MeshFilterSettings = { com.noslop.app.data.MeshFilterSettings() }
 ) {
     private val TAG = "REPOSITORY"
 
@@ -50,6 +52,117 @@ class MeshSocialRepository(
     private val commentReactionDao = db.commentReactionDao()
     private val voteDao = db.voteDao()
     private val commentVoteDao = db.commentVoteDao()
+
+    private suspend fun getIdentityForPeer(peerPubKey: String): CryptoService.IdentityKeys? {
+        val setting = db.appSettingDao().getSetting("contact_identity_$peerPubKey")
+        return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
+    }
+
+    private fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        repositoryScope.launch {
+            val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
+            val hasHub = !hubStatus.isNullOrBlank()
+
+            // Always push to Hub if linked (additional relay for redundancy)
+            if (hasHub) {
+                com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
+            }
+
+            // Directed packets (DMs) MUST always be sent directly over Tor as well.
+            // Hub delegation only replaces direct sends for non-targeted broadcasts.
+            val isDirected = !packet.targetUserId.isNullOrBlank()
+            if (isDirected || !hasHub) {
+                if (onionAddress.isNotBlank()) {
+                    val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                    if (!success && isDirected) {
+                        Logger.warn(TAG, "Direct send to $onionAddress failed. Falling back to gossip relay for ${packet.type} ${packet.id}.")
+                        val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
+                        if (peer != null) {
+                            // Mark offline so presence UI reflects reality
+                            peerDao.insertPeer(peer.copy(isOnline = false))
+                            
+                            // CRITICAL: Gossip-broadcast the actual packet so it
+                            // reaches the recipient via any reachable intermediate peer or Hub.
+                            // Give it full hops so it can traverse the mesh.
+                            val gossipPacket = packet.copy(
+                                id = UUID.randomUUID().toString(),
+                                hops = 6
+                            )
+                            com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
+                            Logger.info(TAG, "Gossip-relayed ${packet.type} ${packet.id} as fallback via mesh broadcast.")
+                            
+                            // Spool background retries for 72 hours! (4320 minutes)
+                            repositoryScope.launch {
+                                Logger.warn(TAG, "Direct send failed. Spooling background retries for 72h for ${packet.type}.")
+                                kotlinx.coroutines.delay((5000..30000).random().toLong()) // Initial scatter to prevent dogpiling Tor
+                                for (i in 1..4320) {
+                                    val jitter = (0..15000).random().toLong()
+                                    kotlinx.coroutines.delay(60_000 + jitter) // Wait 1 min + random jitter
+                                    Logger.info(TAG, "Background retry $i/4320 for ${packet.type} to $onionAddress")
+                                    // Give it a fresh ID so it passes deduplication on the target
+                                    val retryPacket = packet.copy(id = java.util.UUID.randomUUID().toString())
+                                    if (meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, retryPacket)) {
+                                        Logger.info(TAG, "Background retry $i/4320 succeeded for ${packet.type} to $onionAddress!")
+                                        // Mark them back online
+                                        val updatedPeer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
+                                        if (updatedPeer != null) {
+                                            peerDao.insertPeer(updatedPeer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+                                        }
+                                        break
+                                    }
+                                }
+                            }
+                            
+                            // Also send a USER_HANDSHAKE to heal the identity for future attempts
+                            val myKeys = packet.targetUserId?.let { getIdentityForPeer(it) } ?: getLocalIdentity()
+                            if (myKeys != null) {
+                                val userProfile = getUserProfile()
+                                val avatarB64 = userProfile.avatarB64
+                                val timestamp = System.currentTimeMillis()
+                                val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
+                                    id = UUID.randomUUID().toString(),
+                                    fromUserId = myKeys.publicKeyB64,
+                                    fromUsername = myKeys.displayName,
+                                    fromDisplayName = myKeys.displayName,
+                                    fromHomeNode = myKeys.onionAddress,
+                                    fromEncryptionPublicKey = myKeys.encPublicKeyB64,
+                                    authorAvatarB64 = avatarB64,
+                                    bio = userProfile.bio.takeIf { it.isNotBlank() },
+                                    timestamp = timestamp,
+                                    signature = null
+                                )
+                                var payloadToSign = "${myKeys.publicKeyB64}|${syncReq.fromUsername}|${myKeys.onionAddress}|$timestamp"
+                                if (avatarB64 != null) payloadToSign += "|$avatarB64"
+                                if (!syncReq.bio.isNullOrBlank()) payloadToSign += "|${syncReq.bio}"
+                                
+                                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                                val syncPacket = com.noslop.app.mesh.NetworkPacket(
+                                    id = UUID.randomUUID().toString(),
+                                    hops = 3,
+                                    senderId = myKeys.publicKeyB64,
+                                    targetUserId = packet.targetUserId,
+                                    type = "USER_HANDSHAKE",
+                                    payload = com.google.gson.Gson().toJsonTree(syncReq),
+                                    signature = signature
+                                )
+                                com.noslop.app.mesh.GossipService.broadcast(syncPacket)
+                            }
+                        }
+                    }
+                } else {
+                    Logger.warn(TAG, "No onion address for recipient of directed packet ${packet.id}. Falling back to gossip relay.")
+                    // Even without a direct onion, we can still try to reach them via mesh gossip
+                    val gossipDm = packet.copy(
+                        id = UUID.randomUUID().toString(),
+                        hops = 6
+                    )
+                    com.noslop.app.mesh.GossipService.broadcast(gossipDm)
+                }
+            } else {
+                Logger.info(TAG, "Hub is linked. Delegating broadcast packet ${packet.id} to Hub.")
+            }
+        }
+    }
 
     private var presenceJob: kotlinx.coroutines.Job? = null
 
@@ -82,13 +195,14 @@ class MeshSocialRepository(
                         
                         val announcePay = com.noslop.app.mesh.AnnouncePeerPayload(
                             authorId = myKeys.publicKeyB64,
+                            onionAddress = myKeys.onionAddress,
                             timestamp = timestamp,
                             signature = signature
                         )
                         
                         val packet = com.noslop.app.mesh.NetworkPacket(
                             id = UUID.randomUUID().toString(),
-                            hops = 1,
+                            hops = 3,
                             senderId = myKeys.publicKeyB64,
                             type = "ANNOUNCE_PEER",
                             payload = com.google.gson.Gson().toJsonTree(announcePay),
@@ -96,15 +210,63 @@ class MeshSocialRepository(
                         )
                         
                         com.noslop.app.mesh.GossipService.broadcast(packet)
+
+                        val isDiscoverable = db.appSettingDao().getSetting("is_discoverable_enabled") == "true"
+                        if (isDiscoverable) {
+                            val burnableIdentity = getBurnableIdentity()
+                            val burnableAddress = burnableIdentity?.onionAddress ?: com.noslop.app.tor.TorService.currentBurnableOnionAddress
+                            if (burnableAddress != null && burnableIdentity != null) {
+                                val handle = getLocalHandle()
+                                val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
+                                val link = db.appSettingDao().getSetting("creator_fundme_link")?.takeIf { it.isNotBlank() }
+                                val userProfile = getUserProfile()
+                                
+                                // Omit avatar to save bandwidth on the periodic background heartbeat
+                                val msgToSign = "${burnableIdentity.publicKeyB64}:${handle}:${burnableAddress}:${burnableIdentity.encPublicKeyB64}:${isCreator}:${link ?: ""}::${userProfile.bio ?: ""}:${timestamp}"
+                                val sig = CryptoService.sign(msgToSign, burnableIdentity.privateKeyB64)
+                                
+                                val discPayload = com.noslop.app.mesh.AnnounceDiscoverablePayload(
+                                    authorId = burnableIdentity.publicKeyB64,
+                                    handle = handle,
+                                    onionAddress = burnableAddress,
+                                    encPublicKey = burnableIdentity.encPublicKeyB64,
+                                    isCreator = isCreator,
+                                    fundMeLink = link,
+                                    authorAvatarB64 = null,
+                                    bio = userProfile.bio,
+                                    timestamp = timestamp,
+                                    signature = sig
+                                )
+                                
+                                val discPacket = com.noslop.app.mesh.NetworkPacket(
+                                    id = UUID.randomUUID().toString(),
+                                    hops = 4, // 4 hops to reach wider network periodically
+                                    senderId = burnableIdentity.publicKeyB64,
+                                    type = "ANNOUNCE_DISCOVERABLE",
+                                    payload = com.google.gson.Gson().toJsonTree(discPayload),
+                                    signature = sig
+                                )
+                                com.noslop.app.mesh.GossipService.broadcast(discPacket)
+                            }
+                        }
                     }
 
                     val timeout = System.currentTimeMillis() - 3 * 60 * 1000
+                    val discoverableTimeout = System.currentTimeMillis() - 15 * 60 * 1000
                     val archiveTimeout = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000L
                     val peers = peerDao.getAllPeersList()
                     for (peer in peers) {
                         if (peer.isOnline && peer.lastSeenAt < timeout) {
                             peerDao.insertPeer(peer.copy(isOnline = false))
                             Logger.info(TAG, "Marked peer offline due to timeout: ${peer.handle}")
+                        }
+                        if (peer.isDiscoverable && peer.lastSeenAt < discoverableTimeout) {
+                            if (!peer.isTrusted) {
+                                peerDao.deletePeer(peer)
+                                Logger.info(TAG, "Removed inactive discoverable peer: ${peer.handle}")
+                            } else {
+                                peerDao.insertPeer(peer.copy(isDiscoverable = false))
+                            }
                         }
                         if (peer.lastSeenAt < archiveTimeout) {
                             deletePeer(peer.publicKeyB64) // Wipes the peer AND their messages
@@ -164,7 +326,7 @@ class MeshSocialRepository(
         
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "DELETE_POST",
             payload = com.google.gson.Gson().toJsonTree(deletePay),
@@ -223,7 +385,7 @@ class MeshSocialRepository(
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "POST",
             payload = payloadJson,
@@ -246,13 +408,23 @@ class MeshSocialRepository(
             clearnetUrl = clearnetUrl,
             clearnetTitle = clearnetTitle,
             clearnetThumbnailUrl = clearnetThumbnailUrl,
-            clearnetMediaType = clearnetMediaType
+            clearnetMediaType = clearnetMediaType,
+            mediaSize = mediaMetadata?.size ?: 0L
         )
 
         postDao.insertPost(localPost)
         Logger.info(TAG, "Local post created and signed", "postId=${id}")
 
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        val filterSettings = getMeshFilterSettings()
+        val shouldBroadcast = if (clearnetUrl != null) {
+            filterSettings.allowOutgoingClearnetShares
+        } else {
+            true // All native mesh broadcasts are sent unconditionally
+        }
+
+        if (shouldBroadcast) {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
         localPost
     }
 
@@ -268,9 +440,10 @@ class MeshSocialRepository(
         handle: String,
         publicKeyB64: String,
         onionAddress: String,
-        encPublicKeyB64: String = ""
+        encPublicKeyB64: String = "",
+        useBurnableIdentity: Boolean = false
     ): Boolean = withContext(Dispatchers.IO) {
-        val cleanHandle = handle.split(".")[0]
+        val cleanHandle = handle
         val pubBytes = android.util.Base64.decode(publicKeyB64, android.util.Base64.DEFAULT)
         val tripcode = CryptoService.deriveTripcode(pubBytes)
         
@@ -281,21 +454,29 @@ class MeshSocialRepository(
             onionAddress = onionAddress,
             encPublicKeyB64 = encPublicKeyB64,
             isTrusted = false, // We requested them, they are pending until they accept
+            isTemporary = useBurnableIdentity,
             lastSeenAt = System.currentTimeMillis()
         )
         peerDao.insertPeer(newPeer)
 
-        val myKeys = getLocalIdentity()
+        // Sync with hub before dispatching so the hub firewall is aware of the pending peer
+        meshTransport.repository.syncPeersWithHub()
+
+        val myKeys = if (useBurnableIdentity) getBurnableIdentity() else getLocalIdentity()
         if (myKeys != null) {
+            if (useBurnableIdentity) {
+                db.appSettingDao().insertSetting(AppSetting("contact_identity_$publicKeyB64", "burnable"))
+            }
             val userProfile = getUserProfile()
             val avatarB64 = userProfile.avatarB64?.takeIf { it.isNotBlank() }
 
             val reqPay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.split(".")[0],
+                fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
+                bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
@@ -305,38 +486,45 @@ class MeshSocialRepository(
             if (avatarB64 != null) {
                 payloadToSign += "|$avatarB64"
             }
+            if (!reqPay.bio.isNullOrBlank()) {
+                payloadToSign += "|${reqPay.bio}"
+            }
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = publicKeyB64,
                 type = "CONNECTION_REQUEST",
                 payload = gson.toJsonTree(reqPay),
                 signature = reqSig
             )
-            repositoryScope.launch {
-                meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
-            }
+            dispatchPacket(onionAddress, packet)
         }
         true
     }
 
     suspend fun acceptConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
-        peerDao.insertPeer(peer.copy(isTrusted = true))
+        val contactIdentity = db.appSettingDao().getSetting("contact_identity_${peer.publicKeyB64}")
+        val isTemp = peer.isTemporary || contactIdentity == "burnable"
+        peerDao.insertPeer(peer.copy(isTrusted = true, isTemporary = isTemp))
         _incomingRequestFlow.value = null
         
-        val myKeys = getLocalIdentity()
+        // Sync with hub before dispatching so the hub firewall is aware of the new peer
+        meshTransport.repository.syncPeersWithHub()
+        
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
         if (myKeys != null) {
             val handshakePay = com.noslop.app.mesh.PeerHandshakePayload(
                 id = UUID.randomUUID().toString(),
                 fromUserId = myKeys.publicKeyB64,
-                fromUsername = myKeys.displayName.split(".")[0],
+                fromUsername = myKeys.displayName,
                 fromDisplayName = myKeys.displayName,
                 authorAvatarB64 = avatarB64,
+                bio = userProfile.bio.takeIf { it.isNotBlank() },
                 fromHomeNode = myKeys.onionAddress,
                 fromEncryptionPublicKey = myKeys.encPublicKeyB64,
                 timestamp = System.currentTimeMillis(),
@@ -346,20 +534,21 @@ class MeshSocialRepository(
             if (avatarB64 != null) {
                 payloadToSign += "|$avatarB64"
             }
+            if (!handshakePay.bio.isNullOrBlank()) {
+                payloadToSign += "|${handshakePay.bio}"
+            }
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
                 type = "USER_HANDSHAKE",
                 payload = gson.toJsonTree(handshakePay),
                 signature = handshakeSig
             )
-            repositoryScope.launch {
-                meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-            }
+            dispatchPacket(peer.onionAddress, packet)
 
             // Also send INVENTORY_SYNC_REQUEST
             requestInventorySync(peer)
@@ -385,22 +574,20 @@ class MeshSocialRepository(
         val gson = com.google.gson.Gson()
         val syncPacket = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 1,
+            hops = 3,
             senderId = myKeys.publicKeyB64,
             targetUserId = peer.publicKeyB64,
             type = "INVENTORY_SYNC_REQUEST",
             payload = gson.toJsonTree(syncReqPay)
         )
-        repositoryScope.launch {
-            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, syncPacket)
-        }
+        dispatchPacket(peer.onionAddress, syncPacket)
     }
 
     suspend fun rejectConnectionRequest(peer: Peer): Boolean = withContext(Dispatchers.IO) {
         peerDao.deletePeer(peer)
         _incomingRequestFlow.value = null
 
-        val myKeys = getLocalIdentity()
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
             val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
@@ -414,7 +601,7 @@ class MeshSocialRepository(
             
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = peer.publicKeyB64,
                 type = "CONNECTION_REJECTED",
@@ -438,10 +625,52 @@ class MeshSocialRepository(
     suspend fun deletePeer(publicKeyB64: String) = withContext(Dispatchers.IO) {
         val peer = peerDao.getPeerByPublicKey(publicKeyB64)
         if (peer != null) {
+            val myKeys = getLocalIdentity()
+            if (myKeys != null) {
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val exitPayload = com.noslop.app.mesh.UserExitPayload(
+                    userId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = publicKeyB64,
+                    type = "USER_EXIT",
+                    payload = com.google.gson.Gson().toJsonTree(exitPayload),
+                    signature = signature
+                )
+                
+                // Send USER_EXIT directly to inform them we're disconnecting
+                repositoryScope.launch {
+                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                }
+            }
+
+            com.noslop.app.mesh.GossipService.recordDeletedPeer(publicKeyB64)
+            com.noslop.app.mesh.GossipService.removePeerFromRelays(publicKeyB64)
+
             peerDao.deletePeer(peer)
             // Also clean up messages
             messageDao.deleteMessagesWithPeer(publicKeyB64)
-            Logger.info(TAG, "Deleted peer and all associated messages: ${peer.handle}")
+            
+            // Orphan their non-public mesh posts
+            try {
+                db.openHelper.writableDatabase.execSQL(
+                    "UPDATE mesh_posts SET isOrphaned = 1 WHERE authorPublicKeyB64 = ? AND privacy != 'public'",
+                    arrayOf(publicKeyB64)
+                )
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to orphan private posts: ${e.message}")
+            }
+            
+            Logger.info(TAG, "Deleted peer, messages, and orphaned private posts: ${peer.handle}")
         }
     }
 
@@ -451,7 +680,7 @@ class MeshSocialRepository(
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
         replyToMessageId: String? = null
     ): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
         val peer = peerDao.getPeerByPublicKey(recipientPubB64) ?: return@withContext false
         val recipientEncPub = if (peer.encPublicKeyB64.isNotEmpty()) peer.encPublicKeyB64 else recipientPubB64
 
@@ -486,6 +715,7 @@ class MeshSocialRepository(
         )
         messageDao.insertMessage(localMsg)
         Logger.info(TAG, "Sent E2EE DM locally stored", "msgId=${localMsg.id}")
+        meshTransport.repository.triggerDmSync()
 
         // Send to peer onion address if we have it
         val msgPay = com.noslop.app.mesh.EncryptedPayload(
@@ -498,16 +728,14 @@ class MeshSocialRepository(
         val payloadJson = gson.toJsonTree(msgPay)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 1,
+            hops = 3,
             senderId = myKeys.publicKeyB64,
             targetUserId = recipientPubB64,
             type = "MESSAGE",
             payload = payloadJson
         )
 
-        repositoryScope.launch {
-            meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-        }
+        dispatchPacket(peer.onionAddress, packet)
 
         true
     }
@@ -554,9 +782,10 @@ class MeshSocialRepository(
             parentCommentId = parentCommentId
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT",
             payload = com.google.gson.Gson().toJsonTree(commentPay),
@@ -578,11 +807,14 @@ class MeshSocialRepository(
         )
 
         commentDao.insertComment(localComment)
+        
+        // Always broadcast comments on mesh posts (if we are commenting, the post is already tracked locally).
+        // If we want to support isBridging for comments later, we can add it here.
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
 
-    suspend fun reactToMeshPost(postId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
+    suspend fun reactToMeshPost(postId: String, reactionType: String, isBridging: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         
         val reactionId = "${postId}_${myKeys.publicKeyB64}_$reactionType"
@@ -602,9 +834,10 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "REACTION",
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
@@ -624,7 +857,7 @@ class MeshSocialRepository(
             )
             reactionDao.insertReaction(localReaction)
         }
-
+        
         com.noslop.app.mesh.GossipService.broadcast(packet)
         true
     }
@@ -649,9 +882,10 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingPost = postDao.getPostById(postId)
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "VOTE",
             payload = com.google.gson.Gson().toJsonTree(votePayload),
@@ -690,7 +924,7 @@ class MeshSocialRepository(
         digest.doFinal(hash, 0)
         val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
 
-        val isNegative = reactionType in listOf("downvote", "angry", "sad")
+        val isNegative = reactionType in listOf("downvote", "angry")
 
         // Ensure anchor post exists locally and on mesh
         val existingCount = postDao.hasPost(anchorId)
@@ -710,11 +944,15 @@ class MeshSocialRepository(
             )
         }
 
-        reactToMeshPost(anchorId, reactionType)
-    }
+        if (reactionType != "bridge_only") {
+            reactToMeshPost(anchorId, reactionType, existingCount == 0)
+        } else {
+            true
+        }
+}
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext false
+        val myKeys = getIdentityForPeer(recipientPubB64) ?: getLocalIdentity() ?: return@withContext false
         val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
         val existingReaction = chatReactionDao.getReactionById(reactionId)
         val action = if (existingReaction != null) "remove" else "add"
@@ -750,7 +988,7 @@ class MeshSocialRepository(
         if (peer != null) {
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = UUID.randomUUID().toString(),
-                hops = 1,
+                hops = 3,
                 senderId = myKeys.publicKeyB64,
                 targetUserId = recipientPubB64,
                 type = "CHAT_REACTION",
@@ -788,6 +1026,9 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingComment = commentDao.getCommentById(commentId)
+        val existingPost = existingComment?.postId?.let { postDao.getPostById(it) }
+
         if (action == "remove") {
             commentReactionDao.deleteReactionById(reactionId)
         } else {
@@ -804,7 +1045,7 @@ class MeshSocialRepository(
 
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_REACTION",
             payload = com.google.gson.Gson().toJsonTree(reactionPayload),
@@ -834,9 +1075,11 @@ class MeshSocialRepository(
             action = action
         )
 
+        val existingComment = commentDao.getCommentById(commentId)
+        val existingPost = existingComment?.postId?.let { postDao.getPostById(it) }
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
-            hops = 6,
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
             senderId = myKeys.publicKeyB64,
             type = "COMMENT_VOTE",
             payload = com.google.gson.Gson().toJsonTree(votePayload),
@@ -865,10 +1108,14 @@ class MeshSocialRepository(
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
+        val bio = userProfile.bio
         val timestamp = System.currentTimeMillis()
         var payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
         if (avatarB64 != null) {
             payloadToSign += "|$avatarB64"
+        }
+        if (bio.isNotBlank()) {
+            payloadToSign += "|$bio"
         }
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
@@ -876,6 +1123,7 @@ class MeshSocialRepository(
             userId = myKeys.publicKeyB64,
             handle = newHandle,
             authorAvatarB64 = avatarB64,
+            bio = bio.takeIf { it.isNotBlank() },
             timestamp = timestamp,
             signature = signature
         )
@@ -925,5 +1173,188 @@ class MeshSocialRepository(
                 Logger.error(TAG, "Failed to broadcast USER_EXIT: ${e.message}")
             }
         }
+    }
+
+    suspend fun editMeshPost(postId: String, newContent: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingPost = postDao.getPostById(postId) ?: return@withContext false
+        if (existingPost.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+
+        var payloadToSign = "$postId|${myKeys.publicKeyB64}|$newContent|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val editPay = com.noslop.app.mesh.EditPostPayload(
+            postId = postId,
+            authorId = myKeys.publicKeyB64,
+            authorAvatarB64 = avatarB64,
+            content = newContent,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = if (existingPost.privacy == "friends") 1 else 6,
+            senderId = myKeys.publicKeyB64,
+            type = "EDIT_POST",
+            payload = com.google.gson.Gson().toJsonTree(editPay),
+            signature = signature
+        )
+
+        postDao.updatePostContent(postId, newContent, timestamp, signature)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun editMeshComment(postId: String, commentId: String, newContent: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingComment = commentDao.getCommentById(commentId) ?: return@withContext false
+        if (existingComment.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+
+        var payloadToSign = "$postId|$commentId|$newContent|$timestamp"
+        if (avatarB64 != null) {
+            payloadToSign += "|$avatarB64"
+        }
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val editPay = com.noslop.app.mesh.EditCommentPayload(
+            postId = postId,
+            commentId = commentId,
+            authorId = myKeys.publicKeyB64,
+            authorAvatarB64 = avatarB64,
+            content = newContent,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val existingPost = postDao.getPostById(postId)
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
+            senderId = myKeys.publicKeyB64,
+            type = "EDIT_COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(editPay),
+            signature = signature
+        )
+
+        commentDao.updateCommentContent(commentId, newContent, timestamp, signature)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun deleteMeshComment(postId: String, commentId: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val existingComment = commentDao.getCommentById(commentId) ?: return@withContext false
+        if (existingComment.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$postId|$commentId|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val deletePay = com.noslop.app.mesh.DeleteCommentPayload(
+            postId = postId,
+            commentId = commentId,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val existingPost = postDao.getPostById(postId)
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = if (existingPost?.privacy == "friends") 1 else 6,
+            senderId = myKeys.publicKeyB64,
+            type = "DELETE_COMMENT",
+            payload = com.google.gson.Gson().toJsonTree(deletePay),
+            signature = signature
+        )
+
+        commentDao.markCommentDeleted(commentId)
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        true
+    }
+
+    suspend fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext false
+        val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext false
+        
+        for (messageId in messageIds) {
+            val msg = messageDao.getMessageById(messageId)
+            if (msg != null && msg.senderPub == myKeys.publicKeyB64) {
+                // If it's our own message, broadcast DELETE_MESSAGE
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "$messageId|${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                    messageId = messageId,
+                    authorId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = peerPubB64,
+                    type = "DELETE_MESSAGE",
+                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    signature = signature
+                )
+                
+                messageDao.deleteMessageByIdAndSender(messageId, myKeys.publicKeyB64)
+                dispatchPacket(peer.onionAddress, packet)
+                kotlinx.coroutines.delay(300L) // Pace to prevent Tor TCP saturation
+            } else if (msg != null) {
+                // If it's their message, we can only delete it locally
+                messageDao.deleteMessageByIdAndSender(messageId, peerPubB64)
+            }
+        }
+        meshTransport.repository.triggerDmSync()
+        true
+    }
+
+    suspend fun clearChat(peerPubB64: String) = withContext(Dispatchers.IO) {
+        val myKeys = getIdentityForPeer(peerPubB64) ?: getLocalIdentity() ?: return@withContext
+        val peer = peerDao.getPeerByPublicKey(peerPubB64) ?: return@withContext
+        
+        val messages = messageDao.getMessagesWithPeerList(peerPubB64)
+        for (msg in messages) {
+            if (msg.senderPub == myKeys.publicKeyB64) {
+                val timestamp = System.currentTimeMillis()
+                val payloadToSign = "${msg.id}|${myKeys.publicKeyB64}|$timestamp"
+                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                
+                val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                    messageId = msg.id,
+                    authorId = myKeys.publicKeyB64,
+                    timestamp = timestamp,
+                    signature = signature
+                )
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = peerPubB64,
+                    type = "DELETE_MESSAGE",
+                    payload = com.google.gson.Gson().toJsonTree(deletePay),
+                    signature = signature
+                )
+                dispatchPacket(peer.onionAddress, packet)
+                kotlinx.coroutines.delay(300L) // Pace to prevent Tor TCP saturation
+            }
+        }
+        
+        // Delete all locally regardless of sender
+        messageDao.deleteMessagesWithPeer(peerPubB64)
+        meshTransport.repository.triggerDmSync()
     }
 }

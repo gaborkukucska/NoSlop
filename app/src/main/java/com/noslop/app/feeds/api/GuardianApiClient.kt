@@ -13,7 +13,7 @@ import okhttp3.Request
 object GuardianApiClient {
     private const val TAG = "GUARDIAN_API"
     private val gson = Gson()
-    private val client = com.noslop.app.net.HttpClientProvider.clearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     suspend fun searchArticles(query: String, section: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-search"): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("guardian")
