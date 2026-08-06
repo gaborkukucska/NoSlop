@@ -29,9 +29,74 @@ object GossipService {
     private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
 
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
+    
+    // Track persistent send failures to avoid spamming unreachable peers
+    private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
+    private val PEER_FAILURE_THRESHOLD = 3
+    private val PEER_FAILURE_WINDOW_MS = 5 * 60 * 1000L // 5 minutes
+    private val PEER_COOLDOWN_MS = 10 * 60 * 1000L // 10 minutes cooldown
 
     fun recordDeletedPeer(publicKeyB64: String) {
         recentlyDeletedPeers[publicKeyB64] = System.currentTimeMillis()
+    }
+
+    /**
+     * Record a send failure for a peer. If failures exceed threshold within window,
+     * mark peer as temporarily blocked.
+     */
+    fun recordSendFailure(peerOnionAddress: String) {
+        val now = System.currentTimeMillis()
+        val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: (0 to 0L)
+        
+        // Reset count if outside the failure window
+        val effectiveCount = if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS) 1 else count + 1
+        peerSendFailures[peerOnionAddress] = effectiveCount to now
+        
+        if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
+            Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times in ${PEER_FAILURE_WINDOW_MS/1000}s. Cooldown for ${PEER_COOLDOWN_MS/60000}m")
+        }
+    }
+
+    /**
+     * Check if a peer is currently in cooldown due to repeated failures
+     */
+    fun isPeerInCooldown(peerOnionAddress: String): Boolean {
+        val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: return false
+        val now = System.currentTimeMillis()
+        
+        // Check if we're still within the cooldown period after reaching threshold
+        if (count >= PEER_FAILURE_THRESHOLD && now - lastFailureTime < PEER_COOLDOWN_MS) {
+            return true
+        }
+        
+        // Clean up old entries
+        if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_COOLDOWN_MS) {
+            peerSendFailures.remove(peerOnionAddress)
+        }
+        
+        return false
+    }
+
+    /**
+     * Record a successful send to reset failure counter
+     */
+    fun recordSendSuccess(peerOnionAddress: String) {
+        peerSendFailures.remove(peerOnionAddress)
+    }
+
+    /**
+     * Periodic cleanup of failure tracking data
+     */
+    private fun cleanupFailureTracking() {
+        val now = System.currentTimeMillis()
+        val iterator = peerSendFailures.entries.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            val (_, lastFailureTime) = entry.value
+            if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_COOLDOWN_MS) {
+                iterator.remove()
+            }
+        }
     }
 
     fun isPeerRecentlyDeleted(publicKeyB64: String): Boolean {
@@ -101,6 +166,7 @@ object GossipService {
             while (isActive) {
                 delay(60_000)
                 cleanupStaleRoutes()
+                cleanupFailureTracking()
             }
         }
     }
@@ -484,8 +550,19 @@ object GossipService {
         )
 
         for (peer in peersToForward) {
+            // Skip peers that are in cooldown due to repeated failures
+            if (isPeerInCooldown(peer.onionAddress)) {
+                Logger.debug(TAG, "Skipping forward to ${peer.onionAddress}: peer in cooldown")
+                continue
+            }
+            
             scope.launch {
-                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
+                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, forwardedPacket)
+                if (success) {
+                    recordSendSuccess(peer.onionAddress)
+                } else {
+                    recordSendFailure(peer.onionAddress)
+                }
             }
         }
     }
@@ -515,8 +592,19 @@ object GossipService {
         Logger.info(TAG, "Gossip broadcast: Spreading original packet ${packet.id} of type ${packet.type} to ${trustedPeers.size} trusted peers.")
         
         for (peer in trustedPeers) {
+            // Skip peers that are in cooldown due to repeated failures
+            if (isPeerInCooldown(peer.onionAddress)) {
+                Logger.debug(TAG, "Skipping broadcast to ${peer.onionAddress}: peer in cooldown")
+                continue
+            }
+            
             scope.launch {
-                tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                if (success) {
+                    recordSendSuccess(peer.onionAddress)
+                } else {
+                    recordSendFailure(peer.onionAddress)
+                }
             }
         }
     }
