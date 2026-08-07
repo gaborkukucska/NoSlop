@@ -66,8 +66,11 @@ object PreloadManager {
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
         if (rawUrl.isBlank()) return
 
+        Logger.info("PRELOAD", "preWarm called for: $rawUrl")
+
         val resolved = try {
             if (forcedResolvedUrl != null && forcedResolvedUrl != rawUrl) {
+                Logger.info("PRELOAD", "Using forced resolved URL for $rawUrl -> $forcedResolvedUrl")
                 VideoSource.Direct(forcedResolvedUrl)
             } else {
                 resolveSource(rawUrl, false, context)
@@ -77,12 +80,15 @@ object PreloadManager {
             return
         }
 
+        Logger.info("PRELOAD", "Resolved $rawUrl -> ${resolved.javaClass.simpleName}")
+
         when (resolved) {
             is VideoSource.Direct -> {
                 // Covers plain direct URLs (resolved.url == rawUrl) as well as
                 // YouTube/Vimeo URLs that resolved to a direct stream — buffer an
                 // ExoPlayer keyed by the *resolved* URL, since that's the URL
                 // ExoVideoPlayer will call claim() with.
+                Logger.info("PRELOAD", "Buffering ExoPlayer for direct URL: ${resolved.url}")
                 withContext(Dispatchers.Main) {
                     warmUp(context, rawUrl, resolved.url)
                 }
@@ -90,8 +96,9 @@ object PreloadManager {
             is VideoSource.Embed -> {
                 // Embed-only sources (Invidious/Vimeo iframe fallback,
                 // archive.org) can't be buffered into ExoPlayer, but the
-                // resolution itself is now cached for instant reuse.
-                Logger.info("PRELOAD", "Pre-resolved $rawUrl -> embed (${resolved.url})")
+                // resolution itself is now cached in sourceCache for instant reuse.
+                // This means when VideoPlayer calls resolveSource(), it returns immediately.
+                Logger.info("PRELOAD", "Pre-resolved embed source (cached): $rawUrl -> ${resolved.url}")
             }
             is VideoSource.Unavailable -> {
                 Logger.info("PRELOAD", "Pre-resolved $rawUrl -> unavailable, nothing to buffer")
@@ -106,9 +113,13 @@ object PreloadManager {
     init {
         preloadScope.launch {
             for (task in preloadQueue) {
+                // Double-check it hasn't been added while waiting in queue
                 if (!preloadedPlayers.containsKey(task.rawUrl)) {
+                    Logger.info("PRELOAD", "Processing preload task from queue: ${task.rawUrl}")
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl)
                     delay(800L) // Stagger initializations by 800ms to prevent MediaCodec choking!
+                } else {
+                    Logger.info("PRELOAD", "Skipping duplicate preload task for: ${task.rawUrl}")
                 }
             }
         }
@@ -116,13 +127,22 @@ object PreloadManager {
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     fun warmUp(context: Context, rawUrl: String, resolvedUrl: String) {
-        if (preloadedPlayers.containsKey(rawUrl)) return
-        preloadQueue.trySend(PreloadTask(context, rawUrl, resolvedUrl))
+        if (preloadedPlayers.containsKey(rawUrl)) {
+            Logger.info("PRELOAD", "warmUp: already cached for $rawUrl")
+            return
+        }
+        Logger.info("PRELOAD", "warmUp: enqueueing preload task for $rawUrl -> $resolvedUrl")
+        val sent = preloadQueue.trySend(PreloadTask(context, rawUrl, resolvedUrl))
+        if (sent.isFailure) {
+            Logger.warn("PRELOAD", "Failed to enqueue preload task for $rawUrl: ${sent.exceptionOrNull()?.message}")
+        } else {
+            Logger.info("PRELOAD", "Successfully enqueued preload task for $rawUrl")
+        }
     }
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun doWarmUp(context: Context, rawUrl: String, resolvedUrl: String) {
-        Logger.info("PRELOAD", "Warming up media: $rawUrl -> $resolvedUrl")
+        Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
         
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(com.noslop.app.net.HttpClientProvider.activeClearnetClient)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
@@ -166,13 +186,57 @@ object PreloadManager {
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
         
+        // CRITICAL FIX: Wait for the player to actually reach READY state before storing it.
+        // Without this, claim() returns a player that's still buffering, causing the delay.
+        // We use a suspendCoroutine to wait for the state change on the main thread.
+        kotlinx.coroutines.runBlocking {
+            kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
+                val listener = object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                            Logger.info("PRELOAD", "ExoPlayer reached READY state for $rawUrl - now cached")
+                            player.removeListener(this)
+                            if (!cont.isCompleted) cont.resume(Unit) {}
+                        } else if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                            // Video is fully loaded and ended (short video), still ready to play
+                            Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl - cached for replay")
+                            player.removeListener(this)
+                            if (!cont.isCompleted) cont.resume(Unit) {}
+                        }
+                    }
+                    
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        Logger.error("PRELOAD", "ExoPlayer error during preload for $rawUrl: ${error.message}")
+                        player.removeListener(this)
+                        if (!cont.isCompleted) cont.resume(Unit) {} // Still continue, claim() will handle error
+                    }
+                }
+                player.addListener(listener)
+                
+                // Timeout after 10 seconds if never reaches READY
+                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+                    kotlinx.coroutines.delay(10000)
+                    if (!cont.isCompleted) {
+                        Logger.warn("PRELOAD", "Timeout waiting for READY state for $rawUrl, caching anyway")
+                        player.removeListener(listener)
+                        cont.resume(Unit) {}
+                    }
+                }
+            }
+        }
+        
         preloadedPlayers[rawUrl] = player
+        Logger.info("PRELOAD", "Successfully stored preloaded player for $rawUrl (total cached: ${preloadedPlayers.size})")
     }
 
     fun claim(url: String): ExoPlayer? {
         val player = preloadedPlayers.remove(url)
         if (player != null) {
             Logger.info("PRELOAD", "Claimed preloaded video: $url")
+            // Player is already prepared and in READY state from doWarmUp
+            // Just need to set playWhenReady=true when VideoPlayer takes control
+        } else {
+            Logger.warn("PRELOAD", "No preloaded player found for: $url - will create fresh player")
         }
         return player
     }
