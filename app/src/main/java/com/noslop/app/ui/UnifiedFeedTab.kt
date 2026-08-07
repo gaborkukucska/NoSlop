@@ -1558,12 +1558,17 @@ private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.C
     return when (item) {
         is UnifiedItem.Feed -> {
             val mediaUrl = item.item.mediaUrl ?: return null
-            if (item.item.mediaType == "video" || item.item.mediaType == "audio") Pair(mediaUrl, null) else null
+            if (item.item.mediaType == "video" || item.item.mediaType == "audio") {
+                // Use the same key logic as FullScreenFeedCard: item.mediaUrl ?: item.url
+                val stableKey = item.item.mediaUrl ?: item.item.url ?: return null
+                Pair(stableKey, null)
+            } else null
         }
         is UnifiedItem.Mesh -> {
             val type = item.post.mediaType ?: item.post.clearnetMediaType
             if (type == "video" || type == "audio") {
                 val resolvedUrl = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl ?: return null
+                // Use the same key logic as FullScreenMeshCardV2: post.mediaUrl ?: post.clearnetUrl
                 val rawUrl = item.post.mediaUrl ?: item.post.clearnetUrl ?: return null
                 val forced = if (resolvedUrl != rawUrl) resolvedUrl else null
                 Pair(rawUrl, forced)
