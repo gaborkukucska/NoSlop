@@ -40,6 +40,14 @@ object PreloadManager {
             return false
         }
     }
+    
+    // Track which URLs are YouTube URLs that shouldn't be pre-buffered due to URL expiration
+    private val youtubeUrlPattern = Regex("(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)")
+    private val shouldPrebufferUrl: (String) -> Boolean = { url ->
+        // Don't pre-buffer YouTube URLs - their direct stream URLs expire quickly (few minutes)
+        // Instead, only pre-resolve the source and let ExoPlayer create a fresh instance when needed
+        !youtubeUrlPattern.containsMatchIn(url)
+    }
 
     /**
      * Single entry point for pre-loading an upcoming feed item, regardless of
@@ -61,6 +69,10 @@ object PreloadManager {
      *
      * Note: [resolveSource] uses a [ConcurrentHashMap] internally, so concurrent
      * calls from this coroutine and from VideoPlayer's own LaunchedEffect are safe.
+     * 
+     * IMPORTANT: YouTube direct URLs expire quickly (~2-5 minutes), so we only
+     * pre-resolve the source but don't buffer the actual ExoPlayer for YouTube URLs.
+     * This prevents 403 errors when the pre-buffered URL expires before playback.
      */
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
@@ -84,13 +96,16 @@ object PreloadManager {
 
         when (resolved) {
             is VideoSource.Direct -> {
-                // Covers plain direct URLs (resolved.url == rawUrl) as well as
-                // YouTube/Vimeo URLs that resolved to a direct stream — buffer an
-                // ExoPlayer keyed by the *resolved* URL, since that's the URL
-                // ExoVideoPlayer will call claim() with.
-                Logger.info("PRELOAD", "Buffering ExoPlayer for direct URL: ${resolved.url}")
-                withContext(Dispatchers.Main) {
-                    warmUp(context, rawUrl, resolved.url)
+                // For YouTube URLs, only pre-resolve the source (already done above).
+                // Don't buffer the ExoPlayer because YouTube direct URLs expire quickly.
+                // For other direct URLs (Vimeo, archive.org, plain mp4), buffer as normal.
+                if (shouldPrebufferUrl(resolved.url)) {
+                    Logger.info("PRELOAD", "Buffering ExoPlayer for direct URL: ${resolved.url}")
+                    withContext(Dispatchers.Main) {
+                        warmUp(context, rawUrl, resolved.url)
+                    }
+                } else {
+                    Logger.info("PRELOAD", "Skipping ExoPlayer buffering for YouTube URL (will create fresh player on demand): ${resolved.url}")
                 }
             }
             is VideoSource.Embed -> {
@@ -186,55 +201,40 @@ object PreloadManager {
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
         
-        // CRITICAL FIX: Wait for the player to actually reach READY state before storing it.
-        // Without this, claim() returns a player that's still buffering, causing the delay.
-        // We use a suspendCoroutine to wait for the state change on the main thread.
-        kotlinx.coroutines.runBlocking {
-            kotlinx.coroutines.suspendCancellableCoroutine<Unit> { cont ->
-                val listener = object : androidx.media3.common.Player.Listener {
-                    override fun onPlaybackStateChanged(playbackState: Int) {
-                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                            Logger.info("PRELOAD", "ExoPlayer reached READY state for $rawUrl - now cached")
-                            player.removeListener(this)
-                            if (!cont.isCompleted) cont.resume(Unit) {}
-                        } else if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
-                            // Video is fully loaded and ended (short video), still ready to play
-                            Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl - cached for replay")
-                            player.removeListener(this)
-                            if (!cont.isCompleted) cont.resume(Unit) {}
-                        }
-                    }
-                    
-                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        Logger.error("PRELOAD", "ExoPlayer error during preload for $rawUrl: ${error.message}")
-                        player.removeListener(this)
-                        if (!cont.isCompleted) cont.resume(Unit) {} // Still continue, claim() will handle error
-                    }
-                }
-                player.addListener(listener)
-                
-                // Timeout after 10 seconds if never reaches READY
-                kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                    kotlinx.coroutines.delay(10000)
-                    if (!cont.isCompleted) {
-                        Logger.warn("PRELOAD", "Timeout waiting for READY state for $rawUrl, caching anyway")
-                        player.removeListener(listener)
-                        cont.resume(Unit) {}
-                    }
+        // Store the player immediately - don't wait for READY state.
+        // The player will continue buffering in the background, and when claimed,
+        // VideoPlayer will handle any remaining buffering or errors.
+        // This prevents long delays during preload and avoids issues with URLs expiring
+        // while waiting for READY state.
+        preloadedPlayers[rawUrl] = player
+        Logger.info("PRELOAD", "Stored preloaded player for $rawUrl (total cached: ${preloadedPlayers.size}), state: ${player.playbackState}")
+        
+        // Add a listener to log when READY is reached, but don't block on it
+        player.addListener(object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                    Logger.info("PRELOAD", "ExoPlayer reached READY state for $rawUrl")
+                } else if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                    Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl")
+                } else if (playbackState == androidx.media3.common.Player.STATE_IDLE) {
+                    Logger.warn("PRELOAD", "ExoPlayer in IDLE state for $rawUrl")
                 }
             }
-        }
-        
-        preloadedPlayers[rawUrl] = player
-        Logger.info("PRELOAD", "Successfully stored preloaded player for $rawUrl (total cached: ${preloadedPlayers.size})")
+            
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                Logger.error("PRELOAD", "ExoPlayer error during preload for $rawUrl: ${error.message}")
+                // Don't release the player here - let VideoPlayer handle the error
+                // when it claims the player and decides whether to retry
+            }
+        })
     }
 
     fun claim(url: String): ExoPlayer? {
         val player = preloadedPlayers.remove(url)
         if (player != null) {
             Logger.info("PRELOAD", "Claimed preloaded video: $url")
-            // Player is already prepared and in READY state from doWarmUp
-            // Just need to set playWhenReady=true when VideoPlayer takes control
+            // Player has been pre-buffering in the background.
+            // VideoPlayer will set playWhenReady=true and handle any remaining buffering.
         } else {
             Logger.warn("PRELOAD", "No preloaded player found for: $url - will create fresh player")
         }
