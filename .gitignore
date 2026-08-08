@@ -23,6 +23,9 @@ build/
 target/
 .gradle/
 
+# Python files
+*.py
+
 # Python caches
 .mypy_cache/
 .pytest_cache/
@@ -68,3 +71,10 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+
+# Other
+*.sh
+test_parse/
+tests/
+local.properties
+*.keystore
