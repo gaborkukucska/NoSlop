@@ -581,7 +581,7 @@ fun UnifiedFeedTab(
         
         viewModel.syncFilterMode(filterMode)
         
-        if (unifiedItems.size < 5) {
+        if (unifiedItems.size < 5 && !isRefreshing) {
             viewModel.loadMoreFeedItems(filterMode)
         }
     }

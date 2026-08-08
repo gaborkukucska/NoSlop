@@ -262,6 +262,7 @@ fun VideoPlayer(
     var retryTrigger by remember { mutableStateOf(0) }
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
     var isVideoReady by remember(url) { mutableStateOf(false) }
+    val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     var activeVisible by remember { mutableStateOf(isVisible) }
@@ -275,7 +276,7 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(url, retryTrigger) {
+    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality) {
         source = null 
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
         source = resolveSource(url, forceRefresh = retryTrigger > 0, context = context)

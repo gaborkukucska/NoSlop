@@ -380,6 +380,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.getMediaSettings()
             repository.getNotificationSettings()
+            repository.getFeedMixSettings()
             repository.initForegroundServiceSetting()
             repository.initSendOnEnterSetting()
             repository.initTorForClearnetSetting()

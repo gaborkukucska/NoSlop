@@ -78,6 +78,7 @@ private fun sanitizeImageUrl(url: String?): String? {
 fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnailB64: String? = null, fallbackUrl: String? = null) {
     var showZoom by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
     var isError by remember { mutableStateOf(false) }
     val thumbBitmap = remember(thumbnailB64) {
         thumbnailB64?.let {
@@ -101,6 +102,12 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
             .data(actualModel)
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
+            .apply {
+                when (mediaSettings.imageQuality) {
+                    "low" -> size(640)
+                    "medium" -> size(960)
+                }
+            }
             .listener(
                 onError = { _, _ -> if (!isError) isError = true }
             )
@@ -238,6 +245,8 @@ fun SegmentedArticleReader(
     var showWebView by remember { mutableStateOf(false) }
     val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
     val safeThumbnailUrl = sanitizeImageUrl(thumbnailUrl)
+    val context = LocalContext.current
+    val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -252,8 +261,17 @@ fun SegmentedArticleReader(
                     var imageLoadFailed by remember { mutableStateOf(false) }
 
                     if (!imageLoadFailed) {
+                        val imageRequest = coil.request.ImageRequest.Builder(context)
+                            .data(safeThumbnailUrl ?: fallbackImage)
+                            .apply {
+                                when (mediaSettings.imageQuality) {
+                                    "low" -> size(640)
+                                    "medium" -> size(960)
+                                }
+                            }
+                            .build()
                         AsyncImage(
-                            model = safeThumbnailUrl ?: fallbackImage,
+                            model = imageRequest,
                             contentDescription = null,
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop,
