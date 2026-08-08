@@ -13,6 +13,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
@@ -249,6 +251,7 @@ private fun fallbackVimeoEmbed(url: String): VideoSource {
 fun VideoPlayer(
     url: String,
     isVisible: Boolean = true,
+    isNextSlide: Boolean = false,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
     stableKey: String? = null
@@ -265,9 +268,10 @@ fun VideoPlayer(
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
-    var activeVisible by remember { mutableStateOf(isVisible) }
-    LaunchedEffect(isVisible) {
-        if (isVisible) {
+    val isActiveOrNext = isVisible || isNextSlide
+    var activeVisible by remember { mutableStateOf(isActiveOrNext) }
+    LaunchedEffect(isActiveOrNext) {
+        if (isActiveOrNext) {
             activeVisible = true
         } else {
             kotlinx.coroutines.delay(500)
@@ -309,6 +313,7 @@ fun VideoPlayer(
                     EmbedWebViewPlayer(
                         url = resolved.url,
                         rawUrl = stableKey ?: url,
+                        isVisible = isVisible,
                         onRetry = { retryTrigger++ },
                         onReady = { isVideoReady = true }
                     )
@@ -348,7 +353,7 @@ fun VideoPlayer(
             }
         }
 
-        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady
+        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady || !isVisible
         
         val decodedB64 = remember(thumbnailB64) {
             thumbnailB64?.let {
@@ -434,7 +439,7 @@ private fun ExoVideoPlayer(
         val preloaded = PreloadManager.claim(rawUrl)
         val player = if (preloaded != null) {
             preloaded.apply {
-                playWhenReady = true
+                playWhenReady = isVisible
                 
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                 if (resumeMs > 0L) {
@@ -468,6 +473,15 @@ private fun ExoVideoPlayer(
             androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .build().apply {
+                    val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+                    trackSelectionParameters = trackSelectionParameters.buildUpon().apply {
+                        when (quality) {
+                            "low" -> setMaxVideoSize(854, 480)
+                            "medium" -> setMaxVideoSize(1280, 720)
+                            else -> clearVideoSizeConstraints()
+                        }
+                    }.build()
+
                     val mimeType = when {
                         url.endsWith(".m3u8", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_M3U8
                         url.endsWith(".mpd", ignoreCase = true) -> androidx.media3.common.MimeTypes.APPLICATION_MPD
@@ -509,7 +523,7 @@ private fun ExoVideoPlayer(
                         }
                     })
                     prepare()
-                    playWhenReady = true
+                    playWhenReady = isVisible
                 }
         }
         exoPlayer = player
@@ -574,7 +588,17 @@ private fun ExoVideoPlayer(
                 onRelease = { view ->
                     view.player = null
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { 
+                        if (isVisible) {
+                            alpha = 1f
+                            translationX = 0f
+                        } else {
+                            alpha = 0.01f
+                            translationX = 100000f
+                        }
+                    }
             )
         } else {
             Column(
@@ -606,7 +630,7 @@ private fun ExoVideoPlayer(
 }
 
 @Composable
-private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit, onReady: () -> Unit) {
+private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, onRetry: () -> Unit, onReady: () -> Unit) {
     var webError by remember { mutableStateOf<String?>(null) }
 
     if (webError != null) {
@@ -719,12 +743,18 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                             val js = """
                                 (function() {
                                     document.body.style.backgroundColor = 'black';
-                                    var vid = document.querySelector('video');
-                                    if (vid) { vid.play().catch(function(){}); return; }
-                                    var btn = document.querySelector(
-                                        '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
-                                    );
-                                    if (btn) btn.click();
+                                    if (window.NoSlop_isVisible) {
+                                        if (typeof player !== 'undefined' && player.playVideo) {
+                                            player.playVideo();
+                                        } else {
+                                            var vid = document.querySelector('video');
+                                            if (vid) { vid.play().catch(function(){}); return; }
+                                            var btn = document.querySelector(
+                                                '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
+                                            );
+                                            if (btn) btn.click();
+                                        }
+                                    }
                                 })();
                             """.trimIndent()
                             view?.evaluateJavascript(js, null)
@@ -772,9 +802,9 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                                   height: '100%',
                                   width: '100%',
                                   videoId: '$videoId',
-                                  playerVars: { 'playsinline': 1, 'autoplay': 1, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
+                                  playerVars: { 'playsinline': 1, 'autoplay': 0, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
                                   events: {
-                                    'onReady': function(event) { event.target.playVideo(); },
+                                    'onReady': function(event) { if (window.NoSlop_isVisible) { event.target.playVideo(); } },
                                     'onStateChange': function(event) {
                                       if (event.data == 1) { // PLAYING state
                                           window.NoSlopJS.onPlaying();
@@ -812,7 +842,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                             <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
                         </head>
                         <body>
-                            <iframe width="100%" height="100%" src="$url" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
+                            <iframe width="100%" height="100%" src="$url" frameborder="0" allow="fullscreen" allowfullscreen></iframe>
                         </body>
                         </html>
                         """.trimIndent()
@@ -822,12 +852,30 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                 }
             },
             update = { view ->
-                view.evaluateJavascript("""
-                    (function() {
+                val js = if (isVisible) {
+                    """
+                    window.NoSlop_isVisible = true;
+                    if (typeof player !== 'undefined' && player.playVideo) {
+                        player.playVideo();
+                    } else {
                         var vid = document.querySelector('video');
                         if (vid && vid.paused) { vid.play().catch(function(){}); }
-                    })();
-                """.trimIndent(), null)
+                        var btn = document.querySelector('.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]');
+                        if (btn) btn.click();
+                    }
+                    """.trimIndent()
+                } else {
+                    """
+                    window.NoSlop_isVisible = false;
+                    if (typeof player !== 'undefined' && player.pauseVideo) {
+                        player.pauseVideo();
+                    } else {
+                        var vid = document.querySelector('video');
+                        if (vid && !vid.paused) { vid.pause(); }
+                    }
+                    """.trimIndent()
+                }
+                view.evaluateJavascript(js, null)
             },
             onRelease = { view ->
                 view.evaluateJavascript("if (typeof player !== 'undefined' && player.getCurrentTime) { window.NoSlopJS.savePosition(player.getCurrentTime()); }", null)
@@ -835,7 +883,17 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, onRetry: () -> Unit,
                 view.loadUrl("about:blank")
                 view.destroy()
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { 
+                    if (isVisible) {
+                        alpha = 1f
+                        translationX = 0f
+                    } else {
+                        alpha = 0.01f
+                        translationX = 100000f
+                    }
+                }
         )
     }
 }

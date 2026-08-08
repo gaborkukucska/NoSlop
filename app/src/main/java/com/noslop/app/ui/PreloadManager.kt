@@ -46,7 +46,7 @@ object PreloadManager {
     // Track which URLs are YouTube URLs that shouldn't be pre-buffered due to URL expiration
     private val youtubeUrlPattern = Regex("(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)")
     private val shouldPrebufferUrl: (String) -> Boolean = { url ->
-        // Don't pre-buffer YouTube URLs - their direct stream URLs expire quickly (few minutes)
+        // Don't pre-buffer YouTube URLs - their direct stream URLs expire quickly or throttle if buffered in the background
         // Instead, only pre-resolve the source and let ExoPlayer create a fresh instance when needed
         !youtubeUrlPattern.containsMatchIn(url)
     }
@@ -205,7 +205,16 @@ object PreloadManager {
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
-            .build()
+            .build().apply {
+                val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+                trackSelectionParameters = trackSelectionParameters.buildUpon().apply {
+                    when (quality) {
+                        "low" -> setMaxVideoSize(854, 480)
+                        "medium" -> setMaxVideoSize(1280, 720)
+                        else -> clearVideoSizeConstraints()
+                    }
+                }.build()
+            }
             
         val mimeType = when {
             resolvedUrl.endsWith(".m3u8", ignoreCase = true) -> MimeTypes.APPLICATION_M3U8

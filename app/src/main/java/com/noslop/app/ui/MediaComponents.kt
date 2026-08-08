@@ -108,6 +108,8 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                     "medium" -> size(960)
                 }
             }
+            .memoryCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
+            .diskCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
             .listener(
                 onError = { _, _ -> if (!isError) isError = true }
             )
@@ -178,9 +180,22 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                 )
             }
 
+            val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
             val actualModel = if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
+            val request = coil.request.ImageRequest.Builder(LocalContext.current)
+                .data(actualModel)
+                .apply {
+                    when (mediaSettings.imageQuality) {
+                        "low" -> size(1280)
+                        "medium" -> size(1920)
+                    }
+                }
+                .memoryCacheKey(actualModel?.toString() + "_zoom_" + mediaSettings.imageQuality)
+                .diskCacheKey(actualModel?.toString() + "_zoom_" + mediaSettings.imageQuality)
+                .build()
+                
             AsyncImage(
-                model = actualModel,
+                model = request,
                 contentDescription = "Zoomable View".tr,
                 modifier = Modifier
                     .fillMaxSize()
@@ -269,6 +284,8 @@ fun SegmentedArticleReader(
                                     "medium" -> size(960)
                                 }
                             }
+                            .memoryCacheKey((safeThumbnailUrl ?: fallbackImage) + "_" + mediaSettings.imageQuality)
+                            .diskCacheKey((safeThumbnailUrl ?: fallbackImage) + "_" + mediaSettings.imageQuality)
                             .build()
                         AsyncImage(
                             model = imageRequest,

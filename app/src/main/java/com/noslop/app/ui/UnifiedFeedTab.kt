@@ -772,6 +772,8 @@ fun UnifiedFeedTab(
                     (isActiveTab || mediaSettings.backgroundPlayEnabled) && 
                     (appInForeground || mediaSettings.backgroundPlayOutsideApp)
 
+                val isNextSlide = (pagerState.currentPage + 1 == index)
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -788,6 +790,7 @@ fun UnifiedFeedTab(
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
                             isVisible = isVisibleForPlayback,
+                            isNextSlide = isNextSlide,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
@@ -796,6 +799,7 @@ fun UnifiedFeedTab(
                         is UnifiedItem.Mesh -> FullScreenMeshCardV2(
                             post = item.post,
                             isVisible = isVisibleForPlayback,
+                            isNextSlide = isNextSlide,
                             onShareToMesh = { sharedItem = item },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,

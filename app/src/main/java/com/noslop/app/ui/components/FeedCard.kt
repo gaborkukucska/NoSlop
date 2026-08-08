@@ -60,12 +60,26 @@ private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.cor
 
 @Composable
 fun FullScreenImage(url: String) {
+    val context = LocalContext.current
+    val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
+    val request = coil.request.ImageRequest.Builder(context)
+        .data(url)
+        .apply {
+            when (mediaSettings.imageQuality) {
+                "low" -> size(640)
+                "medium" -> size(960)
+            }
+        }
+        .memoryCacheKey(url + "_" + mediaSettings.imageQuality)
+        .diskCacheKey(url + "_" + mediaSettings.imageQuality)
+        .build()
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         coil.compose.AsyncImage(
-            model = url,
+            model = request,
             contentDescription = null,
             modifier = Modifier.fillMaxWidth().aspectRatio(1f),
             contentScale = ContentScale.Fit
@@ -77,6 +91,7 @@ fun FullScreenImage(url: String) {
 fun FullScreenFeedCard(
     item: FeedItem, 
     isVisible: Boolean = true, 
+    isNextSlide: Boolean = false,
     onShareToMesh: () -> Unit, 
     viewModel: NoSlopViewModel? = null,
     bottomSlideOffset: Float = 0f,
@@ -117,7 +132,7 @@ fun FullScreenFeedCard(
                     val stableKeyForRestore = item.mediaUrl ?: item.url
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = item.thumbnailUrl, stableKey = stableKeyForRestore)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, isNextSlide = isNextSlide, thumbnailUrl = item.thumbnailUrl, stableKey = stableKeyForRestore)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -331,6 +346,7 @@ fun FullScreenFeedCard(
 fun FullScreenMeshCardV2(
     post: MeshPost,
     isVisible: Boolean = true,
+    isNextSlide: Boolean = false,
     onShareToMesh: () -> Unit,
     viewModel: NoSlopViewModel? = null,
     bottomSlideOffset: Float = 0f,
@@ -372,7 +388,7 @@ fun FullScreenMeshCardV2(
                     val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = if (post.mediaUrl != null) post.thumbnailB64 else null, stableKey = stableKeyForRestore)
+                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, isNextSlide = isNextSlide, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = if (post.mediaUrl != null) post.thumbnailB64 else null, stableKey = stableKeyForRestore)
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
