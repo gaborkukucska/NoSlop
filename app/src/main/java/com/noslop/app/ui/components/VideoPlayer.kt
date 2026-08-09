@@ -515,8 +515,13 @@ private fun ExoVideoPlayer(
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
+            val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(1500, 10000, 1000, 1500)
+                .build()
+
             androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setLoadControl(loadControl)
                 .build().apply {
                     val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
                     trackSelectionParameters = trackSelectionParameters.buildUpon().apply {

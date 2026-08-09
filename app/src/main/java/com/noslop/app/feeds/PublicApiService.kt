@@ -139,6 +139,9 @@ object PublicApiService {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, recentOnly = true) }
+                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
+                    fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
+                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
                 }
             }
         } catch (e: Exception) {
