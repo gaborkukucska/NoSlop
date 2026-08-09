@@ -1,5 +1,23 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-09)
+
+### 1. Search Filter Logic Fix
+*   **Broken Search Repaired**: Fixed a regression where the search result filter in `NoSlopViewModel.loadMoreFeedItems` was using `terms.any` (OR logic) instead of `terms.all` (AND logic) for local keyword matching. This caused searches like "android news" to flood the feed with every item matching *either* word individually, drowning out actual API search results with thousands of unrelated local cache items. Restored strict AND-matching so all search terms must appear in the item's title, excerpt, or author.
+*   **Mesh Search Filter**: Applied the same `terms.any` → `terms.all` correction to the mesh post filter, ensuring mesh content also requires all search keywords to match.
+
+### 2. Chronological Feed Sorting
+*   **Newest Content First**: Refactored the feed sorting algorithm in `NoSlopViewModel.loadMoreFeedItems` to strictly prioritize chronological ordering (`publishedAt` descending) across all feed modes. Previously, the feed used a multi-tier partition system (creators → priority sources → others) that could bubble up months-old content from favorite creators above breaking news. The new approach sorts the entire pool by publish date, ensuring the user always sees the freshest content first as they swipe down.
+*   **Removed Initial Load Shuffle**: Eliminated the `batch.shuffle()` on initial category loads that was randomizing the order of the first batch, preventing users from seeing the most recent items at the top.
+*   **Removed Creator Front-Loading**: Removed the `creatorBatch`/`otherBatch` separation at the end of the Smart Interleaving Algorithm that was re-sorting the final batch to force creator content to the absolute front regardless of recency. The round-robin media interleaving and diversity limits are preserved.
+
+### 3. Native API Date Filtering for Search
+*   **YouTube InnerTube**: Added a `recentOnly` parameter to `YouTubeInternalClient.searchVideos()`. When true, sets the InnerTube protobuf `params` field to `EgIIBQ==` (upload_date = this_year), restricting search results to videos uploaded within the current year.
+*   **Reddit**: Added a `recentOnly` parameter to `RedditApiClient.searchReddit()`. When true, switches sorting from `relevance` to `new` and adds `&t=year` time filter, returning only posts from the last 12 months sorted newest-first.
+*   **NewsAPI**: Added a `recentOnly` parameter to `NewsApiClient.searchArticles()`. When true, appends `&from=YYYY-MM-DD` (3 months ago) and `&sortBy=publishedAt`, constraining results to the last quarter and sorting by publication date.
+*   **Guardian**: Added a `recentOnly` parameter to `GuardianApiClient.searchArticles()`. When true, appends `&from-date=YYYY-MM-DD` (3 months ago) and `&order-by=newest`, matching the NewsAPI approach.
+*   **PublicApiService Wiring**: All user-initiated search categories (`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and the `else` fallback) in `PublicApiService.fetchItemsForCategory` now pass `recentOnly = true` to their respective API clients. Category-based feeds (Technology, Science, etc.) are unaffected and continue using natural trending/hot sorting.
+
 ## Completed Changes (2026-08-06)
 
 ### 1. Global Media Quality Control

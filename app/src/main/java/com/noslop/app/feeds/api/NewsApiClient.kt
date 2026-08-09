@@ -15,10 +15,16 @@ object NewsApiClient {
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
-    suspend fun searchArticles(query: String, category: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-search", language: String = "en"): List<FeedItem> {
+    suspend fun searchArticles(query: String, category: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-search", language: String = "en", recentOnly: Boolean = false): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("newsapi")
         if (apiKey.isNullOrBlank()) return emptyList()
-        return fetch("https://newsapi.org/v2/everything?q=${java.net.URLEncoder.encode(query, "UTF-8")}&sortBy=relevancy&pageSize=20&language=$language", apiKey, sourceId)
+        val dateParam = if (recentOnly) {
+            val cal = java.util.Calendar.getInstance()
+            cal.add(java.util.Calendar.MONTH, -3)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            "&from=${sdf.format(cal.time)}&sortBy=publishedAt"
+        } else ""
+        return fetch("https://newsapi.org/v2/everything?q=${java.net.URLEncoder.encode(query, "UTF-8")}&sortBy=relevancy&pageSize=20&language=$language$dateParam", apiKey, sourceId)
     }
 
     suspend fun getTopHeadlines(category: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-newsapi-top", language: String = "en"): List<FeedItem> {

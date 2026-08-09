@@ -665,25 +665,34 @@ identifier like `"youtube:trending"`, `"reddit:multi"`, `"nasa:apod"` —
 
 ### 7.3 API Client Roster (`feeds/api/`)
 
+`PublicApiService.fetchItemsForCategory` is a big `when(category)` dispatcher
+using a `supervisorScope` with `async/awaitAll` — each category launches
+concurrent `fetchAsync(sourceId) { ... }` calls, where `fetchAsync` is a
+no-op if `sourceId` is not in `activeApiSourceIds` and catches/logs
+exceptions so one client failure doesn't block the others. Results are
+`distinctBy { it.id }` deduplicated.
+
+**Search recency filtering**: All user-initiated search categories
+(`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and
+the `else` fallback) pass `recentOnly = true` to their respective API
+clients, applying native date filters (YouTube: this year via protobuf
+`params`; Reddit: `t=year`; NewsAPI/Guardian: last 3 months via date
+params). Category-based feeds (Technology, Science, etc.) are unaffected
+and continue using natural trending/hot sorting.
+
 | Client | Auth | Notes |
 |---|---|---|
-| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
+| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. `searchVideos(query, recentOnly)` supports protobuf upload-date filtering (this year) for search recency. |
 | `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool |
-| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query)` |
+| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — when `recentOnly=true`, sorts by `new` with `t=year` time filter |
 | `InternetArchiveClient` | none | `getPopularVideos()`, `searchAudio(query)` |
 | `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
 | `JamendoApiClient` | none (public client ID) | `searchTracks(query)` — CC-licensed music |
 | `PexelsApiClient` | user key required | photos/videos, skipped silently if no key |
-| `NewsApiClient` | user key required | headlines + search, supports `language` param |
-| `GuardianApiClient` | user key required | `searchArticles`, `searchSection` |
+| `NewsApiClient` | user key required | headlines + search, supports `language` and `recentOnly` params — when `recentOnly=true`, constrains to last 3 months via `from` date and sorts by `publishedAt` |
+| `GuardianApiClient` | user key required | `searchArticles(recentOnly)`, `searchSection` — when `recentOnly=true`, constrains to last 3 months via `from-date` and orders by `newest` |
 | `VimeoApiClient` | user key required | `fetchFeatured` |
 | `PodcastIndexClient` | user key required | `searchEpisodes`, supports `language` param |
-
-`PublicApiService.fetchItemsForCategory` is a big `when(category)` dispatcher
-— each category calls `safeCall(sourceId, activeApiSourceIds) { ... }` for
-each relevant client, where `safeCall` is a no-op if `sourceId` is not in
-`activeApiSourceIds` and catches/logs exceptions so one client failure
-doesn't block the others. Results are `distinctBy { it.id }` deduplicated.
 
 ### 7.4 Feed Sync Pipeline (`NoSlopRepository.refreshFeeds`)
 

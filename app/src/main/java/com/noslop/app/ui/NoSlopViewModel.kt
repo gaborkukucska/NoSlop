@@ -628,22 +628,34 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
             .toSet()
 
+        val isHistoryOrLiked = actualFilter == "History" || actualFilter == "Liked"
+        
         var unseenFeeds = allFeeds.filter { 
-            it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles 
+            if (isHistoryOrLiked) {
+                it.id !in currentIds
+            } else {
+                it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles 
+            }
         }
-        var unseenMeshes = allMeshes.filter { it.id !in exclusionIds }
+        var unseenMeshes = allMeshes.filter { 
+            if (isHistoryOrLiked) {
+                it.id !in currentIds
+            } else {
+                it.id !in exclusionIds 
+            }
+        }
 
         if (isSearchActive) {
             val terms = activeSearchQuery.lowercase().split("\\s+".toRegex()).filter { it.isNotEmpty() }
             unseenFeeds = unseenFeeds.filter { item ->
-                item.id in lastSearchResultIds || terms.any { term ->
+                item.id in lastSearchResultIds || terms.all { term ->
                     item.title.lowercase().contains(term) || 
                     item.excerpt?.lowercase()?.contains(term) == true || 
                     item.author?.lowercase()?.contains(term) == true
                 }
             }
             unseenMeshes = unseenMeshes.filter { item ->
-                terms.any { term ->
+                terms.all { term ->
                     item.content.lowercase().contains(term) || 
                     item.clearnetTitle?.lowercase()?.contains(term) == true || 
                     item.authorHandle.lowercase().contains(term)
@@ -783,16 +795,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val sortedLiked = specificFeeds.sortedByDescending { it.publishedAt }.map { UnifiedItem.Feed(it) }
                     batch.addAll(sortedLiked.take(specificNeeded))
                 } else {
-                    val sortedSpecificFeeds = specificFeeds.partition(isCreatorMatch).let { (c, o) ->
-                        c.sortedByDescending { it.publishedAt } + o.sortedByDescending { it.publishedAt }
-                    }
+                    val sortedSpecificFeeds = specificFeeds.sortedByDescending { it.publishedAt }
 
                     batch.addAll(sortedSpecificFeeds.take(specificNeeded).map { UnifiedItem.Feed(it) })
                     batch.addAll(specificMeshes.sortedByDescending { it.timestamp }.take(specificNeeded - batch.size).map { UnifiedItem.Mesh(it) })
-                    
-                    if (isInitialLoad && actualFilter != "Mesh" && actualFilter != "My Content") {
-                        batch.shuffle()
-                    }
                 }
             }
             
@@ -842,14 +848,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val recentFeeds = if (actualFilter == "Random") {
             unseenFeeds.shuffled()
         } else {
-            unseenFeeds.partition(isCreatorMatch).let { (creators, rest1) ->
-                rest1.partition(isPrioritySource).let { (priority, others) ->
-                    // 1. Creators, 2. Explicitly Chosen Interests, 3. General/Trending Fallback
-                    creators.sortedByDescending { it.publishedAt } + 
-                    priority.sortedByDescending { it.publishedAt } + 
-                    others.sortedByDescending { it.publishedAt }
-                }
-            }
+            unseenFeeds.sortedByDescending { it.publishedAt }
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
 
@@ -925,16 +924,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // Separate creators from others to force them to the absolute front
-        val creatorBatch = batch.filter { 
-            it is UnifiedItem.Feed && isCreatorMatch(it.item) 
-        }.sortedByDescending { it.timestamp }.toMutableList()
-        
-        val otherBatch = batch.filter { it !in creatorBatch }.toMutableList()
-
-        val finalBatch = mutableListOf<UnifiedItem>()
-        finalBatch.addAll(creatorBatch)
-        finalBatch.addAll(otherBatch)
+        val finalBatch = batch.toMutableList()
 
         // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload
         if (isInitialLoad && (actualFilter == "Live Feed" || actualFilter == "Random")) {
@@ -1451,7 +1441,12 @@ fun toggleAggregator() {
 
     fun isMeshListening(): Boolean = repository.meshTransport.isListening()
 
-    fun updateMediaSettings(settings: MediaSettings) { viewModelScope.launch { repository.updateMediaSettings(settings) } }
+    fun updateMediaSettings(settings: MediaSettings) { 
+        viewModelScope.launch { 
+            repository.updateMediaSettings(settings)
+            com.noslop.app.ui.PreloadManager.evictAll()
+        } 
+    }
     fun updateNotificationSettings(settings: com.noslop.app.data.NotificationSettings) { viewModelScope.launch { repository.updateNotificationSettings(settings) } }
     fun updateMeshFilterSettings(settings: MeshFilterSettings) { viewModelScope.launch { repository.updateMeshFilterSettings(settings) } }
     fun updateFeedMixSettings(settings: com.noslop.app.data.FeedMixSettings) { viewModelScope.launch { repository.updateFeedMixSettings(settings) } }

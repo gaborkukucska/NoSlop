@@ -43,9 +43,17 @@ object YouTubeInternalClient {
         return payload
     }
 
-    suspend fun searchVideos(query: String, maxResults: Int = 30): List<FeedItem> = withContext(Dispatchers.IO) {
+    /**
+     * @param recentOnly When true, restricts results to videos uploaded this year
+     *   using YouTube's protobuf search filter param (field 2 = upload_date, value 5 = year).
+     */
+    suspend fun searchVideos(query: String, maxResults: Int = 30, recentOnly: Boolean = false): List<FeedItem> = withContext(Dispatchers.IO) {
         try {
             val payload = buildPayload(query)
+            if (recentOnly) {
+                // Protobuf: field 2 (upload_date), varint 5 (this_year) → base64 "EgIIBQ=="
+                payload.addProperty("params", "EgIIBQ==")
+            }
             val requestBody = payload.toString().toRequestBody(jsonMediaType)
 
             val request = Request.Builder()
@@ -259,37 +267,23 @@ object YouTubeInternalClient {
     private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
         
-        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        if (hlsUrl != null && quality == "high") return hlsUrl
-        
+        // HLS is great for 'high' quality because it's adaptive, but let's check formats first
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
             val sortedFormats = formats.map { it.asJsonObject }.sortedBy { it.get("bitrate")?.asInt ?: 0 }
             val chosenFormat = when (quality) {
                 "low" -> sortedFormats.first()
                 "medium" -> sortedFormats[sortedFormats.size / 2]
-                else -> sortedFormats.last()
+                else -> sortedFormats.last() // Usually 720p with audio
             }
             val url = chosenFormat.get("url")?.asString
-            if (url != null && quality != "high") return url
+            if (url != null) return url
         }
         
-        val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
-        if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-            val videoFormats = adaptiveFormats.map { it.asJsonObject }.filter { it.get("mimeType")?.asString?.startsWith("video/mp4") == true }
-            if (videoFormats.isNotEmpty()) {
-                val sortedVideo = videoFormats.sortedBy { it.get("bitrate")?.asInt ?: 0 }
-                val chosenFormat = when (quality) {
-                    "low" -> sortedVideo.first()
-                    "medium" -> sortedVideo[sortedVideo.size / 2]
-                    else -> sortedVideo.last()
-                }
-                val url = chosenFormat.get("url")?.asString
-                if (url != null) return url
-            }
-        }
-        
+        // Fallback to HLS if no muxed formats are available
+        val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
         if (hlsUrl != null) return hlsUrl
+        
         return null
     }
 

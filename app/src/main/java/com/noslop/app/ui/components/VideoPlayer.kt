@@ -281,9 +281,12 @@ fun VideoPlayer(
     }
 
     LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality) {
-        source = null 
+        // On URL change or retry, resolve the source. But try the fast path first:
+        // if PreloadManager already resolved this URL, sourceCache will have it instantly.
+        val forceRefresh = retryTrigger > 0
+        if (forceRefresh) source = null
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
-        source = resolveSource(url, forceRefresh = retryTrigger > 0, context = context)
+        source = resolveSource(url, forceRefresh = forceRefresh, context = context)
         Logger.info("VIDEO", "Resolved source for $url → ${source?.javaClass?.simpleName}")
     }
 
@@ -353,7 +356,7 @@ fun VideoPlayer(
             }
         }
 
-        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady || !isVisible
+        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady
         
         val decodedB64 = remember(thumbnailB64) {
             thumbnailB64?.let {
@@ -458,12 +461,32 @@ private fun ExoVideoPlayer(
                         videoSizeState = videoSize
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        hasError = true
-                        errorMessage = error.message ?: "Playback failed"
-                        Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                        val cause = error.cause
+                        if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
+                            Logger.warn("VIDEO", "403 Forbidden detected for $url. Auto-retrying resolution...")
+                            onRetry()
+                        } else {
+                            hasError = true
+                            errorMessage = error.message ?: "Playback failed"
+                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                        }
                     }
                 })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                
+                // If the player already encountered an error (e.g. 403) in the background before we claimed it,
+                // the listener won't fire retroactively. We must handle it here.
+                playerError?.let { error ->
+                    val cause = error.cause
+                    if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
+                        Logger.warn("VIDEO", "403 Forbidden detected on preloaded player for $url. Auto-retrying...")
+                        onRetry()
+                    } else {
+                        hasError = true
+                        errorMessage = error.message ?: "Playback failed"
+                        Logger.error("VIDEO", "Preloaded ExoPlayer had prior error: ${error.message} | URL: $url")
+                    }
+                }
             }
         } else {
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeClearnetClient)
@@ -506,6 +529,9 @@ private fun ExoVideoPlayer(
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
+                            if (isVisible) {
+                                play()
+                            }
                         }
                         override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
                             videoSizeState = videoSize
@@ -588,17 +614,7 @@ private fun ExoVideoPlayer(
                 onRelease = { view ->
                     view.player = null
                 },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { 
-                        if (isVisible) {
-                            alpha = 1f
-                            translationX = 0f
-                        } else {
-                            alpha = 0.01f
-                            translationX = 100000f
-                        }
-                    }
+                modifier = Modifier.fillMaxSize()
             )
         } else {
             Column(
@@ -632,6 +648,11 @@ private fun ExoVideoPlayer(
 @Composable
 private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, onRetry: () -> Unit, onReady: () -> Unit) {
     var webError by remember { mutableStateOf<String?>(null) }
+    var currentIsVisible by remember { mutableStateOf(isVisible) }
+
+    LaunchedEffect(isVisible) {
+        currentIsVisible = isVisible
+    }
 
     if (webError != null) {
         Column(
@@ -740,10 +761,11 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                         }
 
                         override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                            val shouldAutoplay = currentIsVisible
                             val js = """
                                 (function() {
                                     document.body.style.backgroundColor = 'black';
-                                    if (window.NoSlop_isVisible) {
+                                    if ($shouldAutoplay) {
                                         if (typeof player !== 'undefined' && player.playVideo) {
                                             player.playVideo();
                                         } else {
@@ -854,7 +876,6 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
             update = { view ->
                 val js = if (isVisible) {
                     """
-                    window.NoSlop_isVisible = true;
                     if (typeof player !== 'undefined' && player.playVideo) {
                         player.playVideo();
                     } else {
@@ -866,7 +887,6 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                     """.trimIndent()
                 } else {
                     """
-                    window.NoSlop_isVisible = false;
                     if (typeof player !== 'undefined' && player.pauseVideo) {
                         player.pauseVideo();
                     } else {

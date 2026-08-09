@@ -43,12 +43,11 @@ object PreloadManager {
         }
     }
     
-    // Track which URLs are YouTube URLs that shouldn't be pre-buffered due to URL expiration
     private val youtubeUrlPattern = Regex("(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)")
     private val shouldPrebufferUrl: (String) -> Boolean = { url ->
-        // Don't pre-buffer YouTube URLs - their direct stream URLs expire quickly or throttle if buffered in the background
-        // Instead, only pre-resolve the source and let ExoPlayer create a fresh instance when needed
-        !youtubeUrlPattern.containsMatchIn(url)
+        // We now safely pre-buffer YouTube URLs since our custom LoadControl restricts 
+        // background buffering to a small duration (1.5s - 10s), avoiding throttling.
+        true
     }
 
     /**
@@ -144,7 +143,7 @@ object PreloadManager {
             for (task in preloadQueue) {
                 try {
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl)
-                    delay(800L) // Stagger initializations by 800ms to prevent MediaCodec choking!
+                    kotlinx.coroutines.delay(100L) // Stagger initializations slightly to prevent UI stutter
                 } catch (e: Exception) {
                     Logger.error("PRELOAD", "Error in background warmUp for ${task.rawUrl}: ${e.message}")
                 } finally {
@@ -157,8 +156,10 @@ object PreloadManager {
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     private fun warmUp(context: Context, resolvedUrl: String, rawUrl: String, deferred: CompletableDeferred<Unit>) {
-        if (preloadedPlayers.containsKey(rawUrl)) {
-            Logger.info("PRELOAD", "Already preloaded or buffering: $rawUrl")
+        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        val cacheKey = "$rawUrl||$quality"
+        if (preloadedPlayers.containsKey(cacheKey)) {
+            Logger.info("PRELOAD", "Already preloaded or buffering: $cacheKey")
             pendingTasks.remove(rawUrl)
             deferred.complete(Unit)
             return
@@ -238,8 +239,10 @@ object PreloadManager {
         // VideoPlayer will handle any remaining buffering or errors.
         // This prevents long delays during preload and avoids issues with URLs expiring
         // while waiting for READY state.
-        preloadedPlayers[rawUrl] = player
-        Logger.info("PRELOAD", "Stored preloaded player for $rawUrl (total cached: ${preloadedPlayers.size}), state: ${player.playbackState}")
+        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        val cacheKey = "$rawUrl||$quality"
+        preloadedPlayers[cacheKey] = player
+        Logger.info("PRELOAD", "Stored preloaded player for $cacheKey (total cached: ${preloadedPlayers.size}), state: ${player.playbackState}")
         
         // Add a listener to log when READY is reached, but don't block on it
         player.addListener(object : androidx.media3.common.Player.Listener {
@@ -261,19 +264,21 @@ object PreloadManager {
         })
     }
 
-    fun claim(url: String): ExoPlayer? {
-        val player = preloadedPlayers.remove(url)
+    fun claim(rawUrl: String): ExoPlayer? {
+        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        val cacheKey = "$rawUrl||$quality"
+        val player = preloadedPlayers.remove(cacheKey)
         if (player != null) {
-            Logger.info("PRELOAD", "Claimed preloaded video: $url")
+            Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey")
             // Player has been pre-buffering in the background.
             // VideoPlayer will set playWhenReady=true and handle any remaining buffering.
         } else {
-            if (pendingTasks.containsKey(url)) {
-                Logger.warn("PRELOAD", "Video $url claimed while still in preload queue! Cancelling background preload.")
-                cancelledTasks.add(url)
-                pendingTasks.remove(url)
+            if (pendingTasks.containsKey(rawUrl)) {
+                Logger.warn("PRELOAD", "Video $rawUrl claimed while still in preload queue! Cancelling background preload.")
+                cancelledTasks.add(rawUrl)
+                pendingTasks.remove(rawUrl)
             }
-            Logger.warn("PRELOAD", "No preloaded player found for: $url - will create fresh player")
+            Logger.warn("PRELOAD", "No preloaded player found for: $cacheKey - will create fresh player")
         }
         return player
     }

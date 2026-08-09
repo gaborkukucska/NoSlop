@@ -15,11 +15,17 @@ object GuardianApiClient {
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
-    suspend fun searchArticles(query: String, section: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-search"): List<FeedItem> {
+    suspend fun searchArticles(query: String, section: String? = null, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-search", recentOnly: Boolean = false): List<FeedItem> {
         val apiKey = apiKeyRepo.getKey("guardian")
         if (apiKey.isNullOrBlank()) return emptyList()
         val sectionParam = if (section != null) "&section=$section" else ""
-        return fetch("https://content.guardianapis.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}$sectionParam&show-fields=byline,trailText,thumbnail", apiKey, sourceId)
+        val dateParam = if (recentOnly) {
+            val cal = java.util.Calendar.getInstance()
+            cal.add(java.util.Calendar.MONTH, -3)
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            "&from-date=${sdf.format(cal.time)}&order-by=newest"
+        } else ""
+        return fetch("https://content.guardianapis.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}$sectionParam&show-fields=byline,trailText,thumbnail$dateParam", apiKey, sourceId)
     }
 
     suspend fun searchSection(section: String, apiKeyRepo: ApiKeyRepository, sourceId: String = "api-guardian-section"): List<FeedItem> {

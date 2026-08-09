@@ -42,10 +42,13 @@ object RedditApiClient {
         query: String,
         sourceId: String = "api-reddit-hot",
         limit: Int = 100,
-        requiredMediaType: String? = null
+        requiredMediaType: String? = null,
+        recentOnly: Boolean = false
     ): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://www.reddit.com/search.json?q=$encodedQuery&sort=relevance&limit=$limit&raw_json=1"
+        val sortParam = if (recentOnly) "new" else "relevance"
+        val timeParam = if (recentOnly) "&t=year" else ""
+        val url = "https://www.reddit.com/search.json?q=$encodedQuery&sort=$sortParam&limit=$limit&raw_json=1$timeParam"
         val items = fetchAndParse(url, sourceId)
         
         if (requiredMediaType != null) {

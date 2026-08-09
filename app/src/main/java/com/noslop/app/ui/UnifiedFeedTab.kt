@@ -517,7 +517,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val filtered = unifiedFeed.filter { item ->
@@ -532,31 +532,17 @@ fun UnifiedFeedTab(
                 "Live Feed" -> true
                 "History" -> item.id in viewedHistoryIds
                 "Liked" -> item is UnifiedItem.Feed && item.item.isSaved
-                "Videos" -> item is UnifiedItem.Feed && item.item.mediaType == "video"
-                "Images" -> item is UnifiedItem.Feed && item.item.mediaType == "image"
-                "Audio" -> item is UnifiedItem.Feed && item.item.mediaType == "audio"
+                "Videos" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("video") == true
+                "Images" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("image") == true
+                "Audio" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("audio") == true
                 "Articles" -> item is UnifiedItem.Feed && item.item.mediaType.isNullOrEmpty()
                 "Mesh" -> item is UnifiedItem.Mesh
                 "HUBs" -> false 
                 else -> true
             }
 
-            val matchesQuery = if (searchQuery.isNotBlank()) {
-                val q = searchQuery.lowercase()
-                when (item) {
-                    is UnifiedItem.Feed -> {
-                        item.item.title.lowercase().contains(q) || 
-                        item.item.excerpt?.lowercase()?.contains(q) == true || 
-                        item.item.author?.lowercase()?.contains(q) == true
-                    }
-                    is UnifiedItem.Mesh -> {
-                        item.post.content.lowercase().contains(q) || 
-                        item.post.clearnetTitle?.lowercase()?.contains(q) == true || 
-                        item.post.authorHandle.lowercase().contains(q)
-                    }
-                    is UnifiedItem.Tutorial -> false
-                }
-            } else true
+            // The ViewModel already filters _unifiedFeed based on activeSearchQuery (and Web APIs return semantic matches)
+            val matchesQuery = true
 
             matchesMode && matchesQuery
         }
@@ -654,7 +640,7 @@ fun UnifiedFeedTab(
                     viewModel.recordItemSwiped(currentItem.id)
                 }
 
-                kotlinx.coroutines.delay(5000L)
+                kotlinx.coroutines.delay(1000L)
                 viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
             }
         }
@@ -700,7 +686,7 @@ fun UnifiedFeedTab(
             if (previousPage >= 0 && previousPage < currentPage && previousPage in unifiedItems.indices) {
                 val dwellMs = now - pageEnteredAt
                 val leftItem = unifiedItems[previousPage]
-                if (dwellMs < 5000L) {
+                if (dwellMs < 1000L) {
                     viewModel.recordItemSwiped(leftItem.id)
                 } else {
                     viewModel.markItemViewed(leftItem.id, leftItem is UnifiedItem.Mesh)
