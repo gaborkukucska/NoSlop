@@ -18,6 +18,11 @@
 *   **Guardian**: Added a `recentOnly` parameter to `GuardianApiClient.searchArticles()`. When true, appends `&from-date=YYYY-MM-DD` (3 months ago) and `&order-by=newest`, matching the NewsAPI approach.
 *   **PublicApiService Wiring**: All user-initiated search categories (`Search Videos`, `Search Audio`, `Search Images`, `Search Articles`, and the `else` fallback) in `PublicApiService.fetchItemsForCategory` now pass `recentOnly = true` to their respective API clients. Category-based feeds (Technology, Science, etc.) are unaffected and continue using natural trending/hot sorting.
 
+### 4. Video Player & Embeds UI Polish
+*   **Unified Tap-to-Play**: Disabled the default, persistent Android ExoPlayer control overlay (which took 3-5 seconds to disappear and didn't match the embed players). Implemented a unified tap-to-play/pause mechanic (similar to TikTok) for native video playback, complete with a translucent center play button overlay when paused.
+*   **WebView Embeds Toggle**: Added an `enableWebViewEmbeds` property to `MediaSettings.kt` and a "Fallback Web Embeds" toggle in the Content tab of `SettingsTab.kt`. This allows users to completely disable the slow `WebView` fallback system. When toggled off, `VideoPlayer.resolveSource` intercepts the embed state and cleanly returns `VideoSource.Unavailable`.
+*   **Imports Fix**: Fixed a build failure in `VideoPlayer.kt` where `androidx` composition elements (`clickable`, `MutableInteractionSource`, `CircleShape`) were being incorrectly referenced with fully-qualified package names in modifier chains.
+
 ## Completed Changes (2026-08-06)
 
 ### 1. Global Media Quality Control

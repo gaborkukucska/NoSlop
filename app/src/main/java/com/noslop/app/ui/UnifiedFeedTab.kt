@@ -670,7 +670,11 @@ fun UnifiedFeedTab(
                 val (rawUrl, forcedUrl) = preloadData
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
-                    preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                    preloadScope.launch { 
+                        // Delay progressive preloads to give foreground video bandwidth priority
+                        kotlinx.coroutines.delay((preloadedForwardCount + 1) * 1500L)
+                        com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
+                    }
                 }
                 preloadedForwardCount++
                 if (preloadedForwardCount >= 2) break // Keep up to 2 forward videos warm

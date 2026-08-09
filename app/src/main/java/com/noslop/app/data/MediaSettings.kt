@@ -12,7 +12,8 @@ data class MediaSettings(
     val backgroundPlayOutsideApp: Boolean = false,
     val videoQuality: String = "high",
     val audioQuality: String = "high",
-    val imageQuality: String = "high"
+    val imageQuality: String = "high",
+    val enableWebViewEmbeds: Boolean = false
 ) {
     fun toJson(): String = Gson().toJson(this)
 

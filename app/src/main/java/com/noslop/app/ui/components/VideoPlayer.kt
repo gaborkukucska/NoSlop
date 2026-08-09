@@ -5,8 +5,12 @@ import com.noslop.app.util.tr
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -87,7 +91,7 @@ private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = wi
         return@withContext VideoSource.Unavailable
     }
 
-    when {
+    val result = when {
         isDirectFileUrl(rawUrl) -> {
             if (rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) {
                 val id = rawUrl.substringAfter("id=").substringBefore("&")
@@ -149,6 +153,18 @@ private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = wi
         rawUrl.startsWith("http") -> VideoSource.Direct(rawUrl)
         else -> VideoSource.Unavailable
     }
+
+    if (result is VideoSource.Embed && !com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.enableWebViewEmbeds) {
+        val embedUrl = (result as VideoSource.Embed).url
+        val isYouTubeEmbed = embedUrl.contains("youtube") || embedUrl.contains("youtu.be")
+        val isVimeoEmbed = embedUrl.contains("vimeo.com")
+        if (!isYouTubeEmbed && !isVimeoEmbed) {
+            Logger.info("VIDEO_RESOLVE", "WebView Embeds disabled, marking $rawUrl as Unavailable")
+            return@withContext VideoSource.Unavailable
+        }
+    }
+    
+    return@withContext result
 }
 
 private fun isImageUrl(url: String): Boolean {
@@ -453,6 +469,9 @@ private fun ExoVideoPlayer(
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                        if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                            onReady()
+                        }
                     }
                     override fun onRenderedFirstFrame() {
                         onReady()
@@ -473,6 +492,9 @@ private fun ExoVideoPlayer(
                     }
                 })
                 isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                    onReady()
+                }
                 
                 // If the player already encountered an error (e.g. 403) in the background before we claimed it,
                 // the listener won't fire retroactively. We must handle it here.
@@ -526,6 +548,9 @@ private fun ExoVideoPlayer(
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                            if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                                onReady()
+                            }
                         }
                         override fun onRenderedFirstFrame() {
                             onReady()
@@ -584,7 +609,31 @@ private fun ExoVideoPlayer(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    var isPlaying by remember { mutableStateOf(isVisible) }
+    
+    LaunchedEffect(exoPlayer) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+        }
+        player.addListener(listener)
+    }
+
+    Box(
+        modifier = Modifier.fillMaxSize().clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null
+        ) {
+            val player = exoPlayer
+            if (player != null) {
+                player.playWhenReady = !player.playWhenReady
+                isPlaying = player.playWhenReady
+            }
+        },
+        contentAlignment = Alignment.Center
+    ) {
         if (isBuffering && thumbnailUrl == null && thumbnailB64 == null && !hasError) {
             com.noslop.app.ui.LoadingShimmer()
         }
@@ -598,7 +647,7 @@ private fun ExoVideoPlayer(
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT
                         )
                         player = exoPlayer
-                        useController = true
+                        useController = false
                         useArtwork = false
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
@@ -616,6 +665,22 @@ private fun ExoVideoPlayer(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+            
+            if (!isPlaying && !isBuffering && exoPlayer != null) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .background(PrimaryBlack.copy(alpha = 0.5f), shape = CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = "Play",
+                        tint = TextLight,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
         } else {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,

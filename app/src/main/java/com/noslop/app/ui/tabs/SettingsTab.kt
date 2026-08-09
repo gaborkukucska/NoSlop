@@ -765,6 +765,24 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     )
                                 }
                             }
+                            
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Fallback Web Embeds".tr, color = TextLight, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text("Use hidden web browser to play videos when native extraction fails (can be slow).".tr, color = TextMuted, fontSize = 12.sp)
+                                }
+                                Switch(
+                                    checked = mediaSettings.enableWebViewEmbeds,
+                                    onCheckedChange = { viewModel.updateMediaSettings(mediaSettings.copy(enableWebViewEmbeds = it)) },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = AccentGreen)
+                                )
+                            }
                         }
                     }
 
