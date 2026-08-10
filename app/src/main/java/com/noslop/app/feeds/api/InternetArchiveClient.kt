@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import okhttp3.Request
 
 /**
@@ -146,6 +147,7 @@ object InternetArchiveClient {
                                 try {
                                     val metaUrl = "https://archive.org/metadata/$identifier/files"
                                     Logger.debug(TAG, "Fetching metadata for $identifier from: $metaUrl")
+                                    if (!isActive) return@async null
                                     val metaReq = Request.Builder().url(metaUrl).build()
                                     val metaRes = client.newCall(metaReq).execute()
                                     val metaBody = metaRes.body?.string()
@@ -224,6 +226,7 @@ object InternetArchiveClient {
                                 finalMediaUrl = null // Drop
                             } else {
                                 try {
+                                    if (!isActive) return@async null
                                     val headReq = Request.Builder().url(archiveMediaUrl).head().build()
                                     val headRes = client.newCall(headReq).execute()
                                     val code = headRes.code

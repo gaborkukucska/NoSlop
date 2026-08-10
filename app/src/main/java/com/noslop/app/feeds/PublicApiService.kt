@@ -142,9 +142,6 @@ object PublicApiService {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    // Slow sources last — these make N+1 HTTP requests per item and often take 30-60s
-                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
-                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                 }
             }
         } catch (e: Exception) {
@@ -154,7 +151,8 @@ object PublicApiService {
         val items = mutableListOf<FeedItem>()
         // Collect results with a short hard timeout so fast sources (YouTube, Reddit)
         // return quickly and the UI doesn't hang waiting for slow sources (Archive API).
-        val deadline = System.currentTimeMillis() + 3_500L
+        val timeoutDuration = if (category == "Search Audio") 10_000L else 3_500L
+        val deadline = System.currentTimeMillis() + timeoutDuration
         for (deferred in deferredItems) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
