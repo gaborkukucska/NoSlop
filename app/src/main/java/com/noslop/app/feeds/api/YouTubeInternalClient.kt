@@ -62,8 +62,14 @@ object YouTubeInternalClient {
                 .post(requestBody)
                 .build()
 
-            var response = client.newCall(request).execute()
-            if (response.code == 403 || response.code == 429 || response.code == 400) {
+            var response: okhttp3.Response? = null
+            try {
+                response = client.newCall(request).execute()
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Proxy request threw exception: ${e.message}")
+            }
+            
+            if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
@@ -71,7 +77,7 @@ object YouTubeInternalClient {
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                     .build()
-                response.close()
+                response?.close()
                 response = client.newCall(directReq).execute()
             }
             
@@ -181,8 +187,14 @@ object YouTubeInternalClient {
                 .post(requestBody)
                 .build()
 
-            var response = client.newCall(request).execute()
-            if (response.code == 403 || response.code == 429 || response.code == 400) {
+            var response: okhttp3.Response? = null
+            try {
+                response = client.newCall(request).execute()
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Channel proxy request threw exception: ${e.message}")
+            }
+            
+            if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
@@ -190,7 +202,7 @@ object YouTubeInternalClient {
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                     .build()
-                response.close()
+                response?.close()
                 response = client.newCall(directReq).execute()
             }
             

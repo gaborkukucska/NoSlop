@@ -136,19 +136,38 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article", recentOnly = true) }
                 }
                 else -> {
-                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
+                    // Fast sources first so they complete before the timeout deadline
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, recentOnly = true) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
+                    // Slow sources last — these make N+1 HTTP requests per item and often take 30-60s
+                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
+                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                 }
             }
         } catch (e: Exception) {
             Logger.error(TAG, "Error in category dispatch for '$category'", e.message)
         }
 
-        val items = deferredItems.awaitAll().flatten()
+        val items = mutableListOf<FeedItem>()
+        // Collect results with a short hard timeout so fast sources (YouTube, Reddit)
+        // return quickly and the UI doesn't hang waiting for slow sources (Archive API).
+        val deadline = System.currentTimeMillis() + 3_500L
+        for (deferred in deferredItems) {
+            val remaining = deadline - System.currentTimeMillis()
+            if (remaining <= 0) {
+                Logger.warn(TAG, "Timeout reached for category '$category', skipping remaining sources")
+                break
+            }
+            try {
+                val result = kotlinx.coroutines.withTimeoutOrNull(remaining) { deferred.await() }
+                if (result != null) items.addAll(result)
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Deferred failed for category '$category': ${e.message}")
+            }
+        }
         val deduplicated = items.distinctBy { it.id }
         Logger.info(TAG, "Category '$category': ${deduplicated.size} items (${items.size} before dedup)")
         deduplicated

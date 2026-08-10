@@ -724,7 +724,6 @@ fun UnifiedFeedTab(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (isRefreshing) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(color = AccentGreen)
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
                     }
@@ -872,11 +871,6 @@ fun UnifiedFeedTab(
                     ) {
                         Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
                     }
-                }
-
-                if (isRefreshing) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
                 }
             }
         }

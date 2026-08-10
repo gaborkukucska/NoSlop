@@ -23,7 +23,7 @@ object WikimediaApiClient {
     suspend fun fetchFeaturedPictures(sourceId: String = "api-wikimedia-featured"): List<FeedItem> {
         return try {
             var url = "https://commons.wikimedia.org/w/api.php?action=query&generator=categorymembers" +
-                      "&gcmtitle=Category:Featured_pictures_on_Wikimedia_Commons&gcmlimit=25" +
+                      "&gcmtitle=Category:Featured_pictures_on_Wikimedia_Commons&gcmlimit=25&gcmtype=file" +
                       "&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=1280&format=json"
 
             if (lastContinueToken != null) {
@@ -82,7 +82,7 @@ object WikimediaApiClient {
                         excerpt = cleanDesc.take(200),
                         thumbnailUrl = thumbUrl,
                         publishedAt = System.currentTimeMillis(),
-                        mediaUrl = imageUrl,
+                        mediaUrl = thumbUrl,
                         mediaType = "image",
                         apiSource = "wikimedia"
                     ))

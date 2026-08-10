@@ -201,15 +201,35 @@ private fun extractVimeoId(url: String): String? = when {
     else -> url.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() && it.all { c -> c.isDigit() } }
 }
 
+// Circuit breaker: If YouTube direct stream resolution fails repeatedly,
+// skip the expensive 8-request resolve cycle and go straight to embed.
+private var ytDirectFailCount = 0
+private var ytDirectFailTimestamp = 0L
+private const val YT_CIRCUIT_BREAKER_THRESHOLD = 2
+private const val YT_CIRCUIT_BREAKER_RESET_MS = 10 * 60 * 1000L // 10 minutes
+
 private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
 
-    val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality)
-    if (streamUrl != null) {
-        return VideoSource.Direct(streamUrl)
+    // Circuit breaker: skip direct resolve if it's been failing consistently
+    val now = System.currentTimeMillis()
+    if (ytDirectFailCount >= YT_CIRCUIT_BREAKER_THRESHOLD && (now - ytDirectFailTimestamp) < YT_CIRCUIT_BREAKER_RESET_MS) {
+        Logger.info("VIDEO_RESOLVE", "YouTube direct stream circuit breaker OPEN — skipping to embed for $videoId")
+    } else {
+        // Reset circuit breaker if enough time has passed
+        if ((now - ytDirectFailTimestamp) >= YT_CIRCUIT_BREAKER_RESET_MS) {
+            ytDirectFailCount = 0
+        }
+        val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality)
+        if (streamUrl != null) {
+            ytDirectFailCount = 0
+            return VideoSource.Direct(streamUrl)
+        }
+        ytDirectFailCount++
+        ytDirectFailTimestamp = System.currentTimeMillis()
     }
 
     val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1"
