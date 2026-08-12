@@ -645,12 +645,11 @@ compression of large files.
 ### 7.1 HTTP Client Separation (`net/HttpClientProvider.kt`)
 
 Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
-- `clearnetClient: OkHttpClient` — no proxy, used by `FeedParser` and all
-  `feeds/api/*Client` classes. Configured with `okhttp-dnsoverhttps`
-  (Cloudflare `1.1.1.1`) per milestone 51 to avoid DNS resolution failures
-  without forcing all traffic through Tor.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used exclusively
-  by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
+- `rawClearnetClient: OkHttpClient` — no proxy, used for direct network fetches avoiding Tor. Configured with a cascading DNS (System -> Cloudflare DoH -> Google DoH) to avoid DNS resolution failures.
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used exclusively by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
+- `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet", otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
+
+*Note:* Because some API providers (YouTube, Reddit, Jamendo) actively block Tor exit nodes, these specific clients route their requests through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) when using `activeClearnetClient`. This successfully bypasses the Tor blocks while preserving the user's anonymity.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)
 
