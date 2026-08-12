@@ -115,31 +115,33 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
                 "Search Videos" -> {
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video", recentOnly = true) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
                 }
                 "Search Audio" -> {
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, recentOnly = true) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                 }
                 "Search Images" -> {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image", recentOnly = true) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
                 }
                 "Search Articles" -> {
-                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
-                    fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo, recentOnly = true) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article", recentOnly = true) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
+                    fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                 }
                 else -> {
                     // Fast sources first so they complete before the timeout deadline
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, recentOnly = true) }
-                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language, recentOnly = true) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
+                    fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                 }
