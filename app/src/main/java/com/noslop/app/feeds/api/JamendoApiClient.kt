@@ -24,11 +24,11 @@ object JamendoApiClient {
 
     suspend fun searchTracks(tags: String, sourceId: String = "api-jamendo-music"): List<FeedItem> {
         return try {
-            // Jamendo tags are typically lowercase words (genres/moods) separated by +
-            val formattedTags = java.net.URLEncoder.encode(tags.replace(" ", "+").lowercase(), "UTF-8")
+            val encodedQuery = java.net.URLEncoder.encode(tags.lowercase(), "UTF-8")
             
-            // Limit to 20 tracks, require an audio stream, and get track info + album info
-            val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&tags=$formattedTags&include=musicinfo"
+            // Use namesearch for free-text queries (matches track name and artist name).
+            // tags= only accepts known Jamendo genre/mood tokens and fails on arbitrary text.
+            val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
             
             val proxiedUrl = url.replace("https://api.jamendo.com", "$PROXY_URL/jamendo")
             val request = Request.Builder()
@@ -48,7 +48,7 @@ object JamendoApiClient {
             val headers = root.getAsJsonObject("headers")
             val status = headers?.get("status")?.asString
             if (status != "success") {
-                Logger.warn(TAG, "Jamendo API returned status: $status")
+                Logger.warn(TAG, "Jamendo API returned status: $status for query: $tags")
                 return emptyList()
             }
             

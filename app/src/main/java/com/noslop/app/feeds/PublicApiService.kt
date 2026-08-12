@@ -151,7 +151,7 @@ object PublicApiService {
         val items = mutableListOf<FeedItem>()
         // Collect results with a short hard timeout so fast sources (YouTube, Reddit)
         // return quickly and the UI doesn't hang waiting for slow sources (Archive API).
-        val timeoutDuration = 10_000L
+        val timeoutDuration = 20_000L
         val deadline = System.currentTimeMillis() + timeoutDuration
         for (deferred in deferredItems) {
             val remaining = deadline - System.currentTimeMillis()

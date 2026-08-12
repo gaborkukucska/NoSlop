@@ -623,12 +623,14 @@ private fun ExoVideoPlayer(
 
     LaunchedEffect(exoPlayer) {
         val player = exoPlayer ?: return@LaunchedEffect
+        var lastSavedPos = -1L
         while (true) {
-            kotlinx.coroutines.delay(1000L)
+            kotlinx.coroutines.delay(5000L)
             try {
                 val currentPos = player.currentPosition
-                if (currentPos > 0L) {
+                if (currentPos > 0L && currentPos != lastSavedPos) {
                     PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
+                    lastSavedPos = currentPos
                 }
             } catch (e: Exception) {
                 break

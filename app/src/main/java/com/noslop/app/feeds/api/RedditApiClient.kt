@@ -72,12 +72,13 @@ object RedditApiClient {
             val request = Request.Builder()
                 .url(proxiedUrl)
                 .header("X-Proxy-Secret", PROXY_SECRET)
+                .header("User-Agent", "android:com.noslop.app:v0.3.7 (by /u/NoSlopApp)")
                 .build()
 
             val response = client.newCall(request).execute()
             val body = response.use { res ->
                 if (!res.isSuccessful) {
-                    Logger.warn(TAG, "Reddit API returned ${res.code} for $url")
+                    Logger.warn(TAG, "Reddit API returned ${res.code} for $proxiedUrl")
                     return emptyList()
                 }
                 res.body?.string()
