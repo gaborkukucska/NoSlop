@@ -25,7 +25,7 @@ object YouTubeInternalClient {
     private const val CLIENT_VERSION = "2.20240717.01.00"
     
     private val gson = Gson()
-    private val client get() = com.noslop.app.net.HttpClientProvider.rawClearnetClient
+    private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     private fun buildPayload(query: String): JsonObject {

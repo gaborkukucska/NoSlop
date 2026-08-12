@@ -99,6 +99,7 @@ Your identity is generated locally and never leaves your device unless you expor
 - Tor circuits are built before any data is sent. The app surfaces a clear status indicator so you always know if Tor is connected.
 - Your real IP address is never exposed to feed servers, peers, or anyone on the network.
 - Hidden service registration gives your node a stable `.onion` address for inbound peer connections.
+- **Tor-friendly API Proxies** — Search APIs (YouTube, Reddit, Jamendo) are routed through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`). This bypasses the severe IP blocks these platforms apply to Tor exit nodes, ensuring your search works seamlessly while staying 100% on Tor.
 
 ---
 

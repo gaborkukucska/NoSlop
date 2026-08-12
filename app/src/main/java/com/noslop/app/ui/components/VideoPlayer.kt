@@ -20,6 +20,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -647,15 +649,25 @@ private fun ExoVideoPlayer(
     }
 
     Box(
-        modifier = Modifier.fillMaxSize().clickable(
-            interactionSource = remember { MutableInteractionSource() },
-            indication = null
-        ) {
-            val player = exoPlayer
-            if (player != null) {
-                player.playWhenReady = !player.playWhenReady
-                isPlaying = player.playWhenReady
-            }
+        modifier = Modifier.fillMaxSize().pointerInput(exoPlayer) {
+            detectTapGestures(
+                onDoubleTap = { offset ->
+                    val player = exoPlayer ?: return@detectTapGestures
+                    val width = size.width
+                    if (offset.x > width / 2) {
+                        player.seekTo(player.currentPosition + 10000)
+                    } else {
+                        player.seekTo(maxOf(0, player.currentPosition - 10000))
+                    }
+                },
+                onTap = {
+                    val player = exoPlayer
+                    if (player != null) {
+                        player.playWhenReady = !player.playWhenReady
+                        isPlaying = player.playWhenReady
+                    }
+                }
+            )
         },
         contentAlignment = Alignment.Center
     ) {

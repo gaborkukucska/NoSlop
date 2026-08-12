@@ -17,6 +17,8 @@ object JamendoApiClient {
     
     // Default test client ID for Jamendo API
     private const val CLIENT_ID = "709fa152"
+    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev"
+    private const val PROXY_SECRET = "NoSlopRocks2026"
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
@@ -28,8 +30,10 @@ object JamendoApiClient {
             // Limit to 20 tracks, require an audio stream, and get track info + album info
             val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&tags=$formattedTags&include=musicinfo"
             
+            val proxiedUrl = url.replace("https://api.jamendo.com", "$PROXY_URL/jamendo")
             val request = Request.Builder()
-                .url(url)
+                .url(proxiedUrl)
+                .header("X-Proxy-Secret", PROXY_SECRET)
                 .build()
 
             val response = client.newCall(request).execute()

@@ -45,9 +45,7 @@ object PreloadManager {
     
     private val youtubeUrlPattern = Regex("(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)")
     private val shouldPrebufferUrl: (String) -> Boolean = { url ->
-        // We now safely pre-buffer YouTube URLs since our custom LoadControl restricts 
-        // background buffering to a small duration (1.5s - 10s), avoiding throttling.
-        true
+        !youtubeUrlPattern.containsMatchIn(url)
     }
 
     /**

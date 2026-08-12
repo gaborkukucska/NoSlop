@@ -15,6 +15,8 @@ import okhttp3.Request
 object RedditApiClient {
 
     private const val TAG = "REDDIT_API"
+    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev"
+    private const val PROXY_SECRET = "NoSlopRocks2026"
     private val gson = Gson()
 
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
@@ -66,8 +68,10 @@ object RedditApiClient {
 
     private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> {
         return try {
+            val proxiedUrl = url.replace("https://www.reddit.com", "$PROXY_URL/reddit")
             val request = Request.Builder()
-                .url(url)
+                .url(proxiedUrl)
+                .header("X-Proxy-Secret", PROXY_SECRET)
                 .build()
 
             val response = client.newCall(request).execute()
