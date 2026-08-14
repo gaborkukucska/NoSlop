@@ -25,6 +25,10 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
     val actualKey = stableKey ?: url
     val context = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
+    // --- NOSLOP_MEDIA_PEERS_V1 ---
+    // STATE_BUFFERING was logged but never surfaced, so a track that was still
+    // loading looked identical to one sitting paused.
+    var isBuffering by remember(url) { mutableStateOf(true) }
     var progress by remember { mutableStateOf(0f) }
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
@@ -115,6 +119,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                                     else -> "UNKNOWN"
                                 }
                                 Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                                isBuffering = state == androidx.media3.common.Player.STATE_BUFFERING
                                 if (state == androidx.media3.common.Player.STATE_READY) {
                                     duration = this@apply.duration
                                 }
@@ -190,16 +195,27 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        IconButton(
-            onClick = { exoPlayer?.let { if (isPlaying) it.pause() else it.play() } },
-            modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
-        ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = null,
-                tint = PrimaryBlack,
-                modifier = Modifier.size(48.dp)
-            )
+        // --- NOSLOP_MEDIA_PEERS_V1 ---
+        // Progress ring around the play button while the track buffers.
+        Box(contentAlignment = Alignment.Center) {
+            if (isBuffering && !hasError) {
+                CircularProgressIndicator(
+                    color = AccentGreen,
+                    modifier = Modifier.size(96.dp),
+                    strokeWidth = 3.dp
+                )
+            }
+            IconButton(
+                onClick = { exoPlayer?.let { if (isPlaying) it.pause() else it.play() } },
+                modifier = Modifier.size(80.dp).background(AccentGreen, CircleShape)
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = PrimaryBlack,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(32.dp))

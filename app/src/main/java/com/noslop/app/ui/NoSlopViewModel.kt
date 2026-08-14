@@ -562,6 +562,56 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * NOSLOP_FEED_VARIETY_V1
+     *
+     * Take up to [limit] items, cycling one at a time through each distinct
+     * [keySelector] group instead of draining one group before moving to the
+     * next. Order inside a group is preserved, so each creator contributes
+     * their newest item first, then their second newest on the following pass.
+     *
+     * This replaces the old cap-only approach: capping repeats at 2 stopped a
+     * creator from taking over completely, but did nothing about ordering, so
+     * their items still landed close together.
+     *
+     * [isPriority] items (creator-filter matches) lead the rotation rather than
+     * bypassing it — you still see more of them, just not several in a row.
+     */
+    private fun <T> Iterable<T>.takeRoundRobin(
+        limit: Int,
+        keySelector: (T) -> String,
+        isPriority: (T) -> Boolean = { false }
+    ): List<T> {
+        if (limit <= 0) return emptyList()
+
+        val groups = LinkedHashMap<String, MutableList<T>>()
+        for (item in this) {
+            groups.getOrPut(keySelector(item)) { mutableListOf() }.add(item)
+        }
+        if (groups.isEmpty()) return emptyList()
+
+        // Stable partition: priority groups first, original order otherwise.
+        val queues = groups.values.sortedByDescending { group ->
+            if (group.any(isPriority)) 1 else 0
+        }
+
+        val result = mutableListOf<T>()
+        var round = 0
+        while (result.size < limit) {
+            var addedThisRound = false
+            for (queue in queues) {
+                if (result.size >= limit) break
+                if (round < queue.size) {
+                    result.add(queue[round])
+                    addedThisRound = true
+                }
+            }
+            if (!addedThisRound) break
+            round++
+        }
+        return result
+    }
+
     private fun <T> Iterable<T>.takeDiverse(limit: Int, keySelector: (T) -> String, isPriority: (T) -> Boolean = { false }): List<T> {
         val result = mutableListOf<T>()
         val counts = mutableMapOf<String, Int>()
@@ -877,10 +927,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Group by author to prevent clumping. If author is null, fallback to sourceId
         val diverseKey = { it: FeedItem -> it.author ?: it.sourceId }
 
-        val v = rawVideos.takeDiverse(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
-        val a = rawAudios.takeDiverse(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
-        val i = rawImages.takeDiverse(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
-        val t = rawArticles.takeDiverse(targetT, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        // --- NOSLOP_FEED_VARIETY_V1 ---
+        // One item per creator per pass, so a channel that published four
+        // videos today contributes one here and keeps the rest for later
+        // batches, instead of occupying most of the video quota at once.
+        val v = rawVideos.takeRoundRobin(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val a = rawAudios.takeRoundRobin(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val i = rawImages.takeRoundRobin(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
+        val t = rawArticles.takeRoundRobin(targetT, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val m = rawMeshes.take(targetM).map { UnifiedItem.Mesh(it) }.toMutableList()
 
         val batch = mutableListOf<UnifiedItem>()

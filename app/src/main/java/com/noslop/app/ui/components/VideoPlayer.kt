@@ -71,8 +71,13 @@ private const val SIGNED_URL_FALLBACK_TTL_MS = 4 * 60_000L
 private const val STATIC_URL_TTL_MS = 6 * 60 * 60_000L
 // Don't let one transient network blip mark a video dead for the session.
 private const val UNAVAILABLE_TTL_MS = 60_000L
-// Embed page URLs are stable.
-private const val EMBED_TTL_MS = 12 * 60 * 60_000L
+// --- NOSLOP_MEDIA_PEERS_V1 ---
+// An Embed result is NOT a successful resolve — it is the fallback taken when
+// direct stream resolution failed or the circuit breaker was open. Caching it
+// for hours means one transient failure pins a video to the WebView player for
+// the rest of the session, hiding the fact that direct streaming has recovered.
+// Short TTL so the direct path is retried promptly.
+private const val EMBED_TTL_MS = 3 * 60_000L
 
 private val EXPIRY_QUERY_PATTERN =
     Regex("[?&](?:expire|expires|exp)=(\\d{10,13})", RegexOption.IGNORE_CASE)
@@ -418,7 +423,11 @@ fun VideoPlayer(
 
     rememberAutoFullscreenOnLandscape(enabled = isVisible)
 
-    var retryTrigger by remember { mutableStateOf(0) }
+    // --- NOSLOP_FEED_VARIETY_V1 ---
+    // Keyed on url: unkeyed, a recycled slide inherited the previous item's
+    // retry count, so a fresh video could start with forceRefresh already on
+    // and its auto-retry budget already spent.
+    var retryTrigger by remember(url) { mutableStateOf(0) }
     var source by remember(url) { mutableStateOf<VideoSource?>(null) }
     var isVideoReady by remember(url) { mutableStateOf(false) }
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
@@ -572,7 +581,12 @@ fun VideoPlayer(
             }
         }
 
-        if (isVisible && !isVideoReady && !loadingTimedOut && (isResolving || awaitingFirstFrame)) {
+        // --- NOSLOP_FEED_VARIETY_V1 ---
+        // Gate on activeVisible, not isVisible: the player itself renders on
+        // activeVisible (current OR next slide, with a 500ms debounce leaving),
+        // so gating the overlay more tightly left a window where a video was
+        // resolving with no indicator on screen.
+        if (activeVisible && !isVideoReady && !loadingTimedOut && (isResolving || awaitingFirstFrame)) {
             VideoLoadingOverlay(
                 label = if (isResolving) "Finding stream".tr else "Buffering".tr,
                 modifier = Modifier.zIndex(2f)

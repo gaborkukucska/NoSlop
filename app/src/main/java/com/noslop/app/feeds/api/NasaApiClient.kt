@@ -201,10 +201,34 @@ object NasaApiClient {
                 }
             }
 
-            // Prefer ~orig.mp4 (highest quality), then ~mobile.mp4 (most compatible), then any .mp4
-            var best = mp4Urls.firstOrNull { it.contains("~orig.mp4") }
-                ?: mp4Urls.firstOrNull { it.contains("~mobile.mp4") }
-                ?: mp4Urls.firstOrNull()
+            // --- NOSLOP_FEED_VARIETY_V1 ---
+            // ~orig.mp4 is NASA's broadcast master: frequently 4K at a bitrate
+            // no phone connection sustains, which produced the play-a-few-
+            // seconds-then-stall behaviour. Pick a variant that matches the
+            // user's quality setting and treat ~orig as the last resort.
+            val quality = try {
+                com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+            } catch (_: Exception) { "high" }
+
+            val preference = when (quality) {
+                "low" -> listOf("~mobile.mp4", "~small.mp4", "~medium.mp4", "~large.mp4")
+                "medium" -> listOf("~small.mp4", "~medium.mp4", "~mobile.mp4", "~large.mp4")
+                else -> listOf("~medium.mp4", "~large.mp4", "~small.mp4", "~mobile.mp4")
+            }
+
+            var best: String? = null
+            for (variant in preference) {
+                best = mp4Urls.firstOrNull { it.contains(variant) }
+                if (best != null) break
+            }
+            if (best == null) {
+                // Nothing but the master (or an unrecognised naming scheme).
+                best = mp4Urls.firstOrNull { !it.contains("~orig.mp4") }
+                    ?: mp4Urls.firstOrNull()
+                if (best != null && best.contains("~orig.mp4")) {
+                    Logger.warn(TAG, "Only ~orig.mp4 available for $nasaId — playback may buffer")
+                }
+            }
 
             if (best != null) {
                 best = best.replace("http://", "https://")

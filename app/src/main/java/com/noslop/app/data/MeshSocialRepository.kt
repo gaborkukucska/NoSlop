@@ -659,18 +659,26 @@ class MeshSocialRepository(
             peerDao.deletePeer(peer)
             // Also clean up messages
             messageDao.deleteMessagesWithPeer(publicKeyB64)
-            
-            // Orphan their non-public mesh posts
+
+            // --- NOSLOP_MEDIA_PEERS_V1 ---
+            // Removing a contact previously left their public posts, comments,
+            // reactions and votes in the database indefinitely, so their content
+            // kept appearing in the feed after they were gone. Remove everything
+            // authored by them.
             try {
+                commentDao.deleteCommentsByAuthor(publicKeyB64)
+                commentVoteDao.deleteCommentVotesByAuthor(publicKeyB64)
+                reactionDao.deleteReactionsByAuthor(publicKeyB64)
+                voteDao.deleteVotesByAuthor(publicKeyB64)
                 db.openHelper.writableDatabase.execSQL(
-                    "UPDATE mesh_posts SET isOrphaned = 1 WHERE authorPublicKeyB64 = ? AND privacy != 'public'",
+                    "DELETE FROM mesh_posts WHERE authorPublicKeyB64 = ?",
                     arrayOf(publicKeyB64)
                 )
             } catch (e: Exception) {
-                Logger.error(TAG, "Failed to orphan private posts: ${e.message}")
+                Logger.error(TAG, "Failed to purge peer content: ${e.message}")
             }
-            
-            Logger.info(TAG, "Deleted peer, messages, and orphaned private posts: ${peer.handle}")
+
+            Logger.info(TAG, "Deleted peer and all of their content: ${peer.handle}")
         }
     }
 

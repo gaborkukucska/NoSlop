@@ -122,6 +122,15 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
             }
             .memoryCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
             .diskCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
+            .build()
+
+        // --- NOSLOP_MEDIA_PEERS_V1 ---
+        // The state listener must live on ONE request only. Previously both
+        // AsyncImage layers shared a single listener-carrying request, so the
+        // two loads raced: the second layer's onStart reset isLoading after the
+        // first had already succeeded, and a cancel on either layer could paint
+        // the error state over an image that had loaded fine on the other.
+        val foregroundRequest = request.newBuilder()
             .listener(
                 onStart = { isLoading = true },
                 onSuccess = { _, _ ->
@@ -141,8 +150,8 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
                 }
             )
             .build()
-            
-        // Background blurred layer
+
+        // Background blurred layer (no listener — see above)
         AsyncImage(
             model = request,
             contentDescription = null,
@@ -158,7 +167,7 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         
         // Foreground uncropped layer
         AsyncImage(
-            model = request,
+            model = foregroundRequest,
             contentDescription = null,
             modifier = Modifier
                 .fillMaxWidth()
@@ -211,7 +220,18 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     }
 
     if (showZoom) {
-        ZoomableImageDialog(url = url, onDismiss = { showZoom = false })
+        // --- NOSLOP_MEDIA_PEERS_V1 ---
+        // Open the dialog on the URL the visible image actually resolved to —
+        // sanitised, and already swapped to the fallback if the primary failed.
+        // Passing the raw `url` prop meant zoom reliably showed a black screen
+        // for any image that only rendered via its fallback or needed
+        // http->https / space escaping.
+        val zoomUrl = sanitizeImageUrl(if (isError && sanitizeImageUrl(fallbackUrl) != null) fallbackUrl else url)
+        if (zoomUrl != null) {
+            ZoomableImageDialog(url = zoomUrl, onDismiss = { showZoom = false })
+        } else {
+            showZoom = false
+        }
     }
 }
 
@@ -249,16 +269,38 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
 
             val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
             val actualModel = if (url is String && url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else url
+
+            // --- NOSLOP_MEDIA_PEERS_V1 ---
+            // Same missing-else as elsewhere: "high" is the DEFAULT and had no
+            // ceiling, so opening a 6000px original decoded it at full size.
+            // That is the black screen — the decode fails or is killed before it
+            // ever reaches the canvas. 2560 is generous for a zoomable view.
+            var zoomLoading by remember(actualModel) { mutableStateOf(true) }
+            var zoomFailed by remember(actualModel) { mutableStateOf(false) }
+
             val request = coil.request.ImageRequest.Builder(LocalContext.current)
                 .data(actualModel)
                 .apply {
                     when (mediaSettings.imageQuality) {
                         "low" -> size(1280)
                         "medium" -> size(1920)
+                        else -> size(2560)
                     }
                 }
                 .memoryCacheKey(actualModel?.toString() + "_zoom_" + mediaSettings.imageQuality)
                 .diskCacheKey(actualModel?.toString() + "_zoom_" + mediaSettings.imageQuality)
+                .listener(
+                    onStart = { zoomLoading = true },
+                    onSuccess = { _, _ ->
+                        zoomLoading = false
+                        zoomFailed = false
+                    },
+                    onCancel = { zoomLoading = false },
+                    onError = { _, _ ->
+                        zoomLoading = false
+                        zoomFailed = true
+                    }
+                )
                 .build()
                 
             AsyncImage(
@@ -288,6 +330,8 @@ fun ZoomableImageDialog(url: String, onDismiss: () -> Unit) {
                     .transformable(state = state),
                 contentScale = ContentScale.Fit
             )
+
+            ZoomStateOverlay(loading = zoomLoading, failed = zoomFailed)
 
             IconButton(
                 onClick = onDismiss,
@@ -988,6 +1032,39 @@ fun ContentHealthOverlay(
         }
     }
 }
+@Composable
+private fun ZoomStateOverlay(loading: Boolean, failed: Boolean) {
+    // --- NOSLOP_MEDIA_PEERS_V1 ---
+    if (!loading && !failed) return
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        if (failed) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = TextMuted,
+                    modifier = Modifier.size(44.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "Could not load full image".tr,
+                    color = TextMuted,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        } else {
+            CircularProgressIndicator(
+                color = AccentGreen,
+                modifier = Modifier.size(40.dp),
+                strokeWidth = 3.dp
+            )
+        }
+    }
+}
+
 @Composable
 fun LoadingShimmer(modifier: Modifier = Modifier) {
     val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "shimmer")

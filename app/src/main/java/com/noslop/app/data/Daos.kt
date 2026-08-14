@@ -157,6 +157,10 @@ interface CommentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertComment(comment: MeshComment)
 
+    // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
+    @Query("DELETE FROM mesh_comments WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteCommentsByAuthor(authorId: String)
+
     @Query("DELETE FROM mesh_comments WHERE postId = :postId")
     suspend fun deleteCommentsForPost(postId: String)
 
@@ -197,6 +201,10 @@ interface ReactionDao {
 
     @Query("SELECT COUNT(*) FROM mesh_reactions WHERE postId = :postId")
     suspend fun getReactionCountForPost(postId: String): Int
+
+    // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
+    @Query("DELETE FROM mesh_reactions WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteReactionsByAuthor(authorId: String)
 
     @Query("DELETE FROM mesh_reactions WHERE postId = :postId")
     suspend fun deleteReactionsForPost(postId: String)
@@ -249,12 +257,20 @@ interface VoteDao {
     @Query("DELETE FROM mesh_votes WHERE id = :id")
     suspend fun deleteVoteById(id: String)
 
+    // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
+    @Query("DELETE FROM mesh_votes WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteVotesByAuthor(authorId: String)
+
     @Query("DELETE FROM mesh_votes WHERE postId = :postId")
     suspend fun deleteVotesForPost(postId: String)
 }
 
 @Dao
 interface CommentVoteDao {
+    // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
+    @Query("DELETE FROM comment_votes WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteCommentVotesByAuthor(authorId: String)
+
     @Query("SELECT * FROM comment_votes WHERE commentId = :commentId ORDER BY timestamp ASC")
     fun getVotesForComment(commentId: String): Flow<List<CommentVote>>
 

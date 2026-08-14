@@ -48,7 +48,12 @@ object PublicApiService {
         try {
             when (category) {
                 "Technology", "Open Source", "Self-Hosting" -> {
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    // --- NOSLOP_FEED_VARIETY_V1 --- searchVideos already supported
+                    // recentOnly (YouTube's "this year" upload filter) but no
+                    // caller ever set it, so browsing returned relevance-ranked
+                    // results with no date bound and skewed old. Explicit user
+                    // searches below deliberately stay unfiltered.
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, "technology", apiKeyRepo, language = language) }
                     fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, "technology", apiKeyRepo) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "hot") }
@@ -61,7 +66,7 @@ object PublicApiService {
                 "Science" -> {
                     fetchAsync("api-nasa-apod") { NasaApiClient.fetchAPOD(apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query science") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query science", recentOnly = true) }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.getTopHeadlines("science", apiKeyRepo, language = language) }
                     fetchAsync("api-guardian") { GuardianApiClient.searchSection("science", apiKeyRepo) }
                 }
@@ -78,7 +83,7 @@ object PublicApiService {
                 "Music" -> {
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music", recentOnly = true) }
                     fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
                     fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
                 }
@@ -95,7 +100,7 @@ object PublicApiService {
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes("$query health", apiKeyRepo, language = language) }
                 }
                 "Gaming" -> {
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query gaming") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query gaming", recentOnly = true) }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles("gaming", null, apiKeyRepo, language = language) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("gaming", "hot") }
                 }
@@ -105,7 +110,7 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("LifeProTips", "hot") }
                 }
                 "Automotive" -> {
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query cars automotive") }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query cars automotive", recentOnly = true) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("cars", "hot") }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles("automotive cars", null, apiKeyRepo, language = language) }
                 }
