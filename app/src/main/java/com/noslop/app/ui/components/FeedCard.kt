@@ -65,9 +65,12 @@ fun FullScreenImage(url: String) {
     val request = coil.request.ImageRequest.Builder(context)
         .data(url)
         .apply {
+            // --- NOSLOP_IMAGE_SOURCES_V1 --- see MediaComponents: "high" is the
+            // default and had no size ceiling, so originals decoded full-res.
             when (mediaSettings.imageQuality) {
                 "low" -> size(640)
                 "medium" -> size(960)
+                else -> size(1600)
             }
         }
         .memoryCacheKey(url + "_" + mediaSettings.imageQuality)

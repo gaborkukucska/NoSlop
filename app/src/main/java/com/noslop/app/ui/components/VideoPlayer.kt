@@ -3,6 +3,7 @@ package com.noslop.app.ui.components
 
 import com.noslop.app.util.tr
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.clickable
@@ -48,9 +49,75 @@ internal sealed class VideoSource {
     object Unavailable : VideoSource()
 }
 
-private val sourceCache = ConcurrentHashMap<String, VideoSource>(64)
+// --- NOSLOP_EXPIRY_FIX_V1 -------------------------------------------------
+// Resolved media URLs are NOT permanent. googlevideo.com / vimeocdn.com and
+// most signed CDN links carry an `expire=<epoch>` parameter and start
+// returning 403/410 (or an HTML error body) once it passes. The old cache
+// held a resolved VideoSource forever, so if the user lingered on preceding
+// slides the feed would hand a long-dead URL to ExoPlayer on arrival.
+//
+// Every cache entry now carries an expiry and is re-resolved once stale.
+private class CachedSource(val source: VideoSource, val expiresAtMs: Long)
 
-internal fun isSourceCached(url: String): Boolean = sourceCache.containsKey(url)
+private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
+
+// Re-resolve this far BEFORE the stated expiry, so a slow handshake or a
+// mid-playback range request can't land on the far side of the deadline.
+internal const val URL_EXPIRY_GUARD_MS = 45_000L
+
+// Signed URL with no parseable deadline: assume a short life.
+private const val SIGNED_URL_FALLBACK_TTL_MS = 4 * 60_000L
+// Plain static asset (an mp4 straight off an RSS feed): effectively stable.
+private const val STATIC_URL_TTL_MS = 6 * 60 * 60_000L
+// Don't let one transient network blip mark a video dead for the session.
+private const val UNAVAILABLE_TTL_MS = 60_000L
+// Embed page URLs are stable.
+private const val EMBED_TTL_MS = 12 * 60 * 60_000L
+
+private val EXPIRY_QUERY_PATTERN =
+    Regex("[?&](?:expire|expires|exp)=(\\d{10,13})", RegexOption.IGNORE_CASE)
+private val EXPIRY_PATH_PATTERN =
+    Regex("/expire/(\\d{10,13})", RegexOption.IGNORE_CASE)
+private val SIGNED_URL_HINT_PATTERN = Regex(
+    "googlevideo\\.com|vimeocdn\\.com|akamaized\\.net|cloudfront\\.net|[?&]sig=|[?&]signature=|X-Amz-",
+    RegexOption.IGNORE_CASE
+)
+
+/**
+ * Wall-clock ms after which [url] should be treated as dead and re-resolved.
+ * Local files and the on-device mesh proxy never expire.
+ */
+internal fun expiryOfResolvedUrl(url: String): Long {
+    if (url.startsWith("file://")) return Long.MAX_VALUE
+    if (url.contains("127.0.0.1") || url.contains("localhost")) return Long.MAX_VALUE
+
+    val epoch = EXPIRY_QUERY_PATTERN.find(url)?.groupValues?.get(1)
+        ?: EXPIRY_PATH_PATTERN.find(url)?.groupValues?.get(1)
+    if (epoch != null) {
+        val raw = epoch.toLongOrNull()
+        if (raw != null) {
+            val ms = if (epoch.length <= 10) raw * 1000L else raw
+            return ms - URL_EXPIRY_GUARD_MS
+        }
+    }
+
+    return System.currentTimeMillis() + if (SIGNED_URL_HINT_PATTERN.containsMatchIn(url)) {
+        SIGNED_URL_FALLBACK_TTL_MS
+    } else {
+        STATIC_URL_TTL_MS
+    }
+}
+
+private fun expiryOfSource(source: VideoSource): Long = when (source) {
+    is VideoSource.Direct -> expiryOfResolvedUrl(source.url)
+    is VideoSource.Embed -> System.currentTimeMillis() + EMBED_TTL_MS
+    is VideoSource.Unavailable -> System.currentTimeMillis() + UNAVAILABLE_TTL_MS
+}
+
+internal fun isSourceCached(url: String): Boolean {
+    val entry = sourceCache[url] ?: return false
+    return entry.expiresAtMs > System.currentTimeMillis()
+}
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
@@ -58,25 +125,35 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
     val cacheKey = "$rawUrl||$quality"
 
+    fun freshOrNull(): VideoSource? {
+        val entry = sourceCache[cacheKey] ?: return null
+        if (entry.expiresAtMs > System.currentTimeMillis()) return entry.source
+        Logger.info("VIDEO_RESOLVE", "Cached source for $rawUrl expired — re-resolving")
+        sourceCache.remove(cacheKey)
+        return null
+    }
+
     if (!forceRefresh) {
-        sourceCache[cacheKey]?.let { return it }
+        freshOrNull()?.let { return it }
+    } else {
+        sourceCache.remove(cacheKey)
     }
 
     val mutex = resolveMutexes.computeIfAbsent(cacheKey) { kotlinx.coroutines.sync.Mutex() }
-    
-    return mutex.withLock {
+
+    val resolved = mutex.withLock {
+        // Another coroutine may have resolved it while we waited on the lock.
         if (!forceRefresh) {
-            sourceCache[cacheKey]?.let { return@withLock it }
+            freshOrNull()?.let { return@withLock it }
         }
-        
-        try {
-            val result = doResolve(rawUrl, quality)
-            sourceCache[cacheKey] = result
-            result
-        } finally {
-            resolveMutexes.remove(cacheKey)
-        }
+        val result = doResolve(rawUrl, quality)
+        sourceCache[cacheKey] = CachedSource(result, expiryOfSource(result))
+        result
     }
+    // Drop the mutex only after releasing it, otherwise a concurrent caller can
+    // computeIfAbsent a *different* Mutex and resolve in parallel.
+    resolveMutexes.remove(cacheKey)
+    return resolved
 }
 
 private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = withContext(Dispatchers.IO) {
@@ -284,6 +361,47 @@ private fun fallbackVimeoEmbed(url: String): VideoSource {
     return VideoSource.Embed("https://player.vimeo.com/video/$videoId?autoplay=1&background=0")
 }
 
+// Auto re-resolve attempts before the user is shown a Retry button.
+private const val MAX_AUTO_RESOLVE_RETRIES = 2
+
+/**
+ * True for failures that a fresh URL is likely to fix: expired/blocked HTTP
+ * responses, dropped or timed-out connections, and the malformed-container
+ * case you get when a CDN answers an expired link with an HTML error page.
+ *
+ * The old code only looked for a bare 403 on `error.cause`, which missed 410
+ * Gone, socket resets from a cold mesh circuit, and anything media3 wrapped
+ * one level deeper.
+ */
+private fun isRecoverablePlaybackError(error: androidx.media3.common.PlaybackException): Boolean {
+    when (error.errorCode) {
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED -> return true
+    }
+    // Belt and braces: walk the cause chain for an HTTP status we recognise.
+    var cause: Throwable? = error.cause
+    var depth = 0
+    while (cause != null && depth < 5) {
+        if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
+            val code = cause.responseCode
+            if (code == 403 || code == 404 || code == 410 || code == 429 || code >= 500) return true
+        }
+        if (cause is java.net.SocketTimeoutException ||
+            cause is java.net.SocketException ||
+            cause is java.io.EOFException
+        ) return true
+        cause = cause.cause
+        depth++
+    }
+    return false
+}
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun VideoPlayer(
@@ -343,6 +461,8 @@ fun VideoPlayer(
                         isVisible = isVisible,
                         thumbnailUrl = thumbnailUrl,
                         thumbnailB64 = thumbnailB64,
+                        retryKey = retryTrigger,
+                        canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES,
                         onRetry = { retryTrigger++ },
                         onReady = { isVideoReady = true }
                     )
@@ -431,6 +551,93 @@ fun VideoPlayer(
                 com.noslop.app.ui.LoadingShimmer()
             }
         }
+
+        // --- NOSLOP_LOADING_OVERLAY_V1 ---
+        // Spinner on top of the poster while we resolve a stream and buffer the
+        // first frame. Feed slides are usually pre-warmed so this flashes by;
+        // search results are not, and resolveSource() can take several seconds
+        // walking the InnerTube clients, which previously looked like a freeze.
+        val isResolving = source == null
+        val awaitingFirstFrame = source is VideoSource.Direct || source is VideoSource.Embed
+
+        // Never spin forever: if nothing has become ready by now, something is
+        // wrong and the error / thumbnail state is the more honest thing to show.
+        var loadingTimedOut by remember(url, retryTrigger) { mutableStateOf(false) }
+        LaunchedEffect(url, retryTrigger, isVideoReady) {
+            if (isVideoReady) {
+                loadingTimedOut = false
+            } else {
+                kotlinx.coroutines.delay(45_000L)
+                loadingTimedOut = true
+            }
+        }
+
+        if (isVisible && !isVideoReady && !loadingTimedOut && (isResolving || awaitingFirstFrame)) {
+            VideoLoadingOverlay(
+                label = if (isResolving) "Finding stream".tr else "Buffering".tr,
+                modifier = Modifier.zIndex(2f)
+            )
+        }
+    }
+}
+
+// --- NOSLOP_LOADING_OVERLAY_V1 ---------------------------------------------
+/**
+ * Translucent loading indicator drawn OVER whatever is already on screen
+ * (usually the poster thumbnail).
+ *
+ * Deliberately not [com.noslop.app.ui.LoadingShimmer]: that one paints an
+ * opaque PrimaryBlack background, which is why it could only ever be shown
+ * when there was no thumbnail to hide.
+ */
+@Composable
+private fun VideoLoadingOverlay(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(
+        label = "video_loading"
+    )
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                900,
+                easing = androidx.compose.animation.core.FastOutSlowInEasing
+            ),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "video_loading_pulse"
+    )
+
+    Box(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .background(
+                    PrimaryBlack.copy(alpha = 0.55f),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
+                )
+                .padding(horizontal = 24.dp, vertical = 20.dp)
+        ) {
+            CircularProgressIndicator(
+                color = AccentGreen,
+                modifier = Modifier.size(40.dp),
+                strokeWidth = 3.dp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = label,
+                color = TextLight.copy(alpha = pulse),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        }
     }
 }
 
@@ -443,6 +650,8 @@ private fun ExoVideoPlayer(
     isVisible: Boolean,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
+    retryKey: Int = 0,
+    canRetry: Boolean = true,
     onRetry: () -> Unit,
     onReady: () -> Unit
 ) {
@@ -472,12 +681,17 @@ private fun ExoVideoPlayer(
 
     var videoSizeState by remember { mutableStateOf(androidx.media3.common.VideoSize.UNKNOWN) }
 
-    DisposableEffect(url) {
-        Logger.info("VIDEO", "Loading video in ExoPlayer: $url")
+    // Keyed on retryKey as well as url: a forced re-resolve can legitimately
+    // return the *same* URL (a plain mp4 that 503'd, say), and without the
+    // extra key the effect would not re-run and the slide would sit dead.
+    DisposableEffect(url, retryKey) {
+        Logger.info("VIDEO", "Loading video in ExoPlayer: $url (attempt ${retryKey + 1})")
         hasError = false
         isBuffering = true
 
-        val preloaded = PreloadManager.claim(rawUrl)
+        // Pass the resolved URL: PreloadManager rejects a warm player whose
+        // baked-in URL has expired or no longer matches what we just resolved.
+        val preloaded = PreloadManager.claim(rawUrl, url)
         val player = if (preloaded != null) {
             preloaded.apply {
                 playWhenReady = isVisible
@@ -502,14 +716,14 @@ private fun ExoVideoPlayer(
                         videoSizeState = videoSize
                     }
                     override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                        val cause = error.cause
-                        if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
-                            Logger.warn("VIDEO", "403 Forbidden detected for $url. Auto-retrying resolution...")
+                        if (isRecoverablePlaybackError(error) && canRetry) {
+                            Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}) for $url — re-resolving a fresh stream URL...")
+                            com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                             onRetry()
                         } else {
                             hasError = true
                             errorMessage = error.message ?: "Playback failed"
-                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                            Logger.error("VIDEO", "ExoPlayer error: ${error.message} (code=${error.errorCode}, retries=$retryKey) | URL: $url", error.stackTraceToString())
                         }
                     }
                 })
@@ -521,14 +735,14 @@ private fun ExoVideoPlayer(
                 // If the player already encountered an error (e.g. 403) in the background before we claimed it,
                 // the listener won't fire retroactively. We must handle it here.
                 playerError?.let { error ->
-                    val cause = error.cause
-                    if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
-                        Logger.warn("VIDEO", "403 Forbidden detected on preloaded player for $url. Auto-retrying...")
+                    if (isRecoverablePlaybackError(error) && canRetry) {
+                        Logger.warn("VIDEO", "Preloaded player already failed (code=${error.errorCode}) for $url — re-resolving...")
+                        com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                         onRetry()
                     } else {
                         hasError = true
                         errorMessage = error.message ?: "Playback failed"
-                        Logger.error("VIDEO", "Preloaded ExoPlayer had prior error: ${error.message} | URL: $url")
+                        Logger.error("VIDEO", "Preloaded ExoPlayer had prior error: ${error.message} (code=${error.errorCode}) | URL: $url")
                     }
                 }
             }
@@ -589,14 +803,14 @@ private fun ExoVideoPlayer(
                             videoSizeState = videoSize
                         }
                         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                            val cause = error.cause
-                            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException && cause.responseCode == 403) {
-                                Logger.warn("VIDEO", "403 Forbidden detected for $url. Auto-retrying resolution...")
+                            if (isRecoverablePlaybackError(error) && canRetry) {
+                                Logger.warn("VIDEO", "Recoverable playback error (code=${error.errorCode}) for $url — re-resolving a fresh stream URL...")
+                                com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                                 onRetry()
                             } else {
                                 hasError = true
                                 errorMessage = error.message ?: "Playback failed"
-                                Logger.error("VIDEO", "ExoPlayer error: ${error.message} | URL: $url", error.stackTraceToString())
+                                Logger.error("VIDEO", "ExoPlayer error: ${error.message} (code=${error.errorCode}, retries=$retryKey) | URL: $url", error.stackTraceToString())
                             }
                         }
                     })
@@ -673,8 +887,13 @@ private fun ExoVideoPlayer(
         },
         contentAlignment = Alignment.Center
     ) {
-        if (isBuffering && thumbnailUrl == null && thumbnailB64 == null && !hasError) {
-            com.noslop.app.ui.LoadingShimmer()
+        if (isBuffering && !hasError) {
+            if (thumbnailUrl == null && thumbnailB64 == null) {
+                com.noslop.app.ui.LoadingShimmer()
+            } else {
+                // Rebuffering mid-stream: keep the poster visible underneath.
+                VideoLoadingOverlay(label = "Buffering".tr)
+            }
         }
 
         if (!hasError) {

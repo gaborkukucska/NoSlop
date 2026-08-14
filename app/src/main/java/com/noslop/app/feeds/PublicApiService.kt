@@ -87,6 +87,7 @@ object PublicApiService {
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
                     fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                     fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
+                    fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
                 }
                 "Health" -> {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.getTopHeadlines("health", apiKeyRepo, language = language) }
@@ -130,6 +131,8 @@ object PublicApiService {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
+                    fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
+                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
                 }
                 "Search Articles" -> {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }

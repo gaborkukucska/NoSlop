@@ -79,7 +79,13 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
     var showZoom by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
-    var isError by remember { mutableStateOf(false) }
+    // --- NOSLOP_IMAGE_SOURCES_V1 ---
+    // Keyed on the URLs: these composables are recycled by the pager, and
+    // unkeyed remember{} meant a slide that failed stayed "failed" for whatever
+    // item scrolled into its slot next.
+    var isError by remember(url, fallbackUrl) { mutableStateOf(false) }
+    var loadFailed by remember(url, fallbackUrl) { mutableStateOf(false) }
+    var isLoading by remember(url, fallbackUrl) { mutableStateOf(true) }
     val thumbBitmap = remember(thumbnailB64) {
         thumbnailB64?.let {
             try {
@@ -103,15 +109,36 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
             .apply {
+                // --- NOSLOP_IMAGE_SOURCES_V1 ---
+                // "high" (the DEFAULT) previously fell through with no size at
+                // all, so a 6000px original was decoded full-res and then run
+                // through .blur(20.dp). Slow enough to look like a hang, and an
+                // OOM risk on modest devices. Every tier now has a ceiling.
                 when (mediaSettings.imageQuality) {
                     "low" -> size(640)
                     "medium" -> size(960)
+                    else -> size(1600)
                 }
             }
             .memoryCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
             .diskCacheKey(actualModel?.toString() + "_" + mediaSettings.imageQuality)
             .listener(
-                onError = { _, _ -> if (!isError) isError = true }
+                onStart = { isLoading = true },
+                onSuccess = { _, _ ->
+                    isLoading = false
+                    loadFailed = false
+                },
+                onCancel = { isLoading = false },
+                onError = { _, _ ->
+                    isLoading = false
+                    // First failure with a fallback available: swap and retry.
+                    // Otherwise we've genuinely run out of options.
+                    if (!isError && safeFallback != null) {
+                        isError = true
+                    } else {
+                        loadFailed = true
+                    }
+                }
             )
             .build()
             
@@ -141,6 +168,46 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
             error = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) },
             fallback = thumbBitmap?.let { BitmapPainter(it.asImageBitmap()) }
         )
+
+        // --- NOSLOP_IMAGE_SOURCES_V1 ---
+        // Mesh posts carry an inline base64 thumbnail and so already have a
+        // placeholder/error painter. Clearnet images have neither, which is why
+        // a slow or dead image rendered as a plain black slide with no hint that
+        // anything was happening.
+        if (thumbBitmap == null) {
+            if (loadFailed) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = TextMuted,
+                        modifier = Modifier.size(44.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "Image unavailable".tr,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            } else if (isLoading) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = AccentGreen,
+                        modifier = Modifier.size(40.dp),
+                        strokeWidth = 3.dp
+                    )
+                }
+            }
+        }
     }
 
     if (showZoom) {

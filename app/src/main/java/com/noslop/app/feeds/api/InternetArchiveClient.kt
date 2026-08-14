@@ -23,6 +23,24 @@ object InternetArchiveClient {
     private const val TAG = "ARCHIVE_API"
     private val gson = Gson()
 
+    // --- NOSLOP_IMAGE_SOURCES_V1 ---
+    // Archive.org carries an enormous volume of machine-uploaded YouTube
+    // mirrors. They dominate download-sorted results and are almost never what
+    // someone browsing a curated audio feed wants.
+    // NB: no `$` anywhere in this pattern — it lives in a Kotlin raw string,
+    // where `$` would be parsed as a template expression. \b does the job.
+    private val YOUTUBE_MIRROR_PATTERN = Regex(
+        """\b(youtube|yt-dlp|youtube-dl)\b|audio\s+translation|dubbed\s+audio""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun isLowValueUpload(identifier: String, title: String, extra: String?): Boolean {
+        if (identifier.startsWith("youtube-", ignoreCase = true)) return true
+        if (identifier.startsWith("yt-", ignoreCase = true)) return true
+        val haystack = listOfNotNull(title, extra).joinToString(" ")
+        return YOUTUBE_MIRROR_PATTERN.containsMatchIn(haystack)
+    }
+
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     /**
@@ -47,8 +65,15 @@ object InternetArchiveClient {
         sourceId: String = "api-archive-audio",
         rows: Int = 20
     ): List<FeedItem> {
+        // --- NOSLOP_IMAGE_SOURCES_V1 ---
+        // Sorting all of mediatype:audio by download count surfaces the bulk
+        // auto-uploaded YouTube channel mirrors (dubs, "audio translations",
+        // whole-channel rips) far more often than anything curated. Exclude
+        // them at the query level; isLowValueUpload() catches the stragglers
+        // that aren't tagged.
         val encodedQuery = java.net.URLEncoder.encode(
-            "$query AND mediatype:audio", "UTF-8"
+            "($query) AND mediatype:audio AND -subject:youtube AND -collection:opensource_audio",
+            "UTF-8"
         )
         return search(encodedQuery, "audio", sourceId, rows)
     }
@@ -128,6 +153,23 @@ object InternetArchiveClient {
                             val obj = doc.asJsonObject
                             val identifier = obj.get("identifier")?.asString ?: return@async null
                             val title = obj.get("title")?.asString ?: return@async null
+
+                            // --- NOSLOP_IMAGE_SOURCES_V1 ---
+                            // `subject` comes back as either a bare string or an
+                            // array depending on how many tags the item carries.
+                            val subjectText = try {
+                                val s = obj.get("subject")
+                                when {
+                                    s == null || s.isJsonNull -> null
+                                    s.isJsonArray -> s.asJsonArray.joinToString(" ") { it.asString }
+                                    else -> s.asString
+                                }
+                            } catch (_: Exception) { null }
+
+                            if (isLowValueUpload(identifier, title, subjectText)) {
+                                Logger.debug(TAG, "Filtered YouTube-mirror upload: $identifier")
+                                return@async null
+                            }
 
                             val creator = try { obj.get("creator")?.asString } catch (_: Exception) { null }
                             val description = try { obj.get("description")?.asString?.take(300) } catch (_: Exception) { null }

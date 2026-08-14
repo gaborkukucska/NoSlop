@@ -147,7 +147,10 @@ object SourceLibrary {
         BuiltInSource("api-nasa-apod", "NASA Picture of the Day", "nasa:apod", "api", "Science"),
         BuiltInSource("api-nasa-library", "NASA Image Library", "nasa:library", "api", "Science"),
         BuiltInSource("api-vimeo-featured", "Vimeo Featured", "vimeo:featured", "api", "Video Platforms"),
-        BuiltInSource("api-wikimedia-featured", "Wikimedia Featured", "wikimedia:featured", "api", "Photography")
+        BuiltInSource("api-wikimedia-featured", "Wikimedia Featured", "wikimedia:featured", "api", "Photography"),
+        // NOSLOP_IMAGE_SOURCES_V1 — keyless, so Art/Photography still has something
+        // to show when no Pexels key is configured.
+        BuiltInSource("api-artic-artworks", "Art Institute of Chicago", "artic:artworks", "api", "Art")
     )
 
     fun getSourcesForCategory(category: String): List<BuiltInSource> {
