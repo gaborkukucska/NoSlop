@@ -57,6 +57,8 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                         override fun onIsPlayingChanged(playing: Boolean) {
                             Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
                             isPlaying = playing
+                            // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
+                            if (playing) isBuffering = false
                         }
                         override fun onPlaybackStateChanged(state: Int) {
                             val stateStr = when(state) {
@@ -67,6 +69,8 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                                 else -> "UNKNOWN"
                             }
                             Logger.info("AUDIO", "ExoPlayer state changed: $stateStr for $url")
+                            // --- NOSLOP_AUDIO_SPINNER_V1 --- the preloaded branch was missed first time round
+                            isBuffering = state == androidx.media3.common.Player.STATE_BUFFERING
                             if (state == androidx.media3.common.Player.STATE_READY) {
                                 duration = this@apply.duration
                             }
@@ -109,6 +113,8 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                             override fun onIsPlayingChanged(playing: Boolean) {
                                 Logger.info("AUDIO", "ExoPlayer isPlayingChanged: $playing for $url")
                                 isPlaying = playing
+                                // --- NOSLOP_AUDIO_SPINNER_V1 --- audio is audibly flowing; never show a spinner
+                                if (playing) isBuffering = false
                             }
                             override fun onPlaybackStateChanged(state: Int) {
                                 val stateStr = when(state) {
@@ -130,6 +136,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                 
             exoPlayer = player
             isPlaying = player.isPlaying
+            // --- NOSLOP_AUDIO_SPINNER_V1 ---
+            // The decisive fix. A claimed preloaded player has usually reached
+            // STATE_READY while still sitting in the preload cache, before the
+            // UI attaches its listener. onPlaybackStateChanged only fires on a
+            // CHANGE, so no callback ever arrives and the listener alone can
+            // never clear the initial `true`. Seed from the real state instead.
+            isBuffering = player.playbackState == androidx.media3.common.Player.STATE_BUFFERING
             if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
                 duration = player.duration
             }
