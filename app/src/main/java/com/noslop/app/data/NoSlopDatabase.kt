@@ -45,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -109,6 +109,17 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        // --- NOSLOP_DELETION_BUDGET_V1 ---
+        // Purely additive: an existing row keeps its data and starts with a
+        // full deletion budget, so any deletion still pending propagation gets
+        // MAX_DELETION_BROADCASTS more attempts after the upgrade rather than
+        // being silenced immediately.
+        val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE mesh_posts ADD COLUMN deletionBroadcasts INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -117,7 +128,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build()
                 INSTANCE = instance
                 instance

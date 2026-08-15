@@ -13,6 +13,8 @@ class HandshakePacketHandler(
 ) {
     private val TAG = "MESH_HANDLER"
     private val peerDao = db.peerDao()
+    // --- NOSLOP_DELETION_BUDGET_V1 --- see refreshDeletionBudgetFor()
+    private val postDao = db.postDao()
     private val notificationDao = db.notificationDao()
     private val autoAcceptRateLimits = java.util.concurrent.ConcurrentHashMap<String, MutableList<Long>>()
 
@@ -351,6 +353,14 @@ class HandshakePacketHandler(
             )
             peerDao.insertPeer(newPeer)
         } else {
+            // --- NOSLOP_DELETION_BUDGET_V1 ---
+            // A peer that was offline has come back. Refill the deletion budget
+            // so any post we deleted while they were away is announced again —
+            // they were not there to hear it the first time. Only on an
+            // offline -> online transition, otherwise every ANNOUNCE_PEER from
+            // an already-online peer would reset the budget and we would be
+            // back to broadcasting forever.
+            val cameBackOnline = !peer.isOnline
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 onionAddress = announcePay.onionAddress,
@@ -363,8 +373,28 @@ class HandshakePacketHandler(
                 isOnline = true,
                 lastSeenAt = System.currentTimeMillis()
             ))
+            if (cameBackOnline) {
+                refreshDeletionBudgetFor(peer.handle)
+            }
         }
         return true
+    }
+
+    /**
+     * NOSLOP_DELETION_BUDGET_V1
+     *
+     * Give our own pending deletions a fresh retry budget because [peerHandle]
+     * just reconnected. Failures are logged and swallowed: a peer coming back
+     * online must never be blocked by bookkeeping.
+     */
+    private suspend fun refreshDeletionBudgetFor(peerHandle: String) {
+        try {
+            val myPubKey = repo.getLocalIdentity()?.publicKeyB64 ?: return
+            postDao.resetDeletionBroadcasts(myPubKey)
+            Logger.info(TAG, "Peer $peerHandle reconnected — refreshed deletion announce budget")
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Could not refresh deletion budget: ${e.message}")
+        }
     }
 
     suspend fun handleSubscribe(packet: NetworkPacket): Boolean {

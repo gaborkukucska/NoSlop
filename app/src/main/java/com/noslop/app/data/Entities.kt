@@ -84,7 +84,19 @@ data class MeshPost(
     val clearnetThumbnailUrl: String? = null,
     val clearnetMediaType: String? = null, // "video", "audio", "image", or null for article
     val isOrphaned: Boolean = false,
-    val mediaSize: Long = 0L
+    val mediaSize: Long = 0L,
+    /**
+     * NOSLOP_DELETION_BUDGET_V1
+     *
+     * How many times we have re-announced this post's deletion. The presence
+     * heartbeat used to re-broadcast every orphaned post on every cycle,
+     * forever, with a fresh packet id each time so gossip dedup could not
+     * suppress it. This bounds that.
+     *
+     * Reset to 0 when a peer that was offline reconnects, so a deletion still
+     * reaches someone who was not around to hear it the first time.
+     */
+    val deletionBroadcasts: Int = 0
 )
 
 @Entity(

@@ -105,6 +105,26 @@ interface PostDao {
     @Query("SELECT * FROM mesh_posts WHERE isOrphaned = 1 AND authorPublicKeyB64 = :authorId")
     suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost>
 
+    // --- NOSLOP_DELETION_BUDGET_V1 ---
+    // Orphaned posts still owing a deletion announcement. Ordered oldest-first
+    // so a large backlog drains predictably instead of starving early entries.
+    @Query(
+        "SELECT * FROM mesh_posts WHERE isOrphaned = 1 AND authorPublicKeyB64 = :authorId " +
+        "AND deletionBroadcasts < :maxBroadcasts ORDER BY timestamp ASC LIMIT :limit"
+    )
+    suspend fun getPendingDeletionsByAuthor(
+        authorId: String,
+        maxBroadcasts: Int,
+        limit: Int
+    ): List<MeshPost>
+
+    @Query("UPDATE mesh_posts SET deletionBroadcasts = deletionBroadcasts + 1 WHERE id = :id")
+    suspend fun incrementDeletionBroadcast(id: String)
+
+    /** Give every pending deletion a fresh budget — used when a peer reconnects. */
+    @Query("UPDATE mesh_posts SET deletionBroadcasts = 0 WHERE isOrphaned = 1 AND authorPublicKeyB64 = :authorId")
+    suspend fun resetDeletionBroadcasts(authorId: String)
+
     @Query("UPDATE mesh_posts SET isOrphaned = 1, content = '[Deleted]', mediaUrl = null, thumbnailB64 = null WHERE id = :id")
     suspend fun markPostOrphaned(id: String)
 

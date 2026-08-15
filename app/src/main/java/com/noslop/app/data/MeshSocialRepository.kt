@@ -44,6 +44,20 @@ class MeshSocialRepository(
     private val TAG = "REPOSITORY"
 
     private val postDao = db.postDao()
+
+    /**
+     * NOSLOP_DELETION_BUDGET_V1
+     *
+     * How many times a single deletion is re-announced before going quiet. The
+     * post stays orphaned either way — this only stops the shouting. The budget
+     * refills whenever a peer that was offline reconnects (see
+     * HandshakePacketHandler), which is what makes deletions still reach
+     * someone who was away.
+     */
+    private val MAX_DELETION_BROADCASTS = 5
+
+    /** Deletions announced per heartbeat cycle. Each is paced 2s apart. */
+    private val MAX_DELETIONS_PER_CYCLE = 5
     private val peerDao = db.peerDao()
     private val messageDao = db.messageDao()
     private val commentDao = db.commentDao()
@@ -277,7 +291,18 @@ class MeshSocialRepository(
                     // Periodic Deletion Sync
                     if (myKeys != null) {
                         val currentTimestamp = System.currentTimeMillis()
-                        val orphanedPosts = postDao.getOrphanedPostsByAuthor(myKeys.publicKeyB64)
+                        // --- NOSLOP_DELETION_BUDGET_V1 ---
+                        // Was: every orphaned post, every cycle, forever. Now a
+                        // bounded budget per post, and at most
+                        // MAX_DELETIONS_PER_CYCLE per heartbeat so a large
+                        // backlog cannot monopolise the loop (each send is
+                        // paced 2s, so 100 pending deletions previously meant a
+                        // 200-second cycle doing nothing else).
+                        val orphanedPosts = postDao.getPendingDeletionsByAuthor(
+                            myKeys.publicKeyB64,
+                            MAX_DELETION_BROADCASTS,
+                            MAX_DELETIONS_PER_CYCLE
+                        )
                         for (post in orphanedPosts) {
                             val payloadToSign = "${post.id}|${myKeys.publicKeyB64}|$currentTimestamp"
                             val delSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
@@ -296,6 +321,8 @@ class MeshSocialRepository(
                                 signature = delSig
                             )
                             com.noslop.app.mesh.GossipService.broadcast(delPacket)
+                            // --- NOSLOP_DELETION_BUDGET_V1 --- spend one unit of budget
+                            postDao.incrementDeletionBroadcast(post.id)
                             kotlinx.coroutines.delay(2000L) // Pace the broadcasts to avoid Tor overload
                         }
                     }
