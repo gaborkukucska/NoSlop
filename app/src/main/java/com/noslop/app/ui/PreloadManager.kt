@@ -67,10 +67,22 @@ object PreloadManager {
         }
     }
 
-    private val youtubeUrlPattern = Regex("(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)")
-    private val shouldPrebufferUrl: (String) -> Boolean = { url ->
-        !youtubeUrlPattern.containsMatchIn(url)
-    }
+    // --- NOSLOP_YT_COLDSTART_V1 ---
+    // YouTube URLs used to be excluded from prebuffering wholesale, because a
+    // resolved googlevideo link expired fast enough that a warm player was more
+    // liability than win. That is no longer the trade:
+    //
+    //   * resolved URLs carry expire= roughly six hours out, and
+    //     expiryOfResolvedUrl() parses it,
+    //   * warmUp() refuses anything with under MIN_USEFUL_TTL_MS remaining,
+    //   * claim() rejects a warm player whose URL no longer matches what the
+    //     feed just resolved.
+    //
+    // With those in place the exclusion only guaranteed that every YouTube
+    // slide started from byte zero — and these are itag=18 progressive MP4s
+    // running to 160MB+. Preload players use the small LoadControl (10s max
+    // buffer), so this warms about ten seconds, not the whole file.
+    private val shouldPrebufferUrl: (String) -> Boolean = { _ -> true }
 
     private val pendingTasks = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
     private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
@@ -127,7 +139,15 @@ object PreloadManager {
         when (resolved) {
             is VideoSource.Direct -> {
                 if (!shouldPrebufferUrl(rawUrl)) {
-                    Logger.info("PRELOAD", "Skipping ExoPlayer buffer for YouTube URL: $rawUrl")
+                    Logger.info("PRELOAD", "Skipping ExoPlayer buffer for: $rawUrl")
+                    finish(rawUrl, deferred)
+                    return
+                }
+                // --- NOSLOP_YT_COLDSTART_V1 ---
+                // A page URL that resolved to itself was never really resolved;
+                // handing that to ExoPlayer would buffer an HTML document.
+                if (resolved.url == rawUrl && rawUrl.contains("youtube.com/watch")) {
+                    Logger.warn("PRELOAD", "Refusing to buffer unresolved YouTube page URL: $rawUrl")
                     finish(rawUrl, deferred)
                     return
                 }

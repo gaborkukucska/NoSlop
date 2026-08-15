@@ -23,6 +23,29 @@ object YouTubeInternalClient {
     private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev" // User's Cloudflare Worker
     private const val PROXY_SECRET = "NoSlopRocks2026"
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
+
+    // --- NOSLOP_YT_COLDSTART_V1 ---
+    // The Cloudflare worker throttles under load: the logs show repeated
+    // "Proxy blocked (403)" that increase as a browsing session goes on. Each
+    // one costs a full wasted round trip before the direct fallback runs.
+    // Once it starts refusing, skip it for a while and go straight to
+    // youtube.com — the fallback that was already working anyway.
+    private const val PROXY_COOLDOWN_MS = 5 * 60 * 1000L
+
+    @Volatile
+    private var proxyBlockedUntilMs = 0L
+
+    private fun proxyIsCoolingDown(): Boolean = System.currentTimeMillis() < proxyBlockedUntilMs
+
+    private fun notePlayerProxyBlocked(code: Int) {
+        proxyBlockedUntilMs = System.currentTimeMillis() + PROXY_COOLDOWN_MS
+        Logger.warn(TAG, "Proxy returned $code — bypassing it for ${PROXY_COOLDOWN_MS / 60000}m")
+    }
+
+    /** Player endpoint, proxied unless the proxy is currently refusing us. */
+    private fun playerEndpoint(): String =
+        if (proxyIsCoolingDown()) "https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
+        else "$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
     
     private const val CLIENT_NAME = "WEB"
     private const val CLIENT_VERSION = "2.20240717.01.00"
@@ -324,12 +347,16 @@ object YouTubeInternalClient {
                 payload.add("playbackContext", playbackContext)
                 
                 val requestBody = payload.toString().toRequestBody(jsonMediaType)
+                // --- NOSLOP_YT_COLDSTART_V1 ---
+                val usingProxy = !proxyIsCoolingDown()
                 val requestBuilder = Request.Builder()
-                    .url("$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
-                    .header("X-Proxy-Secret", PROXY_SECRET)
+                    .url(playerEndpoint())
                     .header("Content-Type", "application/json")
                     .header("User-Agent", userAgent)
                     .post(requestBody)
+                if (usingProxy) {
+                    requestBuilder.header("X-Proxy-Secret", PROXY_SECRET)
+                }
 
                 // CRITICAL: Only send Origin and Referer for web-based clients.
                 // If we send web headers while masquerading as an Android/iOS native app,
@@ -340,8 +367,14 @@ object YouTubeInternalClient {
                 }
 
                 var response = client.newCall(requestBuilder.build()).execute()
-                if (response.code == 403 || response.code == 429 || response.code == 400) {
-                    Logger.warn(TAG, "Proxy blocked (${response.code}), trying direct to youtube.com for player...")
+                // --- NOSLOP_YT_COLDSTART_V1 ---
+                // Only retry direct if we actually went through the proxy. When
+                // the breaker is open we are already talking to youtube.com, and
+                // a 400 from YouTube itself is a real answer about the video
+                // (LOGIN_REQUIRED / FAILED_PRECONDITION), not a proxy problem —
+                // retrying the identical request would just double the latency.
+                if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
+                    notePlayerProxyBlocked(response.code)
                     val directReqBuilder = requestBuilder
                         .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
                         .removeHeader("X-Proxy-Secret")
