@@ -577,6 +577,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * [isPriority] items (creator-filter matches) lead the rotation rather than
      * bypassing it — you still see more of them, just not several in a row.
      */
+    /**
+     * NOSLOP_FEED_RECENCY_V1 — Live Feed recency bounds.
+     *
+     * MAX_FEED_AGE_MS is deliberately generous (~13 months): the goal is to
+     * stop years-old videos resurfacing, not to make the feed strictly
+     * news-like. Raise it if the feed starts running dry.
+     */
+    private val MAX_FEED_AGE_MS = 400L * 24 * 60 * 60 * 1000L
+    private val UNKNOWN_DATE_ASSUMED_AGE_MS = 30L * 24 * 60 * 60 * 1000L
+
     private fun <T> Iterable<T>.takeRoundRobin(
         limit: Int,
         keySelector: (T) -> String,
@@ -895,10 +905,32 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }.map { it.id }.toSet()
         val isPrioritySource = { item: FeedItem -> item.sourceId in prioritySourceIds }
 
+        // --- NOSLOP_FEED_RECENCY_V1 ---
+        // publishedAt == 0L now means "the source gave us no date" rather than
+        // "published this instant" (see YouTubeInternalClient). Two things
+        // follow:
+        //
+        //  - Drop dated items older than MAX_FEED_AGE_MS from the Live Feed.
+        //    Undated items are exempt: we cannot judge them, and discarding
+        //    everything we are unsure about throws away too much.
+        //  - Rank undated items as though they were UNKNOWN_DATE_ASSUMED_AGE_MS
+        //    old. Sorting them by a literal 0 would bury them at the bottom
+        //    where the quota never reaches — the mirror image of the bug we
+        //    just fixed. Mid-pack keeps them visible without letting them
+        //    outrank genuinely fresh content.
+        val nowMs = System.currentTimeMillis()
+        val datedRecently = { item: FeedItem ->
+            item.publishedAt <= 0L || (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
+        }
+        val effectiveDate = { item: FeedItem ->
+            if (item.publishedAt <= 0L) nowMs - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
+        }
+
+        val ageFiltered = unseenFeeds.filter(datedRecently)
         val recentFeeds = if (actualFilter == "Random") {
-            unseenFeeds.shuffled()
+            ageFiltered.shuffled()
         } else {
-            unseenFeeds.sortedByDescending { it.publishedAt }
+            ageFiltered.sortedByDescending(effectiveDate)
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
 
@@ -1263,11 +1295,16 @@ fun toggleAggregator() {
                 cachedDefaultFeed = emptyList()
                 sessionLoadedIds.clear()
                 
-                // Load the best items instantly
-                loadMoreFeedItems()
-                
-                // Purge stale YouTube items so they are re-fetched with correct dates
+                // --- NOSLOP_FEED_RECENCY_V1 ---
+                // Purge BEFORE rebuilding. Previously loadMoreFeedItems() ran
+                // first, so the feed the user saw immediately after tapping
+                // Reset was assembled from the very rows the next line deletes
+                // — i.e. it was repopulated with exactly the stale content the
+                // reset was supposed to clear.
                 repository.deleteYouTubeItems()
+
+                // Now rebuild from what actually remains
+                loadMoreFeedItems()
 
                 // Kick off background fetch to replenish the database
                 repository.refreshFeeds()

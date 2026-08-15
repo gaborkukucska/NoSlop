@@ -17,6 +17,9 @@ import kotlinx.coroutines.withContext
  */
 object YouTubeInternalClient {
     private const val TAG = "YT_INTERNAL_API"
+
+    /** NOSLOP_FEED_RECENCY_V1 — sentinel: the source gave us no usable date. */
+    const val UNKNOWN_PUBLISH_DATE = 0L
     private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev" // User's Cloudflare Worker
     private const val PROXY_SECRET = "NoSlopRocks2026"
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
@@ -376,8 +379,20 @@ object YouTubeInternalClient {
         return@withContext null
     }
     
+    /**
+     * NOSLOP_FEED_RECENCY_V1
+     *
+     * Returns 0L for "the source did not tell us", NOT the current time.
+     *
+     * Stamping an undated video with System.currentTimeMillis() made it the
+     * newest thing in the database, so it sorted to the very top of a feed
+     * ordered by publishedAt descending. Videos with no readable
+     * publishedTimeText (live streams, premieres, some shorts, and any locale
+     * whose unit words are missing from the `when` below) are exactly the ones
+     * most likely to be old — so the bug reliably promoted stale content.
+     */
     private fun parseRelativeTime(publishedTimeText: String?): Long {
-        if (publishedTimeText == null) return System.currentTimeMillis()
+        if (publishedTimeText == null) return UNKNOWN_PUBLISH_DATE
         val now = System.currentTimeMillis()
         try {
             val match = Regex("(\\d+)").find(publishedTimeText)
@@ -399,6 +414,6 @@ object YouTubeInternalClient {
                 }
             }
         } catch (e: Exception) {}
-        return now
+        return UNKNOWN_PUBLISH_DATE
     }
 }

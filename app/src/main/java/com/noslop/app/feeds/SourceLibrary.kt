@@ -141,6 +141,9 @@ object SourceLibrary {
         BuiltInSource("api-archive-video", "Internet Archive Video", "archive:video", "api", "Video Platforms"),
         BuiltInSource("api-archive-audio", "Internet Archive Audio", "archive:audio", "api", "Music"),
         BuiltInSource("api-jamendo-music", "Jamendo Free Music", "jamendo:music", "api", "Music"),
+        // NOSLOP_OPENVERSE_V1 — keyless, so Music has a working source even with
+        // no API keys configured.
+        BuiltInSource("api-openverse-audio", "Openverse Audio", "openverse:audio", "api", "Music"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
         BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),

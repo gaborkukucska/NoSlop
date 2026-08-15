@@ -474,7 +474,10 @@ object InvidiousApiClient {
                     author = author,
                     excerpt = excerpt,
                     thumbnailUrl = thumbnailUrl,
-                    publishedAt = published ?: System.currentTimeMillis(),
+                    // --- NOSLOP_FEED_RECENCY_V1 --- 0L means "undated", not "brand new".
+                    // Defaulting to now made undated videos sort ahead of
+                    // genuinely fresh ones.
+                    publishedAt = published ?: 0L,
                     mediaUrl = ytUrl,
                     mediaType = "video",
                     apiSource = "youtube"

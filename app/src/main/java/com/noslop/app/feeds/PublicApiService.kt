@@ -81,6 +81,8 @@ object PublicApiService {
                     fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
+                    // --- NOSLOP_OPENVERSE_V1 --- keyless audio source
+                    fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music", recentOnly = true) }
@@ -126,6 +128,8 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
                 }
                 "Search Audio" -> {
+                    // --- NOSLOP_OPENVERSE_V1 --- keyless audio source
+                    fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
                     fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
