@@ -90,6 +90,92 @@ fun MainScreen(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     MainScreenContent(viewModel, initialRoute)
 }
 
+/**
+ * NOSLOP_TOR_GATE_UI_V1
+ *
+ * Surfaces TorService.torBlockedMessage. NoSlop has no non-Tor path by design,
+ * so when Tor cannot carry traffic the honest thing is to say so and stop,
+ * rather than degrade quietly.
+ *
+ * Blocking when the app genuinely cannot proceed; a banner when it is a
+ * transient condition such as changing circuit, where playback continues.
+ */
+@Composable
+private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
+    // A message is blocking only while nothing can proceed. Circuit changes and
+    // per-video failures are informational — the feed is still usable.
+    val isBlocking = message.startsWith("Waiting for Tor") ||
+        message.startsWith("Tor could not connect")
+
+    if (isBlocking) {
+        AlertDialog(
+            onDismissRequest = { /* deliberately not dismissible */ },
+            containerColor = SurfaceDark,
+            title = {
+                Text(
+                    "Tor required".tr,
+                    color = TextLight,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Text(message, color = TextLight)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "NoSlop routes everything through Tor and will not fetch content outside it.".tr,
+                        color = TextMuted,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = AccentGreen
+                    )
+                }
+            },
+            confirmButton = {
+                if (message.startsWith("Tor could not connect")) {
+                    TextButton(onClick = onRetry) {
+                        Text("Retry".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        )
+    } else {
+        // Non-blocking notice, pinned to the top so it does not cover the feed.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(10f),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(top = 72.dp, start = 16.dp, end = 16.dp)
+                    .background(
+                        PrimaryBlack.copy(alpha = 0.9f),
+                        androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(
+                    color = AccentGreen,
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    message,
+                    color = TextLight,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -98,10 +184,17 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     val context = LocalContext.current
     val torState by viewModel.torReadyState.collectAsState()
+    // --- NOSLOP_TOR_GATE_UI_V1 ---
+    val torStatusMessage by com.noslop.app.tor.TorService.torBlockedMessage.collectAsState()
     val incomingRequest by viewModel.incomingRequest.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
     val isInActiveChat = selectedTab == 1 && selectedPeerPub != null
+
+    // --- NOSLOP_TOR_GATE_UI_V1 ---
+    // Rendered near the end of this composable (see below) so it sits above the
+    // tab content. Held here so the message is read once per recomposition.
+    val activeTorMessage = torStatusMessage
 
     // ─── Landscape auto-hide UI ───
     val configuration = LocalConfiguration.current
@@ -420,6 +513,17 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     // Update Available Dialog
     val updateInfo by viewModel.updateInfo.collectAsState()
     var updatePopupDismissed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+
+    // --- NOSLOP_TOR_GATE_UI_V1 --- drawn above the tab content
+    activeTorMessage?.let { msg ->
+        TorStatusOverlay(
+            message = msg,
+            onRetry = {
+                com.noslop.app.tor.TorService.setTorStatusMessage(null)
+                viewModel.startTor()
+            }
+        )
+    }
 
     if (updateInfo != null && !updatePopupDismissed) {
         AlertDialog(

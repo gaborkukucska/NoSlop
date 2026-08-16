@@ -34,6 +34,21 @@ object WikimediaApiClient {
 
     private var lastContinueToken: String? = null
 
+    /**
+     * NOSLOP_TOR_GATE_UI_V1
+     *
+     * Commons renders thumbnails server-side, so this genuinely reduces bytes
+     * transferred — unlike Coil's size(), which downsamples only after the full
+     * image has already been downloaded. That distinction is the entire point
+     * when every request goes through Tor.
+     */
+    private fun thumbWidthForQuality(): Int =
+        when (com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality) {
+            "low" -> 480
+            "medium" -> 960
+            else -> 1280
+        }
+
     /** Commons featured pictures start around 2004; leave a margin at both ends. */
     private const val EARLIEST_YEAR = 2005
 
@@ -78,7 +93,7 @@ object WikimediaApiClient {
             val q = java.net.URLEncoder.encode("$query filetype:bitmap", "UTF-8")
             val url = "https://commons.wikimedia.org/w/api.php?action=query&generator=search" +
                       "&gsrsearch=$q&gsrnamespace=6&gsrlimit=$limit" +
-                      "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=1280&format=json"
+                      "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=" + thumbWidthForQuality() + "&format=json"
 
             val request = Request.Builder()
                 .url(url)
@@ -159,7 +174,7 @@ object WikimediaApiClient {
             var url = "https://commons.wikimedia.org/w/api.php?action=query&generator=categorymembers" +
                       "&gcmtitle=Category:Featured_pictures_on_Wikimedia_Commons&gcmlimit=25&gcmtype=file" +
                       "&gcmsort=timestamp&gcmdir=descending" +
-                      "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=1280&format=json"
+                      "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=" + thumbWidthForQuality() + "&format=json"
 
             if (lastContinueToken != null) {
                 // Continue where the previous page left off within this session.

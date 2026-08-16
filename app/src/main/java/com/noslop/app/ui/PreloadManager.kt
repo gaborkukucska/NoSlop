@@ -58,6 +58,26 @@ object PreloadManager {
     // googlevideo advertises the full content length in clen=.
     private const val MAX_PREBUFFER_BYTES = 80L * 1024 * 1024
 
+    /**
+     * NOSLOP_TOR_GATE_UI_V1
+     *
+     * Over Tor the warm players compete with the visible one for a single slow
+     * circuit, so the ceiling must be far tighter on 'low' than the clearnet
+     * default. Honours the Content-over-Tor toggle: with Tor off, the original
+     * ceiling applies.
+     */
+    private fun prebufferCeilingBytes(): Long {
+        val vQuality = try {
+            com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        } catch (_: Exception) { "high" }
+        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        return when (vQuality) {
+            "low" -> if (overTor) 12L * 1024 * 1024 else 25L * 1024 * 1024
+            "medium" -> if (overTor) 30L * 1024 * 1024 else 50L * 1024 * 1024
+            else -> if (overTor) 40L * 1024 * 1024 else MAX_PREBUFFER_BYTES
+        }
+    }
+
     private val CLEN_PATTERN = Regex("[?&]clen=(\\d+)")
 
     /** Declared content length in bytes, or null when the URL doesn't say. */
@@ -183,7 +203,7 @@ object PreloadManager {
                 }
                 // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
                 val declaredBytes = declaredContentLength(resolved.url)
-                if (declaredBytes != null && declaredBytes > MAX_PREBUFFER_BYTES) {
+                if (declaredBytes != null && declaredBytes > prebufferCeilingBytes()) {  // NOSLOP_TOR_GATE_UI_V1
                     Logger.info(
                         "PRELOAD",
                         "Skipping buffer for $rawUrl — ${declaredBytes / 1_000_000}MB " +

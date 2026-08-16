@@ -150,6 +150,19 @@ class FeedRepository(
             return@withContext
         }
 
+        // --- NOSLOP_TOR_GATE_UI_V1 ---
+        // Do not dispatch into a proxy that is not up. The log showed requests
+        // going out ~40s before the SOCKS port was confirmed accepting
+        // connections, which is where the 18s resolve times came from.
+        //
+        // Bounded wait, and on failure we RETURN rather than proceeding — there
+        // is no non-Tor path to fall back to, so proceeding would either hang or
+        // leak. Skipped entirely when the user has turned Tor off themselves.
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping feed sync rather than fetching outside Tor")
+            return@withContext
+        }
+
         Logger.info(TAG, "Starting feed synchronization...")
         val activeSources = feedDao.getActiveSourcesList()
         val userCategories = preferencesRepository.getUserSelectedCategories()
@@ -329,6 +342,12 @@ class FeedRepository(
     /** Custom Feed Search Pipeline — used by manual search and the per-sync creator sampling. */
     suspend fun searchCustomFeed(query: String, filterMode: String?): List<String> = withContext(Dispatchers.IO) {
         if (!isAggregatorEnabled()) return@withContext emptyList()
+
+        // --- NOSLOP_TOR_GATE_UI_V1 --- see refreshFeeds
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping search rather than fetching outside Tor")
+            return@withContext emptyList()
+        }
         Logger.info(TAG, "Starting custom search for query: $query and filter: $filterMode")
 
         try {

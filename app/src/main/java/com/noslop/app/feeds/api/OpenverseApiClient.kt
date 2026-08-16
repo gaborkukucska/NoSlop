@@ -132,7 +132,13 @@ object OpenverseApiClient {
                             excerpt = excerpt.ifBlank { null },
                             thumbnailUrl = str("thumbnail") ?: imageUrl,
                             publishedAt = UNDATED,
-                            mediaUrl = imageUrl,
+                            // --- NOSLOP_TOR_GATE_UI_V1 --- on low, serve the
+                            // Openverse-rendered thumbnail rather than the
+                            // original, which is often several megabytes.
+                            mediaUrl = if (
+                                (try { com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality }
+                                 catch (_: Exception) { "high" }) == "low"
+                            ) (str("thumbnail") ?: imageUrl) else imageUrl,
                             mediaType = "image",
                             apiSource = "openverse"
                         )

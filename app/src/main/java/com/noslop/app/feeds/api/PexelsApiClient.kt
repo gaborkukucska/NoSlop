@@ -118,7 +118,17 @@ object PexelsApiClient {
                         thumbnailUrl = src.get("medium")?.asString,
                         // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
                         publishedAt = 0L,
-                        mediaUrl = src.get("large2x")?.asString ?: src.get("large")?.asString,
+                        // --- NOSLOP_TOR_GATE_UI_V1 --- Pexels serves pre-rendered
+                        // sizes: large2x is ~1.5MB, medium ~150KB. Over Tor that
+                        // is the difference between usable and not.
+                        mediaUrl = when (
+                            try { com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality }
+                            catch (_: Exception) { "high" }
+                        ) {
+                            "low" -> src.get("medium")?.asString ?: src.get("small")?.asString
+                            "medium" -> src.get("large")?.asString ?: src.get("medium")?.asString
+                            else -> src.get("large2x")?.asString ?: src.get("large")?.asString
+                        },
                         mediaType = "image",
                         apiSource = "pexels"
                     ))

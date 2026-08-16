@@ -36,10 +36,19 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
-            // Always use clearnet for images — thumbnail URLs are public CDN links
-            // (ytimg.com, pexels, etc.) that don't reveal user identity.
-            // Routing them through Tor causes slow loads and black images.
-            .okHttpClient { HttpClientProvider.rawClearnetClient }
+            // --- NOSLOP_TOR_GATE_UI_V1 ---
+            // Obey the Content-over-Tor toggle like everything else. The old
+            // comment argued these are public CDN links revealing no identity;
+            // the URLs are public but the REQUESTS are not. i.ytimg.com receives
+            // this device's IP together with the id of every video scrolled
+            // past, rebuilding a viewing history as precisely as the stream
+            // fetches we already route through Tor.
+            //
+            // The slow loads that motivated the bypass are addressed below: on
+            // 'low' the app now asks the SOURCE for small images instead of
+            // downloading full-size ones and shrinking them after the bytes
+            // have already crossed the wire.
+            .okHttpClient { HttpClientProvider.activeClearnetClient }
             .components {
                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                     add(coil.decode.ImageDecoderDecoder.Factory())

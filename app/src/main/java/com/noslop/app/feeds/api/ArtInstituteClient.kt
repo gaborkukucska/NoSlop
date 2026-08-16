@@ -97,8 +97,23 @@ object ArtInstituteClient {
                     } catch (_: Exception) { null }
 
                     // IIIF: ask for a display-sized render, not the original.
-                    val fullUrl = "$iiifBase/$imageId/full/1686,/0/default.jpg"
-                    val thumbUrl = "$iiifBase/$imageId/full/843,/0/default.jpg"
+                    // --- NOSLOP_TOR_GATE_UI_V1 --- IIIF renders server-side, so a
+                    // narrower request really does transfer fewer bytes.
+                    val imgQuality = try {
+                        com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality
+                    } catch (_: Exception) { "high" }
+                    val fullWidth = when (imgQuality) {
+                        "low" -> 600
+                        "medium" -> 1024
+                        else -> 1686
+                    }
+                    val thumbWidth = when (imgQuality) {
+                        "low" -> 300
+                        "medium" -> 600
+                        else -> 843
+                    }
+                    val fullUrl = "$iiifBase/$imageId/full/$fullWidth,/0/default.jpg"
+                    val thumbUrl = "$iiifBase/$imageId/full/$thumbWidth,/0/default.jpg"
 
                     val excerpt = listOfNotNull(dateDisplay, medium, altText)
                         .joinToString(" · ")
