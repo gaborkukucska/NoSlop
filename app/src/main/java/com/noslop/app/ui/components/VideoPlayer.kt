@@ -146,6 +146,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
 
     val mutex = resolveMutexes.computeIfAbsent(cacheKey) { kotlinx.coroutines.sync.Mutex() }
 
+    val resolveStartedMs = System.currentTimeMillis()
     val resolved = mutex.withLock {
         // Another coroutine may have resolved it while we waited on the lock.
         if (!forceRefresh) {
@@ -158,6 +159,23 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     // Drop the mutex only after releasing it, otherwise a concurrent caller can
     // computeIfAbsent a *different* Mutex and resolve in parallel.
     resolveMutexes.remove(cacheKey)
+    // --- NOSLOP_PLAYBACK_DIAG_V1 ---
+    // Time the resolve and record exactly which rendition we were handed. A
+    // stalled video can then be correlated with its itag, size and remaining
+    // URL lifetime instead of guessed at.
+    val elapsedMs = System.currentTimeMillis() - resolveStartedMs
+    when (val r = resolved) {
+        is VideoSource.Direct -> Logger.info(
+            PLAYBACK_DIAG_TAG,
+            "resolved DIRECT in ${elapsedMs}ms ${describeStreamUrl(r.url)} | $rawUrl"
+        )
+        is VideoSource.Embed -> Logger.info(
+            PLAYBACK_DIAG_TAG, "resolved EMBED in ${elapsedMs}ms | $rawUrl"
+        )
+        is VideoSource.Unavailable -> Logger.warn(
+            PLAYBACK_DIAG_TAG, "resolved UNAVAILABLE in ${elapsedMs}ms | $rawUrl"
+        )
+    }
     return resolved
 }
 
@@ -364,6 +382,73 @@ private fun resolveVimeoSource(url: String, quality: String): VideoSource {
 private fun fallbackVimeoEmbed(url: String): VideoSource {
     val videoId = extractVimeoId(url) ?: return VideoSource.Unavailable
     return VideoSource.Embed("https://player.vimeo.com/video/$videoId?autoplay=1&background=0")
+}
+
+// --- NOSLOP_PLAYBACK_DIAG_V1 ---------------------------------------------
+// Diagnostics for "it buffers but never plays". The distinguishing question is
+// whether bytes are arriving at all, arriving too slowly, or arriving fine but
+// failing to decode — and none of those were observable from the old logs.
+
+private const val PLAYBACK_DIAG_TAG = "PLAYBACK_DIAG"
+
+private fun playbackStateName(state: Int): String = when (state) {
+    androidx.media3.common.Player.STATE_IDLE -> "IDLE"
+    androidx.media3.common.Player.STATE_BUFFERING -> "BUFFERING"
+    androidx.media3.common.Player.STATE_READY -> "READY"
+    androidx.media3.common.Player.STATE_ENDED -> "ENDED"
+    else -> "UNKNOWN($state)"
+}
+
+private fun errorCodeName(error: androidx.media3.common.PlaybackException): String =
+    try { error.errorCodeName } catch (_: Throwable) { "CODE_" + error.errorCode }
+
+/** Full cause chain, so a wrapped IOException is not invisible. */
+private fun causeChain(t: Throwable?): String {
+    val parts = mutableListOf<String>()
+    var cur = t
+    var depth = 0
+    while (cur != null && depth < 6) {
+        parts.add("${cur.javaClass.simpleName}: ${cur.message}")
+        cur = cur.cause
+        depth++
+    }
+    return parts.joinToString(" <- ").ifBlank { "none" }
+}
+
+/** itag / clen / remaining lifetime, pulled out of a googlevideo URL. */
+internal fun describeStreamUrl(url: String): String {
+    fun param(name: String): String? =
+        Regex("[?&]$name=([^&]+)").find(url)?.groupValues?.get(1)
+    val itag = param("itag") ?: "?"
+    val clen = param("clen")?.toLongOrNull()
+    val expire = param("expire")?.toLongOrNull()
+    val sizeText = clen?.let { "${it / 1_000_000}MB" } ?: "size?"
+    val ttlText = expire?.let {
+        val secs = it - System.currentTimeMillis() / 1000
+        "ttl=${secs / 60}m"
+    } ?: "ttl?"
+    val host = try { java.net.URI(url).host ?: "?" } catch (_: Exception) { "?" }
+    return "itag=$itag $sizeText $ttlText host=$host"
+}
+
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+private fun logPlaybackState(
+    player: androidx.media3.exoplayer.ExoPlayer,
+    state: Int,
+    rawUrl: String,
+    sinceMs: Long
+) {
+    try {
+        Logger.info(
+            PLAYBACK_DIAG_TAG,
+            "state=${playbackStateName(state)} +${System.currentTimeMillis() - sinceMs}ms " +
+                "pos=${player.currentPosition} bufPos=${player.bufferedPosition} " +
+                "bufMs=${player.totalBufferedDuration} pct=${player.bufferedPercentage} " +
+                "playWhenReady=${player.playWhenReady} dur=${player.duration} | $rawUrl"
+        )
+    } catch (e: Exception) {
+        Logger.debug(PLAYBACK_DIAG_TAG, "state log failed: ${e.message}")
+    }
 }
 
 // Auto re-resolve attempts before the user is shown a Retry button.
@@ -695,6 +780,48 @@ private fun ExoVideoPlayer(
 
     var videoSizeState by remember { mutableStateOf(androidx.media3.common.VideoSize.UNKNOWN) }
 
+    // --- NOSLOP_PLAYBACK_DIAG_V1 ---
+    // Sample the buffer while stuck. A zero delta means no bytes are arriving
+    // (dead URL / blocked host / Tor stall); a small non-zero delta means
+    // bandwidth starvation; a full buffer with no READY means the container or
+    // codec is the problem. These look identical in the old logs.
+    val diagStartMs = remember(url, retryKey) { System.currentTimeMillis() }
+    LaunchedEffect(url, retryKey, isVisible) {
+        if (!isVisible) return@LaunchedEffect
+        var lastBufPos = -1L
+        var stalledSamples = 0
+        while (true) {
+            kotlinx.coroutines.delay(2000L)
+            val p = exoPlayer ?: continue
+            try {
+                if (p.playbackState == androidx.media3.common.Player.STATE_READY && p.isPlaying) {
+                    return@LaunchedEffect  // healthy; stop sampling
+                }
+                val bufPos = p.bufferedPosition
+                val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
+                stalledSamples = if (delta <= 0L) stalledSamples + 1 else 0
+                Logger.info(
+                    PLAYBACK_DIAG_TAG,
+                    "sample +${System.currentTimeMillis() - diagStartMs}ms " +
+                        "state=${playbackStateName(p.playbackState)} bufPos=$bufPos " +
+                        "delta=${delta}ms pct=${p.bufferedPercentage} " +
+                        "playWhenReady=${p.playWhenReady} stalledFor=${stalledSamples * 2}s | $rawUrl"
+                )
+                if (stalledSamples == 5) {
+                    Logger.warn(
+                        PLAYBACK_DIAG_TAG,
+                        "NO PROGRESS for 10s — buffer has not advanced. " +
+                            "If bufPos is also 0 the stream never started arriving. | $rawUrl"
+                    )
+                }
+                lastBufPos = bufPos
+            } catch (e: Exception) {
+                Logger.debug(PLAYBACK_DIAG_TAG, "sampler failed: ${e.message}")
+                return@LaunchedEffect
+            }
+        }
+    }
+
     // Keyed on retryKey as well as url: a forced re-resolve can legitimately
     // return the *same* URL (a plain mp4 that 503'd, say), and without the
     // extra key the effect would not re-run and the slide would sit dead.
@@ -719,11 +846,18 @@ private fun ExoVideoPlayer(
                 addListener(object : androidx.media3.common.Player.Listener {
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
+                        // --- NOSLOP_PLAYBACK_DIAG_V1 ---
+                        logPlaybackState(this@apply, playbackState, rawUrl, diagStartMs)
                         if (playbackState == androidx.media3.common.Player.STATE_READY) {
                             onReady()
                         }
                     }
                     override fun onRenderedFirstFrame() {
+                        // --- NOSLOP_PLAYBACK_DIAG_V1 --- the only proof a pixel reached the surface
+                        Logger.info(
+                            PLAYBACK_DIAG_TAG,
+                            "FIRST FRAME rendered +${System.currentTimeMillis() - diagStartMs}ms | $rawUrl"
+                        )
                         onReady()
                     }
                     override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
@@ -738,6 +872,12 @@ private fun ExoVideoPlayer(
                             hasError = true
                             errorMessage = error.message ?: "Playback failed"
                             Logger.error("VIDEO", "ExoPlayer error: ${error.message} (code=${error.errorCode}, retries=$retryKey) | URL: $url", error.stackTraceToString())
+                            // --- NOSLOP_PLAYBACK_DIAG_V1 --- named code + full cause chain
+                            Logger.error(
+                                PLAYBACK_DIAG_TAG,
+                                "FAILED ${errorCodeName(error)} after ${System.currentTimeMillis() - diagStartMs}ms " +
+                                    "| causes: ${causeChain(error)} | ${describeStreamUrl(url)}"
+                            )
                         }
                     }
                 })
@@ -825,6 +965,12 @@ private fun ExoVideoPlayer(
                                 hasError = true
                                 errorMessage = error.message ?: "Playback failed"
                                 Logger.error("VIDEO", "ExoPlayer error: ${error.message} (code=${error.errorCode}, retries=$retryKey) | URL: $url", error.stackTraceToString())
+                            // --- NOSLOP_PLAYBACK_DIAG_V1 --- named code + full cause chain
+                            Logger.error(
+                                PLAYBACK_DIAG_TAG,
+                                "FAILED ${errorCodeName(error)} after ${System.currentTimeMillis() - diagStartMs}ms " +
+                                    "| causes: ${causeChain(error)} | ${describeStreamUrl(url)}"
+                            )
                             }
                         }
                     })

@@ -155,8 +155,19 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                 }
                 else -> {
+                    // --- NOSLOP_SOURCE_AGE_V1 ---
+                    // This branch serves the creator/interest auto-searches, and
+                    // it was fetching all-time results — which is where the
+                    // years-old uploads were coming from. With recentOnly the
+                    // same query returns recent material ABOUT the creator (fan
+                    // edits, reactions, commentary) when the creator themselves
+                    // has posted nothing new, which is the desired fallback.
+                    //
+                    // The explicit "Search Videos" branch above deliberately
+                    // stays unfiltered: if someone searches for something old,
+                    // they should find it.
                     // Fast sources first so they complete before the timeout deadline
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                     fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }

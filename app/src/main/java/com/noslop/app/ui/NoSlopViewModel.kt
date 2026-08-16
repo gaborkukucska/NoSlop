@@ -587,6 +587,31 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val MAX_FEED_AGE_MS = 400L * 24 * 60 * 60 * 1000L
     private val UNKNOWN_DATE_ASSUMED_AGE_MS = 30L * 24 * 60 * 60 * 1000L
 
+    /**
+     * NOSLOP_SOURCE_AGE_V1
+     *
+     * Age means different things depending on where an item came from, and the
+     * distinction is by SOURCE, not by media type.
+     *
+     * Archives publish material that is *supposed* to be old — NASA's Apollo
+     * footage, Internet Archive's 1940s documentaries, Commons photographs. An
+     * age ceiling applied to them removes good content for no reason, and worse:
+     * because both NASA and Internet Archive set real dates via
+     * FeedParser.parseDate, the ceiling used to empty the video bucket, which
+     * triggered the empty-pool floor, which returned everything — including the
+     * stale YouTube uploads the ceiling was meant to remove.
+     *
+     * Exempting archival sources keeps the bucket populated, so the floor stops
+     * firing and the ceiling can actually bite on the sources where staleness is
+     * a real defect.
+     */
+    private val ARCHIVAL_SOURCES = setOf(
+        "nasa", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo"
+    )
+
+    /** Age ceiling for sources where a stale upload is genuinely stale. */
+    private val FRESHNESS_MAX_AGE_MS = 400L * 24 * 60 * 60 * 1000L
+
     private fun <T> Iterable<T>.takeRoundRobin(
         limit: Int,
         keySelector: (T) -> String,
@@ -935,8 +960,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         //
         // Symmetric again. Undated items (publishedAt <= 0) are still exempt
         // because we genuinely cannot judge them.
+        // --- NOSLOP_SOURCE_AGE_V1 ---
         val datedRecently = { item: FeedItem ->
-            item.publishedAt <= 0L || (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
+            when {
+                // Undated: we genuinely cannot judge it.
+                item.publishedAt <= 0L -> true
+                // Archives: age is the point. NASA Apollo footage and Internet
+                // Archive documentaries are not "stale".
+                // NB: apiSource is String?, and `x in Set<String>` does not
+                // compile with a nullable left side. Coalesce first.
+                (item.apiSource ?: "") in ARCHIVAL_SOURCES -> true
+                // Everything else — YouTube, Reddit, news — a two-year-old
+                // upload is stale and should not be in a live feed.
+                else -> (nowMs - item.publishedAt) <= FRESHNESS_MAX_AGE_MS
+            }
         }
         val effectiveDate = { item: FeedItem ->
             if (item.publishedAt <= 0L) nowMs - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
