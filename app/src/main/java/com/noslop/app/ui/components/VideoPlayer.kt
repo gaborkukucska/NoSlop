@@ -814,6 +814,49 @@ private fun ExoVideoPlayer(
                             "If bufPos is also 0 the stream never started arriving. | $rawUrl"
                     )
                 }
+
+                // --- NOSLOP_TOR_CIRCUIT_V1 ---
+                // Zero bytes after 12s means the stream never began arriving.
+                // googlevideo URLs are IP-locked to the exit that resolved them,
+                // and large exits are routinely blocked by Google — the captured
+                // log had all 27 URLs on ip=185.220.101.15 with one video
+                // playing.
+                //
+                // The answer is a DIFFERENT EXIT, not a different network. Ask
+                // Tor for a new circuit and re-resolve. Traffic never leaves
+                // Tor; if this does not work the video is reported unavailable.
+                if (stalledSamples >= 6 && bufPos == 0L && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
+                    Logger.warn(
+                        PLAYBACK_DIAG_TAG,
+                        "Zero bytes over Tor after 12s — this exit is likely blocked " +
+                            "for googlevideo. Requesting a new Tor circuit and re-resolving. | $rawUrl"
+                    )
+                    com.noslop.app.tor.TorService.setTorStatusMessage(
+                        "Tor exit blocked by this provider — trying a new route…"
+                    )
+                    val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
+                    if (!rotated) {
+                        Logger.warn(PLAYBACK_DIAG_TAG, "Could not rotate circuit; will retry resolve anyway")
+                    }
+                    // Give Tor a moment to build the replacement circuit before
+                    // asking for a fresh URL against it.
+                    kotlinx.coroutines.delay(2000L)
+                    com.noslop.app.tor.TorService.setTorStatusMessage(null)
+                    onRetry()
+                    return@LaunchedEffect
+                }
+
+                if (stalledSamples >= 6 && bufPos == 0L && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
+                    Logger.warn(
+                        PLAYBACK_DIAG_TAG,
+                        "Still zero bytes after $retryKey circuit changes — giving up on this " +
+                            "video rather than fetching it outside Tor. | $rawUrl"
+                    )
+                    com.noslop.app.tor.TorService.setTorStatusMessage(
+                        "This video could not be loaded over Tor. Skipping it."
+                    )
+                    return@LaunchedEffect
+                }
                 lastBufPos = bufPos
             } catch (e: Exception) {
                 Logger.debug(PLAYBACK_DIAG_TAG, "sampler failed: ${e.message}")
@@ -901,7 +944,7 @@ private fun ExoVideoPlayer(
                 }
             }
         } else {
-            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeClearnetClient)
+            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeMediaClient)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 

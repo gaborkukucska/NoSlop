@@ -132,6 +132,35 @@ object HttpClientProvider {
     val activeClearnetClient: OkHttpClient
         get() = if (useTorForClearnet) torClient else rawClearnetClient
 
+    // --- NOSLOP_TOR_CIRCUIT_V1 ---
+    // There is deliberately NO media-specific client and no direct fallback.
+    // If Tor cannot carry it, NoSlop does not fetch it — the alternative is
+    // handing the user's IP to the very services the project exists to keep at
+    // arm's length.
+    //
+    // Media and its resolution share this one client so that the ip= lock on a
+    // googlevideo URL is issued to, and used by, the same exit.
+    val activeMediaClient: OkHttpClient
+        get() = activeClearnetClient
+
+    /**
+     * True when it is safe to dispatch network work: either Tor is off by
+     * configuration, or Tor is fully READY.
+     */
+    val isNetworkReady: Boolean
+        get() = !useTorForClearnet ||
+            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY
+
+    /**
+     * Suspend until network work can safely be dispatched. Returns false if Tor
+     * never came up, in which case the caller should surface that rather than
+     * proceed.
+     */
+    suspend fun awaitNetworkReady(timeoutMs: Long = 90_000L): Boolean {
+        if (!useTorForClearnet) return true
+        return com.noslop.app.tor.TorService.awaitReady(timeoutMs)
+    }
+
     private val userAgentInterceptor = okhttp3.Interceptor { chain ->
         val request = chain.request()
         if (request.header("User-Agent") != null) {

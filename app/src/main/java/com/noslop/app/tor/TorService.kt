@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first  // NOSLOP_TOR_CIRCUIT_V1
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -33,6 +34,85 @@ object TorService {
     const val PROXY_HOST = "127.0.0.1"
 
     var onAddressCallback: ((String) -> Unit)? = null
+
+    // --- NOSLOP_TOR_CIRCUIT_V1 ---
+    // Plain-language status for the UI. Null means nothing to report. This
+    // exists so a Tor problem is stated to the user rather than silently
+    // worked around — there is no non-Tor path to fall back to by design.
+    private val _torBlockedMessage = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    val torBlockedMessage: kotlinx.coroutines.flow.StateFlow<String?> = _torBlockedMessage
+
+    fun setTorStatusMessage(message: String?) {
+        _torBlockedMessage.value = message
+    }
+
+    /**
+     * NOSLOP_TOR_CIRCUIT_V1
+     *
+     * Ask Tor for a fresh set of circuits (SIGNAL NEWNYM).
+     *
+     * Why this matters: googlevideo URLs are IP-locked to the exit that
+     * resolved them, and large exits are routinely blocked by Google. In the
+     * captured log every one of 27 stream URLs carried ip=185.220.101.15 and
+     * only one video ever played — a blocked exit, not a broken app.
+     *
+     * A new circuit means a new exit, which is very likely not blocked. This is
+     * the privacy-preserving answer to the problem: change route, never leave
+     * Tor.
+     *
+     * NEWNYM is rate-limited by Tor itself, so callers should not spam it.
+     */
+    suspend fun requestNewCircuit(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
+            controlSocket.soTimeout = 5000
+            val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
+            val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
+
+            writer.print("AUTHENTICATE\r\n")
+            writer.flush()
+            val authResp = reader.readLine()
+            if (authResp == null || !authResp.startsWith("250")) {
+                Logger.warn(TAG, "NEWNYM auth failed: $authResp")
+                controlSocket.close()
+                return@withContext false
+            }
+
+            writer.print("SIGNAL NEWNYM\r\n")
+            writer.flush()
+            val resp = reader.readLine()
+            controlSocket.close()
+
+            val ok = resp != null && resp.startsWith("250")
+            Logger.info(TAG, "SIGNAL NEWNYM -> $resp")
+            ok
+        } catch (e: Exception) {
+            Logger.warn(TAG, "requestNewCircuit failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * NOSLOP_TOR_CIRCUIT_V1
+     *
+     * Suspend until Tor is READY, or give up after [timeoutMs].
+     * Callers use this instead of firing requests at a proxy that is not up —
+     * the log showed work dispatched ~40s before the SOCKS port was confirmed
+     * accepting connections.
+     */
+    suspend fun awaitReady(timeoutMs: Long = 90_000L): Boolean {
+        if (_torState.value == TorState.READY) return true
+        setTorStatusMessage("Waiting for Tor to connect…")
+        val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            _torState.first { it == TorState.READY || it == TorState.FAILED }
+        }
+        val ready = ok == TorState.READY
+        setTorStatusMessage(
+            if (ready) null
+            else "Tor could not connect. NoSlop will not fetch anything outside Tor."
+        )
+        return ready
+    }
 
     // Unmanaged coroutine scope is fine here — TorService is a process-lifetime singleton.
     // It is initialised once in NoSlopApp.onCreate() and never torn down independently.
