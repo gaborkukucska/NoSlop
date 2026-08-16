@@ -670,9 +670,18 @@ fun UnifiedFeedTab(
                 val (rawUrl, forcedUrl) = preloadData
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
+                    val pageWhenQueued = pagerState.currentPage
                     preloadScope.launch { 
                         // Delay progressive preloads to give foreground video bandwidth priority
                         kotlinx.coroutines.delay((preloadedForwardCount + 1) * 1500L)
+                        // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+                        // If the user has swiped on while this was pending, the
+                        // item is no longer near the viewport. Warming it now
+                        // spends bandwidth the visible video needs and the
+                        // player gets evicted before it ever reaches READY.
+                        if (pagerState.currentPage != pageWhenQueued) {
+                            return@launch
+                        }
                         com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
                     }
                 }

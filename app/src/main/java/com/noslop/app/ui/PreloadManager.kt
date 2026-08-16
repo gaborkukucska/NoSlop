@@ -39,17 +39,42 @@ object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
     // player for the currently-playing item (claimed via claim()) doesn't get
     // evicted before VideoPlayer has a chance to take it.
-    private const val MAX_PRELOAD = 4
+    // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+    // Was 4. Search results are frequently hours-long podcasts served as one
+    // progressive MP4 (the log shows 369MB / 135min among them), so four warm
+    // players meant ~700MB downloading concurrently alongside the visible
+    // video. Nothing reached STATE_READY. Two is enough to make a swipe feel
+    // instant without starving the slide the user is actually looking at.
+    private const val MAX_PRELOAD = 2
 
     // Don't bother buffering a stream that dies before the user can plausibly
     // reach it; VideoPlayer will re-resolve on arrival instead.
     private const val MIN_USEFUL_TTL_MS = 30_000L
+
+    // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+    // Above this, prebuffering costs far more than it saves: a multi-hundred-MB
+    // progressive file cannot be meaningfully warmed on a phone connection, and
+    // the bandwidth it consumes is taken directly from the video on screen.
+    // googlevideo advertises the full content length in clen=.
+    private const val MAX_PREBUFFER_BYTES = 80L * 1024 * 1024
+
+    private val CLEN_PATTERN = Regex("[?&]clen=(\\d+)")
+
+    /** Declared content length in bytes, or null when the URL doesn't say. */
+    private fun declaredContentLength(url: String): Long? =
+        CLEN_PATTERN.find(url)?.groupValues?.get(1)?.toLongOrNull()
 
     private class Preloaded(
         val player: ExoPlayer,
         val resolvedUrl: String,
         val expiresAtMs: Long
     )
+
+    // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+    // Declared ahead of preloadedPlayers because removeEldestEntry() now reads
+    // it. A member function may legally forward-reference a later property, but
+    // ordering it explicitly removes any question about initialisation.
+    private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
 
     // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
     // from the main thread: preWarm() is called via launch{} from a Composable
@@ -61,6 +86,12 @@ object PreloadManager {
             if (size > MAX_PRELOAD) {
                 Logger.info("PRELOAD", "Evicting preloaded player for ${eldest.key}")
                 eldest.value.player.release()
+                // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+                // Also drop any queued warm-up for this item. Without this the
+                // task runs to completion, spends bandwidth, and stores into a
+                // slot that is about to be evicted again — the churn visible in
+                // the log as ten doWarmUp/Evict cycles in nine seconds.
+                cancelledTasks.add(eldest.key.substringBefore("||"))
                 return true
             }
             return false
@@ -85,7 +116,6 @@ object PreloadManager {
     private val shouldPrebufferUrl: (String) -> Boolean = { _ -> true }
 
     private val pendingTasks = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
-    private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
 
     private fun cacheKeyFor(rawUrl: String): String {
         val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
@@ -151,6 +181,18 @@ object PreloadManager {
                     finish(rawUrl, deferred)
                     return
                 }
+                // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+                val declaredBytes = declaredContentLength(resolved.url)
+                if (declaredBytes != null && declaredBytes > MAX_PREBUFFER_BYTES) {
+                    Logger.info(
+                        "PRELOAD",
+                        "Skipping buffer for $rawUrl — ${declaredBytes / 1_000_000}MB " +
+                            "exceeds the prebuffer ceiling; it would starve the visible video"
+                    )
+                    finish(rawUrl, deferred)
+                    return
+                }
+
                 val expiresAt = expiryOfResolvedUrl(resolved.url)
                 if (expiresAt - System.currentTimeMillis() < MIN_USEFUL_TTL_MS) {
                     Logger.info(
