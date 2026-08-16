@@ -168,10 +168,17 @@ object PublicApiService {
                     // Every source here must honour the query. fetchFeaturedPictures()
                     // did not, and was padding each search with 25 arbitrary photos.
                     addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
+                    // --- NOSLOP_SEARCH_SOURCES_V1 --- now actually registered, so it runs
                     fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
                     fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
+                    // --- NOSLOP_SEARCH_SOURCES_V1 ---
+                    // Art Institute removed from image SEARCH. It is a museum
+                    // catalogue whose search fuzzy-matches anything, so it
+                    // returned 20 artworks for "gabor mate" exactly as it did
+                    // for "hasanabi" — half of every result set was noise. It
+                    // stays in the Art category, where browsing a collection is
+                    // the whole point.
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
                     // Images only: see NasaApiClient — the video path costs ~1.3s per
                     // item sequentially and used to consume the whole category budget.
@@ -182,12 +189,21 @@ object PublicApiService {
                     // The only source here that works without an API key and
                     // without the Reddit proxy. Backed by synced RSS items.
                     addLocal(articlesOnly = true)
+                    // --- NOSLOP_SEARCH_SOURCES_V1 ---
+                    // The first sources here that can answer an arbitrary query
+                    // without a key. Local search returns nothing when the RSS
+                    // corpus simply does not cover the subject, which is exactly
+                    // what happened with "gabor mate".
+                    fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
+                    fetchAsync("api-hackernews-search") { HackerNewsApiClient.searchStories(query) }
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                 }
                 else -> {
                     addLocal()  // NOSLOP_LOCAL_SEARCH_V1 — any type
+                    // --- NOSLOP_SEARCH_SOURCES_V1 --- keyless text coverage
+                    fetchAsync("api-wikipedia-search") { WikipediaApiClient.searchArticles(query, language = language) }
                     // --- NOSLOP_SOURCE_AGE_V1 ---
                     // This branch serves the creator/interest auto-searches, and
                     // it was fetching all-time results — which is where the

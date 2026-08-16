@@ -144,6 +144,16 @@ object SourceLibrary {
         // NOSLOP_OPENVERSE_V1 — keyless, so Music has a working source even with
         // no API keys configured.
         BuiltInSource("api-openverse-audio", "Openverse Audio", "openverse:audio", "api", "Music"),
+        // --- NOSLOP_SEARCH_SOURCES_V1 ---
+        // api-openverse-images was called in PublicApiService but never
+        // registered here, and fetchAsync silently skips any id missing from
+        // activeApiSourceIds — so image search never once queried Openverse.
+        BuiltInSource("api-openverse-images", "Openverse Images", "openverse:images", "api", "Photography"),
+        BuiltInSource("api-wikipedia-search", "Wikipedia", "wikipedia:search", "api", "Technology"),
+        BuiltInSource("api-hackernews-search", "Hacker News", "hackernews:search", "api", "Technology"),
+        // api-invidious-search was called from two places in PublicApiService and
+        // was never registered either — the YouTube fallback has never once run.
+        BuiltInSource("api-invidious-search", "Invidious", "invidious:search", "api", "Video Platforms"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
         BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),
