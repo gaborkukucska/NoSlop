@@ -27,6 +27,36 @@ interface FeedDao {
     @Query("SELECT * FROM feed_items WHERE isSaved = 1 ORDER BY publishedAt DESC")
     fun getSavedItems(): Flow<List<FeedItem>>
 
+    // --- NOSLOP_LOCAL_SEARCH_V1 ---
+    // Local search over already-synced items — overwhelmingly RSS articles.
+    // Instant, keyless, offline, and the only source Search Articles has when
+    // NewsAPI and Guardian have no key and the Reddit proxy is refusing.
+    // LIKE with a leading wildcard cannot use an index; feed_items is bounded
+    // in practice and the LIMIT keeps this cheap.
+
+    @Query(
+        "SELECT * FROM feed_items WHERE (title LIKE '%' || :q || '%' " +
+        "OR excerpt LIKE '%' || :q || '%') " +
+        "AND (mediaType IS NULL OR mediaType = '') " +
+        "ORDER BY publishedAt DESC LIMIT :limit"
+    )
+    suspend fun searchLocalArticles(q: String, limit: Int): List<FeedItem>
+
+    @Query(
+        "SELECT * FROM feed_items WHERE (title LIKE '%' || :q || '%' " +
+        "OR excerpt LIKE '%' || :q || '%') " +
+        "AND mediaType LIKE '%' || :type || '%' " +
+        "ORDER BY publishedAt DESC LIMIT :limit"
+    )
+    suspend fun searchLocalByType(q: String, type: String, limit: Int): List<FeedItem>
+
+    @Query(
+        "SELECT * FROM feed_items WHERE title LIKE '%' || :q || '%' " +
+        "OR excerpt LIKE '%' || :q || '%' " +
+        "ORDER BY publishedAt DESC LIMIT :limit"
+    )
+    suspend fun searchLocalAny(q: String, limit: Int): List<FeedItem>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertItems(items: List<FeedItem>)
 

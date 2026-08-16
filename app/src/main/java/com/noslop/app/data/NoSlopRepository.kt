@@ -24,6 +24,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     private val repositoryScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val TAG = "REPOSITORY"
     private val feedDao = db.feedDao()
+
+    /**
+     * NOSLOP_LOCAL_SEARCH_V1
+     *
+     * Search items already in the database. RSS sync keeps feed_items stocked,
+     * so this is the RSS-backed article search — and unlike every network
+     * source it needs no key, works offline, and returns instantly.
+     *
+     * @param mediaType "" for any, "" plus articlesOnly for untyped items, or
+     *   "video" / "audio" / "image" to match a media type.
+     */
+    suspend fun searchLocalLibrary(
+        query: String,
+        mediaType: String = "",
+        articlesOnly: Boolean = false,
+        limit: Int = 25
+    ): List<FeedItem> {
+        val q = query.trim()
+        if (q.length < 2) return emptyList()
+        return try {
+            when {
+                articlesOnly -> feedDao.searchLocalArticles(q, limit)
+                mediaType.isNotBlank() -> feedDao.searchLocalByType(q, mediaType, limit)
+                else -> feedDao.searchLocalAny(q, limit)
+            }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.warn("REPOSITORY", "Local search failed: ${e.message}")
+            emptyList()
+        }
+    }
     val peerDao = db.peerDao()
     internal val postDao = db.postDao()
     private val messageDao = db.messageDao()

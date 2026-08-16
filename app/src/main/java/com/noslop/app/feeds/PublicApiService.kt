@@ -32,6 +32,28 @@ object PublicApiService {
         val query = if (userKeywords.isNotEmpty()) userKeywords.joinToString(" ") else category
         val deferredItems = mutableListOf<kotlinx.coroutines.Deferred<List<FeedItem>>>()
 
+        // --- NOSLOP_LOCAL_SEARCH_V1 ---
+        // Local results are added directly rather than through fetchAsync: they
+        // involve no network, so they must never be delayed by — or discarded
+        // with — the category deadline that governs the remote sources.
+        val localItems = mutableListOf<FeedItem>()
+        suspend fun addLocal(mediaType: String = "", articlesOnly: Boolean = false) {
+            if (userKeywords.isEmpty()) return
+            try {
+                val found = com.noslop.app.NoSlopApp.repository.searchLocalLibrary(
+                    query = query,
+                    mediaType = mediaType,
+                    articlesOnly = articlesOnly
+                )
+                if (found.isNotEmpty()) {
+                    Logger.info(TAG, "Local library: ${found.size} items for '$query'")
+                    localItems.addAll(found)
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Local library search failed: ${e.message}")
+            }
+        }
+
         fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>) {
             if (activeApiSourceIds.contains(sourceId)) {
                 deferredItems.add(async(Dispatchers.IO) {
@@ -81,9 +103,9 @@ object PublicApiService {
                     fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
-                    // --- NOSLOP_OPENVERSE_V1 --- keyless audio source
+                    // --- NOSLOP_LOCAL_SEARCH_V1 --- Jamendo dropped: returns "failed"
+                    // with its hardcoded client id, and Openverse indexes Jamendo.
                     fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
-                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music", recentOnly = true) }
                     fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
@@ -123,23 +145,29 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "new") }
                 }
                 "Search Videos" -> {
+                    addLocal(mediaType = "video")  // NOSLOP_LOCAL_SEARCH_V1
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
                     fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "video") }
                 }
                 "Search Audio" -> {
-                    // --- NOSLOP_OPENVERSE_V1 --- keyless audio source
+                    // --- NOSLOP_LOCAL_SEARCH_V1 ---
+                    // Removed from this branch:
+                    //   YouTubeInternalClient.searchVideos — returns VIDEO items,
+                    //     which is why audio results looked wrong.
+                    //   JamendoApiClient — has been returning "failed", and
+                    //     Openverse indexes Jamendo anyway, so nothing is lost.
+                    addLocal(mediaType = "audio")
                     fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
-                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(query) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
                     fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                 }
                 "Search Images" -> {
                     // --- NOSLOP_IMAGE_SEARCH_V1 ---
                     // Every source here must honour the query. fetchFeaturedPictures()
                     // did not, and was padding each search with 25 arbitrary photos.
+                    addLocal(mediaType = "image")  // NOSLOP_LOCAL_SEARCH_V1
                     fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
                     fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
@@ -150,11 +178,16 @@ object PublicApiService {
                     fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query, includeVideo = false) }
                 }
                 "Search Articles" -> {
+                    // --- NOSLOP_LOCAL_SEARCH_V1 ---
+                    // The only source here that works without an API key and
+                    // without the Reddit proxy. Backed by synced RSS items.
+                    addLocal(articlesOnly = true)
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
                     fetchAsync("api-guardian") { GuardianApiClient.searchArticles(query, null, apiKeyRepo) }
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "article") }
                 }
                 else -> {
+                    addLocal()  // NOSLOP_LOCAL_SEARCH_V1 — any type
                     // --- NOSLOP_SOURCE_AGE_V1 ---
                     // This branch serves the creator/interest auto-searches, and
                     // it was fetching all-time results — which is where the
@@ -184,6 +217,15 @@ object PublicApiService {
         // return quickly and the UI doesn't hang waiting for slow sources (Archive API).
         val timeoutDuration = 20_000L
         val deadline = System.currentTimeMillis() + timeoutDuration
+        // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
+        // Track what the main loop already took. The deadline sweep below used
+        // to re-await every deferred, including ones harvested here, so every
+        // result was added twice — visible in the log as "20 items (40 before
+        // dedup)" on every single category. distinctBy hid it, but it made the
+        // before-dedup count useless as a diagnostic.
+        val harvested = java.util.Collections.newSetFromMap(
+            java.util.IdentityHashMap<kotlinx.coroutines.Deferred<List<FeedItem>>, Boolean>()
+        )
         for (deferred in deferredItems) {
             val remaining = deadline - System.currentTimeMillis()
             if (remaining <= 0) {
@@ -192,7 +234,10 @@ object PublicApiService {
             }
             try {
                 val result = kotlinx.coroutines.withTimeoutOrNull(remaining) { deferred.await() }
-                if (result != null) items.addAll(result)
+                if (result != null) {
+                    items.addAll(result)
+                    harvested.add(deferred)
+                }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Deferred failed for category '$category': ${e.message}")
             }
@@ -205,6 +250,7 @@ object PublicApiService {
         // reporting 0 items despite several sources having succeeded. Sweep up
         // anything already finished before giving up on the rest.
         for (deferred in deferredItems) {
+            if (deferred in harvested) continue  // NOSLOP_ARCHIVE_BUDGET_V1
             if (!deferred.isActive && !deferred.isCancelled) {
                 try {
                     val late = kotlinx.coroutines.withTimeoutOrNull(50L) { deferred.await() }
@@ -215,6 +261,11 @@ object PublicApiService {
                 deferred.cancel()
             }
         }
+        // --- NOSLOP_LOCAL_SEARCH_V1 ---
+        // Local results first so they lead the ordering, then dedupe by id —
+        // an item already in the database will also come back from the network.
+        items.addAll(0, localItems)
+
         val deduplicated = items.distinctBy { it.id }
         Logger.info(TAG, "Category '$category': ${deduplicated.size} items (${items.size} before dedup)")
         deduplicated

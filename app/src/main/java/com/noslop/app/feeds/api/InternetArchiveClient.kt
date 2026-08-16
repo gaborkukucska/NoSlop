@@ -21,6 +21,20 @@ import okhttp3.Request
 object InternetArchiveClient {
 
     private const val TAG = "ARCHIVE_API"
+
+    // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
+    // Each result needs its own /metadata/<id>/files round trip to find a
+    // playable file. Those run inside async, but OkHttp's Dispatcher allows
+    // only 5 concurrent requests PER HOST, and every one of these targets
+    // archive.org — so twenty results drain in four serialised waves and
+    // consumed the whole 20s category budget in the logs.
+    //
+    // Cap the number we resolve. Items past the cap are DROPPED rather than
+    // emitted with the bare /download/<id> directory URL, which is a file
+    // listing and will not play.
+    private const val MAX_METADATA_RESOLUTIONS = 8
+
+    private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
     private val gson = Gson()
 
     // --- NOSLOP_IMAGE_SOURCES_V1 ---
@@ -78,6 +92,11 @@ object InternetArchiveClient {
         return search(encodedQuery, "audio", sourceId, rows)
     }
 
+    /** NOSLOP_ARCHIVE_BUDGET_V1 — reset the per-search resolution budget. */
+    private fun resetMetadataBudget() {
+        metadataResolutions.set(0)
+    }
+
     /**
      * Get curated documentary/lecture videos.
      */
@@ -120,6 +139,7 @@ object InternetArchiveClient {
         sourceId: String,
         rows: Int
     ): List<FeedItem> {
+        resetMetadataBudget()  // NOSLOP_ARCHIVE_BUDGET_V1
         val url = "https://archive.org/advancedsearch.php?" +
                 "q=$encodedQuery&" +
                 "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
@@ -186,6 +206,11 @@ object InternetArchiveClient {
 
                             // Resolve actual playable file URLs from metadata for both audio and video
                             if (resolvedMediaType == "audio" || resolvedMediaType == "video") {
+                                // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
+                                if (metadataResolutions.incrementAndGet() > MAX_METADATA_RESOLUTIONS) {
+                                    Logger.debug(TAG, "Metadata resolution cap reached; dropping $identifier")
+                                    return@async null
+                                }
                                 try {
                                     val metaUrl = "https://archive.org/metadata/$identifier/files"
                                     Logger.debug(TAG, "Fetching metadata for $identifier from: $metaUrl")
@@ -198,7 +223,9 @@ object InternetArchiveClient {
                                         val files = metaJson.getAsJsonArray("result")
 
                                         if (files != null) {
-                                            Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
+                                            // NOSLOP_ARCHIVE_BUDGET_V1 — was DEBUG per item; 321 of 515 log
+                                            // lines came from this client alone.
+                                            // Logger.debug(TAG, "Found ${files.size()} files in metadata for $identifier")
                                             if (resolvedMediaType == "audio") {
                                                 var bestAudio: String? = null
                                                 for (f in files) {
