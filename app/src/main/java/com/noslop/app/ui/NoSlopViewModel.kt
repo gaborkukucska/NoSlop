@@ -926,36 +926,58 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // the video pool was the only pool being thinned, and the shortfall got
         // backfilled with images.
         //
-        // Apply the ceiling only where a date means something AND the type is
-        // one the user is likely to want fresh. Images and audio are timeless
-        // often enough that age is a poor signal for them.
-        val ageSensitiveTypes = setOf("video")
+        // --- NOSLOP_AGE_FLOOR_V1 ---
+        // The previous version exempted every type except video from the age
+        // ceiling, on the theory that images and audio are timeless. The effect
+        // was the opposite of intended: video became the ONLY type the ceiling
+        // could remove, so the video pool could be emptied entirely while 2009
+        // podcasts passed through untouched and backfilled the whole batch.
+        //
+        // Symmetric again. Undated items (publishedAt <= 0) are still exempt
+        // because we genuinely cannot judge them.
         val datedRecently = { item: FeedItem ->
-            val type = item.mediaType ?: ""
-            val ageSensitive = ageSensitiveTypes.any { type.contains(it) } || type.isEmpty()
-            when {
-                item.publishedAt <= 0L -> true          // undated: cannot judge
-                !ageSensitive -> true                   // images/audio: age is weak signal
-                else -> (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
-            }
+            item.publishedAt <= 0L || (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
         }
         val effectiveDate = { item: FeedItem ->
             if (item.publishedAt <= 0L) nowMs - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
         }
 
-        val ageFiltered = unseenFeeds.filter(datedRecently)
+        /**
+         * NOSLOP_AGE_FLOOR_V1
+         *
+         * The age ceiling is a preference, not a hard constraint. Applied to a
+         * whole pool it can silently reduce one content type to zero, and the
+         * mix quota then has nothing to draw on — which is how an 80%-video
+         * setting produced a feed with no video in it at all.
+         *
+         * Applied per bucket with a floor: if the ceiling would empty a type,
+         * that type keeps everything it had. A year-old video beats no video.
+         */
+        val withAgeFloor = { items: List<FeedItem> ->
+            val fresh = items.filter(datedRecently)
+            if (fresh.isEmpty()) items else fresh
+        }
+
+        // NB: no longer age-filtered here — that now happens per bucket below.
         val recentFeeds = if (actualFilter == "Random") {
-            ageFiltered.shuffled()
+            unseenFeeds.shuffled()
         } else {
-            ageFiltered.sortedByDescending(effectiveDate)
+            unseenFeeds.sortedByDescending(effectiveDate)
         }
         val recentMeshes = if (actualFilter == "Random") unseenMeshes.shuffled() else unseenMeshes.sortedByDescending { it.timestamp }
 
         // Filter based on toggles
-        val rawVideos = if (mixSettings.videoEnabled) recentFeeds.filter { it.mediaType?.contains("video") == true } else emptyList()
-        val rawAudios = if (mixSettings.audioEnabled) recentFeeds.filter { it.mediaType?.contains("audio") == true } else emptyList()
-        val rawImages = if (mixSettings.imageEnabled) recentFeeds.filter { it.mediaType?.contains("image") == true } else emptyList()
-        val rawArticles = if (mixSettings.articleEnabled) recentFeeds.filter { it.mediaType.isNullOrEmpty() } else emptyList()
+        // --- NOSLOP_AGE_FLOOR_V1 ---
+        // Age ceiling applied per bucket, with the empty-pool floor.
+        val allVideos = if (mixSettings.videoEnabled) recentFeeds.filter { it.mediaType?.contains("video") == true } else emptyList()
+        val allAudios = if (mixSettings.audioEnabled) recentFeeds.filter { it.mediaType?.contains("audio") == true } else emptyList()
+        val allImages = if (mixSettings.imageEnabled) recentFeeds.filter { it.mediaType?.contains("image") == true } else emptyList()
+        val allArticles = if (mixSettings.articleEnabled) recentFeeds.filter { it.mediaType.isNullOrEmpty() } else emptyList()
+
+        val rawVideos = withAgeFloor(allVideos)
+        val rawAudios = withAgeFloor(allAudios)
+        val rawImages = withAgeFloor(allImages)
+        val rawArticles = withAgeFloor(allArticles)
         val rawMeshes = if (mixSettings.meshEnabled) recentMeshes else emptyList()
 
         // Calculate quotas based on precise percentages
@@ -985,10 +1007,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // is almost always because the pool is empty, not because the maths is
         // wrong — this makes that visible instead of guesswork.
         if (rawVideos.size < targetV) {
+            // --- NOSLOP_AGE_FLOOR_V1 ---
+            // Report the pool before AND after the ceiling. The previous version
+            // of this line could not distinguish "the ceiling removed them all"
+            // from "there were never any videos in the database", which is
+            // exactly the question that mattered.
+            val ceilingRemoved = allVideos.size - allVideos.count(datedRecently)
             Logger.info(
                 "VM",
-                "Video pool short: have ${rawVideos.size}, want $targetV " +
-                    "(of ${recentFeeds.size} candidates after age filter)"
+                "Video pool short: have ${rawVideos.size}, want $targetV | " +
+                    "videos in db=${allVideos.size}, removed by age ceiling=$ceilingRemoved, " +
+                    "total candidates=${recentFeeds.size}"
             )
         }
         val v = rawVideos.takeRoundRobin(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
