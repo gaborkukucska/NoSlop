@@ -58,6 +58,98 @@ object OpenverseApiClient {
      */
     private const val UNDATED = 0L
 
+    /**
+     * NOSLOP_IMAGE_SEARCH_V1
+     *
+     * Openverse image search — keyless, and unlike Wikimedia's featured
+     * listing it actually honours the query. Aggregates Flickr, Wikimedia,
+     * museum collections and more, all openly licensed.
+     */
+    suspend fun searchImages(
+        query: String,
+        sourceId: String = "api-openverse-images",
+        limit: Int = 20
+    ): List<FeedItem> {
+        if (query.isBlank()) return emptyList()
+
+        val now = System.currentTimeMillis()
+        if (now < rateLimitedUntilMs) {
+            Logger.info(TAG, "Skipping Openverse images — rate limited")
+            return emptyList()
+        }
+
+        return try {
+            val q = java.net.URLEncoder.encode(query, "UTF-8")
+            val url = "https://api.openverse.org/v1/images/?q=$q&page_size=$limit&mature=false"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .build()
+
+            val body = client.newCall(request).execute().use { res ->
+                if (res.code == 429) {
+                    rateLimitedUntilMs = System.currentTimeMillis() + RATE_LIMIT_COOLDOWN_MS
+                    Logger.warn(TAG, "Openverse rate limit (429) on images — backing off")
+                    return emptyList()
+                }
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Openverse images returned ${res.code}")
+                    return emptyList()
+                }
+                res.body?.string()
+            } ?: return emptyList()
+
+            val root = gson.fromJson(body, JsonObject::class.java)
+            val results = root.getAsJsonArray("results") ?: return emptyList()
+
+            val items = mutableListOf<FeedItem>()
+            for (element in results) {
+                try {
+                    val obj = element.asJsonObject
+                    fun str(key: String): String? =
+                        obj.get(key)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
+
+                    val id = str("id") ?: continue
+                    val imageUrl = str("url") ?: continue
+                    val title = str("title") ?: "Untitled"
+                    val creator = str("creator")
+                    val provider = str("provider") ?: str("source")
+                    val license = str("license")?.uppercase()
+
+                    val excerpt = listOfNotNull(
+                        license?.let { "CC $it" },
+                        provider?.let { "via $it" }
+                    ).joinToString(" · ").take(200)
+
+                    items.add(
+                        FeedItem(
+                            id = "openverse_img_$id",
+                            sourceId = sourceId,
+                            title = title,
+                            url = str("foreign_landing_url") ?: imageUrl,
+                            author = creator,
+                            excerpt = excerpt.ifBlank { null },
+                            thumbnailUrl = str("thumbnail") ?: imageUrl,
+                            publishedAt = UNDATED,
+                            mediaUrl = imageUrl,
+                            mediaType = "image",
+                            apiSource = "openverse"
+                        )
+                    )
+                } catch (e: Exception) {
+                    Logger.debug(TAG, "Skipping Openverse image: ${e.message}")
+                }
+            }
+
+            Logger.info(TAG, "Openverse images: fetched ${items.size} for '$query'")
+            items
+        } catch (e: Exception) {
+            Logger.error(TAG, "Openverse image request failed", e.message)
+            emptyList()
+        }
+    }
+
     suspend fun searchAudio(
         query: String,
         sourceId: String = "api-openverse-audio",

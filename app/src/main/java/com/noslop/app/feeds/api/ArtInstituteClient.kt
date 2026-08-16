@@ -113,7 +113,12 @@ object ArtInstituteClient {
                             author = artist?.replace("\n", " ")?.trim(),
                             excerpt = excerpt.ifBlank { null },
                             thumbnailUrl = thumbUrl,
-                            publishedAt = System.currentTimeMillis(),
+                            // --- NOSLOP_TOR_MIX_V1 ---
+                            // 0L = "undated". Stamping artworks with the current
+                            // time made every one of them the newest thing in the
+                            // database, so they took the top of a recency-sorted
+                            // feed ahead of genuinely dated video.
+                            publishedAt = 0L,
                             mediaUrl = fullUrl,
                             mediaType = "image",
                             apiSource = "artic"

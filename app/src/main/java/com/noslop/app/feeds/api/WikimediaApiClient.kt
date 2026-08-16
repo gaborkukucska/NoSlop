@@ -57,6 +57,103 @@ object WikimediaApiClient {
         return fmt.format(java.util.Date(pick))
     }
 
+    /**
+     * NOSLOP_IMAGE_SEARCH_V1
+     *
+     * A REAL search over Wikimedia Commons, as opposed to
+     * [fetchFeaturedPictures] which ignores any query and returns whatever is
+     * in the featured-pictures category. Wiring the latter into "Search Images"
+     * meant every image search was padded with 25 arbitrary photos.
+     *
+     * Uses generator=search restricted to the File namespace (6), with
+     * filetype:bitmap so Commons only returns things that rasterise.
+     */
+    suspend fun searchImages(
+        query: String,
+        sourceId: String = "api-wikimedia-featured",
+        limit: Int = 20
+    ): List<FeedItem> {
+        if (query.isBlank()) return fetchFeaturedPictures(sourceId)
+        return try {
+            val q = java.net.URLEncoder.encode("$query filetype:bitmap", "UTF-8")
+            val url = "https://commons.wikimedia.org/w/api.php?action=query&generator=search" +
+                      "&gsrsearch=$q&gsrnamespace=6&gsrlimit=$limit" +
+                      "&prop=imageinfo&iiprop=url|extmetadata|mime|size&iiurlwidth=1280&format=json"
+
+            val request = Request.Builder()
+                .url(url)
+                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                .build()
+
+            val body = client.newCall(request).execute().use { res ->
+                if (!res.isSuccessful) {
+                    Logger.warn(TAG, "Wikimedia search returned ${res.code}")
+                    return emptyList()
+                }
+                res.body?.string()
+            } ?: return emptyList()
+
+            val items = parsePages(gson.fromJson(body, JsonObject::class.java), sourceId)
+            Logger.info(TAG, "Wikimedia search '$query': ${items.size} items")
+            items
+        } catch (e: Exception) {
+            Logger.error(TAG, "Wikimedia search failed", e.message)
+            emptyList()
+        }
+    }
+
+    /**
+     * NOSLOP_IMAGE_SEARCH_V1 — shared page/imageinfo parsing for both the featured
+     * listing and the search above.
+     */
+    private fun parsePages(root: JsonObject, sourceId: String): List<FeedItem> {
+        val query = root.getAsJsonObject("query") ?: return emptyList()
+        val pages = query.getAsJsonObject("pages") ?: return emptyList()
+
+        val items = mutableListOf<FeedItem>()
+        for (entry in pages.entrySet()) {
+            try {
+                val page = entry.value.asJsonObject
+                val pageId = page.get("pageid")?.asString ?: ""
+                val title = page.get("title")?.asString ?: "Untitled"
+                val imageInfoArr = page.getAsJsonArray("imageinfo") ?: continue
+                if (imageInfoArr.size() == 0) continue
+                val info = imageInfoArr[0].asJsonObject
+
+                val imageUrl = info.get("url")?.asString ?: continue
+                val descriptionUrl = info.get("descriptionurl")?.asString ?: imageUrl
+
+                val thumbUrl = info.get("thumburl")?.asString
+                val mime = info.get("mime")?.asString
+                if (thumbUrl.isNullOrBlank() || (mime != null && mime !in RENDERABLE_MIME)) continue
+
+                val metadata = info.getAsJsonObject("extmetadata")
+                val artist = metadata?.getAsJsonObject("Artist")?.get("value")?.asString ?: "Unknown"
+                val description = metadata?.getAsJsonObject("ImageDescription")?.get("value")?.asString ?: ""
+
+                val cleanArtist = android.text.Html.fromHtml(artist, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+                val cleanDesc = android.text.Html.fromHtml(description, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+
+                items.add(FeedItem(
+                    id = "wikimedia_$pageId",
+                    sourceId = sourceId,
+                    title = title.removePrefix("File:").substringBeforeLast("."),
+                    url = descriptionUrl,
+                    author = cleanArtist,
+                    excerpt = cleanDesc.take(200),
+                    thumbnailUrl = thumbUrl,
+                    publishedAt = 0L,
+                    mediaUrl = thumbUrl,
+                    mediaType = "image",
+                    apiSource = "wikimedia"
+                ))
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Skipping Wikimedia entry: ${e.message}")
+            }
+        }
+        return items
+    }
+
     suspend fun fetchFeaturedPictures(sourceId: String = "api-wikimedia-featured"): List<FeedItem> {
         return try {
             var url = "https://commons.wikimedia.org/w/api.php?action=query&generator=categorymembers" +
@@ -138,7 +235,8 @@ object WikimediaApiClient {
                         author = cleanArtist,
                         excerpt = cleanDesc.take(200),
                         thumbnailUrl = thumbUrl,
-                        publishedAt = System.currentTimeMillis(),
+                        // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
+                        publishedAt = 0L,
                         mediaUrl = thumbUrl,
                         mediaType = "image",
                         apiSource = "wikimedia"

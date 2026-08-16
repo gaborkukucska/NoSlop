@@ -133,10 +133,36 @@ object TorService {
             
             intent.action = org.torproject.jni.TorService.ACTION_START
             
+            // --- NOSLOP_TOR_MIX_V1 ---
+            // Android 8+ refuses startService() from the background, and the
+            // old code swallowed the resulting IllegalStateException and then
+            // polled for sixty seconds against a Tor that had never launched.
+            // org.torproject.jni.TorService calls startForeground() itself, so
+            // startForegroundService() is the supported way to launch it from
+            // the background.
+            var serviceStarted = false
             try {
                 context.startService(intent)
+                serviceStarted = true
             } catch (e: IllegalStateException) {
-                Logger.warn(TAG, "startService threw IllegalStateException: ${e.message}")
+                Logger.warn(TAG, "startService refused (app backgrounded): ${e.message}")
+                try {
+                    androidx.core.content.ContextCompat.startForegroundService(context, intent)
+                    serviceStarted = true
+                    Logger.info(TAG, "Started TorService as a foreground service instead")
+                } catch (e2: Exception) {
+                    Logger.error(TAG, "startForegroundService also failed: ${e2.message}")
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "startService failed: ${e.message}")
+            }
+
+            if (!serviceStarted) {
+                // Nothing is coming. Fail fast instead of polling a port that
+                // cannot open; the caller's retry loop will try again later.
+                Logger.warn(TAG, "TorService could not be started at all — skipping the readiness poll")
+                _torState.value = TorState.FAILED
+                return
             }
 
             // Unified self-healing bootstrap loop

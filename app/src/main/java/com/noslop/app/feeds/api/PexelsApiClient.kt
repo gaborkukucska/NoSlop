@@ -116,7 +116,8 @@ object PexelsApiClient {
                         author = photographer,
                         excerpt = "Photo by $photographer on Pexels",
                         thumbnailUrl = src.get("medium")?.asString,
-                        publishedAt = System.currentTimeMillis(),
+                        // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
+                        publishedAt = 0L,
                         mediaUrl = src.get("large2x")?.asString ?: src.get("large")?.asString,
                         mediaType = "image",
                         apiSource = "pexels"
@@ -191,7 +192,8 @@ object PexelsApiClient {
                         author = userName,
                         excerpt = "Video by $userName on Pexels",
                         thumbnailUrl = thumbnailUrl,
-                        publishedAt = System.currentTimeMillis(),
+                        // --- NOSLOP_TOR_MIX_V1 --- 0L = undated, not "brand new"
+                        publishedAt = 0L,
                         mediaUrl = bestFileUrl,
                         mediaType = "video",
                         apiSource = "pexels"

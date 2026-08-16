@@ -919,8 +919,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         //    just fixed. Mid-pack keeps them visible without letting them
         //    outrank genuinely fresh content.
         val nowMs = System.currentTimeMillis()
+        // --- NOSLOP_TOR_MIX_V1 ---
+        // The age filter could only ever remove VIDEO. Videos carry real parsed
+        // dates; the image sources are either undated (0L, exempt) or used to
+        // stamp themselves with the current time. So asking for 80% video meant
+        // the video pool was the only pool being thinned, and the shortfall got
+        // backfilled with images.
+        //
+        // Apply the ceiling only where a date means something AND the type is
+        // one the user is likely to want fresh. Images and audio are timeless
+        // often enough that age is a poor signal for them.
+        val ageSensitiveTypes = setOf("video")
         val datedRecently = { item: FeedItem ->
-            item.publishedAt <= 0L || (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
+            val type = item.mediaType ?: ""
+            val ageSensitive = ageSensitiveTypes.any { type.contains(it) } || type.isEmpty()
+            when {
+                item.publishedAt <= 0L -> true          // undated: cannot judge
+                !ageSensitive -> true                   // images/audio: age is weak signal
+                else -> (nowMs - item.publishedAt) <= MAX_FEED_AGE_MS
+            }
         }
         val effectiveDate = { item: FeedItem ->
             if (item.publishedAt <= 0L) nowMs - UNKNOWN_DATE_ASSUMED_AGE_MS else item.publishedAt
@@ -963,6 +980,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // One item per creator per pass, so a channel that published four
         // videos today contributes one here and keeps the rest for later
         // batches, instead of occupying most of the video quota at once.
+        // --- NOSLOP_TOR_MIX_V1 ---
+        // Log the pool vs the quota. When the mix setting is not being met it
+        // is almost always because the pool is empty, not because the maths is
+        // wrong — this makes that visible instead of guesswork.
+        if (rawVideos.size < targetV) {
+            Logger.info(
+                "VM",
+                "Video pool short: have ${rawVideos.size}, want $targetV " +
+                    "(of ${recentFeeds.size} candidates after age filter)"
+            )
+        }
         val v = rawVideos.takeRoundRobin(targetV, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val a = rawAudios.takeRoundRobin(targetA, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()
         val i = rawImages.takeRoundRobin(targetI, diverseKey, isCreatorMatch).map { UnifiedItem.Feed(it) }.toMutableList()

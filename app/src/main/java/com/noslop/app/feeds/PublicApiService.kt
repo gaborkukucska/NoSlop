@@ -137,11 +137,17 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query) }
                 }
                 "Search Images" -> {
+                    // --- NOSLOP_IMAGE_SEARCH_V1 ---
+                    // Every source here must honour the query. fetchFeaturedPictures()
+                    // did not, and was padding each search with 25 arbitrary photos.
+                    fetchAsync("api-openverse-images") { OpenverseApiClient.searchImages(query) }
+                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.searchImages(query) }
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }
-                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query) }
-                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
                     fetchAsync("api-artic-artworks") { ArtInstituteClient.fetchArtworks(query) }
-                    fetchAsync("api-wikimedia-featured") { WikimediaApiClient.fetchFeaturedPictures() }
+                    fetchAsync("api-reddit-hot") { RedditApiClient.searchReddit(query, requiredMediaType = "image") }
+                    // Images only: see NasaApiClient — the video path costs ~1.3s per
+                    // item sequentially and used to consume the whole category budget.
+                    fetchAsync("api-nasa-library") { NasaApiClient.searchImageLibrary(query, includeVideo = false) }
                 }
                 "Search Articles" -> {
                     fetchAsync("api-newsapi-headlines") { NewsApiClient.searchArticles(query, null, apiKeyRepo, language = language) }
@@ -178,6 +184,24 @@ object PublicApiService {
                 if (result != null) items.addAll(result)
             } catch (e: Exception) {
                 Logger.warn(TAG, "Deferred failed for category '$category': ${e.message}")
+            }
+        }
+
+        // --- NOSLOP_IMAGE_SEARCH_V1 ---
+        // The loop above awaits in order against one shared deadline and breaks
+        // when it expires — which threw away every source after the slow one,
+        // including ones that had ALREADY returned. That is how a search ends up
+        // reporting 0 items despite several sources having succeeded. Sweep up
+        // anything already finished before giving up on the rest.
+        for (deferred in deferredItems) {
+            if (!deferred.isActive && !deferred.isCancelled) {
+                try {
+                    val late = kotlinx.coroutines.withTimeoutOrNull(50L) { deferred.await() }
+                    if (late != null) items.addAll(late)
+                } catch (_: Exception) {
+                }
+            } else if (deferred.isActive) {
+                deferred.cancel()
             }
         }
         val deduplicated = items.distinctBy { it.id }

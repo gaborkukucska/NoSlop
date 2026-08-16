@@ -100,10 +100,21 @@ object NasaApiClient {
     suspend fun searchImageLibrary(
         query: String,
         sourceId: String = "api-nasa-library",
-        pageSize: Int = 20
+        pageSize: Int = 20,
+        includeVideo: Boolean = true
     ): List<FeedItem> {
         val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
-        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=image,video&page_size=$pageSize"
+        // --- NOSLOP_IMAGE_SEARCH_V1 ---
+        // Each video result costs a separate, sequential asset-manifest fetch
+        // (~1.3s). Your log shows sixteen of them running 00:25:33 -> 00:25:52
+        // during an IMAGE search, blowing the 20s category budget so the whole
+        // category returned nothing. Image searches now ask for images only.
+        val mediaTypes = if (includeVideo) "image,video" else "image"
+        val url = "https://images-api.nasa.gov/search?q=$encodedQuery&media_type=$mediaTypes&page_size=$pageSize"
+        // Declared here, not beside the item list: this must live inside
+        // searchImageLibrary, and several functions in this file open with
+        // an identically-worded `val items = mutableListOf<FeedItem>()`.
+        var videoResolutions = 0
 
         return try {
             val request = Request.Builder()
@@ -146,6 +157,15 @@ object NasaApiClient {
 
                     // For videos, resolve the actual .mp4 from the asset manifest
                     val actualMediaUrl = if (nasaMediaType == "video") {
+                        // --- NOSLOP_IMAGE_SEARCH_V1 --- bound the sequential cost.
+                        // Skip the whole item past the cap rather than emitting a
+                        // video card with a null mediaUrl, which would render as a
+                        // slide that can never play.
+                        if (videoResolutions >= MAX_VIDEO_RESOLUTIONS) {
+                            Logger.debug(TAG, "Video resolution cap reached; skipping $nasaId")
+                            continue
+                        }
+                        videoResolutions++
                         resolveNasaVideoUrl(nasaId) ?: thumbnailUrl
                     } else {
                         thumbnailUrl
@@ -181,6 +201,11 @@ object NasaApiClient {
      * Resolve the actual playable .mp4 URL for a NASA video by querying the asset manifest.
      * NASA's Image Library API requires a second request to /asset/{nasa_id} to get file URLs.
      */
+    // --- NOSLOP_IMAGE_SEARCH_V1 ---
+    // Resolving a video URL is a blocking round trip per item. Even outside
+    // image search, twenty of them in a row will outlive any sane deadline.
+    private const val MAX_VIDEO_RESOLUTIONS = 6
+
     private fun resolveNasaVideoUrl(nasaId: String): String? {
         return try {
             val url = "https://images-api.nasa.gov/asset/$nasaId"
