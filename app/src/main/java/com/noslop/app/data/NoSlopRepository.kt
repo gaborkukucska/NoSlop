@@ -849,6 +849,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // --- Feed pipeline & toggles (delegated to FeedRepository) ---
     suspend fun clearFeedData() = feedRepository.clearFeedData()
 
+    suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
+
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
     suspend fun refreshFeeds() = feedRepository.refreshFeeds()

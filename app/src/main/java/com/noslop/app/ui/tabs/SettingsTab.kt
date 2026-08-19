@@ -245,7 +245,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     if (!torState.first) {
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Button(
-                                            onClick = { viewModel.startTor() },
+                                            onClick = { viewModel.startTor(forceRestart = true) },
                                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
                                             shape = RoundedCornerShape(4.dp)
                                         ) {

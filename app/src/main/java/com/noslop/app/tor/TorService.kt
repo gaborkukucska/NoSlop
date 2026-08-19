@@ -168,15 +168,18 @@ object TorService {
      * true (user has external Orbot) — in that case the daemon may already
      * be running on 9050.
      */
-    fun startTor(context: Context, privateKeyB64: String? = null, burnablePrivateKeyB64: String? = null) {
-        // FIX: Guard now excludes IDLE — IDLE means "not started yet" and must
-        // always proceed. FAILED also now falls through so the Retry button works.
-        if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
+    fun startTor(
+        context: Context,
+        privateKeyB64: String? = null,
+        burnablePrivateKeyB64: String? = null,
+        forceRestart: Boolean = false
+    ) {
+        if (forceRestart) {
+            Logger.info(TAG, "Force restart requested. Resetting Tor bootstrap state...")
+            bootstrapJob?.cancel()
+            _torState.value = TorState.IDLE
+        } else if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
-            // FIX: Detect when a real identity key is provided for the first time
-            // (e.g. after onboarding completes, or on a warm restart with identity loaded).
-            // The previous code updated the key but never re-triggered registration,
-            // leaving wrong ephemeral hidden services published permanently.
             val keyChanged = privateKeyB64 != null && privateKeyB64 != currentPrivateKeyB64
             currentPrivateKeyB64 = privateKeyB64
             currentBurnablePrivateKeyB64 = burnablePrivateKeyB64
@@ -403,7 +406,7 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
             
-            val content = "SocksPort $SOCKS_PORT\nControlPort ${Constants.TOR_CONTROL_PORT}\nCookieAuthentication 1\n"
+            val content = "SocksPort $SOCKS_PORT\nControlPort ${Constants.TOR_CONTROL_PORT}\nCookieAuthentication 0\n"
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {

@@ -415,25 +415,35 @@ object FeedParser {
     }
 
     private fun extractFirstImage(html: String): String? {
-        // Broad search for images in typical RSS/Atom content
+        if (html.isBlank()) return null
         val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
         val matches = pattern.findAll(html)
         for (match in matches) {
-            val url = match.groupValues[1]
+            val url = match.groupValues[1].trim()
+            if (url.isBlank()) continue
             val lowerUrl = url.lowercase(Locale.US)
-            if (lowerUrl.contains("pixel") || lowerUrl.contains("tracker") || lowerUrl.contains("1x1") || lowerUrl.contains("gravatar") || lowerUrl.contains("feedsportal")) {
+            if (lowerUrl.contains("pixel") || lowerUrl.contains("tracker") || lowerUrl.contains("1x1") ||
+                lowerUrl.contains("gravatar") || lowerUrl.contains("feedsportal") || lowerUrl.contains("badge") ||
+                lowerUrl.contains("icon") || lowerUrl.contains("logo") || lowerUrl.contains("spinner")) {
                 continue
             }
-            if (lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerUrl.contains(".png") || lowerUrl.contains(".webp") || lowerUrl.contains("/image") || lowerUrl.contains("/photo")) {
-                return url
-            }
+            return normalizeUrl(url)
         }
         
         val metaPattern = Regex("<meta[^>]+(?:property|name)=['\"](?:og|twitter):image['\"][^>]+content=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
-        val metaUrl = metaPattern.find(html)?.groupValues?.get(1)
-        if (metaUrl != null) return metaUrl
+        val metaUrl = metaPattern.find(html)?.groupValues?.get(1)?.trim()
+        if (!metaUrl.isNullOrBlank()) return normalizeUrl(metaUrl)
 
         return null
+    }
+
+    fun normalizeUrl(url: String): String {
+        var clean = url.trim()
+        clean = android.text.Html.fromHtml(clean, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
+        if (clean.startsWith("//")) return "https:$clean"
+        if (clean.startsWith("http://")) return "https://" + clean.substring(7)
+        if (clean.contains(" ")) return clean.replace(" ", "%20")
+        return clean
     }
 
     /**

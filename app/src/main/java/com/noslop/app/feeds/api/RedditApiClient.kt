@@ -139,41 +139,46 @@ object RedditApiClient {
             }
         }
 
-        // Check for image preview
-        if (mediaUrl == null) {
-            try {
-                val previewSource = data.getAsJsonObject("preview")
-                    ?.getAsJsonArray("images")
-                    ?.get(0)?.asJsonObject
-                    ?.getAsJsonObject("source")
-                val previewUrl = previewSource?.get("url")?.asString
-                if (!previewUrl.isNullOrBlank()) {
-                    mediaUrl = previewUrl
-                    mediaType = "image"
-                }
-            } catch (_: Exception) {}
+        fun clean(u: String?): String? {
+            if (u.isNullOrBlank()) return null
+            val decoded = android.text.Html.fromHtml(u.trim(), android.text.Html.FROM_HTML_MODE_COMPACT).toString()
+            return if (decoded.startsWith("http")) decoded else null
         }
+
+        // Check for image preview
+        var previewUrl: String? = null
+        try {
+            val previewSource = data.getAsJsonObject("preview")
+                ?.getAsJsonArray("images")
+                ?.get(0)?.asJsonObject
+                ?.getAsJsonObject("source")
+            previewUrl = clean(previewSource?.get("url")?.asString)
+        } catch (_: Exception) {}
 
         // Thumbnail
-        val thumb = data.get("thumbnail")?.asString
-        if (!thumb.isNullOrBlank() && thumb != "self" && thumb != "default" && thumb != "nsfw" && thumb.startsWith("http")) {
-            thumbnailUrl = thumb
+        val rawThumb = clean(data.get("thumbnail")?.asString)
+        if (rawThumb != null && rawThumb != "self" && rawThumb != "default" && rawThumb != "nsfw") {
+            thumbnailUrl = rawThumb
         }
-
-        // If we got an image preview URL but no thumbnail, use the image as thumbnail
-        if (thumbnailUrl == null && mediaType == "image" && mediaUrl != null) {
-            thumbnailUrl = mediaUrl
+        if (thumbnailUrl == null && previewUrl != null) {
+            thumbnailUrl = previewUrl
         }
 
         // If postUrl points directly to an image
-        if (mediaUrl == null && postUrl != null) {
-            val lower = postUrl.lowercase()
+        if (postUrl != null) {
+            val cleanPostUrl = clean(postUrl)
+            val lower = (cleanPostUrl ?: "").lowercase()
             if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png") ||
-                lower.endsWith(".gif") || lower.endsWith(".webp")) {
-                mediaUrl = postUrl
+                lower.endsWith(".gif") || lower.endsWith(".webp") || lower.contains("i.redd.it")) {
+                mediaUrl = cleanPostUrl
                 mediaType = "image"
-                if (thumbnailUrl == null) thumbnailUrl = postUrl
+                if (thumbnailUrl == null) thumbnailUrl = cleanPostUrl
             }
+        }
+
+        // If not a direct image or video, treat as article
+        if (mediaType == null && previewUrl != null) {
+            thumbnailUrl = previewUrl
         }
 
         val subreddit = data.get("subreddit")?.asString ?: ""
@@ -186,9 +191,9 @@ object RedditApiClient {
             url = articleUrl,
             author = "u/$author",
             excerpt = excerpt,
-            thumbnailUrl = thumbnailUrl,
+            thumbnailUrl = clean(thumbnailUrl),
             publishedAt = createdUtc,
-            mediaUrl = mediaUrl,
+            mediaUrl = clean(mediaUrl),
             mediaType = mediaType,
             apiSource = "reddit"
         )

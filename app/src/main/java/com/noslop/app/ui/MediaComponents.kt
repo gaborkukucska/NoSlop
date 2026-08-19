@@ -185,24 +185,39 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         // anything was happening.
         if (thumbBitmap == null) {
             if (loadFailed) {
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF141414)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = TextMuted,
-                        modifier = Modifier.size(44.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        "Image unavailable".tr,
-                        color = TextMuted,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column(
+                        modifier = Modifier.padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Image,
+                            contentDescription = null,
+                            tint = AccentGreen.copy(alpha = 0.6f),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            "Artwork / Photo Preview".tr,
+                            color = TextLight,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            "Image host unavailable over current circuit".tr,
+                            color = TextMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             } else if (isLoading) {
                 Box(
@@ -359,7 +374,8 @@ fun SegmentedArticleReader(
     sourceLabel: String,
     thumbnailUrl: String?,
     articleUrl: String?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    publishedAt: Long = 0L
 ) {
     val rawContent = content.ifBlank { "" }
     val segments: List<String> = remember(rawContent) { splitIntoSegments(rawContent, 800) }
@@ -369,7 +385,6 @@ fun SegmentedArticleReader(
     val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
 
     var showWebView by remember { mutableStateOf(false) }
-    val fallbackImage = "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?q=80&w=2070&auto=format&fit=crop"
     val safeThumbnailUrl = sanitizeImageUrl(thumbnailUrl)
     val context = LocalContext.current
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
@@ -384,19 +399,19 @@ fun SegmentedArticleReader(
             if (page == 0) {
                 // Page 0: Hero Layout (Magazine Style)
                 Box(modifier = Modifier.fillMaxSize()) {
-                    var imageLoadFailed by remember { mutableStateOf(false) }
+                    var imageLoadFailed by remember(safeThumbnailUrl) { mutableStateOf(safeThumbnailUrl.isNullOrBlank()) }
 
-                    if (!imageLoadFailed) {
+                    if (!safeThumbnailUrl.isNullOrBlank() && !imageLoadFailed) {
                         val imageRequest = coil.request.ImageRequest.Builder(context)
-                            .data(safeThumbnailUrl ?: fallbackImage)
+                            .data(safeThumbnailUrl)
                             .apply {
                                 when (mediaSettings.imageQuality) {
                                     "low" -> size(640)
                                     "medium" -> size(960)
                                 }
                             }
-                            .memoryCacheKey((safeThumbnailUrl ?: fallbackImage) + "_" + mediaSettings.imageQuality)
-                            .diskCacheKey((safeThumbnailUrl ?: fallbackImage) + "_" + mediaSettings.imageQuality)
+                            .memoryCacheKey(safeThumbnailUrl + "_" + mediaSettings.imageQuality)
+                            .diskCacheKey(safeThumbnailUrl + "_" + mediaSettings.imageQuality)
                             .build()
                         AsyncImage(
                             model = imageRequest,
@@ -406,30 +421,37 @@ fun SegmentedArticleReader(
                             onError = { imageLoadFailed = true }
                         )
                     } else {
-                        // Fallback for Tor-blocked images
+                        // Clean editorial background for articles without lead image or on load failure
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xFF1A1A1A)),
+                                .background(Color(0xFF141414)),
                             contentAlignment = Alignment.Center
                         ) {
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.padding(32.dp)
                             ) {
-                                Icon(Icons.Default.BrokenImage, contentDescription = null, tint = TextMuted, modifier = Modifier.size(48.dp))
+                                Icon(Icons.Default.Article, contentDescription = null, tint = AccentGreen.copy(alpha = 0.7f), modifier = Modifier.size(48.dp))
                                 Spacer(modifier = Modifier.height(16.dp))
                                 Text(
                                     title,
                                     color = TextLight,
-                                    style = MaterialTheme.typography.titleMedium,
+                                    style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     textAlign = TextAlign.Center
                                 )
-                                if (!author.isNullOrBlank()) {
+                                val formattedDate = if (publishedAt > 0L) {
+                                    try {
+                                        java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(publishedAt))
+                                    } catch (_: Exception) { null }
+                                } else null
+                                val byline = listOfNotNull(author?.takeIf { it.isNotBlank() }?.let { "By $it" }, formattedDate).joinToString(" · ")
+
+                                if (byline.isNotBlank()) {
                                     Spacer(modifier = Modifier.height(8.dp))
                                     Text(
-                                        author,
+                                        byline,
                                         color = TextMuted,
                                         style = MaterialTheme.typography.bodySmall
                                     )
@@ -479,10 +501,16 @@ fun SegmentedArticleReader(
                             ),
                             color = Color.White
                         )
-                        if (author != null) {
+                        val formattedDate = if (publishedAt > 0L) {
+                            try {
+                                java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(publishedAt))
+                            } catch (_: Exception) { null }
+                        } else null
+                        val byline = listOfNotNull(author?.takeIf { it.isNotBlank() }?.let { "By $it" }, formattedDate).joinToString(" · ")
+                        if (byline.isNotBlank()) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "By $author",
+                                text = byline,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = TextMuted
                             )

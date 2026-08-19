@@ -103,13 +103,14 @@ object PublicApiService {
                     fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                 }
                 "Music" -> {
-                    // --- NOSLOP_LOCAL_SEARCH_V1 --- Jamendo dropped: returns "failed"
-                    // with its hardcoded client id, and Openverse indexes Jamendo.
-                    fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(query) }
-                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(query, apiKeyRepo, language = language) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$query music", recentOnly = true) }
-                    fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(query, apiKeyRepo) }
-                    fetchAsync("api-archive-audio") { InternetArchiveClient.searchAudio(query) }
+                    val audioQuery = if (query.isBlank()) "music" else query
+                    fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(audioQuery) }
+                    fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(audioQuery, apiKeyRepo, language = language) }
+                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$audioQuery music", recentOnly = true) }
+                    fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(audioQuery, apiKeyRepo) }
+                    fetchAsync("api-archive-audio") { 
+                        if (query.isBlank()) InternetArchiveClient.getPopularAudio() else InternetArchiveClient.searchAudio(query)
+                    }
                 }
                 "Art", "Photography" -> {
                     fetchAsync("api-pexels-photo") { PexelsApiClient.searchPhotos(query, apiKeyRepo) }

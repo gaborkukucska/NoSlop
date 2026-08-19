@@ -209,7 +209,8 @@ fun FullScreenFeedCard(
                         author = item.author,
                         sourceLabel = sourceLabel,
                         thumbnailUrl = item.thumbnailUrl ?: resolvedUrl,
-                        articleUrl = item.url
+                        articleUrl = item.url,
+                        publishedAt = item.publishedAt
                     )
                 }
             }
@@ -221,7 +222,8 @@ fun FullScreenFeedCard(
                 author = item.author,
                 sourceLabel = sourceLabel,
                 thumbnailUrl = item.thumbnailUrl,
-                articleUrl = item.url
+                articleUrl = item.url,
+                publishedAt = item.publishedAt
             )
         }
 
@@ -623,7 +625,8 @@ fun FullScreenMeshCardV2(
                         author = post.authorHandle,
                         sourceLabel = if (post.clearnetUrl != null) "Shared by ${post.authorHandle}" else "MESH",
                         thumbnailUrl = post.clearnetThumbnailUrl ?: resolvedUrl,
-                        articleUrl = post.clearnetUrl
+                        articleUrl = post.clearnetUrl,
+                        publishedAt = post.timestamp
                     )
                 }
             }
@@ -634,7 +637,8 @@ fun FullScreenMeshCardV2(
                 author = displayHandle,
                 sourceLabel = if (post.clearnetUrl != null) "Shared by $displayHandle" else "MESH",
                 thumbnailUrl = post.clearnetThumbnailUrl,
-                articleUrl = post.clearnetUrl
+                articleUrl = post.clearnetUrl,
+                publishedAt = post.timestamp
             )
         }
 

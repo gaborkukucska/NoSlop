@@ -49,7 +49,7 @@ class ApiKeyRepository(context: Context) {
     companion object {
         /** All supported API services with their display names and whether they're required */
         val SERVICES = listOf(
-            ServiceInfo("youtube", "YouTube Data API v3", true, "console.developers.google.com"),
+            ServiceInfo("youtube", "YouTube InnerTube API", false, "Keyless (InnerTube proxy)"),
             ServiceInfo("pexels", "Pexels API", true, "pexels.com/api"),
             ServiceInfo("newsapi", "NewsAPI", true, "newsapi.org/register"),
             ServiceInfo("guardian", "The Guardian API", true, "open-platform.theguardian.com/access"),

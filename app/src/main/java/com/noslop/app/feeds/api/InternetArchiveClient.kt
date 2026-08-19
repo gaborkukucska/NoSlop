@@ -79,17 +79,31 @@ object InternetArchiveClient {
         sourceId: String = "api-archive-audio",
         rows: Int = 20
     ): List<FeedItem> {
-        // --- NOSLOP_IMAGE_SOURCES_V1 ---
-        // Sorting all of mediatype:audio by download count surfaces the bulk
-        // auto-uploaded YouTube channel mirrors (dubs, "audio translations",
-        // whole-channel rips) far more often than anything curated. Exclude
-        // them at the query level; isLowValueUpload() catches the stragglers
-        // that aren't tagged.
+        val qTerm = query.trim()
+        val queryPart = if (qTerm.isBlank()) "mediatype:audio AND downloads:[100 TO 999999]" else "($qTerm) AND mediatype:audio"
         val encodedQuery = java.net.URLEncoder.encode(
-            "($query) AND mediatype:audio AND -subject:youtube AND -collection:opensource_audio",
+            "$queryPart AND -subject:youtube AND -collection:opensource_audio",
             "UTF-8"
         )
         return search(encodedQuery, "audio", sourceId, rows)
+    }
+
+    /**
+     * Get popular audio recordings, music collections, podcasts, and vintage radio.
+     */
+    suspend fun getPopularAudio(
+        sourceId: String = "api-archive-audio",
+        rows: Int = 20
+    ): List<FeedItem> {
+        val encodedQuery = java.net.URLEncoder.encode(
+            "(collection:78rpm OR collection:netlabels OR collection:etree OR collection:oldtimeradio OR mediatype:audio) AND -subject:youtube", "UTF-8"
+        )
+        val url = "https://archive.org/advancedsearch.php?" +
+                "q=$encodedQuery&" +
+                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
+                "sort[]=downloads+desc&" +
+                "rows=$rows&output=json"
+        return fetchAndParse(url, "audio", sourceId)
     }
 
     /** NOSLOP_ARCHIVE_BUDGET_V1 — reset the per-search resolution budget. */

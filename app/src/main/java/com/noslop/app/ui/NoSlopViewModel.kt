@@ -342,10 +342,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         viewModelScope.launch {
             _isOnboardingComplete.value = repository.isOnboardingComplete()
+            repository.ensureDefaultApiSourcesExist()
             val recovered = repository.recoverSourcesAfterMigration()
             if (recovered) {
                 _selectedInterests.value = repository.getUserSelectedCategories()
                 _isAggregatorEnabled.value = repository.isAggregatorEnabled()
+                refreshFeeds()
+            } else if (_isOnboardingComplete.value && _isAggregatorEnabled.value) {
                 refreshFeeds()
             }
             
@@ -1993,7 +1996,7 @@ fun toggleAggregator() {
         }
     }
 
-    fun startTor() {
+    fun startTor(forceRestart: Boolean = false) {
         viewModelScope.launch {
             val identity = repository.getLocalIdentity()
             val burnableIdentity = repository.getBurnableIdentity()
@@ -2006,7 +2009,12 @@ fun toggleAggregator() {
                 com.noslop.app.mesh.NoSlopForegroundService.start(getApplication())
             }
             
-            com.noslop.app.tor.TorService.startTor(getApplication(), identity?.privateKeyB64, burnableIdentity?.privateKeyB64)
+            com.noslop.app.tor.TorService.startTor(
+                getApplication(),
+                identity?.privateKeyB64,
+                burnableIdentity?.privateKeyB64,
+                forceRestart = forceRestart
+            )
         }
     }
 

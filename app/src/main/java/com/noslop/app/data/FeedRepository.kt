@@ -141,6 +141,38 @@ class FeedRepository(
     }
 
     /**
+     * Ensures all keyless built-in API sources (such as YouTube InnerTube) are present in the
+     * database's feed_sources table. Fixes issues where onboarding skipped keyless API sources.
+     */
+    suspend fun ensureDefaultApiSourcesExist() = withContext(Dispatchers.IO) {
+        val existing = feedDao.getActiveSourcesList().map { it.id }.toSet()
+        val keylessApiSources = com.noslop.app.feeds.SourceLibrary.sources.filter { src ->
+            if (src.feedType != "api") false
+            else {
+                val serviceId = src.url.split(":").firstOrNull() ?: ""
+                val requiresKey = ApiKeyRepository.SERVICES.find { it.id == serviceId }?.requiresUserKey == true
+                !requiresKey
+            }
+        }
+        for (src in keylessApiSources) {
+            if (src.id !in existing) {
+                feedDao.insertSource(
+                    FeedSource(
+                        id = src.id,
+                        url = src.url,
+                        title = src.title,
+                        feedType = src.feedType,
+                        category = src.category,
+                        addedDuringOnboarding = true,
+                        isActive = true
+                    )
+                )
+                Logger.info(TAG, "Auto-seeded missing keyless API source: ${src.id} (${src.title})")
+            }
+        }
+    }
+
+    /**
      * Loops over active feed sources and parses them, storing items in Room database.
      * Then runs the public API pipeline for content enrichment.
      */
@@ -149,6 +181,8 @@ class FeedRepository(
             Logger.info(TAG, "Aggregator is disabled via settings. Skipping feed fetch.")
             return@withContext
         }
+
+        ensureDefaultApiSourcesExist()
 
         // --- NOSLOP_TOR_GATE_UI_V1 ---
         // Do not dispatch into a proxy that is not up. The log showed requests
