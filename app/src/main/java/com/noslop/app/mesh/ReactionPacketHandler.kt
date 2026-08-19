@@ -53,7 +53,12 @@ class ReactionPacketHandler(
                 if (post?.authorPublicKeyB64 == localKeys?.publicKeyB64 && payload.authorId != localKeys?.publicKeyB64) {
                     val peer = repo.peerDao.getPeerByPublicKey(payload.authorId)
                     val authorName = peer?.handle ?: "Someone"
-                    val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
+                    val emojiMap = mapOf(
+                        "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                        "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                        "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
+                    )
                     val displayEmoji = emojiMap[payload.reactionType] ?: payload.reactionType
                     
                     val title = com.noslop.app.util.LanguageManager.translate("New Reaction")
@@ -194,7 +199,12 @@ class ReactionPacketHandler(
                 if (comment?.authorPublicKeyB64 == localKeys?.publicKeyB64 && reactionPay.authorId != localKeys?.publicKeyB64) {
                     val peer = repo.peerDao.getPeerByPublicKey(reactionPay.authorId)
                     val authorName = peer?.handle ?: "Someone"
-                    val emojiMap = mapOf("like" to "❤️", "upvote" to "👍", "downvote" to "👎", "laugh" to "😂", "wow" to "😮", "sad" to "😢", "fire" to "🔥", "angry" to "😡")
+                    val emojiMap = mapOf(
+                        "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                        "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                        "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
+                    )
                     val displayEmoji = emojiMap[reactionPay.reactionType] ?: reactionPay.reactionType
                     
                     val title = com.noslop.app.util.LanguageManager.translate("New Reaction")

@@ -253,7 +253,40 @@ fun FullScreenFeedCard(
                             Text(badgeText, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(item.author ?: "Unknown Source", color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        val creatorKeywords by (viewModel?.creatorKeywords ?: kotlinx.coroutines.flow.MutableStateFlow("")).collectAsState()
+                        val currentKeywordsSet = remember(creatorKeywords) {
+                            creatorKeywords.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                        }
+                        var showChannelPrefModal by remember { mutableStateOf(false) }
+                        val authorName = item.author
+
+                        Text(
+                            text = item.author ?: "Unknown Source",
+                            color = AccentGreen,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.then(
+                                if (!authorName.isNullOrBlank()) Modifier.clickable { showChannelPrefModal = true }
+                                else Modifier
+                            )
+                        )
+
+                        if (showChannelPrefModal && !authorName.isNullOrBlank()) {
+                            val isAlreadyIn = currentKeywordsSet.any { it.equals(authorName, ignoreCase = true) }
+                            com.noslop.app.ui.components.ChannelPreferenceModal(
+                                channelName = authorName,
+                                isAlreadyInPreferences = isAlreadyIn,
+                                onAdd = {
+                                    val updated = (currentKeywordsSet + authorName).joinToString(", ")
+                                    viewModel?.saveCreatorKeywords(updated)
+                                },
+                                onRemove = {
+                                    val updated = currentKeywordsSet.filter { !it.equals(authorName, ignoreCase = true) }.joinToString(", ")
+                                    viewModel?.saveCreatorKeywords(updated)
+                                },
+                                onDismiss = { showChannelPrefModal = false }
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
@@ -285,9 +318,9 @@ fun FullScreenFeedCard(
 
         val upvotes = votes.count { it.voteType == "upvote" }
         val downvotes = votes.count { it.voteType == "downvote" }
-        val angryReactions = reactions.count { it.reactionType == "angry" }
+        val explicitNegativeReactions = reactions.count { it.reactionType in setOf("downvote", "slop", "vomit", "clown", "noslop") }
         val totalSignals = reactions.size + votes.size
-        val negativeSignals = downvotes + angryReactions
+        val negativeSignals = downvotes + explicitNegativeReactions
         val negativeRatio = if (totalSignals > 0) negativeSignals.toFloat() / totalSignals else 0f
 
         var isHardBlocked = false
@@ -307,6 +340,8 @@ fun FullScreenFeedCard(
                 isMesh = false,
                 showLike = true,
                 showComment = true,
+                isSaved = item.isSaved,
+                onToggleSave = { viewModel?.toggleItemSavedState(item.id, !item.isSaved) },
                 onLike = { viewModel?.reactToFeedItem(item, "like") },
                 onReaction = { type -> viewModel?.reactToFeedItem(item, type) },
                 onShare = onShareToMesh,
@@ -852,9 +887,9 @@ fun FullScreenMeshCardV2(
 
         val upvotes = votes.count { it.voteType == "upvote" }
         val downvotes = votes.count { it.voteType == "downvote" }
-        val angryReactions = reactions.count { it.reactionType == "angry" }
+        val explicitNegativeReactions = reactions.count { it.reactionType in setOf("downvote", "slop", "vomit", "clown", "noslop") }
         val totalSignals = reactions.size + votes.size
-        val negativeSignals = downvotes + angryReactions
+        val negativeSignals = downvotes + explicitNegativeReactions
         val negativeRatio = if (totalSignals > 0) negativeSignals.toFloat() / totalSignals else 0f
 
         var isHardBlocked = false

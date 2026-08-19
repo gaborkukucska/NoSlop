@@ -513,9 +513,10 @@ fun CommentItem(
             val grouped = allReactions.groupBy { it.first }
             
             val emojiMap = mapOf(
-                "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
-                "laugh" to "😂", "wow" to "😮", "sad" to "😢",
-                "fire" to "🔥", "angry" to "😡"
+                "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
             )
 
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -539,11 +540,12 @@ fun CommentItem(
         }
 
         if (showReactionPicker) {
-            val emojis = listOf("upvote", "downvote", "🔥", "😂", "👀")
+            val emojis = listOf("upvote", "like", "fire", "laugh", "insightful", "sad", "downvote", "slop")
             val emojiMap = mapOf(
-                "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
-                "laugh" to "😂", "wow" to "😮", "sad" to "😢",
-                "fire" to "🔥", "angry" to "😡"
+                "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+                "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+                "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+                "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
             )
             Row(
                 modifier = Modifier

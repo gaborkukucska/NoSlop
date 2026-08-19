@@ -123,7 +123,7 @@ private fun TorStatusOverlay(message: String, onRetry: () -> Unit) {
                     Text(message, color = TextLight)
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        "NoSlop routes everything through Tor and will not fetch content outside it.".tr,
+                        "NoSlop routes everything through Tor when 'Route Clearnet via Tor' is enabled. You can toggle this setting in Settings anytime.".tr,
                         color = TextMuted,
                         style = MaterialTheme.typography.bodySmall
                     )
@@ -515,14 +515,17 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     var updatePopupDismissed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
 
     // --- NOSLOP_TOR_GATE_UI_V1 --- drawn above the tab content
-    activeTorMessage?.let { msg ->
-        TorStatusOverlay(
-            message = msg,
-            onRetry = {
-                com.noslop.app.tor.TorService.setTorStatusMessage(null)
-                viewModel.startTor()
-            }
-        )
+    val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
+    if (useTorForClearnet) {
+        activeTorMessage?.let { msg ->
+            TorStatusOverlay(
+                message = msg,
+                onRetry = {
+                    com.noslop.app.tor.TorService.setTorStatusMessage(null)
+                    viewModel.startTor()
+                }
+            )
+        }
     }
 
     if (updateInfo != null && !updatePopupDismissed) {
@@ -635,7 +638,7 @@ fun UnifiedFeedTab(
             val matchesMode = when (filterMode) {
                 "Live Feed" -> true
                 "History" -> item.id in viewedHistoryIds
-                "Liked" -> item is UnifiedItem.Feed && item.item.isSaved
+                "Liked", "Saved" -> item is UnifiedItem.Feed && item.item.isSaved
                 "Videos" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("video") == true
                 "Images" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("image") == true
                 "Audio" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("audio") == true
@@ -993,13 +996,26 @@ fun UnifiedFeedTab(
     if (showSearchModal) {
         var localSearchQuery by remember { mutableStateOf(searchQuery) }
         var localFilterMode by remember { mutableStateOf(filterMode) }
+        val localInterests by viewModel.selectedInterests.collectAsState()
+        val suggestedChannels = remember(localInterests, localSearchQuery) {
+            val baseSuggestions = com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
+            if (localSearchQuery.isBlank()) {
+                baseSuggestions.take(8)
+            } else {
+                val queryLower = localSearchQuery.trim().lowercase()
+                (baseSuggestions + com.noslop.app.feeds.SourceLibrary.sources.map { it.title }).distinct()
+                    .filter { it.lowercase().contains(queryLower) }
+                    .take(8)
+            }
+        }
+
         AlertDialog(
             onDismissRequest = { showSearchModal = false },
             containerColor = SurfaceDark,
             title = { Text("Search & Filter".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
             text = {
                 Column(
-                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).imePadding(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     OutlinedTextField(
@@ -1047,6 +1063,21 @@ fun UnifiedFeedTab(
                             }
                         )
                     )
+
+                    if (suggestedChannels.isNotEmpty()) {
+                        Text(
+                            "SUGGESTIONS".tr,
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        OptInFlowRowSuggestions(
+                            suggestions = suggestedChannels,
+                            currentQuery = localSearchQuery,
+                            onSelect = { localSearchQuery = it }
+                        )
+                    }
 
                     Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
                     
@@ -1113,7 +1144,7 @@ fun UnifiedFeedTab(
 
                     Text("Lists".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("History" to Icons.Default.History, "Liked" to Icons.Default.Favorite).forEach { (mode, icon) ->
+                        listOf("Saved" to Icons.Default.Bookmark, "History" to Icons.Default.History, "Liked" to Icons.Default.Favorite).forEach { (mode, icon) ->
                             val selected = localFilterMode == mode
                             Box(
                                 modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (selected) AccentGreen.copy(alpha = 0.15f) else PrimaryBlack).clickable { localFilterMode = mode }
@@ -1825,6 +1856,36 @@ fun FeedTutorialSlide(step: Int, onComplete: () -> Unit, bottomSlideOffset: Floa
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun OptInFlowRowSuggestions(
+    suggestions: List<String>,
+    currentQuery: String,
+    onSelect: (String) -> Unit
+) {
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        suggestions.forEach { suggestion ->
+            val isSelected = currentQuery.trim().equals(suggestion, ignoreCase = true)
+            FilterChip(
+                selected = isSelected,
+                onClick = { onSelect(suggestion) },
+                label = { Text(suggestion, fontSize = 11.sp) },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = PrimaryBlack,
+                    labelColor = TextLight,
+                    selectedContainerColor = AccentGreen.copy(alpha = 0.2f),
+                    selectedLabelColor = AccentGreen
+                ),
+                border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle)
+            )
         }
     }
 }

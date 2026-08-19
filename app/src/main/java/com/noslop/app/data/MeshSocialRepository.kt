@@ -959,7 +959,7 @@ class MeshSocialRepository(
         digest.doFinal(hash, 0)
         val anchorId = "clearnet_" + hash.joinToString("") { "%02x".format(it) }.take(16)
 
-        val isNegative = reactionType in listOf("downvote", "angry")
+        val isNegative = reactionType in setOf("downvote", "slop", "vomit", "clown", "noslop")
 
         // Ensure anchor post exists locally and on mesh
         val existingCount = postDao.hasPost(anchorId)

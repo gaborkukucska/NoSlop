@@ -707,6 +707,8 @@ fun OverlayInteractions(
     onComment: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     reactionSummary: Map<String, Int> = emptyMap(),
+    isSaved: Boolean = false,
+    onToggleSave: (() -> Unit)? = null,
     commentCount: Int = 0,
     netScore: Int? = null,
     isFlagged: Boolean = false,
@@ -716,9 +718,10 @@ fun OverlayInteractions(
 
     // Map reaction types to emojis for display
     val emojiMap = mapOf(
-        "like" to "❤️", "upvote" to "👍", "downvote" to "👎",
-        "laugh" to "😂", "wow" to "😮", "sad" to "😢",
-        "fire" to "🔥", "angry" to "😡"
+        "like" to "❤️", "upvote" to "👍", "laugh" to "😂", "fire" to "🔥", "wow" to "😮",
+        "celebrate" to "🎉", "insightful" to "💡", "clap" to "👏", "gem" to "💎",
+        "sad" to "😢", "angry" to "😡", "shocked" to "😱", "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘",
+        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮", "clown" to "🤡", "noslop" to "🚫"
     )
 
     Column(
@@ -798,6 +801,15 @@ fun OverlayInteractions(
                     }
                 }
 
+                if (onToggleSave != null) {
+                    InteractionButton(
+                        icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        label = if (isSaved) "Saved".tr else "Save".tr,
+                        onClick = onToggleSave,
+                        tint = if (isSaved) AccentGreen else TextLight
+                    )
+                }
+
                 if (onShare != null) {
                     InteractionButton(
                         icon = Icons.Default.Share,
@@ -850,11 +862,11 @@ fun ClearnetAttachment(
             verticalAlignment = Alignment.CenterVertically
         ) {
             if (thumbnailUrl != null) {
-                AsyncImage(
+                coil.compose.AsyncImage(
                     model = thumbnailUrl,
                     contentDescription = null,
                     modifier = Modifier
-                        .size(60.dp)
+                        .size(48.dp)
                         .clip(RoundedCornerShape(8.dp)),
                     contentScale = ContentScale.Crop
                 )
@@ -867,24 +879,18 @@ fun ClearnetAttachment(
                     style = MaterialTheme.typography.bodyMedium,
                     color = TextLight,
                     maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.Bold
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (author != null) {
                     Text(
                         text = author,
                         style = MaterialTheme.typography.labelSmall,
-                        color = AccentGreen
+                        color = TextMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
-            
-            Icon(
-                Icons.Default.OpenInNew,
-                contentDescription = "Open".tr,
-                tint = TextMuted,
-                modifier = Modifier.size(18.dp).padding(horizontal = 4.dp)
-            )
         }
     }
 }
@@ -895,15 +901,18 @@ fun ReactionPicker(
     onReactionSelect: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val reactions = listOf(
-        "like" to "❤️",
-        "upvote" to "👍",
-        "downvote" to "👎",
-        "laugh" to "😂",
-        "wow" to "😮",
-        "sad" to "😢",
-        "fire" to "🔥",
-        "angry" to "😡"
+    val positiveReactions = listOf(
+        "like" to "❤️", "upvote" to "👍", "laugh" to "😂",
+        "fire" to "🔥", "wow" to "😮", "celebrate" to "🎉",
+        "insightful" to "💡", "clap" to "👏", "gem" to "💎"
+    )
+    val neutralReactions = listOf(
+        "sad" to "😢", "angry" to "😡", "shocked" to "😱",
+        "thinking" to "🤔", "mindblown" to "🤯", "mindful" to "🧘"
+    )
+    val negativeReactions = listOf(
+        "downvote" to "👎", "slop" to "💩", "vomit" to "🤮",
+        "clown" to "🤡", "noslop" to "🚫"
     )
 
     androidx.compose.ui.window.Popup(
@@ -912,31 +921,56 @@ fun ReactionPicker(
     ) {
         Surface(
             color = SurfaceDark.copy(alpha = 0.95f),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(24.dp),
             border = BorderStroke(1.dp, BorderSubtle),
             shadowElevation = 8.dp,
             modifier = Modifier.padding(end = 56.dp)
         ) {
             Column(
-                modifier = Modifier.padding(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                modifier = Modifier.padding(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Top row: ❤️ 👍 👎 😂
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    reactions.take(4).forEach { (type, emoji) ->
-                        val count = currentReactions[type] ?: 0
-                        ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                // Positive section
+                Text("Positive".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    positiveReactions.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            row.forEach { (type, emoji) ->
+                                val count = currentReactions[type] ?: 0
+                                ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                            }
+                        }
                     }
                 }
-                // Bottom row: 😮 😢 🔥 😡
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    reactions.drop(4).forEach { (type, emoji) ->
-                        val count = currentReactions[type] ?: 0
-                        ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+
+                HorizontalDivider(modifier = Modifier.width(100.dp), color = BorderSubtle.copy(alpha = 0.5f))
+
+                // Neutral section
+                Text("Neutral".tr, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    neutralReactions.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            row.forEach { (type, emoji) ->
+                                val count = currentReactions[type] ?: 0
+                                ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.width(100.dp), color = BorderSubtle.copy(alpha = 0.5f))
+
+                // Negative section
+                Text("Negative".tr, color = DestructiveRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    negativeReactions.chunked(3).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            row.forEach { (type, emoji) ->
+                                val count = currentReactions[type] ?: 0
+                                ReactionPickerItem(emoji, count) { onReactionSelect(type) }
+                            }
+                        }
                     }
                 }
             }

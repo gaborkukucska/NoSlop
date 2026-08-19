@@ -154,6 +154,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var savedFeedItemId: String? = null
     private val sessionLoadedIds = mutableSetOf<String>()
     private var lastSearchResultIds = emptySet<String>()
+    private val allSearchResultItemIds = mutableSetOf<String>()
     private var searchExhaustedCount = 0
 
     fun saveFeedPosition(itemId: String) {
@@ -522,9 +523,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 
-                val isLocalOnly = filterMode in listOf("History", "Liked", "My Content", "Mesh")
+                val isLocalOnly = filterMode in listOf("History", "Liked", "Saved", "My Content", "Mesh")
                 if (!isLocalOnly) {
-                    lastSearchResultIds = repository.searchCustomFeed(query, filterMode).toSet()
+                    val searchResultList = repository.searchCustomFeed(query, filterMode)
+                    lastSearchResultIds = searchResultList.toSet()
+                    allSearchResultItemIds.addAll(searchResultList)
 
                     var waitCount = 0
                     while (waitCount < 15) {
@@ -787,7 +790,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val viewedIds = viewedHistoryIds.value
             unseenFeeds = unseenFeeds.filter { it.id in viewedIds }
             unseenMeshes = unseenMeshes.filter { it.id in viewedIds }
-        } else if (actualFilter == "Liked") {
+        } else if (actualFilter == "Liked" || actualFilter == "Saved") {
             unseenFeeds = unseenFeeds.filter { it.isSaved }
             unseenMeshes = emptyList() 
         }
@@ -808,11 +811,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 viewModelScope.launch {
                     _isRefreshingFeeds.value = true
                     try {
-                        val isLocalOnly = actualFilter in listOf("History", "Liked", "My Content", "Mesh")
+                        val isLocalOnly = actualFilter in listOf("History", "Liked", "Saved", "My Content", "Mesh")
                         if (!isLocalOnly) {
                             val newIds = repository.searchCustomFeed(newQuery, actualFilter)
                             if (newIds.isNotEmpty()) {
                                 lastSearchResultIds = lastSearchResultIds + newIds
+                                allSearchResultItemIds.addAll(newIds)
                             }
                         }
                         loadMoreFeedItems(actualFilter, isInjection = false)
@@ -849,7 +853,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     "Images" -> it.mediaType?.contains("image") == true
                     "Articles" -> it.mediaType.isNullOrEmpty()
                     "History" -> true
-                    "Liked" -> true
+                    "Liked", "Saved" -> true
                     else -> false
                 }
             }
@@ -863,7 +867,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     "Images" -> (it.mediaType == "image" || it.clearnetMediaType == "image")
                     "Articles" -> (it.mediaType.isNullOrEmpty() && it.clearnetMediaType.isNullOrEmpty())
                     "History" -> true
-                    "Liked" -> true
+                    "Liked", "Saved" -> true
                     else -> !isSpecificFilter
                 }
             }
@@ -879,7 +883,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val allHistoryItems = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
                     val sortedHistory = allHistoryItems.sortedBy { viewedIdsList.indexOf(it.id) }
                     batch.addAll(sortedHistory.take(specificNeeded))
-                } else if (actualFilter == "Liked") {
+                } else if (actualFilter == "Liked" || actualFilter == "Saved") {
                     val sortedLiked = specificFeeds.sortedByDescending { it.publishedAt }.map { UnifiedItem.Feed(it) }
                     batch.addAll(sortedLiked.take(specificNeeded))
                 } else {
@@ -1020,7 +1024,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val rawArticles = withAgeFloor(allArticles)
         val rawMeshes = if (mixSettings.meshEnabled) recentMeshes else emptyList()
 
-        // Calculate quotas based on precise percentages
+        // Balance search-origin candidates in Live Feed so search items don't overwhelm regular feeds
+        if ((actualFilter == "Live Feed" || actualFilter == "Random") && !isSearchActive && allSearchResultItemIds.isNotEmpty()) {
+            val searchFeeds = unseenFeeds.filter { it.id in allSearchResultItemIds }
+            val nonSearchFeeds = unseenFeeds.filter { it.id !in allSearchResultItemIds }
+            val maxSearchCandidates = (needed * 0.25f).toInt().coerceAtLeast(2)
+            val balancedSearchFeeds = searchFeeds.take(maxSearchCandidates)
+            unseenFeeds = (nonSearchFeeds + balancedSearchFeeds).sortedByDescending { it.publishedAt }
+        }
         val totalActivePercent = (if (mixSettings.videoEnabled) mixSettings.videoPercent else 0) +
                                  (if (mixSettings.audioEnabled) mixSettings.audioPercent else 0) +
                                  (if (mixSettings.imageEnabled) mixSettings.imagePercent else 0) +
@@ -1175,6 +1186,13 @@ fun toggleAggregator() {
         viewModelScope.launch {
             val updated = source.copy(isActive = !source.isActive)
             repository.insertSource(updated)
+        }
+    }
+
+    fun saveCreatorKeywords(keywords: String) {
+        viewModelScope.launch {
+            repository.saveCreatorKeywords(keywords)
+            _creatorKeywords.value = keywords
         }
     }
 
@@ -1943,7 +1961,7 @@ fun toggleAggregator() {
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {
-            if (reactionType == "downvote" || reactionType == "angry") {
+            if (reactionType in setOf("downvote", "slop", "vomit", "clown", "noslop")) {
                 recordItemSwiped(item.id)
                 _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 return@launch
