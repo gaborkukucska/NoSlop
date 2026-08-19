@@ -1,5 +1,36 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-19)
+
+### 1. Keyless YouTube Video Sourcing & Feed Restoration
+*   **Keyless YouTube API Configuration**: Marked `youtube` in `ApiKeyRepository.SERVICES` as `requiresUserKey = false` because `YouTubeInternalClient` (InnerTube API via Cloudflare Worker proxy & direct fallbacks) operates keylessly without requiring a user API key.
+*   **Auto-Seeding Keyless Sources**: Added `ensureDefaultApiSourcesExist()` to `FeedRepository` and exposed it via `NoSlopRepository`. Automatically seeds missing keyless API sources (`api-yt-trending`, `api-yt-search`) into the `feed_sources` Room DB table on app startup or migration.
+*   **Feed Reset & Startup Sync**: Updated `NoSlopViewModel.init` to execute `ensureDefaultApiSourcesExist()` on cold startup and trigger feed sync if items are empty.
+
+### 2. Article Image Extraction & Generic Fallback Cleanup
+*   **Flexible RSS Image Parsing**: Updated `FeedParser.extractFirstImage` to accept modern extension-less CDN image URLs (Vox, Kinja, BuzzFeed, etc.) without requiring strict `.jpg`/`.png` file extension substrings in the URL path.
+*   **URL Normalization**: Added `normalizeUrl()` in `FeedParser.kt` to normalize relative (`/`), protocol-relative (`//`), and HTML-encoded (`&amp;`) image URLs to valid `https://` links.
+*   **Reddit Image Entity Decoding**: Decoded `&amp;` HTML entities in `RedditApiClient.kt` preview URLs and preserved article classification for Reddit link/text posts with preview images.
+*   **Stock Fallback Removal**: Removed the hardcoded generic Unsplash stock photo fallback in `SegmentedArticleReader` ([MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L385)). Missing or failed article lead images now render a clean dark editorial typography layout (`Color(0xFF141414)`).
+
+### 3. Article Publication Date Display
+*   **Article Reader Date Overlay**: Added `publishedAt: Long` parameter to `SegmentedArticleReader` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L370).
+*   **Byline Date Formatting**: Formatted `publishedAt` timestamps into human-readable date strings (`MMM d, yyyy`) and rendered them alongside author details (e.g., `By Author · Aug 19, 2026`) on Page 0 hero layout overlays and editorial text cards.
+*   **Feed Card Wiring**: Updated [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt#L210) to pass `item.publishedAt` and `post.timestamp` into `SegmentedArticleReader`.
+
+### 4. Keyless Audio Sourcing & Ingestion
+*   **Internet Archive Query Fix**: Fixed `InternetArchiveClient.searchAudio(query)` to prevent blank queries from generating invalid Lucene search syntax (`() AND mediatype:audio...`).
+*   **Popular Audio Sourcing**: Added `InternetArchiveClient.getPopularAudio()` to fetch curated MP3 and FLAC music tracks, old-time radio, and podcasts keylessly.
+*   **PublicApiService Music Pipeline**: Updated the `"Music"` category pipeline in [PublicApiService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/PublicApiService.kt#L105) to query `InternetArchiveClient.getPopularAudio()` and `OpenverseApiClient.searchAudio("music")` when `query` is empty, delivering 27+ audio items per feed refresh.
+*   **Openverse Rate Limit Cooldown**: Reduced HTTP 429 rate-limit backoff cooldown in [OpenverseApiClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/OpenverseApiClient.kt) to 5 minutes so throttled audio requests self-heal quickly.
+
+### 5. Tor ControlPort & Reconnect Button Fixes
+*   **ControlPort Cookie Authentication**: Updated `writeTorrc()` in [TorService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/tor/TorService.kt#L406) to set `CookieAuthentication 0`. ControlPort commands (`AUTHENTICATE\r\n`) over port 9051 now succeed immediately without password or cookie errors, enabling `requestNewCircuit()` and `registerHiddenService()`.
+*   **Force Restart Support**: Added `forceRestart: Boolean = false` to `TorService.startTor()`. Tapping **Reconnect Tor** in Settings now passes `forceRestart = true`, immediately clearing stuck bootstrap coroutine jobs and restarting Tor.
+
+### 6. Styled Image Load Failure Fallbacks
+*   **WAF Fallback Card**: Replaced plain warning icons on failed image loads in `BlurredImageBackground` ([MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt#L186)) with a clean dark editorial artwork card (`Color(0xFF141414)`), cleanly displaying artwork details, title, and media type when an image host (such as Art Institute via Cloudflare WAF) blocks Tor exit nodes.
+
 ## Completed Changes (2026-08-09)
 
 ### 1. Search Filter Logic Fix

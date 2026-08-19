@@ -681,15 +681,16 @@ and continue using natural trending/hot sorting.
 
 | Client | Auth | Notes |
 |---|---|---|
-| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. `searchVideos(query, recentOnly)` supports protobuf upload-date filtering (this year) for search recency. |
+| `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Marked `requiresUserKey = false` in `ApiKeyRepository.SERVICES` (InnerTube proxy & direct fallbacks). Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
 | `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool |
-| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — when `recentOnly=true`, sorts by `new` with `t=year` time filter |
-| `InternetArchiveClient` | none | `getPopularVideos()`, `searchAudio(query)` |
+| `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — decodes `&amp;` preview URLs and preserves article classification for link/text posts |
+| `InternetArchiveClient` | none | `getPopularVideos()`, `getPopularAudio()`, `searchAudio(query)` — supports keyless MP3/FLAC music and podcast browsing |
+| `OpenverseApiClient` | none | `searchAudio(query)`, `searchImages(query)` — CC-licensed audio and photography, 5 min rate-limit cooldown |
 | `NasaApiClient` | optional (DEMO_KEY works) | `fetchAPOD()`, `searchImageLibrary(query)` |
 | `JamendoApiClient` | none (public client ID) | `searchTracks(query)` — CC-licensed music |
 | `PexelsApiClient` | user key required | photos/videos, skipped silently if no key |
-| `NewsApiClient` | user key required | headlines + search, supports `language` and `recentOnly` params — when `recentOnly=true`, constrains to last 3 months via `from` date and sorts by `publishedAt` |
-| `GuardianApiClient` | user key required | `searchArticles(recentOnly)`, `searchSection` — when `recentOnly=true`, constrains to last 3 months via `from-date` and orders by `newest` |
+| `NewsApiClient` | user key required | headlines + search, supports `language` and `recentOnly` params |
+| `GuardianApiClient` | user key required | `searchArticles(recentOnly)`, `searchSection` |
 | `VimeoApiClient` | user key required | `fetchFeatured` |
 | `PodcastIndexClient` | user key required | `searchEpisodes`, supports `language` param |
 
