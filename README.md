@@ -47,9 +47,15 @@ A vertical feed purpose-built for signal-to-noise ratio.
 
 - **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
 - **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
-- **Media playback** — seamless native audio and video streaming (HLS/m3u8, MP4, MP3, Archive.org, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
+- **Media playback** — seamless native audio and video streaming (HLS/m3u8, MP4, MP3, Archive.org, Invidious direct fallback, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
 - **Immersive landscape mode** — rotate your device horizontally to automatically hide the UI, allowing edge-to-edge viewing for video and image content.
 - **3-Tier Priority Curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) and specify your favorite creators during onboarding. NoSlop pre-loads curated RSS/Atom feeds and strictly prioritizes your feed chronologically in three tiers: `Creators > Chosen Categories > Trending Fallback`, guaranteeing a perfectly tailored experience from the first swipe.
+- **3-Tier Categorized Reaction System** — express nuanced feedback across 20 distinct reaction icons cleanly organized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Neutral / Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫). Neutral/expressive reactions (e.g. `sad`, `angry`, `thinking`) provide nuanced emotion without counting as downvotes or penalizing content.
+- **Channel / Creator Banning via 🚫 Reaction** — tap the `noslop` 🚫 reaction on any slide to instantly blacklist the creator/channel. Banned channels are immediately purged from the active feed and permanently excluded from future feed aggregation and search results. Manage banned creators anytime via chip lists in Content Preferences or the interactive Channel Preference Modal.
+- **Channel Creation Cut-Off Date Filter** — set a Year / Month cut-off date (e.g., Exclude channels created after January 2022) in Settings to drop modern automated content farms. Explicit channel and creator searches remain exempt so you can still discover new creators manually.
+- **Save For Later & Saved Filter** — bookmark feed slides with a single tap of the Save icon on feed cards. Access all bookmarked content reliably via the dedicated **Saved** feed filter.
+- **Interactive Channel Preference Modal** — tap any creator/channel name on feed cards to inspect their status, 1-tap add/remove creator preferences, or ban/unban the channel.
+- **Dynamic Search Cloud & Soft Keyboard Support** — real-time search suggestion cloud appears dynamically as you type ( querying local sources + live YouTube channel search API). Modal adjusts with soft keyboard IME padding to remain scrollable.
 
 ### Serverless Social Mesh
 

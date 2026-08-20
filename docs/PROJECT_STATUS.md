@@ -1,5 +1,43 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-20)
+
+### 1. Categorized Reaction System (Positive, Neutral, & Negative)
+*   **3-Tier Categorized Reactions**: Expanded supported reaction icons to 20 across three distinct sections in `ReactionPicker`: **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Neutral / Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
+*   **Nuanced Scoring Logic**: Updated [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt), [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt), and [MeshSocialRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MeshSocialRepository.kt) so neutral/expressive reactions (`sad`, `angry`, `thinking`, etc.) express emotion without counting towards downvotes or community slop flagging.
+
+### 2. Save For Later Feed Action & Saved Filter
+*   **Feed Slide Bookmark Button**: Added a **Save** action button (`Icons.Default.Bookmark` / `BookmarkBorder`) to `OverlayInteractions` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) and connected it to feed slides in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt).
+*   **Saved Filter Fix**: Added a **Saved** filter option under the **Lists** section in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) and fixed [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) `isHistoryOrLiked` filter condition to include `"Saved"`.
+
+### 3. Channel / Creator Banning via 🚫 Reaction
+*   **Automatic Channel Blacklisting**: Reacting with `noslop` 🚫 on any slide automatically blacklists the item's channel/author name.
+*   **Feed Purging & Aggregator Exclusion**: Added `banChannel(author)` and `unbanChannel(author)` in [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) & [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt). Banning a channel immediately purges all current slides from that creator from the active feed view, and excludes them from future feed aggregation and content search queries.
+
+### 4. Channel Creation Year / Month Cut-Off Filter
+*   **Database Schema Migration**: Added `channelCreatedAt` field to [Entities.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Entities.kt) with Room Migration `MIGRATION_7_8` (Database Version 8) in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt).
+*   **Settings Selector**: Added a **Channel Creation Cut-Off Date 📅** section in [ContentPreferencesScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/ContentPreferencesScreen.kt) with a toggle switch and Year/Month dropdown selectors (e.g., Year 2005–2026, Month Jan–Dec).
+*   **Search Exemption**: When enabled, live feed aggregation excludes content from channels started after the cut-off date to filter out recent automated content farms, while creator/channel search remains exempt so users can still discover new creators manually.
+
+### 5. Interactive Channel Preference Modal
+*   **Clickable Channel Names**: Made author/channel names on feed cards clickable in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt).
+*   **Channel Preference & Banning Modal**: Created [ChannelPreferenceModal.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChannelPreferenceModal.kt) offering 1-tap **Add/Remove Preference**, **Ban Channel 🚫**, or **Unban Channel** actions.
+
+### 6. Search Suggestions Cloud & IME Soft Keyboard Support
+*   **Dynamic Suggestions Cloud**: Updated Search & Filter modal in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) so suggestions only appear when typing, querying local sources and live YouTube channel search API.
+*   **Keyboard Scrollability**: Applied `.imePadding()` to the modal dialog content container so the modal container adjusts its layout and remains fully scrollable under the software keyboard.
+
+### 7. Tor Service Resilience & Key Parsing Fixes
+*   **"Bad Sequence Size" Fix**: Updated `getEd25519PrivateKeyParams` and `getEd25519PublicKeyParams` in [CryptoService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/crypto/CryptoService.kt) to handle raw 32-byte and 64-byte Ed25519 seeds/keys with fallback extraction, eliminating BouncyCastle's `Bad sequence size: 3` exception during hidden service registration.
+*   **Force-Restart Reconnect**: Updated `TorWarningPanel.kt` and [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) so tapping **Retry** / **Reconnect Tor** passes `forceRestart = true` to `viewModel.startTor(forceRestart = true)`.
+*   **Tor Daemon Failure Overlay**: Updated [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to display `TorStatusOverlay` whenever `useTorForClearnet == true` and Tor is in `FAILED` state.
+
+### 8. Video Streaming & Circuit Breaker Optimization
+*   **Circuit Breaker & Fallback**: Increased `YT_CIRCUIT_BREAKER_THRESHOLD` to 5 and lowered reset cooldown to 45 seconds in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt). Added an Invidious direct stream resolver fallback (`InvidiousApiClient.resolveStreamUrl(videoId)`) in [YouTubeInternalClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/YouTubeInternalClient.kt) so direct MP4 streams are resolved without resorting to WebViews.
+*   **Targeted Video Sourcing**: Updated the `"Video Platforms"` category pipeline in [PublicApiService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/PublicApiService.kt) to execute targeted keyword/creator queries when user preferences or search terms exist.
+
+---
+
 ## Completed Changes (2026-08-19)
 
 ### 1. Keyless YouTube Video Sourcing & Feed Restoration

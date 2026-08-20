@@ -864,16 +864,16 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 5)
+## 10. Data Model (Room, version 8)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
-| `feed_sources` | `id` | `url` (unique), `title`, `feedType`, `category`, `lastFetchedAt`, `unreadCount`, `isActive`, `addedDuringOnboarding` | unique on `url` |
-| `feed_items` | `id` | `sourceId`, `title`, `url`, `excerpt`, `thumbnailUrl`, `publishedAt`, `isRead`, `isSaved`, `fullContent`, `mediaUrl`, `mediaType`, `apiSource` | on `sourceId` |
-| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt` | — |
-| `mesh_posts` | `id` | `authorPublicKeyB64`, `authorHandle`, `authorTripcode`, `content`, `timestamp`, `signature`, `mediaUrl`, `mediaType`, `gossipCount`, `privacy`, `thumbnailB64`, `clearnetUrl`, `clearnetTitle`, `clearnetThumbnailUrl` | — |
+| `feed_sources` | `id` | `url` (unique), `title`, `feedType`, `category`, `lastFetchedAt`, `unreadCount`, `isActive`, `addedDuringOnboarding`, `channelCreatedAt` | unique on `url` |
+| `feed_items` | `id` | `sourceId`, `title`, `url`, `excerpt`, `thumbnailUrl`, `publishedAt`, `isRead`, `isSaved`, `fullContent`, `mediaUrl`, `mediaType`, `apiSource`, `channelCreatedAt` | on `sourceId` |
+| `peers` | `publicKeyB64` | `handle`, `tripcode`, `onionAddress`, `encPublicKeyB64`, `isTrusted`, `lastSeenAt`, `customFolder`, `isTemporary`, `isDiscoverable`, `isCreator`, `fundMeLink`, `bio` | — |
+| `mesh_posts` | `id` | `authorPublicKeyB64`, `authorHandle`, `authorTripcode`, `content`, `timestamp`, `signature`, `mediaUrl`, `mediaType`, `gossipCount`, `privacy`, `thumbnailB64`, `clearnetUrl`, `clearnetTitle`, `clearnetThumbnailUrl`, `clearnetMediaType`, `mediaSize`, `deletionBroadcasts` | — |
 | `chat_messages` | `id` | `chatWithPeerPub`, `senderPub`, `ciphertext`, `nonce`, `timestamp`, `isRead`, `mediaId`, `mediaType` | on `chatWithPeerPub`, on `timestamp` |
-| `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId` | on `postId` |
+| `mesh_comments` | `id` | `postId`, `authorPublicKeyB64`, `authorHandle`, `content`, `timestamp`, `signature`, `parentCommentId`, `mediaId`, `mediaType` | on `postId` |
 | `mesh_reactions` | `id` (format `"${postId}_${authorPubKey}_${reactionType}"`) | `postId`, `authorPublicKeyB64`, `reactionType`, `timestamp`, `signature` | — |
 | `mesh_votes` | `id` (format `"${postId}_${authorPubKey}_${voteType}"`) | `postId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Separates upvotes/downvotes from emoji reactions |
 | `comment_votes` | `id` (format `"${commentId}_${authorPubKey}_${voteType}"`) | `commentId`, `authorPublicKeyB64`, `voteType`, `timestamp`, `signature` | Votes scoped to comments |
@@ -886,15 +886,11 @@ the ephemeral onion with the identity-derived one.
 `mesh_filter_settings` (JSON — see §4.6), per-category
 keyword lists (`keywords_<Category>`), `selected_categories`,
 `selected_music_genres`, `selected_video_genres`, `negative_keywords`,
-`language_preference`, `enable_aggregator`, `user_profile` (JSON),
-`dm_all_tab_hidden` (`"true"`/`"false"` — persists collapsed state of the
-"All" contacts list on the DMs tab).
+`language_preference`, `creator_keywords`, `banned_channels` (comma-separated blacklist),
+`channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
+`enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
 
-Database is opened with `JournalMode.WRITE_AHEAD_LOGGING` and
-`fallbackToDestructiveMigration()` — any schema version bump destroys and
-recreates all tables (acceptable for prototyping; **all local mesh history,
-peers, and feed cache are lost on a version bump** since there is no
-migration path defined).
+Database migrations (`MIGRATION_1_2` through `MIGRATION_7_8`) safely preserve data across schema updates. `MIGRATION_7_8` adds the optional `channelCreatedAt` timestamp to `feed_items` and `feed_sources`.
 
 ---
 
