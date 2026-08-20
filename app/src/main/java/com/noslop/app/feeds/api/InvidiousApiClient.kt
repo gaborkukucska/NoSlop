@@ -439,6 +439,38 @@ object InvidiousApiClient {
         return emptyList()
     }
 
+    suspend fun getChannelJoinedTimestamp(authorIdOrName: String): Long? {
+        if (authorIdOrName.isBlank()) return null
+        val encoded = java.net.URLEncoder.encode(authorIdOrName, "UTF-8")
+        val allInstances = getInstances()
+        val instances = allInstances.filter { !isInstanceCoolingDown(it) }
+
+        for (instance in instances) {
+            val url = "$instance/api/v1/channels/$encoded"
+            try {
+                val request = Request.Builder().url(url).header("User-Agent", BROWSER_USER_AGENT).build()
+                val response = probeClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string()
+                    response.close()
+                    if (body != null) {
+                        val root = com.google.gson.JsonParser.parseString(body).asJsonObject
+                        val joinedSec = try { root.get("joined")?.asLong } catch (_: Exception) { null }
+                        if (joinedSec != null && joinedSec > 0L) {
+                            markInstanceOk(instance)
+                            return joinedSec * 1000L
+                        }
+                    }
+                } else {
+                    response.close()
+                }
+            } catch (e: Exception) {
+                // Try next instance
+            }
+        }
+        return null
+    }
+
     private fun parseVideoArray(array: JsonArray, sourceId: String): List<FeedItem> {
         val items = mutableListOf<FeedItem>()
         for (element in array) {

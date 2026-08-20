@@ -620,7 +620,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * a real defect.
      */
     private val ARCHIVAL_SOURCES = setOf(
-        "nasa", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo"
+        "nasa", "archive", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo", "podcast_index", "jamendo"
     )
 
     /** Age ceiling for sources where a stale upload is genuinely stale. */
@@ -793,8 +793,22 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             cal.set(cutoff.second, cutoff.third - 1, 1, 0, 0, 0)
             val cutoffMs = cal.timeInMillis
             unseenFeeds = unseenFeeds.filter { item ->
-                val created = item.channelCreatedAt ?: item.publishedAt
-                created == 0L || created <= cutoffMs
+                val created = item.channelCreatedAt
+                    ?: item.author?.let { com.noslop.app.feeds.api.ChannelMetadataResolver.getCreationDate(it) }
+                    ?: (if (item.publishedAt > 0L && item.publishedAt <= cutoffMs) item.publishedAt else null)
+                // If channel creation timestamp is unknown (null or 0L), keep the item.
+                // If known (> 0), drop only if created after the cut-off date.
+                created == null || created == 0L || created <= cutoffMs
+            }
+
+            // Proactively resolve channel creation dates in background for current candidate items
+            val candidateItems = unseenFeeds.take(25)
+            viewModelScope.launch(Dispatchers.IO) {
+                candidateItems.forEach { item ->
+                    item.author?.let { author ->
+                        com.noslop.app.feeds.api.ChannelMetadataResolver.resolveCreationDate(author, item.publishedAt)
+                    }
+                }
             }
         }
 

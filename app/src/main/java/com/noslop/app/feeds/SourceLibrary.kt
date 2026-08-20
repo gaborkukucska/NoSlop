@@ -16,7 +16,7 @@ object SourceLibrary {
      * Their sources are auto-enabled and they should never appear in the
      * onboarding/settings category picker.
      */
-    val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet")
+    val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet", "Music")
 
     /** Full internal category list — used by the pipeline / recovery logic. */
     val categories = listOf(

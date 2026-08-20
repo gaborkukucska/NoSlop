@@ -32,7 +32,7 @@ object InternetArchiveClient {
     // Cap the number we resolve. Items past the cap are DROPPED rather than
     // emitted with the bare /download/<id> directory URL, which is a file
     // listing and will not play.
-    private const val MAX_METADATA_RESOLUTIONS = 8
+    private const val MAX_METADATA_RESOLUTIONS = 25
 
     private val metadataResolutions = java.util.concurrent.atomic.AtomicInteger(0)
     private val gson = Gson()

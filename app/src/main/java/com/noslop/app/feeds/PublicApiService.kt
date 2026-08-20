@@ -98,23 +98,24 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("worldnews", "hot") }
                 }
                 "Video Platforms" -> {
-                    if (query.isNotBlank()) {
+                    if (query.isNotBlank() && !query.equals("Video Platforms", ignoreCase = true)) {
                         fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
                         fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
                     } else {
                         fetchAsync("api-yt-trending") { YouTubeInternalClient.getTrendingVideos() }
+                        fetchAsync("api-invidious-search") { InvidiousApiClient.getTrendingVideos() }
                         fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                         fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
                     }
                 }
                 "Music" -> {
-                    val audioQuery = if (query.isBlank()) "music" else query
+                    val isDefaultMusic = query.isBlank() || query.equals("Music", ignoreCase = true)
+                    val audioQuery = if (isDefaultMusic) "music" else query
                     fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(audioQuery) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(audioQuery, apiKeyRepo, language = language) }
                     fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$audioQuery music", recentOnly = true) }
-                    fetchAsync("api-pexels-video") { PexelsApiClient.searchVideos(audioQuery, apiKeyRepo) }
                     fetchAsync("api-archive-audio") { 
-                        if (query.isBlank()) InternetArchiveClient.getPopularAudio() else InternetArchiveClient.searchAudio(query)
+                        if (isDefaultMusic) InternetArchiveClient.getPopularAudio() else InternetArchiveClient.searchAudio(query)
                     }
                 }
                 "Art", "Photography" -> {
