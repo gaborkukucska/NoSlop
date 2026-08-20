@@ -273,9 +273,12 @@ fun FullScreenFeedCard(
 
                         if (showChannelPrefModal && !authorName.isNullOrBlank()) {
                             val isAlreadyIn = currentKeywordsSet.any { it.equals(authorName, ignoreCase = true) }
+                            val bannedList = viewModel?.bannedChannels?.collectAsState()?.value ?: emptyList()
+                            val isBanned = bannedList.any { it.equals(authorName, ignoreCase = true) }
                             com.noslop.app.ui.components.ChannelPreferenceModal(
                                 channelName = authorName,
                                 isAlreadyInPreferences = isAlreadyIn,
+                                isBanned = isBanned,
                                 onAdd = {
                                     val updated = (currentKeywordsSet + authorName).joinToString(", ")
                                     viewModel?.saveCreatorKeywords(updated)
@@ -284,6 +287,8 @@ fun FullScreenFeedCard(
                                     val updated = currentKeywordsSet.filter { !it.equals(authorName, ignoreCase = true) }.joinToString(", ")
                                     viewModel?.saveCreatorKeywords(updated)
                                 },
+                                onBan = { viewModel?.banChannel(authorName) },
+                                onUnban = { viewModel?.unbanChannel(authorName) },
                                 onDismiss = { showChannelPrefModal = false }
                             )
                         }

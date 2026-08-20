@@ -21,8 +21,11 @@ import com.noslop.app.util.tr
 fun ChannelPreferenceModal(
     channelName: String,
     isAlreadyInPreferences: Boolean,
+    isBanned: Boolean = false,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
+    onBan: (() -> Unit)? = null,
+    onUnban: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -33,12 +36,12 @@ fun ChannelPreferenceModal(
                 Icon(
                     Icons.Default.Person,
                     contentDescription = null,
-                    tint = AccentGreen,
+                    tint = if (isBanned) DestructiveRed else AccentGreen,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Manage Preference".tr,
+                    text = if (isBanned) "Channel Banned".tr else "Manage Preference".tr,
                     color = TextLight,
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
@@ -49,14 +52,20 @@ fun ChannelPreferenceModal(
             Column {
                 Text(
                     text = channelName,
-                    color = AccentGreen,
+                    color = if (isBanned) DestructiveRed else AccentGreen,
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                if (isAlreadyInPreferences) {
+                if (isBanned) {
+                    Text(
+                        text = "This channel/creator is currently Banned 🚫. All content from this channel is blacklisted and excluded from feeds and search results.".tr,
+                        color = DestructiveRed,
+                        fontSize = 13.sp
+                    )
+                } else if (isAlreadyInPreferences) {
                     Text(
                         text = "This channel/creator is currently in your preferences list. Removing it will stop prioritizing their content in your feed.".tr,
                         color = TextMuted,
@@ -72,37 +81,77 @@ fun ChannelPreferenceModal(
             }
         },
         confirmButton = {
-            if (isAlreadyInPreferences) {
-                Button(
-                    onClick = {
-                        onRemove()
-                        onDismiss()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = DestructiveRed,
-                        contentColor = TextLight
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Remove Preference".tr, fontWeight = FontWeight.Bold)
-                }
-            } else {
-                Button(
-                    onClick = {
-                        onAdd()
-                        onDismiss()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentGreen,
-                        contentColor = PrimaryBlack
-                    ),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Add to Preferences".tr, fontWeight = FontWeight.Bold)
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (isBanned) {
+                    if (onUnban != null) {
+                        Button(
+                            onClick = {
+                                onUnban()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentGreen,
+                                contentColor = PrimaryBlack
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Unban Channel".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                } else {
+                    if (isAlreadyInPreferences) {
+                        Button(
+                            onClick = {
+                                onRemove()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SurfaceDark,
+                                contentColor = TextLight
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Remove Preference".tr, fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                onAdd()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AccentGreen,
+                                contentColor = PrimaryBlack
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Add to Preferences".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (onBan != null) {
+                        Button(
+                            onClick = {
+                                onBan()
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = DestructiveRed,
+                                contentColor = TextLight
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Ban Channel 🚫".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
                 }
             }
         },

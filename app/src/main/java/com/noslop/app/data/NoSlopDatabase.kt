@@ -45,7 +45,7 @@ import androidx.room.RoomDatabase
         ViewedHistoryItem::class,
         SwipeTracker::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -120,6 +120,13 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE feed_items ADD COLUMN channelCreatedAt INTEGER DEFAULT NULL")
+                database.execSQL("ALTER TABLE feed_sources ADD COLUMN channelCreatedAt INTEGER DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -128,7 +135,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build()
                 INSTANCE = instance
                 instance

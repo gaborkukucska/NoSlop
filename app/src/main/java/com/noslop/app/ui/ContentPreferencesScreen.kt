@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.noslop.app.data.UserProfile
 import com.noslop.app.data.FeedSource
 import com.noslop.app.feeds.SourceLibrary
@@ -487,6 +488,236 @@ fun ContentPreferencesScreen(
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── BANNED CHANNELS / CREATORS ──────────────────
+            item {
+                val bannedChannels by viewModel.bannedChannels.collectAsState()
+                var newBanInput by remember { mutableStateOf("") }
+
+                Text(
+                    text = "Banned Channels / Creators 🚫".tr,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = DestructiveRed,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Channels blacklisted via the 🚫 reaction or added below will be completely excluded from live feeds and search results.".tr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (bannedChannels.isNotEmpty()) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        bannedChannels.forEach { channel ->
+                            FilterChip(
+                                selected = true,
+                                onClick = { viewModel.unbanChannel(channel) },
+                                label = { Text(channel, style = MaterialTheme.typography.labelSmall) },
+                                trailingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Unban",
+                                        tint = DestructiveRed,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = DestructiveRed.copy(alpha = 0.15f),
+                                    selectedLabelColor = DestructiveRed
+                                ),
+                                border = FilterChipDefaults.filterChipBorder(
+                                    enabled = true,
+                                    selected = true,
+                                    borderColor = DestructiveRed,
+                                    selectedBorderColor = DestructiveRed
+                                )
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newBanInput,
+                        onValueChange = { newBanInput = it },
+                        label = { Text("Ban channel by name".tr) },
+                        placeholder = { Text("e.g. SlopFactory".tr) },
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = DestructiveRed, unfocusedBorderColor = BorderSubtle,
+                            focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (newBanInput.isNotBlank()) {
+                                viewModel.banChannel(newBanInput.trim())
+                                newBanInput = ""
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.height(54.dp)
+                    ) {
+                        Text("Ban".tr, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+
+            // ────────────────── CHANNEL CREATION CUT-OFF DATE ──────────────────
+            item {
+                val cutoffSettings by viewModel.channelCutoffSettings.collectAsState()
+                var cutoffEnabled by remember(cutoffSettings) { mutableStateOf(cutoffSettings.first) }
+                var selectedYear by remember(cutoffSettings) { mutableStateOf(cutoffSettings.second) }
+                var selectedMonth by remember(cutoffSettings) { mutableStateOf(cutoffSettings.third) }
+
+                val months = listOf(
+                    1 to "Jan", 2 to "Feb", 3 to "Mar", 4 to "Apr",
+                    5 to "May", 6 to "Jun", 7 to "Jul", 8 to "Aug",
+                    9 to "Sep", 10 to "Oct", 11 to "Nov", 12 to "Dec"
+                )
+
+                Text(
+                    text = "Channel Creation Cut-Off Date 📅".tr,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Filter out channels and creators created after a specific date to drop recent automated content farms. Creator search remains unaffected.".tr,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextMuted
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Enable Cut-Off Date Filter".tr,
+                        color = TextLight,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Switch(
+                        checked = cutoffEnabled,
+                        onCheckedChange = {
+                            cutoffEnabled = it
+                            viewModel.saveChannelCutoffSettings(it, selectedYear, selectedMonth)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = PrimaryBlack,
+                            checkedTrackColor = AccentGreen
+                        )
+                    )
+                }
+
+                if (cutoffEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Year Dropdown
+                        var yearExpanded by remember { mutableStateOf(false) }
+                        val years = (2005..2026).toList().reversed()
+                        ExposedDropdownMenuBox(
+                            expanded = yearExpanded,
+                            onExpandedChange = { yearExpanded = !yearExpanded },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            OutlinedTextField(
+                                value = selectedYear.toString(),
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Year Cut-Off".tr) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = yearExpanded) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = yearExpanded,
+                                onDismissRequest = { yearExpanded = false }
+                            ) {
+                                years.forEach { yr ->
+                                    DropdownMenuItem(
+                                        text = { Text(yr.toString(), color = if (yr == selectedYear) AccentGreen else TextLight) },
+                                        onClick = {
+                                            selectedYear = yr
+                                            yearExpanded = false
+                                            viewModel.saveChannelCutoffSettings(true, yr, selectedMonth)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Month Dropdown
+                        var monthExpanded by remember { mutableStateOf(false) }
+                        ExposedDropdownMenuBox(
+                            expanded = monthExpanded,
+                            onExpandedChange = { monthExpanded = !monthExpanded },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            val monthLabel = months.find { it.first == selectedMonth }?.second ?: "Jan"
+                            OutlinedTextField(
+                                value = monthLabel,
+                                onValueChange = {},
+                                readOnly = true,
+                                label = { Text("Month Cut-Off".tr) },
+                                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = monthExpanded) },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.menuAnchor().fillMaxWidth()
+                            )
+                            ExposedDropdownMenu(
+                                expanded = monthExpanded,
+                                onDismissRequest = { monthExpanded = false }
+                            ) {
+                                months.forEach { m ->
+                                    DropdownMenuItem(
+                                        text = { Text("${m.first} - ${m.second}", color = if (m.first == selectedMonth) AccentGreen else TextLight) },
+                                        onClick = {
+                                            selectedMonth = m.first
+                                            monthExpanded = false
+                                            viewModel.saveChannelCutoffSettings(true, selectedYear, m.first)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Excludes channels created after ${months.find { it.first == selectedMonth }?.second} $selectedYear".tr,
+                        color = AccentGreen,
+                        fontSize = 12.sp
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(24.dp))
             }
         }

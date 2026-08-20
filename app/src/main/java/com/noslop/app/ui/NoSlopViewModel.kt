@@ -291,6 +291,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _creatorKeywords = MutableStateFlow("")
     val creatorKeywords: StateFlow<String> = _creatorKeywords.asStateFlow()
 
+    private val _bannedChannels = MutableStateFlow<List<String>>(emptyList())
+    val bannedChannels: StateFlow<List<String>> = _bannedChannels.asStateFlow()
+
+    private val _channelCutoffSettings = MutableStateFlow<Triple<Boolean, Int, Int>>(Triple(false, 2022, 1))
+    val channelCutoffSettings: StateFlow<Triple<Boolean, Int, Int>> = _channelCutoffSettings.asStateFlow()
+
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
     val isUsingInsecureStorage = repository.isUsingInsecureStorage
 
@@ -399,6 +405,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _negativeKeywords.value = repository.getUserNegativeKeywords().joinToString(", ")
             _languagePreference.value = repository.getLanguagePreference()
             _creatorKeywords.value = repository.getCreatorKeywords().joinToString(", ")
+            _bannedChannels.value = repository.getBannedChannels()
+            _channelCutoffSettings.value = repository.getChannelCutoffSettings()
         }
 
         viewModelScope.launch {
@@ -768,6 +776,26 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Swiped items are always hidden from clearnet feeds (user explicitly dismissed them)
         if (cachedExcludedIds.isNotEmpty()) {
             unseenFeeds = unseenFeeds.filter { it.id !in cachedExcludedIds }
+        }
+
+        // Banned channels filtering
+        val bannedList = _bannedChannels.value
+        if (bannedList.isNotEmpty()) {
+            unseenFeeds = unseenFeeds.filter { item ->
+                item.author == null || bannedList.none { b -> item.author.equals(b, ignoreCase = true) }
+            }
+        }
+
+        // Channel creation date cut-off filtering (exempt during explicit creator/channel search)
+        val cutoff = _channelCutoffSettings.value
+        if (cutoff.first && !isSearchActive) {
+            val cal = java.util.Calendar.getInstance()
+            cal.set(cutoff.second, cutoff.third - 1, 1, 0, 0, 0)
+            val cutoffMs = cal.timeInMillis
+            unseenFeeds = unseenFeeds.filter { item ->
+                val created = item.channelCreatedAt ?: item.publishedAt
+                created == 0L || created <= cutoffMs
+            }
         }
 
         // In feed-centric modes, also exclude viewed items and swiped mesh posts
@@ -1961,13 +1989,54 @@ fun toggleAggregator() {
 
     fun reactToFeedItem(item: FeedItem, reactionType: String = "like") {
         viewModelScope.launch {
-            if (reactionType in setOf("downvote", "slop", "vomit", "clown", "noslop")) {
+            if (reactionType == "noslop") {
+                recordItemSwiped(item.id)
+                val author = item.author
+                if (!author.isNullOrBlank()) {
+                    banChannel(author)
+                } else {
+                    _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
+                }
+                return@launch
+            }
+            if (reactionType in setOf("downvote", "slop", "vomit", "clown")) {
                 recordItemSwiped(item.id)
                 _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 return@launch
             }
             repository.reactToFeedItemWithType(item, reactionType)
             if (reactionType == "like") repository.updateSavedState(item.id, true)
+        }
+    }
+
+    fun banChannel(channelName: String) {
+        if (channelName.isBlank()) return
+        viewModelScope.launch {
+            repository.banChannel(channelName)
+            _bannedChannels.value = repository.getBannedChannels()
+            val bannedList = _bannedChannels.value
+            _unifiedFeed.value = _unifiedFeed.value.filter { uItem ->
+                if (uItem is UnifiedItem.Feed) {
+                    val a = uItem.item.author
+                    a == null || bannedList.none { b -> a.equals(b, ignoreCase = true) }
+                } else true
+            }
+        }
+    }
+
+    fun unbanChannel(channelName: String) {
+        if (channelName.isBlank()) return
+        viewModelScope.launch {
+            repository.unbanChannel(channelName)
+            _bannedChannels.value = repository.getBannedChannels()
+        }
+    }
+
+    fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) {
+        viewModelScope.launch {
+            repository.saveChannelCutoffSettings(enabled, year, month)
+            _channelCutoffSettings.value = Triple(enabled, year, month)
+            refreshFeeds()
         }
     }
 

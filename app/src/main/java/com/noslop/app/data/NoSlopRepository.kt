@@ -911,6 +911,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun getUserProfile(): UserProfile =
         preferencesRepository.getUserProfile()
 
+    suspend fun saveBannedChannels(channels: List<String>) =
+        preferencesRepository.saveBannedChannels(channels)
+
+    suspend fun getBannedChannels(): List<String> =
+        preferencesRepository.getBannedChannels()
+
+    suspend fun banChannel(channelName: String) =
+        preferencesRepository.banChannel(channelName)
+
+    suspend fun unbanChannel(channelName: String) =
+        preferencesRepository.unbanChannel(channelName)
+
+    suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) =
+        preferencesRepository.saveChannelCutoffSettings(enabled, year, month)
+
+    suspend fun getChannelCutoffSettings(): Triple<Boolean, Int, Int> =
+        preferencesRepository.getChannelCutoffSettings()
+
     suspend fun factoryReset() = withContext(Dispatchers.IO) {
         // Clear all database tables
         db.clearAllTables()

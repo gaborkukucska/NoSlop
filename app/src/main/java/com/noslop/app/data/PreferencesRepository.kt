@@ -174,4 +174,47 @@ class PreferencesRepository(
         }
         UserProfile() // Default empty profile
     }
+
+    // --- Banned Channels ---
+
+    suspend fun saveBannedChannels(channels: List<String>) = withContext(Dispatchers.IO) {
+        val clean = channels.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        appSettingDao.insertSetting(AppSetting("banned_channels", clean.joinToString(",")))
+    }
+
+    suspend fun getBannedChannels(): List<String> = withContext(Dispatchers.IO) {
+        val str = appSettingDao.getSetting("banned_channels") ?: ""
+        str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    suspend fun banChannel(channelName: String) = withContext(Dispatchers.IO) {
+        if (channelName.isBlank()) return@withContext
+        val current = getBannedChannels().toMutableList()
+        val trimmed = channelName.trim()
+        if (!current.any { it.equals(trimmed, ignoreCase = true) }) {
+            current.add(trimmed)
+            saveBannedChannels(current)
+        }
+    }
+
+    suspend fun unbanChannel(channelName: String) = withContext(Dispatchers.IO) {
+        if (channelName.isBlank()) return@withContext
+        val current = getBannedChannels().filter { !it.equals(channelName.trim(), ignoreCase = true) }
+        saveBannedChannels(current)
+    }
+
+    // --- Channel Creation Cut-Off Date Settings ---
+
+    suspend fun saveChannelCutoffSettings(enabled: Boolean, year: Int, month: Int) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("channel_cutoff_enabled", enabled.toString()))
+        appSettingDao.insertSetting(AppSetting("channel_cutoff_year", year.toString()))
+        appSettingDao.insertSetting(AppSetting("channel_cutoff_month", month.toString()))
+    }
+
+    suspend fun getChannelCutoffSettings(): Triple<Boolean, Int, Int> = withContext(Dispatchers.IO) {
+        val enabled = appSettingDao.getSetting("channel_cutoff_enabled") == "true"
+        val year = appSettingDao.getSetting("channel_cutoff_year")?.toIntOrNull() ?: 2022
+        val month = appSettingDao.getSetting("channel_cutoff_month")?.toIntOrNull() ?: 1
+        Triple(enabled, year, month)
+    }
 }

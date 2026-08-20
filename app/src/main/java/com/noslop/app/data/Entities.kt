@@ -20,7 +20,8 @@ data class FeedSource(
     val unreadCount: Int = 0,
     val isActive: Boolean = true,
     val addedDuringOnboarding: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val channelCreatedAt: Long? = null
 )
 
 @Entity(
@@ -42,7 +43,8 @@ data class FeedItem(
     val mediaUrl: String? = null,
     val mediaType: String? = null, // "video", "audio", "image"
     val apiSource: String? = null, // "youtube", "reddit", "pexels", "nasa", etc.
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val channelCreatedAt: Long? = null
 )
 
 @Entity(tableName = "peers")
