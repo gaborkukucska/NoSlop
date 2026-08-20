@@ -79,3 +79,4 @@ test_parse/
 tests/
 local.properties
 *.keystore
+.kotlin/
