@@ -130,7 +130,7 @@ fun TorWarningPanel(viewModel: NoSlopViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
-                        onClick = { viewModel.startTor() },
+                        onClick = { viewModel.startTor(forceRestart = true) },
                         // FIX: also disable during IDLE (briefly) to avoid double-tap before first launch
                         enabled = daemonState != TorState.STARTING && daemonState != TorState.IDLE,
                         colors = ButtonDefaults.buttonColors(

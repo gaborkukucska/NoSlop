@@ -409,6 +409,13 @@ object YouTubeInternalClient {
                 Logger.warn(TAG, "resolveStreamUrl failed for client ${clientInfo.first}: ${e.message}")
             }
         }
+        
+        // Fallback to Invidious direct stream URL if InnerTube clients fail
+        val invidiousStream = InvidiousApiClient.resolveStreamUrl(videoId)
+        if (invidiousStream != null) {
+            return@withContext invidiousStream
+        }
+
         return@withContext null
     }
     

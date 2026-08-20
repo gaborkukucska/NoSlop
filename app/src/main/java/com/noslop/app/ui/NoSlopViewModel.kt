@@ -719,7 +719,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
             .toSet()
 
-        val isHistoryOrLiked = actualFilter == "History" || actualFilter == "Liked"
+        val isHistoryOrLiked = actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved"
         
         var unseenFeeds = allFeeds.filter { 
             if (isHistoryOrLiked) {

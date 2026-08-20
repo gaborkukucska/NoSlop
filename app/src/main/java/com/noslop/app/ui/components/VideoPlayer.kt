@@ -307,8 +307,8 @@ private fun extractVimeoId(url: String): String? = when {
 // skip the expensive 8-request resolve cycle and go straight to embed.
 private var ytDirectFailCount = 0
 private var ytDirectFailTimestamp = 0L
-private const val YT_CIRCUIT_BREAKER_THRESHOLD = 2
-private const val YT_CIRCUIT_BREAKER_RESET_MS = 10 * 60 * 1000L // 10 minutes
+private const val YT_CIRCUIT_BREAKER_THRESHOLD = 5
+private const val YT_CIRCUIT_BREAKER_RESET_MS = 45 * 1000L // 45 seconds
 
 private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
@@ -855,6 +855,8 @@ private fun ExoVideoPlayer(
                     com.noslop.app.tor.TorService.setTorStatusMessage(
                         "This video could not be loaded over Tor. Skipping it."
                     )
+                    kotlinx.coroutines.delay(3000L)
+                    com.noslop.app.tor.TorService.setTorStatusMessage(null)
                     return@LaunchedEffect
                 }
                 lastBufPos = bufPos

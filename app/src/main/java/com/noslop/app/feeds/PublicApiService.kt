@@ -98,9 +98,14 @@ object PublicApiService {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("worldnews", "hot") }
                 }
                 "Video Platforms" -> {
-                    fetchAsync("api-yt-trending") { YouTubeInternalClient.getTrendingVideos() }
-                    fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
-                    fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
+                    if (query.isNotBlank()) {
+                        fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos(query, recentOnly = true) }
+                        fetchAsync("api-invidious-search") { InvidiousApiClient.searchVideos(query) }
+                    } else {
+                        fetchAsync("api-yt-trending") { YouTubeInternalClient.getTrendingVideos() }
+                        fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
+                        fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
+                    }
                 }
                 "Music" -> {
                     val audioQuery = if (query.isBlank()) "music" else query

@@ -62,18 +62,28 @@ object CryptoService {
      * from any historical PKCS#8 / X.509 structure size.
      */
     private fun getEd25519PrivateKeyParams(encoded: ByteArray): Ed25519PrivateKeyParameters {
-        return if (encoded.size == 32) {
-            Ed25519PrivateKeyParameters(encoded, 0)
-        } else {
+        if (encoded.size == 32 || encoded.size == 64) {
+            return Ed25519PrivateKeyParameters(encoded, 0)
+        }
+        return try {
             PrivateKeyFactory.createKey(encoded) as Ed25519PrivateKeyParameters
+        } catch (e: Exception) {
+            Logger.warn(TAG, "PrivateKeyFactory parsing failed (${e.message}), extracting raw 32-byte seed")
+            val seed = if (encoded.size >= 32) encoded.copyOfRange(encoded.size - 32, encoded.size) else encoded
+            Ed25519PrivateKeyParameters(seed, 0)
         }
     }
 
     private fun getEd25519PublicKeyParams(encoded: ByteArray): Ed25519PublicKeyParameters {
-        return if (encoded.size == 32) {
-            Ed25519PublicKeyParameters(encoded, 0)
-        } else {
+        if (encoded.size == 32) {
+            return Ed25519PublicKeyParameters(encoded, 0)
+        }
+        return try {
             PublicKeyFactory.createKey(encoded) as Ed25519PublicKeyParameters
+        } catch (e: Exception) {
+            Logger.warn(TAG, "PublicKeyFactory parsing failed (${e.message}), extracting raw 32-byte public key")
+            val key = if (encoded.size >= 32) encoded.copyOfRange(encoded.size - 32, encoded.size) else encoded
+            Ed25519PublicKeyParameters(key, 0)
         }
     }
 

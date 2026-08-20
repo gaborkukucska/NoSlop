@@ -516,15 +516,26 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
 
     // --- NOSLOP_TOR_GATE_UI_V1 --- drawn above the tab content
     val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
+    val daemonState by com.noslop.app.tor.TorService.torState.collectAsState()
     if (useTorForClearnet) {
-        activeTorMessage?.let { msg ->
+        if (daemonState == com.noslop.app.tor.TorState.FAILED && activeTorMessage == null) {
             TorStatusOverlay(
-                message = msg,
+                message = "Tor could not connect. Please retry connecting.".tr,
                 onRetry = {
                     com.noslop.app.tor.TorService.setTorStatusMessage(null)
-                    viewModel.startTor()
+                    viewModel.startTor(forceRestart = true)
                 }
             )
+        } else {
+            activeTorMessage?.let { msg ->
+                TorStatusOverlay(
+                    message = msg,
+                    onRetry = {
+                        com.noslop.app.tor.TorService.setTorStatusMessage(null)
+                        viewModel.startTor(forceRestart = true)
+                    }
+                )
+            }
         }
     }
 
@@ -997,16 +1008,33 @@ fun UnifiedFeedTab(
         var localSearchQuery by remember { mutableStateOf(searchQuery) }
         var localFilterMode by remember { mutableStateOf(filterMode) }
         val localInterests by viewModel.selectedInterests.collectAsState()
-        val suggestedChannels = remember(localInterests, localSearchQuery) {
-            val baseSuggestions = com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
-            if (localSearchQuery.isBlank()) {
-                baseSuggestions.take(8)
-            } else {
-                val queryLower = localSearchQuery.trim().lowercase()
-                (baseSuggestions + com.noslop.app.feeds.SourceLibrary.sources.map { it.title }).distinct()
-                    .filter { it.lowercase().contains(queryLower) }
-                    .take(8)
+        var suggestedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
+        var isSearchingSuggestions by remember { mutableStateOf(false) }
+
+        LaunchedEffect(localSearchQuery) {
+            val q = localSearchQuery.trim()
+            if (q.isBlank()) {
+                suggestedChannels = emptyList()
+                isSearchingSuggestions = false
+                return@LaunchedEffect
             }
+            isSearchingSuggestions = true
+            kotlinx.coroutines.delay(300)
+            val qLower = q.lowercase()
+            val localMatches = (com.noslop.app.feeds.SourceLibrary.sources.map { it.title } +
+                                com.noslop.app.feeds.SourceLibrary.getSuggestedCreatorsForCategories(localInterests))
+                                .distinct()
+                                .filter { it.lowercase().contains(qLower) }
+            suggestedChannels = localMatches.take(8)
+            try {
+                val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(q).take(8)
+                }
+                if (ytChannels.isNotEmpty()) {
+                    suggestedChannels = (localMatches + ytChannels).distinct().take(10)
+                }
+            } catch (_: Exception) {}
+            isSearchingSuggestions = false
         }
 
         AlertDialog(
@@ -1064,19 +1092,27 @@ fun UnifiedFeedTab(
                         )
                     )
 
-                    if (suggestedChannels.isNotEmpty()) {
-                        Text(
-                            "SUGGESTIONS".tr,
-                            color = TextMuted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                        OptInFlowRowSuggestions(
-                            suggestions = suggestedChannels,
-                            currentQuery = localSearchQuery,
-                            onSelect = { localSearchQuery = it }
-                        )
+                    if (localSearchQuery.isNotBlank() && (suggestedChannels.isNotEmpty() || isSearchingSuggestions)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "SUGGESTIONS".tr,
+                                color = TextMuted,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                            if (isSearchingSuggestions) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                CircularProgressIndicator(modifier = Modifier.size(12.dp), color = AccentGreen, strokeWidth = 1.5.dp)
+                            }
+                        }
+                        if (suggestedChannels.isNotEmpty()) {
+                            OptInFlowRowSuggestions(
+                                suggestions = suggestedChannels,
+                                currentQuery = localSearchQuery,
+                                onSelect = { localSearchQuery = it }
+                            )
+                        }
                     }
 
                     Text("Feeds".tr, color = TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
