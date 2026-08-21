@@ -106,7 +106,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
 
         Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Text(
-                text = "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.",
+                text = "Help us improve NoSlop. Your report will be sent to our secure relay and tracked on GitHub.".tr,
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextMuted,
                 modifier = Modifier.padding(bottom = 16.dp)
@@ -327,7 +327,7 @@ fun ReportIssueScreen(onBack: () -> Unit) {
                 } else {
                     Icon(Icons.Default.BugReport, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Submit Issue", fontWeight = FontWeight.Bold)
+                    Text("Submit Issue".tr, fontWeight = FontWeight.Bold)
                 }
             }
         }

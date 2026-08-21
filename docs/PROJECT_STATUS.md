@@ -761,6 +761,37 @@
 *   **Native Hub Tor Generation**: Upgraded `hainet-seed` to dynamically generate a standard `/var/lib/tor/hainet/hs_ed25519_secret_key` from the PKCS#8 Mobile Identity Clone, clamping and hashing the seed natively in Rust.
 *   **Unified Onion Routing**: Configured the Hub's `/etc/tor/torrc` to expose both Port 9999 (Mesh Gossip) and Port 8080 (REST API) under the single, persistent `.onion` address, allowing NoSlop to securely hit the API from anywhere in the world.
 
+## Completed Changes (2026-08-21)
+
+### 12. Audio Pipeline, YouTube Streams, and Channel Creation Cut-off
+*   **Always-Included "Music" Category**: Added `"Music"` to `alwaysIncludedCategories` in `SourceLibrary.kt`. Existing and new users get audio sources (`Openverse`, `Internet Archive Audio`, `Jamendo`, `Podcast Index`) in feed sync by default.
+*   **Archival Source Identifier Match**: Added `"archive"`, `"podcast_index"`, and `"jamendo"` to `ARCHIVAL_SOURCES` in `NoSlopViewModel.kt`. Fixed an issue where `InternetArchiveClient` items (`apiSource = "archive"`) were mismatched with `"internet_archive"` and discarded by the 400-day freshness ceiling. Increased metadata resolution cap to 25.
+*   **Keyless API Fetching & Parallel Harvesting**: Updated `PublicApiService.kt` so keyless public API sources run without blocking. Replaced sequential await loop with parallel `awaitAll()` under a 35s harvest budget.
+*   **Low-Latency Audio Buffer**: Injected a 500ms `DefaultLoadControl` buffer into `AudioPlayer.kt` so ExoPlayer audio playback begins immediately after half a second of buffering.
+*   **Invidious Direct Stream Resolver Fallback**: Added Invidious direct stream URL resolution fallback in `InvidiousApiClient.kt` when YouTube internal client hits rate limits.
+*   **Channel Creation Cut-Off Date Filter**: Added Room database schema migration (v7 -> v8) and UI settings in `ContentPreferencesScreen.kt` allowing users to filter out content from channels created after a specific cut-off date (e.g. drop recent AI content farms). Integrated `ChannelMetadataResolver.kt` querying Invidious API channel metadata.
+
+### 13. Channel Banning UX & Instant Feed Removal
+*   **Instant Feed Removal on Ban**: Updated `reactToFeedItem()` and `banChannel()` in `NoSlopViewModel.kt` to filter out the active item ID (`it.id != item.id`) immediately in local UI state before completing room database persistence.
+*   **Flexible Handle Matching**: Implemented trimmed substring handle matching (`a == bClean || a.contains(bClean) || bClean.contains(a)`) to handle channel name variations (e.g., `@handle` vs `handle`).
+*   **Isolated Preload Eviction**: Isolated `PreloadManager.evictAll()` to explicit user-triggered feed resets, ensuring channel banning does not touch or evict preloaded media players in the active feed.
+
+### 14. Tor Daemon Recovery & Startup Protection
+*   **Tor Auto-Retry Force Restart**: Updated `TorState.FAILED` collector in `NoSlopViewModel.kt` to call `startTor(forceRestart = true)`, ensuring hanging bootstrap jobs or stale daemon processes are cleanly reset.
+*   **Conditional Tor Warning Overlay**: Restricted the startup Tor warning banner in `TorWarningPanel.kt` to display only when `useTorForClearnet == true`.
+
+### 15. Collapsible UI Sections & Category Accordions
+*   **Collapsible Banned Channels Section**: Encapsulated the Banned Channels list and manual ban input field in `ContentPreferencesScreen.kt` behind a toggleable Card section (`Banned Channels / Creators 🚫 (X banned)`), keeping the screen uncluttered by default.
+*   **Collapsible Creator Preferences & Category Accordions**: Encapsulated Creator Preferences behind an expandable card (`Creator Preferences 👤 (X selected)`). Grouped suggested channels into topic accordions (*Technology*, *Privacy & Security*, *Science*, *World News*, *Open Source*, *Video Platforms*, *Gaming*, *Lifestyle*, *Health*, *Music*, *Art & Photography*).
+*   **Collapsible Content Categories & Genre Accordions**: Encapsulated topics and genres behind `Content Categories & Genres 🏷️ (X active)`, grouped into 3 sub-accordions (*Main Topics*, *Video Genres*, *Music Genres*).
+
+### 16. Touch Gesture Controls Parity Across Primary & Backup Video Players
+*   **Dual Player Architecture**: Preserved `EmbedWebViewPlayer` as an essential backup player when direct YouTube/Vimeo stream URL extraction fails or is age-gated/DRM-restricted.
+*   **Gesture Control Parity**: Added full gesture control parity to both `ExoVideoPlayer` (native) and `EmbedWebViewPlayer` (backup embed) in `VideoPlayer.kt`:
+    *   **Double Tap (Left / Right)**: Seeks -10s / +10s with animated `-10s ⏪` and `+10s ⏩` overlay indicators.
+    *   **Long Press (Hold)**: Fast forwards at 2.0x playback speed with an animated `2x ▶▶` top indicator, automatically reverting to 1.0x speed on release.
+    *   **Single Tap**: Toggles play/pause with centered play icon state feedback.
+
 ## Next Steps (Planned)
 *   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
 *   **Deep Data Sync**: Synchronize Contact lists, trusted peer statuses, and DM histories between Room (Mobile) and the Hub's master database.

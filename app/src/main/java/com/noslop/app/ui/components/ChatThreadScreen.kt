@@ -351,7 +351,7 @@ fun ChatThreadScreen(
                     onClick = { viewModel.requestConnection(peer.handle, peer.publicKeyB64, peer.onionAddress, peer.encPublicKeyB64, useBurnableIdentity = false) },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                     border = BorderStroke(1.dp, AccentGreen)
-                ) { Text("Share Permanent Identity") }
+                ) { Text("Share Permanent Identity".tr) }
             }
         }
 

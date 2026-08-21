@@ -211,12 +211,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 var dropdownExpanded by remember { mutableStateOf(false) }
                 AlertDialog(
                     onDismissRequest = { peerToAssignFolder = null },
-                    title = { Text("Assign to Folder", color = TextLight) },
+                    title = { Text("Assign to Folder".tr, color = TextLight) },
                     text = {
                         Column {
                             if (existingFolders.isNotEmpty()) {
                                 Text(
-                                    text = "Choose existing folder",
+                                    text = "Choose existing folder".tr,
                                     color = TextMuted,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
@@ -232,7 +232,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                         onValueChange = {},
                                         readOnly = true,
                                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
-                                        placeholder = { Text("Select a folder", color = TextMuted) },
+                                        placeholder = { Text("Select a folder".tr, color = TextMuted) },
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedTextColor = TextLight,
                                             unfocusedTextColor = TextLight
@@ -263,7 +263,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
-                                    Text("  or create new  ", color = TextMuted, fontSize = 11.sp)
+                                    Text("  or create new  ".tr, color = TextMuted, fontSize = 11.sp)
                                     HorizontalDivider(modifier = Modifier.weight(1f), color = BorderSubtle)
                                 }
                             }
@@ -287,10 +287,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 peerToAssignFolder = null
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                        ) { Text("Save") }
+                        ) { Text("Save".tr) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { peerToAssignFolder = null }) { Text("Cancel", color = TextMuted) }
+                        TextButton(onClick = { peerToAssignFolder = null }) { Text("Cancel".tr, color = TextMuted) }
                     },
                     containerColor = SurfaceDark
                 )

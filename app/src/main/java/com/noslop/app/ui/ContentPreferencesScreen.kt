@@ -202,7 +202,7 @@ fun ContentPreferencesScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
-                                        text = "$totalActiveCategoriesCount active".tr,
+                                        text = "$totalActiveCategoriesCount ${"active".tr}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = AccentGreen,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -243,7 +243,7 @@ fun ContentPreferencesScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text("Main Topics".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("(${localInterests.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                            Text("(${localInterests.size} ${"selected".tr})", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
                                         }
                                         Icon(
                                             imageVector = if (isMainExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -298,7 +298,7 @@ fun ContentPreferencesScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text("Video Genres".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("(${localVideoGenres.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                            Text("(${localVideoGenres.size} ${"selected".tr})", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
                                         }
                                         Icon(
                                             imageVector = if (isVideoExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -353,7 +353,7 @@ fun ContentPreferencesScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text("Music Genres".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("(${localMusicGenres.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                            Text("(${localMusicGenres.size} ${"selected".tr})", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
                                         }
                                         Icon(
                                             imageVector = if (isMusicExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
@@ -475,7 +475,7 @@ fun ContentPreferencesScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
-                                        text = "${currentSelectedSet.size} selected".tr,
+                                        text = "${currentSelectedSet.size} ${"selected".tr}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = AccentGreen,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -724,7 +724,7 @@ fun ContentPreferencesScreen(
                                     shape = RoundedCornerShape(12.dp)
                                 ) {
                                     Text(
-                                        text = "${bannedChannels.size} banned".tr,
+                                        text = "${bannedChannels.size} ${"banned".tr}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = DestructiveRed,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
@@ -952,7 +952,7 @@ fun ContentPreferencesScreen(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Excludes channels created after ${months.find { it.first == selectedMonth }?.second} $selectedYear".tr,
+                        text = "${"Excludes channels created after".tr} ${months.find { it.first == selectedMonth }?.second} $selectedYear",
                         color = AccentGreen,
                         fontSize = 12.sp
                     )
