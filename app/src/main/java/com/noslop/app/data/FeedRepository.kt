@@ -219,7 +219,7 @@ class FeedRepository(
         // Split sources
         val rssSources = activeSources.filter { it.feedType != "api" }.toMutableList()
         val explicitApiSources = activeSources.filter { it.feedType == "api" }
-        val activeCategories = (activeSources.mapNotNull { it.category } + userCategories).distinct().toMutableList()
+        val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
 
         // Limited parallel dispatcher
         val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
@@ -341,7 +341,7 @@ class FeedRepository(
             }
 
             var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
-            if (categoryApiSourceIds.isEmpty() && userCategories.contains(category)) {
+            if (categoryApiSourceIds.isEmpty() && (userCategories.contains(category) || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(category))) {
                 categoryApiSourceIds = com.noslop.app.feeds.SourceLibrary.sources
                     .filter { it.feedType == "api" && it.category == category }
                     .map { it.id }
@@ -349,7 +349,7 @@ class FeedRepository(
 
             // Combine category specific fallbacks with ALL other active API sources
             // so cross-category plugins (like YouTube search) execute correctly
-            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds).distinct()
+            val allActiveIds = (explicitApiSources.map { it.id } + categoryApiSourceIds + com.noslop.app.feeds.SourceLibrary.sources.filter { it.feedType == "api" && (it.category == category || com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories.contains(it.category)) }.map { it.id }).distinct()
 
             val apiItems = com.noslop.app.feeds.PublicApiService.fetchItemsForCategory(
                 category = category,

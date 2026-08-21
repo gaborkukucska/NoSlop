@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FilterAlt
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -174,112 +176,239 @@ fun ContentPreferencesScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
-            // ────────────────── CATEGORIES ──────────────────
+            // ────────────────── CONTENT CATEGORIES & GENRES (COLLAPSIBLE BY GROUPS) ──────────────────
             item {
-                Text("CATEGORIES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-            }
+                var isCategorySectionExpanded by remember { mutableStateOf(false) }
+                var expandedSubGroup by remember { mutableStateOf<String?>(null) }
 
-            items(SourceLibrary.selectableCategories) { category ->
-                val isSelected = localInterests.contains(category)
+                val totalActiveCategoriesCount = localInterests.size + localVideoGenres.size + localMusicGenres.size
+
                 Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                        if (isSelected) localInterests.remove(category) else localInterests.add(category)
-                    },
-                    colors = CardDefaults.cardColors(containerColor = if (isSelected) SurfaceDark else PrimaryBlack),
-                    border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle)
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, if (isCategorySectionExpanded) AccentGreen else BorderSubtle)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(category.tr, color = TextLight)
-                        Checkbox(
-                            checked = isSelected,
-                            onCheckedChange = {
-                                if (it) localInterests.add(category) else localInterests.remove(category)
-                            },
-                            colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
-                        )
-                    }
-                }
-            }
-
-            // ────────────────── MUSIC GENRES ──────────────────
-            if (localInterests.contains("Music")) {
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text("MUSIC GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                items(allMusicGenres) { genre ->
-                    val isSelected = localMusicGenres.contains(genre)
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                            if (isSelected) localMusicGenres.remove(genre) else localMusicGenres.add(genre)
-                        },
-                        colors = CardDefaults.cardColors(containerColor = if (isSelected) SurfaceDark else PrimaryBlack),
-                        border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle)
-                    ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                         Row(
-                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().clickable { isCategorySectionExpanded = !isCategorySectionExpanded },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(genre.tr, color = TextLight)
-                            Checkbox(
-                                checked = isSelected,
-                                onCheckedChange = {
-                                    if (it) localMusicGenres.add(genre) else localMusicGenres.remove(genre)
-                                },
-                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Content Categories & Genres 🏷️".tr, style = MaterialTheme.typography.titleMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = AccentGreen.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = "$totalActiveCategoriesCount active".tr,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AccentGreen,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (isCategorySectionExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Toggle Categories",
+                                tint = AccentGreen
                             )
+                        }
+
+                        if (isCategorySectionExpanded) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Customize topic interests and genre preferences for feed generation.".tr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Sub-group 1: Main Topics
+                            val isMainExpanded = expandedSubGroup == "main"
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                    expandedSubGroup = if (isMainExpanded) null else "main"
+                                },
+                                colors = CardDefaults.cardColors(containerColor = PrimaryBlack),
+                                border = BorderStroke(1.dp, if (isMainExpanded) AccentGreen.copy(alpha = 0.5f) else BorderSubtle)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Main Topics".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("(${localInterests.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                        }
+                                        Icon(
+                                            imageVector = if (isMainExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = "Expand",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    if (isMainExpanded) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            SourceLibrary.selectableCategories.forEach { category ->
+                                                val isSelected = localInterests.contains(category)
+                                                FilterChip(
+                                                    selected = isSelected,
+                                                    onClick = {
+                                                        if (isSelected) localInterests.remove(category) else localInterests.add(category)
+                                                    },
+                                                    label = { Text(category.tr, style = MaterialTheme.typography.labelSmall) },
+                                                    colors = FilterChipDefaults.filterChipColors(
+                                                        containerColor = SurfaceDark, labelColor = TextLight,
+                                                        selectedContainerColor = AccentGreen.copy(alpha = 0.15f), selectedLabelColor = AccentGreen
+                                                    ),
+                                                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = BorderSubtle, selectedBorderColor = AccentGreen)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Sub-group 2: Video Genres
+                            val isVideoExpanded = expandedSubGroup == "video"
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                    expandedSubGroup = if (isVideoExpanded) null else "video"
+                                },
+                                colors = CardDefaults.cardColors(containerColor = PrimaryBlack),
+                                border = BorderStroke(1.dp, if (isVideoExpanded) AccentGreen.copy(alpha = 0.5f) else BorderSubtle)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Video Genres".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("(${localVideoGenres.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                        }
+                                        Icon(
+                                            imageVector = if (isVideoExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = "Expand",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    if (isVideoExpanded) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            allVideoGenres.forEach { genre ->
+                                                val isSelected = localVideoGenres.contains(genre)
+                                                FilterChip(
+                                                    selected = isSelected,
+                                                    onClick = {
+                                                        if (isSelected) localVideoGenres.remove(genre) else localVideoGenres.add(genre)
+                                                    },
+                                                    label = { Text(genre.tr, style = MaterialTheme.typography.labelSmall) },
+                                                    colors = FilterChipDefaults.filterChipColors(
+                                                        containerColor = SurfaceDark, labelColor = TextLight,
+                                                        selectedContainerColor = AccentGreen.copy(alpha = 0.15f), selectedLabelColor = AccentGreen
+                                                    ),
+                                                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = BorderSubtle, selectedBorderColor = AccentGreen)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Sub-group 3: Music Genres
+                            val isMusicExpanded = expandedSubGroup == "music"
+                            Card(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                    expandedSubGroup = if (isMusicExpanded) null else "music"
+                                },
+                                colors = CardDefaults.cardColors(containerColor = PrimaryBlack),
+                                border = BorderStroke(1.dp, if (isMusicExpanded) AccentGreen.copy(alpha = 0.5f) else BorderSubtle)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Music Genres".tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("(${localMusicGenres.size} selected)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                        }
+                                        Icon(
+                                            imageVector = if (isMusicExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = "Expand",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+
+                                    if (isMusicExpanded) {
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            allMusicGenres.forEach { genre ->
+                                                val isSelected = localMusicGenres.contains(genre)
+                                                FilterChip(
+                                                    selected = isSelected,
+                                                    onClick = {
+                                                        if (isSelected) localMusicGenres.remove(genre) else localMusicGenres.add(genre)
+                                                    },
+                                                    label = { Text(genre.tr, style = MaterialTheme.typography.labelSmall) },
+                                                    colors = FilterChipDefaults.filterChipColors(
+                                                        containerColor = SurfaceDark, labelColor = TextLight,
+                                                        selectedContainerColor = AccentGreen.copy(alpha = 0.15f), selectedLabelColor = AccentGreen
+                                                    ),
+                                                    border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = BorderSubtle, selectedBorderColor = AccentGreen)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            }
-
-            // ────────────────── VIDEO GENRES ──────────────────
-            // Video Platforms is always included — always show video genre options
-            run {
-                item {
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Text("VIDEO GENRES".tr, style = MaterialTheme.typography.labelMedium, color = AccentGreen, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 8.dp))
-                }
-                items(allVideoGenres) { genre ->
-                    val isSelected = localVideoGenres.contains(genre)
-                    Card(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
-                            if (isSelected) localVideoGenres.remove(genre) else localVideoGenres.add(genre)
-                        },
-                        colors = CardDefaults.cardColors(containerColor = if (isSelected) SurfaceDark else PrimaryBlack),
-                        border = BorderStroke(1.dp, if (isSelected) AccentGreen else BorderSubtle)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(genre.tr, color = TextLight)
-                            Checkbox(
-                                checked = isSelected,
-                                onCheckedChange = {
-                                    if (it) localVideoGenres.add(genre) else localVideoGenres.remove(genre)
-                                },
-                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
-                            )
-                        }
-                    }
-            }
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
 
 
-            // Creator word-cloud suggestion chips (derived from current selected interests)
-            // Shown ABOVE the text field so users pick from suggestions first
+            // ────────────────── CREATOR & CHANNEL PREFERENCES (COLLAPSIBLE BY CATEGORY) ──────────────────
             item {
+                var isCreatorSectionExpanded by remember { mutableStateOf(false) }
+                var expandedCategory by remember { mutableStateOf<String?>(null) }
                 var channelSearchQuery by remember { mutableStateOf("") }
                 var searchedChannels by remember { mutableStateOf<List<String>>(emptyList()) }
                 var isSearchingChannels by remember { mutableStateOf(false) }
+
+                val currentSelectedSet = creatorKeywords.split(",")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+                    .toSet()
 
                 // Pre-warm the Invidious instance cache so the first search is fast
                 LaunchedEffect(Unit) {
@@ -295,9 +424,11 @@ fun ContentPreferencesScreen(
                         return@LaunchedEffect
                     }
                     isSearchingChannels = true
-                    kotlinx.coroutines.delay(500) // Increase debounce to 500ms
+                    kotlinx.coroutines.delay(500)
                     try {
-                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(10) }
+                        val ytChannels = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { 
+                            com.noslop.app.feeds.api.YouTubeInternalClient.searchChannels(channelSearchQuery).take(10) 
+                        }
                         if (ytChannels.isNotEmpty()) {
                             searchedChannels = ytChannels
                         } else {
@@ -322,109 +453,186 @@ fun ContentPreferencesScreen(
                             searchedChannels = emptyList()
                         }
                     }
-                    // Only clear the spinner if we weren't cancelled
                     isSearchingChannels = false
                 }
-                
-                val suggestions = SourceLibrary.getSuggestedCreatorsForCategories(localInterests)
-                val combinedSuggestions = (searchedChannels + suggestions).distinct()
 
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = channelSearchQuery,
-                        onValueChange = { channelSearchQuery = it },
-                        label = { Text("Search channel names...".tr) },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
-                        trailingIcon = {
-                            if (isSearchingChannels) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
-                            } else if (channelSearchQuery.isNotBlank()) {
-                                IconButton(onClick = { channelSearchQuery = "" }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted)
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, if (isCreatorSectionExpanded) AccentGreen else BorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { isCreatorSectionExpanded = !isCreatorSectionExpanded },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Creator Preferences 👤".tr, style = MaterialTheme.typography.titleMedium, color = AccentGreen, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = AccentGreen.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = "${currentSelectedSet.size} selected".tr,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AccentGreen,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                    )
                                 }
                             }
-                        },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = AccentGreen,
-                            unfocusedBorderColor = BorderSubtle,
-                            focusedTextColor = TextLight,
-                            unfocusedTextColor = TextLight,
-                            focusedLabelColor = AccentGreen,
-                            unfocusedLabelColor = TextMuted
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    )
+                            Icon(
+                                imageVector = if (isCreatorSectionExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Toggle",
+                                tint = AccentGreen
+                            )
+                        }
 
-                    if (combinedSuggestions.isNotEmpty()) {
-                        Text(
-                            "SUGGESTED CHANNELS & CREATORS".tr,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 6.dp)
-                        )
-                        
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            combinedSuggestions.forEach { creator ->
-                                val currentSet = creatorKeywords.split(",")
-                                    .map { it.trim() }
-                                    .filter { it.isNotEmpty() }
-                                    .toSet()
-                                val isSelected = currentSet.contains(creator)
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = {
-                                        val updated = if (isSelected) currentSet - creator else currentSet + creator
-                                        creatorKeywords = updated.joinToString(", ")
-                                    },
-                                    label = {
-                                        Text(
-                                            text = creator,
-                                            style = MaterialTheme.typography.labelSmall
+                        if (isCreatorSectionExpanded) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Select creator channels grouped by category or search across YouTube & Reddit.".tr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Global Live Channel Search Box
+                            OutlinedTextField(
+                                value = channelSearchQuery,
+                                onValueChange = { channelSearchQuery = it },
+                                label = { Text("Search channel names...".tr) },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AccentGreen) },
+                                trailingIcon = {
+                                    if (isSearchingChannels) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), color = AccentGreen, strokeWidth = 2.dp)
+                                    } else if (channelSearchQuery.isNotBlank()) {
+                                        IconButton(onClick = { channelSearchQuery = "" }) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear".tr, tint = TextMuted)
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            if (searchedChannels.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("LIVE SEARCH RESULTS".tr, style = MaterialTheme.typography.labelSmall, color = TextMuted, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    searchedChannels.forEach { creator ->
+                                        val isSelected = currentSelectedSet.contains(creator)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                val updated = if (isSelected) currentSelectedSet - creator else currentSelectedSet + creator
+                                                creatorKeywords = updated.joinToString(", ")
+                                            },
+                                            label = { Text(creator, style = MaterialTheme.typography.labelSmall) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                containerColor = PrimaryBlack, labelColor = TextLight,
+                                                selectedContainerColor = AccentGreen.copy(alpha = 0.15f), selectedLabelColor = AccentGreen
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = BorderSubtle, selectedBorderColor = AccentGreen)
                                         )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        containerColor = PrimaryBlack,
-                                        labelColor = TextLight,
-                                        selectedContainerColor = AccentGreen.copy(alpha = 0.15f),
-                                        selectedLabelColor = AccentGreen
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = isSelected,
-                                        borderColor = if (isSelected) AccentGreen else BorderSubtle,
-                                        selectedBorderColor = AccentGreen
-                                    )
-                                )
+                                    }
+                                }
                             }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Category Accordions
+                            val availableCategoryMap = SourceLibrary.creatorSuggestionsByCategory
+                            availableCategoryMap.forEach { (catName, suggestions) ->
+                                val catCount = suggestions.count { currentSelectedSet.contains(it) }
+                                val isCatExpanded = expandedCategory == catName
+
+                                Card(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable {
+                                        expandedCategory = if (isCatExpanded) null else catName
+                                    },
+                                    colors = CardDefaults.cardColors(containerColor = PrimaryBlack),
+                                    border = BorderStroke(1.dp, if (isCatExpanded) AccentGreen.copy(alpha = 0.5f) else BorderSubtle)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(catName.tr, style = MaterialTheme.typography.bodyMedium, color = TextLight, fontWeight = FontWeight.Bold)
+                                                if (catCount > 0) {
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text("($catCount)", style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                                                }
+                                            }
+                                            Icon(
+                                                imageVector = if (isCatExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                                contentDescription = "Expand",
+                                                tint = TextMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+
+                                        if (isCatExpanded) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            FlowRow(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                suggestions.forEach { creator ->
+                                                    val isSelected = currentSelectedSet.contains(creator)
+                                                    FilterChip(
+                                                        selected = isSelected,
+                                                        onClick = {
+                                                            val updated = if (isSelected) currentSelectedSet - creator else currentSelectedSet + creator
+                                                            creatorKeywords = updated.joinToString(", ")
+                                                        },
+                                                        label = { Text(creator, style = MaterialTheme.typography.labelSmall) },
+                                                        colors = FilterChipDefaults.filterChipColors(
+                                                            containerColor = SurfaceDark, labelColor = TextLight,
+                                                            selectedContainerColor = AccentGreen.copy(alpha = 0.15f), selectedLabelColor = AccentGreen
+                                                        ),
+                                                        border = FilterChipDefaults.filterChipBorder(enabled = true, selected = isSelected, borderColor = BorderSubtle, selectedBorderColor = AccentGreen)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            // Manual Comma Separated Input
+                            OutlinedTextField(
+                                value = creatorKeywords,
+                                onValueChange = { creatorKeywords = it },
+                                label = { Text("All Selected Creators (Comma Separated)".tr) },
+                                placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...".tr) },
+                                minLines = 2,
+                                maxLines = 4,
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
+                                    focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
                 }
-            }
-
-            // ────────────────── CREATOR TEXT FIELD ──────────────────
-            item {
-                OutlinedTextField(
-                    value = creatorKeywords,
-                    onValueChange = { creatorKeywords = it },
-                    label = { Text("Creators / channels (comma separated)".tr) },
-                    placeholder = { Text("e.g. Linus Tech Tips, Veritasium, Krebs...".tr) },
-                    minLines = 2,
-                    maxLines = 4,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle,
-                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
@@ -491,92 +699,124 @@ fun ContentPreferencesScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
-            // ────────────────── BANNED CHANNELS / CREATORS ──────────────────
+            // ────────────────── BANNED CHANNELS / CREATORS (COLLAPSIBLE BUTTON) ──────────────────
             item {
                 val bannedChannels by viewModel.bannedChannels.collectAsState()
+                var isBannedExpanded by remember { mutableStateOf(false) }
                 var newBanInput by remember { mutableStateOf("") }
 
-                Text(
-                    text = "Banned Channels / Creators 🚫".tr,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = DestructiveRed,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Channels blacklisted via the 🚫 reaction or added below will be completely excluded from live feeds and search results.".tr,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextMuted
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-
-                if (bannedChannels.isNotEmpty()) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        bannedChannels.forEach { channel ->
-                            FilterChip(
-                                selected = true,
-                                onClick = { viewModel.unbanChannel(channel) },
-                                label = { Text(channel, style = MaterialTheme.typography.labelSmall) },
-                                trailingIcon = {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Unban",
-                                        tint = DestructiveRed,
-                                        modifier = Modifier.size(14.dp)
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                    border = BorderStroke(1.dp, if (isBannedExpanded) DestructiveRed else BorderSubtle)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable { isBannedExpanded = !isBannedExpanded },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("Banned Channels / Creators 🚫".tr, style = MaterialTheme.typography.titleMedium, color = DestructiveRed, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    color = DestructiveRed.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Text(
+                                        text = "${bannedChannels.size} banned".tr,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = DestructiveRed,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = DestructiveRed.copy(alpha = 0.15f),
-                                    selectedLabelColor = DestructiveRed
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
-                                    selected = true,
-                                    borderColor = DestructiveRed,
-                                    selectedBorderColor = DestructiveRed
-                                )
+                                }
+                            }
+                            Icon(
+                                imageVector = if (isBannedExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Toggle Banned",
+                                tint = DestructiveRed
                             )
                         }
-                    }
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    OutlinedTextField(
-                        value = newBanInput,
-                        onValueChange = { newBanInput = it },
-                        label = { Text("Ban channel by name".tr) },
-                        placeholder = { Text("e.g. SlopFactory".tr) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = DestructiveRed, unfocusedBorderColor = BorderSubtle,
-                            focusedTextColor = TextLight, unfocusedTextColor = TextLight
-                        ),
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = {
-                            if (newBanInput.isNotBlank()) {
-                                viewModel.banChannel(newBanInput.trim())
-                                newBanInput = ""
+                        if (isBannedExpanded) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Channels blacklisted via the 🚫 reaction or added below will be completely excluded from live feeds and search results.".tr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextMuted
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            if (bannedChannels.isNotEmpty()) {
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    bannedChannels.forEach { channel ->
+                                        FilterChip(
+                                            selected = true,
+                                            onClick = { viewModel.unbanChannel(channel) },
+                                            label = { Text(channel, style = MaterialTheme.typography.labelSmall) },
+                                            trailingIcon = {
+                                                Icon(
+                                                    imageVector = Icons.Default.Close,
+                                                    contentDescription = "Unban",
+                                                    tint = DestructiveRed,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                            },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = DestructiveRed.copy(alpha = 0.15f),
+                                                selectedLabelColor = DestructiveRed
+                                            ),
+                                            border = FilterChipDefaults.filterChipBorder(
+                                                enabled = true,
+                                                selected = true,
+                                                borderColor = DestructiveRed,
+                                                selectedBorderColor = DestructiveRed
+                                            )
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.height(54.dp)
-                    ) {
-                        Text("Ban".tr, fontWeight = FontWeight.Bold)
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = newBanInput,
+                                    onValueChange = { newBanInput = it },
+                                    label = { Text("Ban channel by name".tr) },
+                                    placeholder = { Text("e.g. SlopFactory".tr) },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = DestructiveRed, unfocusedBorderColor = BorderSubtle,
+                                        focusedTextColor = TextLight, unfocusedTextColor = TextLight
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        if (newBanInput.isNotBlank()) {
+                                            viewModel.banChannel(newBanInput.trim())
+                                            newBanInput = ""
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = TextLight),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.height(54.dp)
+                                ) {
+                                    Text("Ban".tr, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             // ────────────────── CHANNEL CREATION CUT-OFF DATE ──────────────────

@@ -89,8 +89,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                     .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
                     .build()
                     
+                val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(1500, 15000, 500, 1000)
+                    .build()
+
                 androidx.media3.exoplayer.ExoPlayer.Builder(context)
                     .setMediaSourceFactory(androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory))
+                    .setLoadControl(loadControl)
                     .setAudioAttributes(audioAttributes, true)
                     .build().apply {
                         val mediaItem = androidx.media3.common.MediaItem.fromUri(url)

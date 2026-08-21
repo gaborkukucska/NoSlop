@@ -416,9 +416,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     retryCount = 0
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {
-                    com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor...")
-                    kotlinx.coroutines.delay(10000)
-                    startTor()
+                    com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor with forceRestart...")
+                    kotlinx.coroutines.delay(8000)
+                    startTor(forceRestart = true)
                 }
             }
         }
@@ -1459,6 +1459,7 @@ fun toggleAggregator() {
                 // — i.e. it was repopulated with exactly the stale content the
                 // reset was supposed to clear.
                 repository.deleteYouTubeItems()
+                com.noslop.app.ui.PreloadManager.evictAll()
 
                 // Now rebuild from what actually remains
                 loadMoreFeedItems()
@@ -2005,11 +2006,10 @@ fun toggleAggregator() {
         viewModelScope.launch {
             if (reactionType == "noslop") {
                 recordItemSwiped(item.id)
+                _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 val author = item.author
                 if (!author.isNullOrBlank()) {
                     banChannel(author)
-                } else {
-                    _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 }
                 return@launch
             }
@@ -2028,11 +2028,16 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.banChannel(channelName)
             _bannedChannels.value = repository.getBannedChannels()
+            refreshExclusionCaches()
             val bannedList = _bannedChannels.value
             _unifiedFeed.value = _unifiedFeed.value.filter { uItem ->
                 if (uItem is UnifiedItem.Feed) {
-                    val a = uItem.item.author
-                    a == null || bannedList.none { b -> a.equals(b, ignoreCase = true) }
+                    val a = uItem.item.author?.trim()?.lowercase()
+                    if (a.isNullOrBlank()) true
+                    else bannedList.none { b ->
+                        val bClean = b.trim().lowercase()
+                        a == bClean || a.contains(bClean) || bClean.contains(a)
+                    }
                 } else true
             }
         }

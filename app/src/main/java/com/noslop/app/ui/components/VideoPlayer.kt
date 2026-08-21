@@ -28,6 +28,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
@@ -1057,7 +1060,17 @@ private fun ExoVideoPlayer(
         }
     }
 
+    val scope = rememberCoroutineScope()
     var isPlaying by remember { mutableStateOf(isVisible) }
+    var isFastForwarding by remember { mutableStateOf(false) }
+    var seekIndicator by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(seekIndicator) {
+        if (seekIndicator != null) {
+            kotlinx.coroutines.delay(800)
+            seekIndicator = null
+        }
+    }
     
     LaunchedEffect(exoPlayer) {
         val player = exoPlayer ?: return@LaunchedEffect
@@ -1072,13 +1085,32 @@ private fun ExoVideoPlayer(
     Box(
         modifier = Modifier.fillMaxSize().pointerInput(exoPlayer) {
             detectTapGestures(
+                onPress = {
+                    val player = exoPlayer ?: return@detectTapGestures
+                    val holdJob = scope.launch {
+                        kotlinx.coroutines.delay(400)
+                        isFastForwarding = true
+                        player.playbackParameters = androidx.media3.common.PlaybackParameters(2.0f)
+                    }
+                    try {
+                        awaitRelease()
+                    } finally {
+                        holdJob.cancel()
+                        if (isFastForwarding) {
+                            isFastForwarding = false
+                            player.playbackParameters = androidx.media3.common.PlaybackParameters(1.0f)
+                        }
+                    }
+                },
                 onDoubleTap = { offset ->
                     val player = exoPlayer ?: return@detectTapGestures
                     val width = size.width
                     if (offset.x > width / 2) {
                         player.seekTo(player.currentPosition + 10000)
+                        seekIndicator = "+10s ⏩"
                     } else {
                         player.seekTo(maxOf(0, player.currentPosition - 10000))
+                        seekIndicator = "-10s ⏪"
                     }
                 },
                 onTap = {
@@ -1129,6 +1161,37 @@ private fun ExoVideoPlayer(
                 modifier = Modifier.fillMaxSize()
             )
             
+            if (isFastForwarding) {
+                Surface(
+                    color = PrimaryBlack.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).zIndex(2f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("2x ▶▶".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                }
+            }
+
+            if (seekIndicator != null) {
+                Surface(
+                    color = PrimaryBlack.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.align(Alignment.Center).zIndex(2f)
+                ) {
+                    Text(
+                        text = seekIndicator!!,
+                        color = AccentGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+
             if (!isPlaying && !isBuffering && exoPlayer != null) {
                 Box(
                     modifier = Modifier
@@ -1175,11 +1238,22 @@ private fun ExoVideoPlayer(
 
 @Composable
 private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, onRetry: () -> Unit, onReady: () -> Unit) {
+    val scope = rememberCoroutineScope()
     var webError by remember { mutableStateOf<String?>(null) }
     var currentIsVisible by remember { mutableStateOf(isVisible) }
+    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var isFastForwarding by remember { mutableStateOf(false) }
+    var seekIndicator by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(isVisible) {
         currentIsVisible = isVisible
+    }
+
+    LaunchedEffect(seekIndicator) {
+        if (seekIndicator != null) {
+            kotlinx.coroutines.delay(800)
+            seekIndicator = null
+        }
     }
 
     if (webError != null) {
@@ -1210,238 +1284,341 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
             }
         }
     } else {
-        AndroidView(
-            factory = { ctx ->
-                object : android.webkit.WebView(ctx) {
-                    override fun onWindowVisibilityChanged(visibility: Int) {
-                        if (visibility != android.view.View.GONE) {
-                            super.onWindowVisibilityChanged(android.view.View.VISIBLE)
-                        }
-                    }
-                }.apply {
-                    layoutParams = android.view.ViewGroup.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    setBackgroundColor(android.graphics.Color.BLACK)
-
-                    with(settings) {
-                        javaScriptEnabled = true
-                        mediaPlaybackRequiresUserGesture = false
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                        userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
-                    }
-
-                    webChromeClient = android.webkit.WebChromeClient()
-
-                    val baseUrl = when {
-                        url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie") -> "https://noslop.me/"
-                        url.contains("vimeo") -> "https://vimeo.com/"
-                        else -> "https://archive.org/"
-                    }
-
-                    addJavascriptInterface(object {
-                        @android.webkit.JavascriptInterface
-                        fun onPlaying() {
-                            post { onReady() }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun savePosition(timeSeconds: Float) {
-                            val timeMs = (timeSeconds * 1000).toLong()
-                            if (timeMs > 0) {
-                                PlaybackPositionStore.save(rawUrl, timeMs, 0L)
+        Box(modifier = Modifier.fillMaxSize()) {
+            AndroidView(
+                factory = { ctx ->
+                    object : android.webkit.WebView(ctx) {
+                        override fun onWindowVisibilityChanged(visibility: Int) {
+                            if (visibility != android.view.View.GONE) {
+                                super.onWindowVisibilityChanged(android.view.View.VISIBLE)
                             }
                         }
-                    }, "NoSlopJS")
+                    }.apply {
+                        webViewRef = this
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        setBackgroundColor(android.graphics.Color.BLACK)
 
-                    webViewClient = object : android.webkit.WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: android.webkit.WebView?,
-                            request: android.webkit.WebResourceRequest?
-                        ): Boolean {
-                            val targetUri = request?.url ?: return false
-                            val scheme = targetUri.scheme ?: return false
-
-                            if (scheme == "data" || scheme == "blob") return false
-
-                            val targetHost = targetUri.host ?: return false
-                            val currentHost = android.net.Uri.parse(baseUrl).host ?: return false
-
-                            if (targetHost == currentHost) return false
-
-                            val mediaFamily = setOf(
-                                "youtube-nocookie.com", "youtube.com", "www.youtube.com",
-                                "googlevideo.com", "yt3.ggpht.com", "i.ytimg.com",
-                                "vimeo.com", "player.vimeo.com", "archive.org",
-                                "noslop.me"
-                            )
-                            if (mediaFamily.any { targetHost.endsWith(it) }) return false
-
-                            Logger.info("VIDEO", "Blocked outbound navigation to $targetHost")
-                            return true
+                        with(settings) {
+                            javaScriptEnabled = true
+                            mediaPlaybackRequiresUserGesture = false
+                            domStorageEnabled = true
+                            databaseEnabled = true
+                            allowFileAccess = false
+                            allowContentAccess = false
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            userAgentString = "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
                         }
 
-                        override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
-                            val shouldAutoplay = currentIsVisible
-                            val js = """
-                                (function() {
-                                    document.body.style.backgroundColor = 'black';
-                                    if ($shouldAutoplay) {
-                                        if (typeof player !== 'undefined' && player.playVideo) {
-                                            player.playVideo();
-                                        } else {
-                                            var vid = document.querySelector('video');
-                                            if (vid) { vid.play().catch(function(){}); return; }
-                                            var btn = document.querySelector(
-                                                '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
-                                            );
-                                            if (btn) btn.click();
+                        webChromeClient = android.webkit.WebChromeClient()
+
+                        val baseUrl = when {
+                            url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie") -> "https://noslop.me/"
+                            url.contains("vimeo") -> "https://vimeo.com/"
+                            else -> "https://archive.org/"
+                        }
+
+                        addJavascriptInterface(object {
+                            @android.webkit.JavascriptInterface
+                            fun onPlaying() {
+                                post { onReady() }
+                            }
+
+                            @android.webkit.JavascriptInterface
+                            fun savePosition(timeSeconds: Float) {
+                                val timeMs = (timeSeconds * 1000).toLong()
+                                if (timeMs > 0) {
+                                    PlaybackPositionStore.save(rawUrl, timeMs, 0L)
+                                }
+                            }
+                        }, "NoSlopJS")
+
+                        webViewClient = object : android.webkit.WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?
+                            ): Boolean {
+                                val targetUri = request?.url ?: return false
+                                val scheme = targetUri.scheme ?: return false
+
+                                if (scheme == "data" || scheme == "blob") return false
+
+                                val targetHost = targetUri.host ?: return false
+                                val currentHost = android.net.Uri.parse(baseUrl).host ?: return false
+
+                                if (targetHost == currentHost) return false
+
+                                val mediaFamily = setOf(
+                                    "youtube-nocookie.com", "youtube.com", "www.youtube.com",
+                                    "googlevideo.com", "yt3.ggpht.com", "i.ytimg.com",
+                                    "vimeo.com", "player.vimeo.com", "archive.org",
+                                    "noslop.me"
+                                )
+                                if (mediaFamily.any { targetHost.endsWith(it) }) return false
+
+                                Logger.info("VIDEO", "Blocked outbound navigation to $targetHost")
+                                return true
+                            }
+
+                            override fun onPageFinished(view: android.webkit.WebView?, pageUrl: String?) {
+                                val shouldAutoplay = currentIsVisible
+                                val js = """
+                                    (function() {
+                                        document.body.style.backgroundColor = 'black';
+                                        window.noslopSeekRelative = function(sec) {
+                                            if (typeof player !== 'undefined' && player.getCurrentTime && player.seekTo) {
+                                                var curr = player.getCurrentTime();
+                                                player.seekTo(Math.max(0, curr + sec), true);
+                                            } else {
+                                                var vid = document.querySelector('video');
+                                                if (vid) { vid.currentTime = Math.max(0, vid.currentTime + sec); }
+                                            }
+                                        };
+                                        window.noslopSetSpeed = function(rate) {
+                                            if (typeof player !== 'undefined' && player.setPlaybackRate) {
+                                                player.setPlaybackRate(rate);
+                                            } else {
+                                                var vid = document.querySelector('video');
+                                                if (vid) { vid.playbackRate = rate; }
+                                            }
+                                        };
+                                        window.noslopTogglePlay = function() {
+                                            if (typeof player !== 'undefined' && player.getPlayerState) {
+                                                var state = player.getPlayerState();
+                                                if (state === 1) { player.pauseVideo(); } else { player.playVideo(); }
+                                            } else {
+                                                var vid = document.querySelector('video');
+                                                if (vid) {
+                                                    if (vid.paused) { vid.play().catch(function(){}); } else { vid.pause(); }
+                                                }
+                                            }
+                                        };
+                                        if ($shouldAutoplay) {
+                                            if (typeof player !== 'undefined' && player.playVideo) {
+                                                player.playVideo();
+                                            } else {
+                                                var vid = document.querySelector('video');
+                                                if (vid) { vid.play().catch(function(){}); return; }
+                                                var btn = document.querySelector(
+                                                    '.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]'
+                                                );
+                                                if (btn) btn.click();
+                                            }
                                         }
-                                    }
-                                })();
-                            """.trimIndent()
-                            view?.evaluateJavascript(js, null)
-                            
-                            val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
-                            if (!isYouTube) {
-                                view?.postDelayed({ onReady() }, 800)
+                                    })();
+                                """.trimIndent()
+                                view?.evaluateJavascript(js, null)
+                                
+                                val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                                if (!isYouTube) {
+                                    view?.postDelayed({ onReady() }, 800)
+                                }
+                            }
+
+                            override fun onReceivedError(
+                                view: android.webkit.WebView?,
+                                request: android.webkit.WebResourceRequest?,
+                                error: android.webkit.WebResourceError?
+                            ) {
+                                if (request?.isForMainFrame == true) {
+                                    webError = error?.description?.toString() ?: "Unknown Network/SSL Error"
+                                }
                             }
                         }
 
-                        override fun onReceivedError(
-                            view: android.webkit.WebView?,
-                            request: android.webkit.WebResourceRequest?,
-                            error: android.webkit.WebResourceError?
-                        ) {
-                            if (request?.isForMainFrame == true) {
-                                webError = error?.description?.toString() ?: "Unknown Network/SSL Error"
-                            }
-                        }
-                    }
-
-                    val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
-                    
-                    val htmlContent = if (isYouTube) {
-                        val videoId = url.substringAfter("/embed/").substringBefore("?")
-                        val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
-                        val startSeconds = (resumeMs / 1000).toInt()
-                        """
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                            <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
-                        </head>
-                        <body>
-                            <div id="player"></div>
-                            <script>
-                              var tag = document.createElement('script');
-                              tag.src = "https://www.youtube.com/iframe_api";
-                              var firstScriptTag = document.getElementsByTagName('script')[0];
-                              firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-                              var player;
-                              function onYouTubeIframeAPIReady() {
-                                player = new YT.Player('player', {
-                                  height: '100%',
-                                  width: '100%',
-                                  videoId: '$videoId',
-                                  playerVars: { 'playsinline': 1, 'autoplay': 0, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
-                                  events: {
-                                    'onReady': function(event) { if (window.NoSlop_isVisible) { event.target.playVideo(); } },
-                                    'onStateChange': function(event) {
-                                      if (event.data == 1) { // PLAYING state
-                                          window.NoSlopJS.onPlaying();
-                                          if (!window.posInterval) {
-                                              window.posInterval = setInterval(function() {
+                        val isYouTube = url.contains("youtube") || url.contains("youtu.be") || url.contains("youtube-nocookie")
+                        
+                        val htmlContent = if (isYouTube) {
+                            val videoId = url.substringAfter("/embed/").substringBefore("?")
+                            val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
+                            val startSeconds = (resumeMs / 1000).toInt()
+                            """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
+                            </head>
+                            <body>
+                                <div id="player"></div>
+                                <script>
+                                  var tag = document.createElement('script');
+                                  tag.src = "https://www.youtube.com/iframe_api";
+                                  var firstScriptTag = document.getElementsByTagName('script')[0];
+                                  firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                                  var player;
+                                  function onYouTubeIframeAPIReady() {
+                                    player = new YT.Player('player', {
+                                      height: '100%',
+                                      width: '100%',
+                                      videoId: '$videoId',
+                                      playerVars: { 'playsinline': 1, 'autoplay': 0, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
+                                      events: {
+                                        'onReady': function(event) { if (window.NoSlop_isVisible) { event.target.playVideo(); } },
+                                        'onStateChange': function(event) {
+                                          if (event.data == 1) { // PLAYING state
+                                              window.NoSlopJS.onPlaying();
+                                              if (!window.posInterval) {
+                                                  window.posInterval = setInterval(function() {
+                                                      if (player && player.getCurrentTime) {
+                                                          window.NoSlopJS.savePosition(player.getCurrentTime());
+                                                      }
+                                                  }, 1000);
+                                              }
+                                          } else {
+                                              if (window.posInterval) {
+                                                  clearInterval(window.posInterval);
+                                                  window.posInterval = null;
                                                   if (player && player.getCurrentTime) {
                                                       window.NoSlopJS.savePosition(player.getCurrentTime());
                                                   }
-                                              }, 1000);
-                                          }
-                                      } else {
-                                          if (window.posInterval) {
-                                              clearInterval(window.posInterval);
-                                              window.posInterval = null;
-                                              if (player && player.getCurrentTime) {
-                                                  window.NoSlopJS.savePosition(player.getCurrentTime());
                                               }
                                           }
+                                        }
                                       }
-                                    }
+                                    });
                                   }
-                                });
-                              }
-                            </script>
-                        </body>
-                        </html>
+                                </script>
+                            </body>
+                            </html>
+                            """.trimIndent()
+                        } else {
+                            """
+                            <!DOCTYPE html>
+                            <html>
+                            <head>
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                                <meta name="referrer" content="strict-origin-when-cross-origin">
+                                <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
+                            </head>
+                            <body>
+                                <iframe width="100%" height="100%" src="$url" frameborder="0" allow="fullscreen" allowfullscreen></iframe>
+                            </body>
+                            </html>
+                            """.trimIndent()
+                        }
+                        
+                        loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
+                    }
+                },
+                update = { view ->
+                    val js = if (isVisible) {
+                        """
+                        if (typeof player !== 'undefined' && player.playVideo) {
+                            player.playVideo();
+                        } else {
+                            var vid = document.querySelector('video');
+                            if (vid && vid.paused) { vid.play().catch(function(){}); }
+                            var btn = document.querySelector('.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]');
+                            if (btn) btn.click();
+                        }
                         """.trimIndent()
                     } else {
                         """
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-                            <meta name="referrer" content="strict-origin-when-cross-origin">
-                            <style>body, html { margin:0; padding:0; width:100%; height:100%; background:black; }</style>
-                        </head>
-                        <body>
-                            <iframe width="100%" height="100%" src="$url" frameborder="0" allow="fullscreen" allowfullscreen></iframe>
-                        </body>
-                        </html>
+                        if (typeof player !== 'undefined' && player.pauseVideo) {
+                            player.pauseVideo();
+                        } else {
+                            var vid = document.querySelector('video');
+                            if (vid && !vid.paused) { vid.pause(); }
+                        }
                         """.trimIndent()
                     }
-                    
-                    loadDataWithBaseURL(baseUrl, htmlContent, "text/html", "UTF-8", null)
-                }
-            },
-            update = { view ->
-                val js = if (isVisible) {
-                    """
-                    if (typeof player !== 'undefined' && player.playVideo) {
-                        player.playVideo();
-                    } else {
-                        var vid = document.querySelector('video');
-                        if (vid && vid.paused) { vid.play().catch(function(){}); }
-                        var btn = document.querySelector('.play-button, button[aria-label="Play"], button[title="Play"], [data-testid="play-button"]');
-                        if (btn) btn.click();
+                    view.evaluateJavascript(js, null)
+                },
+                onRelease = { view ->
+                    view.evaluateJavascript("if (typeof player !== 'undefined' && player.getCurrentTime) { window.NoSlopJS.savePosition(player.getCurrentTime()); }", null)
+                    view.stopLoading()
+                    view.loadUrl("about:blank")
+                    view.destroy()
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { 
+                        if (isVisible) {
+                            alpha = 1f
+                            translationX = 0f
+                        } else {
+                            alpha = 0.01f
+                            translationX = 100000f
+                        }
                     }
-                    """.trimIndent()
-                } else {
-                    """
-                    if (typeof player !== 'undefined' && player.pauseVideo) {
-                        player.pauseVideo();
-                    } else {
-                        var vid = document.querySelector('video');
-                        if (vid && !vid.paused) { vid.pause(); }
+            )
+
+            // Transparent Gesture Overlay for EmbedWebViewPlayer
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(webViewRef) {
+                        detectTapGestures(
+                            onPress = {
+                                val webView = webViewRef ?: return@detectTapGestures
+                                val holdJob = scope.launch {
+                                    kotlinx.coroutines.delay(400)
+                                    isFastForwarding = true
+                                    webView.evaluateJavascript("window.noslopSetSpeed(2.0);", null)
+                                }
+                                try {
+                                    awaitRelease()
+                                } finally {
+                                    holdJob.cancel()
+                                    if (isFastForwarding) {
+                                        isFastForwarding = false
+                                        webView.evaluateJavascript("window.noslopSetSpeed(1.0);", null)
+                                    }
+                                }
+                            },
+                            onDoubleTap = { offset ->
+                                val webView = webViewRef ?: return@detectTapGestures
+                                val width = size.width
+                                if (offset.x > width / 2) {
+                                    webView.evaluateJavascript("window.noslopSeekRelative(10);", null)
+                                    seekIndicator = "+10s ⏩"
+                                } else {
+                                    webView.evaluateJavascript("window.noslopSeekRelative(-10);", null)
+                                    seekIndicator = "-10s ⏪"
+                                }
+                            },
+                            onTap = {
+                                webViewRef?.evaluateJavascript("window.noslopTogglePlay();", null)
+                            }
+                        )
                     }
-                    """.trimIndent()
-                }
-                view.evaluateJavascript(js, null)
-            },
-            onRelease = { view ->
-                view.evaluateJavascript("if (typeof player !== 'undefined' && player.getCurrentTime) { window.NoSlopJS.savePosition(player.getCurrentTime()); }", null)
-                view.stopLoading()
-                view.loadUrl("about:blank")
-                view.destroy()
-            },
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { 
-                    if (isVisible) {
-                        alpha = 1f
-                        translationX = 0f
-                    } else {
-                        alpha = 0.01f
-                        translationX = 100000f
+            )
+
+            if (isFastForwarding) {
+                Surface(
+                    color = PrimaryBlack.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp).zIndex(2f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("2x ▶▶".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 }
-        )
+            }
+
+            if (seekIndicator != null) {
+                Surface(
+                    color = PrimaryBlack.copy(alpha = 0.75f),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier.align(Alignment.Center).zIndex(2f)
+                ) {
+                    Text(
+                        text = seekIndicator!!,
+                        color = AccentGreen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        }
     }
 }

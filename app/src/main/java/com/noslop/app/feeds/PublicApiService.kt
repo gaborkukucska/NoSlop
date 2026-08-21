@@ -55,7 +55,12 @@ object PublicApiService {
         }
 
         fun fetchAsync(sourceId: String, block: suspend () -> List<FeedItem>) {
-            if (activeApiSourceIds.contains(sourceId)) {
+            val isKeylessApiSource = sourceId.startsWith("api-archive") || sourceId.startsWith("api-openverse") ||
+                    sourceId.startsWith("api-yt") || sourceId.startsWith("api-invidious") ||
+                    sourceId.startsWith("api-jamendo") || sourceId.startsWith("api-reddit") ||
+                    sourceId.startsWith("api-wikipedia") || sourceId.startsWith("api-hackernews") ||
+                    sourceId.startsWith("api-nasa") || sourceId.startsWith("api-podcast")
+            if (activeApiSourceIds.contains(sourceId) || isKeylessApiSource) {
                 deferredItems.add(async(Dispatchers.IO) {
                     try {
                         block()
@@ -236,53 +241,30 @@ object PublicApiService {
         }
 
         val items = mutableListOf<FeedItem>()
-        // Collect results with a short hard timeout so fast sources (YouTube, Reddit)
-        // return quickly and the UI doesn't hang waiting for slow sources (Archive API).
-        val timeoutDuration = 20_000L
-        val deadline = System.currentTimeMillis() + timeoutDuration
-        // --- NOSLOP_ARCHIVE_BUDGET_V1 ---
-        // Track what the main loop already took. The deadline sweep below used
-        // to re-await every deferred, including ones harvested here, so every
-        // result was added twice — visible in the log as "20 items (40 before
-        // dedup)" on every single category. distinctBy hid it, but it made the
-        // before-dedup count useless as a diagnostic.
-        val harvested = java.util.Collections.newSetFromMap(
-            java.util.IdentityHashMap<kotlinx.coroutines.Deferred<List<FeedItem>>, Boolean>()
-        )
-        for (deferred in deferredItems) {
-            val remaining = deadline - System.currentTimeMillis()
-            if (remaining <= 0) {
-                Logger.warn(TAG, "Timeout reached for category '$category', skipping remaining sources")
-                break
+        val timeoutDuration = 35_000L
+        try {
+            val allResults = kotlinx.coroutines.withTimeoutOrNull(timeoutDuration) {
+                deferredItems.awaitAll()
             }
-            try {
-                val result = kotlinx.coroutines.withTimeoutOrNull(remaining) { deferred.await() }
-                if (result != null) {
-                    items.addAll(result)
-                    harvested.add(deferred)
+            if (allResults != null) {
+                for (res in allResults) {
+                    items.addAll(res)
                 }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Deferred failed for category '$category': ${e.message}")
-            }
-        }
-
-        // --- NOSLOP_IMAGE_SEARCH_V1 ---
-        // The loop above awaits in order against one shared deadline and breaks
-        // when it expires — which threw away every source after the slow one,
-        // including ones that had ALREADY returned. That is how a search ends up
-        // reporting 0 items despite several sources having succeeded. Sweep up
-        // anything already finished before giving up on the rest.
-        for (deferred in deferredItems) {
-            if (deferred in harvested) continue  // NOSLOP_ARCHIVE_BUDGET_V1
-            if (!deferred.isActive && !deferred.isCancelled) {
-                try {
-                    val late = kotlinx.coroutines.withTimeoutOrNull(50L) { deferred.await() }
-                    if (late != null) items.addAll(late)
-                } catch (_: Exception) {
+            } else {
+                Logger.warn(TAG, "Timeout of ${timeoutDuration}ms reached for category '$category', harvesting completed sources")
+                for (deferred in deferredItems) {
+                    if (deferred.isCompleted && !deferred.isCancelled) {
+                        try {
+                            val res = deferred.getCompleted()
+                            items.addAll(res)
+                        } catch (e: Exception) {
+                            Logger.warn(TAG, "Error retrieving completed result: ${e.message}")
+                        }
+                    }
                 }
-            } else if (deferred.isActive) {
-                deferred.cancel()
             }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Error harvesting API results for '$category'", e.message)
         }
         // --- NOSLOP_LOCAL_SEARCH_V1 ---
         // Local results first so they lead the ordering, then dedupe by id —
