@@ -650,10 +650,10 @@ fun UnifiedFeedTab(
                 "Live Feed" -> true
                 "History" -> item.id in viewedHistoryIds
                 "Liked", "Saved" -> item is UnifiedItem.Feed && item.item.isSaved
-                "Videos" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("video") == true
-                "Images" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("image") == true
-                "Audio" -> item is UnifiedItem.Feed && item.item.mediaType?.contains("audio") == true
-                "Articles" -> item is UnifiedItem.Feed && item.item.mediaType.isNullOrEmpty()
+                "Videos" -> isVideoItem(item)
+                "Images" -> isImageItem(item)
+                "Audio" -> isAudioItem(item)
+                "Articles" -> isArticleItem(item)
                 "Mesh" -> item is UnifiedItem.Mesh
                 "HUBs" -> false 
                 else -> true
@@ -1744,9 +1744,76 @@ private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.C
                 val rawUrl = item.post.mediaUrl ?: item.post.clearnetUrl ?: return null
                 val forced = if (resolvedUrl != rawUrl) resolvedUrl else null
                 Pair(rawUrl, forced)
-            } else null
+    } else null
         }
         is UnifiedItem.Tutorial -> null
+    }
+}
+
+private fun isAudioItem(item: UnifiedItem): Boolean {
+    return when (item) {
+        is UnifiedItem.Feed -> {
+            val type = item.item.mediaType?.lowercase() ?: ""
+            val url = (item.item.mediaUrl ?: item.item.url ?: "").lowercase()
+            type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".m4a") ||
+            url.endsWith(".ogg") || url.endsWith(".wav") || url.endsWith(".aac") ||
+            url.endsWith(".flac") || url.contains("/audio/") || url.contains("podbean")
+        }
+        is UnifiedItem.Mesh -> {
+            val type = (item.post.mediaType ?: item.post.clearnetMediaType ?: "").lowercase()
+            val url = (item.post.mediaUrl ?: item.post.clearnetUrl ?: "").lowercase()
+            type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".m4a") ||
+            url.endsWith(".ogg") || url.endsWith(".wav") || url.endsWith(".aac")
+        }
+        is UnifiedItem.Tutorial -> false
+    }
+}
+
+private fun isVideoItem(item: UnifiedItem): Boolean {
+    return when (item) {
+        is UnifiedItem.Feed -> {
+            val type = item.item.mediaType?.lowercase() ?: ""
+            val url = (item.item.mediaUrl ?: item.item.url ?: "").lowercase()
+            type.contains("video") || url.contains("youtube") || url.contains("youtu.be") ||
+            url.contains("vimeo") || url.endsWith(".mp4") || url.endsWith(".webm") ||
+            url.endsWith(".m3u8") || url.endsWith(".mpd")
+        }
+        is UnifiedItem.Mesh -> {
+            val type = (item.post.mediaType ?: item.post.clearnetMediaType ?: "").lowercase()
+            val url = (item.post.mediaUrl ?: item.post.clearnetUrl ?: "").lowercase()
+            type.contains("video") || url.endsWith(".mp4") || url.endsWith(".webm") || url.endsWith(".m3u8")
+        }
+        is UnifiedItem.Tutorial -> false
+    }
+}
+
+private fun isImageItem(item: UnifiedItem): Boolean {
+    return when (item) {
+        is UnifiedItem.Feed -> {
+            val type = item.item.mediaType?.lowercase() ?: ""
+            val mediaUrl = (item.item.mediaUrl ?: "").lowercase()
+            type == "image" || (mediaUrl.isNotBlank() && (mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".jpeg") || mediaUrl.endsWith(".png") || mediaUrl.endsWith(".webp") || mediaUrl.endsWith(".gif")) && item.item.url.isNullOrBlank())
+        }
+        is UnifiedItem.Mesh -> {
+            val type = (item.post.mediaType ?: item.post.clearnetMediaType ?: "").lowercase()
+            val mediaUrl = (item.post.mediaUrl ?: item.post.clearnetUrl ?: "").lowercase()
+            type == "image" || (mediaUrl.isNotBlank() && (mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".jpeg") || mediaUrl.endsWith(".png") || mediaUrl.endsWith(".webp") || mediaUrl.endsWith(".gif")) && item.post.content.isBlank())
+        }
+        is UnifiedItem.Tutorial -> false
+    }
+}
+
+private fun isArticleItem(item: UnifiedItem): Boolean {
+    return when (item) {
+        is UnifiedItem.Feed -> {
+            val type = item.item.mediaType?.lowercase() ?: ""
+            type == "article" || type.isEmpty() || (!isVideoItem(item) && !isAudioItem(item))
+        }
+        is UnifiedItem.Mesh -> {
+            val type = (item.post.mediaType ?: item.post.clearnetMediaType ?: "").lowercase()
+            type == "article" || type.isEmpty() || (!isVideoItem(item) && !isAudioItem(item))
+        }
+        is UnifiedItem.Tutorial -> false
     }
 }
 

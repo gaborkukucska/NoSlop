@@ -425,38 +425,19 @@ fun SegmentedArticleReader(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color(0xFF141414)),
+                                .background(
+                                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        colors = listOf(Color(0xFF1F2421), Color(0xFF101211))
+                                    )
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier.padding(32.dp)
-                            ) {
-                                Icon(Icons.Default.Article, contentDescription = null, tint = AccentGreen.copy(alpha = 0.7f), modifier = Modifier.size(48.dp))
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Text(
-                                    title,
-                                    color = TextLight,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    textAlign = TextAlign.Center
-                                )
-                                val formattedDate = if (publishedAt > 0L) {
-                                    try {
-                                        java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(publishedAt))
-                                    } catch (_: Exception) { null }
-                                } else null
-                                val byline = listOfNotNull(author?.takeIf { it.isNotBlank() }?.let { "By $it" }, formattedDate).joinToString(" · ")
-
-                                if (byline.isNotBlank()) {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        byline,
-                                        color = TextMuted,
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
-                                }
-                            }
+                            Icon(
+                                Icons.Default.Article,
+                                contentDescription = null,
+                                tint = AccentGreen.copy(alpha = 0.08f),
+                                modifier = Modifier.size(160.dp)
+                            )
                         }
                     }
 
@@ -466,18 +447,18 @@ fun SegmentedArticleReader(
                             .fillMaxSize()
                             .background(
                                 androidx.compose.ui.graphics.Brush.verticalGradient(
-                                    colors = listOf(Color.Black.copy(alpha = 0.9f), Color.Transparent),
+                                    colors = listOf(Color.Black.copy(alpha = 0.95f), Color.Black.copy(alpha = 0.3f), Color.Transparent),
                                     startY = Float.POSITIVE_INFINITY,
                                     endY = 0f
                                 )
                             )
                     )
 
-                    // Title Overlay
+                    // Title & Byline Overlay
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .padding(horizontal = 32.dp, vertical = 64.dp)
+                            .padding(horizontal = 28.dp, vertical = 56.dp)
                     ) {
                         Surface(
                             color = AccentGreen,
@@ -497,7 +478,7 @@ fun SegmentedArticleReader(
                             text = title,
                             style = MaterialTheme.typography.headlineMedium.copy(
                                 fontWeight = FontWeight.Bold,
-                                lineHeight = 38.sp
+                                lineHeight = 36.sp
                             ),
                             color = Color.White
                         )
@@ -506,7 +487,8 @@ fun SegmentedArticleReader(
                                 java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(publishedAt))
                             } catch (_: Exception) { null }
                         } else null
-                        val byline = listOfNotNull(author?.takeIf { it.isNotBlank() }?.let { "By $it" }, formattedDate).joinToString(" · ")
+                        val effectiveAuthor = author?.takeIf { it.isNotBlank() } ?: sourceLabel
+                        val byline = listOfNotNull("By $effectiveAuthor", formattedDate).joinToString(" · ")
                         if (byline.isNotBlank()) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
