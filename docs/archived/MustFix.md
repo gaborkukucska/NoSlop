@@ -1,4 +1,7 @@
-# SSH Deployment Bug: Persistent `sudo` Shim Shadows System `sudo`
+# [ARCHIVED - RESOLVED] SSH Deployment Bug: Persistent `sudo` Shim Shadows System `sudo`
+
+> [!NOTE]
+> **Status: RESOLVED**. Self-healing cleanup (`rm -f ~/.cargo/bin/sudo`) and transient execution directory (`~/.hainet_deploy_tmp/sudo`) have been implemented in `SshDeployer.kt`.
 
 **File affected:** `NoSlop-Legacy-Android/app/src/main/java/com/noslop/app/net/SshDeployer.kt`
 **Severity:** High — breaks `sudo` on every target host after deployment; also a latent privilege-escalation risk

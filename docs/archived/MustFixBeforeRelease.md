@@ -1,4 +1,7 @@
-# NoSlop (Legacy Android) — Must-Fix-Before-Release Report
+# [ARCHIVED - RESOLVED] NoSlop (Legacy Android) — Must-Fix-Before-Release Report
+
+> [!NOTE]
+> **Status: RESOLVED**. All critical issues (Tor-by-default routing, cleartext network security scoping, StrictHostKeyChecking TOFU handling, non-exported broadcast receivers, and DAO unit test fixtures) have been implemented and verified in `app/`.
 
 Scope: `NoSlop-Legacy-Android/app/` only, as requested (the `mvp/` KMP rewrite was ignored). Cross-referenced against `hai-master` for context on the HAI-Net vision it plugs into.
 

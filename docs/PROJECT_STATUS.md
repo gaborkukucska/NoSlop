@@ -1,5 +1,19 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-22)
+
+### 1. Network & Security Hardening
+*   **Cleartext Traffic Scoping**: Updated [network_security_config.xml](file:///home/tom/NoSlop/app/src/main/res/xml/network_security_config.xml) to disable global cleartext traffic and scope `cleartextTrafficPermitted` strictly to `127.0.0.1` and `localhost`. Feed and media traffic now default to HTTPS / Tor SOCKS5 proxy while preserving LAN Hub and SOCKS proxy access.
+*   **Non-Exported Receiver**: Confirmed `UpdateManager$DownloadReceiver` in [AndroidManifest.xml](file:///home/tom/NoSlop/app/src/main/AndroidManifest.xml) is set to `android:exported="false"`, protecting against external intent injection.
+*   **Encrypted Storage Fallback Alerting**: Verified reactive state `isUsingInsecureStorage` in [IdentityRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/IdentityRepository.kt) and surfaced prominent red warning banners in [OnboardingScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/OnboardingScreen.kt) and [ContentPreferencesScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/ContentPreferencesScreen.kt) when hardware Keystore initialization fails.
+
+### 2. Test Fixture Parity & Cryptographic Identity Standardizing
+*   **DAO Test Fixtures**: Updated [FakeDaos.kt](file:///home/tom/NoSlop/app/src/test/java/com/noslop/app/data/FakeDaos.kt) with implementations for all modern DAO queries (`searchLocalArticles`, `deleteYouTubeItems`, `deleteReactionsByAuthor`, `deleteVotesByAuthor`, `getPendingDeletionsByAuthor`, `getMessagesWithPeerList`, etc.).
+*   **DisplayName Standardization**: Updated [CryptoService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/crypto/CryptoService.kt) to format `IdentityKeys.displayName` consistently as `handle.tripcode` (matching identity specifications and unit test contracts).
+*   **Unit Test Suite Pass**: Achieved 100% pass rate (`71/71 tests passing`) across off-device unit test suite (`./gradlew testDebugUnitTest`).
+
+---
+
 ## Completed Changes (2026-08-20)
 
 ### 1. Categorized Reaction System (Positive, Neutral, & Negative)
