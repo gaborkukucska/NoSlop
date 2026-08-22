@@ -60,6 +60,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val peers by viewModel.peers.collectAsState()
     val conversations by viewModel.conversations.collectAsState()
     val selectedPeerPub by viewModel.selectedPeerPub.collectAsState()
+    val selectedGroupChatId by viewModel.selectedGroupChatId.collectAsState()
+    val groupChats by viewModel.groupChats.collectAsState()
     val activeChatMessages by viewModel.chatMessages.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
     val handle by viewModel.localHandle.collectAsState()
@@ -88,8 +90,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
     // Intercept hardware back button when viewing a chat thread —
     // return to contacts list instead of minimising the app.
-    BackHandler(enabled = selectedPeerPub != null) {
+    BackHandler(enabled = selectedPeerPub != null || selectedGroupChatId != null) {
         viewModel.selectChatPeer(null)
+        viewModel.selectGroupChat(null)
     }
 
     Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { tabCoordinates = it }) {
@@ -122,6 +125,18 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     }
                 }
             }
+        }
+    } else if (selectedGroupChatId != null) {
+        val activeGroup = groupChats.find { it.groupId == selectedGroupChatId }
+        if (activeGroup != null) {
+            GroupChatThreadScreen(
+                group = activeGroup,
+                messages = activeChatMessages,
+                localKeys = localKeys,
+                viewModel = viewModel,
+                onSendMessage = { txt, media, replyTo -> viewModel.sendGroupMessage(activeGroup.groupId, txt, media, replyTo) },
+                onBack = { viewModel.selectGroupChat(null) }
+            )
         }
     } else {
         // Conversation/Contacts List view
@@ -230,7 +245,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)) {
                     items(groupChats) { group ->
                         Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp)
+                                .clickable { viewModel.selectGroupChat(group.groupId) },
                             colors = CardDefaults.cardColors(containerColor = SurfaceDark),
                             border = BorderStroke(1.dp, BorderSubtle)
                         ) {

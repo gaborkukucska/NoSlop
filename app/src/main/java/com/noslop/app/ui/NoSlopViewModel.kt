@@ -344,12 +344,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _selectedPeerPub = MutableStateFlow<String?>(null)
     val selectedPeerPub: StateFlow<String?> = _selectedPeerPub.asStateFlow()
 
-    val chatMessages: StateFlow<List<ChatMessage>> = _selectedPeerPub
-        .flatMapLatest { pub ->
-            if (pub == null) flowOf(emptyList())
-            else repository.getMessagesWithPeer(pub)
+    private val _selectedGroupChatId = MutableStateFlow<String?>(null)
+    val selectedGroupChatId: StateFlow<String?> = _selectedGroupChatId.asStateFlow()
+
+    val chatMessages: StateFlow<List<ChatMessage>> = combine(_selectedPeerPub, _selectedGroupChatId) { peerPub, groupId ->
+        peerPub to groupId
+    }.flatMapLatest { (peerPub, groupId) ->
+        when {
+            peerPub != null -> repository.getMessagesWithPeer(peerPub)
+            groupId != null -> repository.getMessagesWithPeer(groupId)
+            else -> flowOf(emptyList())
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
@@ -1745,8 +1751,20 @@ fun toggleAggregator() {
     fun sendTestPost() { viewModelScope.launch { repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}") } }
 
     fun selectChatPeer(peerPub: String?) {
+        _selectedGroupChatId.value = null
         _selectedPeerPub.value = peerPub
         if (peerPub != null) viewModelScope.launch { repository.markMessagesAsRead(peerPub) }
+    }
+
+    fun selectGroupChat(groupId: String?) {
+        _selectedPeerPub.value = null
+        _selectedGroupChatId.value = groupId
+    }
+
+    fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.sendGroupMessage(groupId, text, media, replyToMessageId)
+        }
     }
 
 

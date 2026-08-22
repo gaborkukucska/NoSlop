@@ -719,6 +719,55 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    suspend fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
+        val myKeys = getLocalIdentity() ?: return
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val msgId = java.util.UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        val jsonPayload = com.google.gson.JsonObject().apply {
+            addProperty("content", text)
+            addProperty("groupId", groupId)
+            if (media != null) add("media", com.google.gson.Gson().toJsonTree(media))
+            if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
+        }.toString()
+
+        val localMsg = ChatMessage(
+            id = msgId,
+            chatWithPeerPub = groupId,
+            senderPub = myKeys.publicKeyB64,
+            ciphertext = text,
+            nonce = "",
+            timestamp = timestamp,
+            mediaId = media?.id,
+            mediaType = media?.type,
+            replyToMessageId = replyToMessageId
+        )
+        messageDao.insertMessage(localMsg)
+
+        val memberPubs: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        for (memberPub in memberPubs) {
+            if (memberPub == myKeys.publicKeyB64) continue
+            val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
+            if (peer.onionAddress.isNotBlank()) {
+                val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
+                val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.privateKeyB64)
+                val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, timestamp = timestamp)
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = memberPub,
+                    type = "MESSAGE",
+                    payload = com.google.gson.Gson().toJsonTree(msgPayload)
+                )
+                com.noslop.app.mesh.MeshTransport(this).sendPacket(peer.onionAddress, packet = packet)
+            }
+        }
+    }
+
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
