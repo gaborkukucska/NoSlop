@@ -211,6 +211,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val temporaryPeers: StateFlow<List<Peer>> = repository.temporaryPeers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val followedPeers: StateFlow<List<Peer>> = repository.followedPeers
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val groupChats: StateFlow<List<GroupChat>> = repository.groupChats
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val peerTypingStates: StateFlow<Map<String, Boolean>> = repository.peerTypingStates
+
+    fun toggleFollowPeer(peerPub: String, follow: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.toggleFollowPeer(peerPub, follow)
+        }
+    }
+
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

@@ -143,4 +143,19 @@ class DmPacketHandler(
         repo.triggerDmSync()
         return true
     }
+
+    suspend fun handleTyping(packet: NetworkPacket): Boolean {
+        val typing = packet.getTypingPayload() ?: return false
+        Logger.debug(TAG, "Received TYPING signal from ${packet.senderId}: isTyping=${typing.isTyping}")
+        repo.updatePeerTypingState(packet.senderId, typing.isTyping)
+        return true
+    }
+
+    suspend fun handleReadReceipt(packet: NetworkPacket): Boolean {
+        val receipt = packet.getReadReceiptPayload() ?: return false
+        Logger.debug(TAG, "Received READ_RECEIPT for message ${receipt.messageId} from ${packet.senderId}")
+        messageDao.markAsRead(packet.senderId)
+        repo.triggerDmSync()
+        return true
+    }
 }

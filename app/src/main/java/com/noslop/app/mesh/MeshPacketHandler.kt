@@ -84,6 +84,12 @@ class MeshPacketHandler(
             "DELETE_POST" -> post.handleDeletePost(packet)
             "EDIT_COMMENT" -> comment.handleEditComment(packet)
             "DELETE_COMMENT" -> comment.handleDeleteComment(packet)
+            "FOLLOW", "UNFOLLOW" -> handshake.handleFollow(packet)
+            "GROUP_INVITE" -> handshake.handleGroupInvite(packet)
+            "GROUP_UPDATE" -> handshake.handleGroupUpdate(packet)
+            "GROUP_DELETE" -> handshake.handleGroupDelete(packet)
+            "TYPING" -> dm.handleTyping(packet)
+            "READ_RECEIPT" -> dm.handleReadReceipt(packet)
             else -> {
                 Logger.warn(TAG, "Unknown packet type received: ${packet.type}")
                 false

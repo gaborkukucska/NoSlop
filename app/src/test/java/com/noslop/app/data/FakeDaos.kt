@@ -140,6 +140,10 @@ class FakePeerDao : PeerDao {
     override fun getTemporaryPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTemporary })
     override fun getPeersByFolder(folder: String): Flow<List<Peer>> = flowOf(peers.values.filter { it.customFolder == folder })
     override fun getDiscoverablePeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isDiscoverable })
+    override fun getFollowedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isFollowing })
+    override suspend fun updateFollowState(pubKey: String, isFollowing: Boolean) {
+        peers[pubKey]?.let { peers[pubKey] = it.copy(isFollowing = isFollowing) }
+    }
 }
 
 /** Fake [PostDao] keyed by id (REPLACE on insert). */
@@ -182,4 +186,13 @@ class FakeMessageDao : MessageDao {
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())
     override suspend fun markAsRead(peerPub: String) {}
     override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }
+}
+
+/** Fake [GroupChatDao] for group chat unit testing. */
+class FakeGroupChatDao : GroupChatDao {
+    private val groups = linkedMapOf<String, GroupChat>()
+    override fun getAllGroupChats(): Flow<List<GroupChat>> = flowOf(groups.values.toList())
+    override suspend fun getGroupChatById(groupId: String): GroupChat? = groups[groupId]
+    override suspend fun insertGroupChat(groupChat: GroupChat) { groups[groupChat.groupId] = groupChat }
+    override suspend fun deleteGroupChat(groupId: String) { groups.remove(groupId) }
 }

@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
@@ -625,6 +626,42 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val trustedPeers: Flow<List<Peer>> = peerDao.getTrustedPeers()
     val discoverablePeers: Flow<List<Peer>> = peerDao.getDiscoverablePeers()
     val temporaryPeers: Flow<List<Peer>> = peerDao.getTemporaryPeers()
+    val followedPeers: Flow<List<Peer>> = peerDao.getFollowedPeers()
+    val groupChats: Flow<List<GroupChat>> = db.groupChatDao().getAllGroupChats()
+    
+    private val _peerTypingStates = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val peerTypingStates: kotlinx.coroutines.flow.StateFlow<Map<String, Boolean>> = _peerTypingStates.asStateFlow()
+
+    fun updatePeerTypingState(peerPub: String, isTyping: Boolean) {
+        val current = _peerTypingStates.value.toMutableMap()
+        current[peerPub] = isTyping
+        _peerTypingStates.value = current
+    }
+
+    suspend fun toggleFollowPeer(peerPub: String, follow: Boolean) {
+        peerDao.updateFollowState(peerPub, follow)
+        val myKeys = getLocalIdentity() ?: return
+        val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        if (peer.onionAddress.isNotBlank()) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "$peerPub|${myKeys.publicKeyB64}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val followPayload = com.noslop.app.mesh.FollowPayload(
+                followedPublicKeyB64 = peerPub,
+                followerPublicKeyB64 = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature,
+                action = if (follow) "follow" else "unfollow"
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                type = if (follow) "FOLLOW" else "UNFOLLOW",
+                payload = com.google.gson.Gson().toJsonTree(followPayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
+    }
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()

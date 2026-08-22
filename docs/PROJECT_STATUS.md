@@ -12,6 +12,11 @@
 *   **DisplayName Standardization**: Updated [CryptoService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/crypto/CryptoService.kt) to format `IdentityKeys.displayName` consistently as `handle.tripcode` (matching identity specifications and unit test contracts).
 *   **Unit Test Suite Pass**: Achieved 100% pass rate (`71/71 tests passing`) across off-device unit test suite (`./gradlew testDebugUnitTest`).
 
+### 3. Asymmetric Follows, Group Chat Schemas, & Ephemeral Signals
+*   **Asymmetric Follow/Unfollow Model**: Implemented `FOLLOW` and `UNFOLLOW` wire packets in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt), added `isFollowing` to `Peer` entity in [Entities.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Entities.kt) with Room Migration `MIGRATION_8_9` (Database Version 9) in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt), and added `handleFollow` signature verification in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt).
+*   **Group Chat Protocol Schemas**: Added `GROUP_INVITE`, `GROUP_UPDATE`, and `GROUP_DELETE` wire packets, created [GroupChat.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/GroupChat.kt) Room entity (`groupId`, `title`, `adminPublicKeyB64`, `membersJson`), `GroupChatDao`, and handler dispatching in [MeshPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MeshPacketHandler.kt).
+*   **Ephemeral Signals**: Added `TYPING` and `READ_RECEIPT` wire packets, handler dispatch in [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt), and `peerTypingStates` StateFlow in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) and [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt).
+
 ---
 
 ## Completed Changes (2026-08-20)

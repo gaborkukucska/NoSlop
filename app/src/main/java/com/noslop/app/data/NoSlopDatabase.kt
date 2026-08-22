@@ -43,9 +43,10 @@ import androidx.room.RoomDatabase
         CommentVote::class,
         NotificationItem::class,
         ViewedHistoryItem::class,
-        SwipeTracker::class
+        SwipeTracker::class,
+        GroupChat::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -64,6 +65,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun notificationDao(): NotificationDao
     abstract fun viewedHistoryDao(): ViewedHistoryDao
     abstract fun swipeTrackerDao(): SwipeTrackerDao
+    abstract fun groupChatDao(): GroupChatDao
 
     companion object {
         @Volatile
@@ -127,6 +129,13 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE peers ADD COLUMN isFollowing INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("CREATE TABLE IF NOT EXISTS group_chats (groupId TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, adminPublicKeyB64 TEXT NOT NULL, membersJson TEXT NOT NULL, createdAt INTEGER NOT NULL)")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -135,7 +144,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build()
                 INSTANCE = instance
                 instance

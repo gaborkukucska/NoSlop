@@ -246,6 +246,51 @@ data class DeleteMessagePayload(
     val signature: String
 )
 
+data class FollowPayload(
+    @SerializedName("followed_public_key") val followedPublicKeyB64: String,
+    @SerializedName("follower_public_key") val followerPublicKeyB64: String,
+    val timestamp: Long,
+    val signature: String,
+    val action: String = "follow" // "follow" or "unfollow"
+)
+
+data class GroupInvitePayload(
+    @SerializedName("group_id") val groupId: String,
+    val title: String,
+    @SerializedName("admin_public_key") val adminPublicKeyB64: String,
+    val members: List<String>,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class GroupUpdatePayload(
+    @SerializedName("group_id") val groupId: String,
+    val title: String? = null,
+    @SerializedName("added_members") val addedMembers: List<String>? = null,
+    @SerializedName("removed_members") val removedMembers: List<String>? = null,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class GroupDeletePayload(
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("admin_public_key") val adminPublicKeyB64: String,
+    val timestamp: Long,
+    val signature: String
+)
+
+data class TypingPayload(
+    @SerializedName("chat_with_peer_pub") val chatWithPeerPub: String,
+    @SerializedName("is_typing") val isTyping: Boolean,
+    val timestamp: Long
+)
+
+data class ReadReceiptPayload(
+    @SerializedName("message_id") val messageId: String,
+    @SerializedName("reader_public_key") val readerPublicKeyB64: String,
+    val timestamp: Long
+)
+
 data class DeletePostPayload(
     @SerializedName("post_id") val postId: String,
     @SerializedName("author_id") val authorId: String,
@@ -394,6 +439,30 @@ data class NetworkPacket(
 
     fun getSubscribePayload(): SubscribePayload? = if (type == "SUBSCRIBE" && payload != null) {
         Gson().fromJson(payload, SubscribePayload::class.java)
+    } else null
+
+    fun getFollowPayload(): FollowPayload? = if ((type == "FOLLOW" || type == "UNFOLLOW") && payload != null) {
+        Gson().fromJson(payload, FollowPayload::class.java)
+    } else null
+
+    fun getGroupInvitePayload(): GroupInvitePayload? = if (type == "GROUP_INVITE" && payload != null) {
+        Gson().fromJson(payload, GroupInvitePayload::class.java)
+    } else null
+
+    fun getGroupUpdatePayload(): GroupUpdatePayload? = if (type == "GROUP_UPDATE" && payload != null) {
+        Gson().fromJson(payload, GroupUpdatePayload::class.java)
+    } else null
+
+    fun getGroupDeletePayload(): GroupDeletePayload? = if (type == "GROUP_DELETE" && payload != null) {
+        Gson().fromJson(payload, GroupDeletePayload::class.java)
+    } else null
+
+    fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {
+        Gson().fromJson(payload, TypingPayload::class.java)
+    } else null
+
+    fun getReadReceiptPayload(): ReadReceiptPayload? = if (type == "READ_RECEIPT" && payload != null) {
+        Gson().fromJson(payload, ReadReceiptPayload::class.java)
     } else null
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {

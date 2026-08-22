@@ -451,4 +451,64 @@ class HandshakePacketHandler(
         }
         return true
     }
+
+    suspend fun handleFollow(packet: NetworkPacket): Boolean {
+        val followPay = packet.getFollowPayload() ?: return false
+        val signature = followPay.signature
+        val payloadToVerify = "${followPay.followedPublicKeyB64}|${followPay.followerPublicKeyB64}|${followPay.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, signature, followPay.followerPublicKeyB64)) {
+            Logger.warn(TAG, "Invalid signature on FOLLOW packet from ${followPay.followerPublicKeyB64}")
+            return false
+        }
+        val isFollow = followPay.action == "follow"
+        peerDao.updateFollowState(followPay.followerPublicKeyB64, isFollow)
+        Logger.info(TAG, "Updated follow state for ${followPay.followerPublicKeyB64} to isFollowing=$isFollow")
+        return true
+    }
+
+    suspend fun handleGroupInvite(packet: NetworkPacket): Boolean {
+        val invite = packet.getGroupInvitePayload() ?: return false
+        val membersJson = com.google.gson.Gson().toJson(invite.members)
+        val group = GroupChat(
+            groupId = invite.groupId,
+            title = invite.title,
+            adminPublicKeyB64 = invite.adminPublicKeyB64,
+            membersJson = membersJson,
+            createdAt = invite.timestamp
+        )
+        db.groupChatDao().insertGroupChat(group)
+        Logger.info(TAG, "Joined group chat '${invite.title}' (${invite.groupId}) via invite")
+        return true
+    }
+
+    suspend fun handleGroupUpdate(packet: NetworkPacket): Boolean {
+        val update = packet.getGroupUpdatePayload() ?: return false
+        val existing = db.groupChatDao().getGroupChatById(update.groupId) ?: return false
+        var currentMembers: MutableList<String> = try {
+            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toMutableList()
+        } catch (e: Exception) { mutableListOf() }
+        
+        update.addedMembers?.let { currentMembers.addAll(it) }
+        update.removedMembers?.let { currentMembers.removeAll(it.toSet()) }
+        val updatedTitle = update.title ?: existing.title
+        
+        val updatedGroup = existing.copy(
+            title = updatedTitle,
+            membersJson = com.google.gson.Gson().toJson(currentMembers.distinct())
+        )
+        db.groupChatDao().insertGroupChat(updatedGroup)
+        Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId})")
+        return true
+    }
+
+    suspend fun handleGroupDelete(packet: NetworkPacket): Boolean {
+        val del = packet.getGroupDeletePayload() ?: return false
+        val existing = db.groupChatDao().getGroupChatById(del.groupId) ?: return false
+        if (existing.adminPublicKeyB64 == del.adminPublicKeyB64) {
+            db.groupChatDao().deleteGroupChat(del.groupId)
+            Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet")
+            return true
+        }
+        return false
+    }
 }

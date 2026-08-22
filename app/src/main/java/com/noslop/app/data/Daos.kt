@@ -102,6 +102,12 @@ interface PeerDao {
     @Query("SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 AND isOnline = 1 AND isTemporary = 1 ORDER BY lastSeenAt DESC")
     fun getDiscoverablePeers(): Flow<List<Peer>>
 
+    @Query("SELECT * FROM peers WHERE isFollowing = 1 ORDER BY lastSeenAt DESC")
+    fun getFollowedPeers(): Flow<List<Peer>>
+
+    @Query("UPDATE peers SET isFollowing = :isFollowing WHERE publicKeyB64 = :pubKey")
+    suspend fun updateFollowState(pubKey: String, isFollowing: Boolean)
+
     @Query("SELECT * FROM peers WHERE publicKeyB64 = :pubKey LIMIT 1")
     suspend fun getPeerByPublicKey(pubKey: String): Peer?
 
@@ -410,4 +416,19 @@ interface SwipeTrackerDao {
 
     @Query("DELETE FROM swipe_tracker")
     suspend fun clearAllSwipeHistory()
+}
+
+@Dao
+interface GroupChatDao {
+    @Query("SELECT * FROM group_chats ORDER BY createdAt DESC")
+    fun getAllGroupChats(): Flow<List<GroupChat>>
+
+    @Query("SELECT * FROM group_chats WHERE groupId = :groupId LIMIT 1")
+    suspend fun getGroupChatById(groupId: String): GroupChat?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroupChat(groupChat: GroupChat)
+
+    @Query("DELETE FROM group_chats WHERE groupId = :groupId")
+    suspend fun deleteGroupChat(groupId: String)
 }
