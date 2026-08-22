@@ -19,6 +19,27 @@ import kotlinx.coroutines.withContext
  *
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
+fun normalizeFeedItemId(rawId: String, link: String = ""): String {
+    val cleanUrl = (if (link.isNotBlank()) link else rawId).trim()
+    if (cleanUrl.contains("youtube.com/watch")) {
+        val videoId = cleanUrl.substringAfter("v=").substringBefore("&").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("youtu.be/")) {
+        val videoId = cleanUrl.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (rawId.startsWith("yt:") || rawId.startsWith("yt_")) {
+        val videoId = rawId.removePrefix("yt:video:").removePrefix("yt:").removePrefix("yt_")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("reddit.com/r/")) {
+        val postPath = cleanUrl.substringAfter("reddit.com/r/").substringBefore("?").trimEnd('/')
+        if (postPath.isNotBlank()) return "reddit_$postPath"
+    }
+    return rawId.ifBlank { cleanUrl }
+}
+
 class EngagementRepository(
     private val viewedHistoryDao: ViewedHistoryDao,
     private val swipeTrackerDao: SwipeTrackerDao,
@@ -37,9 +58,15 @@ class EngagementRepository(
      * History items are never removed (except when the cap is reached, oldest are pruned).
      */
     suspend fun markAsViewed(itemId: String, itemType: String) = withContext(Dispatchers.IO) {
+        val normId = normalizeFeedItemId(itemId)
         viewedHistoryDao.insertViewedItem(
             ViewedHistoryItem(itemId = itemId, itemType = itemType)
         )
+        if (normId != itemId) {
+            viewedHistoryDao.insertViewedItem(
+                ViewedHistoryItem(itemId = normId, itemType = itemType)
+            )
+        }
         // Prune oldest items if we exceed the history limit
         val count = viewedHistoryDao.getCount()
         if (count > HISTORY_LIMIT) {

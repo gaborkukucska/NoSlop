@@ -474,7 +474,9 @@ class HandshakePacketHandler(
             title = invite.title,
             adminPublicKeyB64 = invite.adminPublicKeyB64,
             membersJson = membersJson,
-            createdAt = invite.timestamp
+            createdAt = invite.timestamp,
+            description = invite.description,
+            avatarB64 = invite.avatarB64
         )
         db.groupChatDao().insertGroupChat(group)
         Logger.info(TAG, "Joined group chat '${invite.title}' (${invite.groupId}) via invite")
@@ -494,6 +496,8 @@ class HandshakePacketHandler(
         
         val updatedGroup = existing.copy(
             title = updatedTitle,
+            description = update.description ?: existing.description,
+            avatarB64 = update.avatarB64 ?: existing.avatarB64,
             membersJson = com.google.gson.Gson().toJson(currentMembers.distinct())
         )
         db.groupChatDao().insertGroupChat(updatedGroup)

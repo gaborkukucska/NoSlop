@@ -259,6 +259,8 @@ data class GroupInvitePayload(
     val title: String,
     @SerializedName("admin_public_key") val adminPublicKeyB64: String,
     val members: List<String>,
+    @SerializedName("avatar_b64") val avatarB64: String? = null,
+    @SerializedName("description") val description: String? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -266,6 +268,8 @@ data class GroupInvitePayload(
 data class GroupUpdatePayload(
     @SerializedName("group_id") val groupId: String,
     val title: String? = null,
+    @SerializedName("avatar_b64") val avatarB64: String? = null,
+    @SerializedName("description") val description: String? = null,
     @SerializedName("added_members") val addedMembers: List<String>? = null,
     @SerializedName("removed_members") val removedMembers: List<String>? = null,
     val timestamp: Long,

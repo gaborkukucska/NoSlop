@@ -228,8 +228,8 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 CreateGroupDialog(
                     peers = rawContacts,
                     onDismiss = { showCreateGroupDialog = false },
-                    onCreate = { title, selectedMembers ->
-                        viewModel.createGroupChat(title, selectedMembers)
+                    onCreate = { title, desc, avatarB64, allowInvites, allowSelfRemove, selectedMembers ->
+                        viewModel.createGroupChat(title, selectedMembers, avatarB64, desc, allowInvites, allowSelfRemove)
                     }
                 )
             }
@@ -256,7 +256,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 modifier = Modifier.fillMaxWidth().padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Outlined.People, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(28.dp))
+                                com.noslop.app.ui.components.GroupAvatarDisplay(avatarB64 = group.avatarB64, size = 32)
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(group.title, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -796,9 +796,13 @@ fun TutorialSpotlight(
 fun CreateGroupDialog(
     peers: List<Peer>,
     onDismiss: () -> Unit,
-    onCreate: (title: String, selectedMemberPubs: List<String>) -> Unit
+    onCreate: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, selectedMemberPubs: List<String>) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var avatarB64 by remember { mutableStateOf("👥") }
+    var allowInvites by remember { mutableStateOf(true) }
+    var allowSelfRemove by remember { mutableStateOf(true) }
     var selectedPubs by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     AlertDialog(
@@ -813,6 +817,37 @@ fun CreateGroupDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                // Group Avatar Preset Row
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    com.noslop.app.ui.components.GroupAvatarDisplay(avatarB64 = avatarB64, size = 48)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Group Avatar".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Select preset emoji avatar:".tr, color = TextMuted, fontSize = 11.sp)
+                    }
+                }
+
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                ) {
+                    items(com.noslop.app.ui.components.PRESET_GROUP_AVATARS) { preset ->
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(if (avatarB64 == preset) AccentGreen.copy(alpha = 0.3f) else SurfaceDark)
+                                .clickable { avatarB64 = preset },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(preset, fontSize = 16.sp)
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
@@ -826,14 +861,56 @@ fun CreateGroupDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text("Select Members:".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 Spacer(modifier = Modifier.height(8.dp))
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description (Optional)".tr, color = TextMuted) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight,
+                        focusedBorderColor = AccentGreen,
+                        unfocusedBorderColor = BorderSubtle
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Allow members to invite".tr, color = TextLight, fontSize = 12.sp)
+                    Switch(
+                        checked = allowInvites,
+                        onCheckedChange = { allowInvites = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = PrimaryBlack, checkedTrackColor = AccentGreen)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Allow members to leave".tr, color = TextLight, fontSize = 12.sp)
+                    Switch(
+                        checked = allowSelfRemove,
+                        onCheckedChange = { allowSelfRemove = it },
+                        colors = SwitchDefaults.colors(checkedThumbColor = PrimaryBlack, checkedTrackColor = AccentGreen)
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text("Select Members:".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(6.dp))
 
                 if (peers.isEmpty()) {
                     Text("No trusted peers available to invite yet. Connect with peers to add them to groups.".tr, color = TextMuted, fontSize = 12.sp)
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 140.dp)) {
                         items(peers) { peer ->
                             Row(
                                 modifier = Modifier
@@ -845,7 +922,7 @@ fun CreateGroupDialog(
                                             selectedPubs + peer.publicKeyB64
                                         }
                                     }
-                                    .padding(vertical = 6.dp),
+                                    .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Checkbox(
@@ -867,7 +944,7 @@ fun CreateGroupDialog(
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onCreate(title, selectedPubs.toList())
+                        onCreate(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, selectedPubs.toList())
                         onDismiss()
                     }
                 },

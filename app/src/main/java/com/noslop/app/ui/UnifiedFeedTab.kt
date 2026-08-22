@@ -664,11 +664,15 @@ fun UnifiedFeedTab(
 
             matchesMode && matchesQuery
         }
+        val deduplicatedFiltered = filtered.distinctBy { item ->
+            val rawUrl = if (item is UnifiedItem.Feed) (item.item.url ?: "") else ""
+            com.noslop.app.data.normalizeFeedItemId(item.id, rawUrl)
+        }
         if (filterMode == "Live Feed" && searchQuery.isBlank() && step < 5) {
             val tutorials = (step..4).map { UnifiedItem.Tutorial(it) }
-            tutorials + filtered
+            tutorials + deduplicatedFiltered
         } else {
-            filtered
+            deduplicatedFiltered
         }
     }
 

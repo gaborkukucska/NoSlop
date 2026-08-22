@@ -225,9 +225,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun createGroupChat(title: String, memberPubs: List<String>) {
+    fun createGroupChat(
+        title: String,
+        memberPubs: List<String>,
+        avatarB64: String? = null,
+        description: String? = null,
+        allowInvites: Boolean = true,
+        allowSelfRemove: Boolean = true
+    ) {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.createGroupChat(title, memberPubs)
+            repository.createGroupChat(title, memberPubs, avatarB64, description, allowInvites, allowSelfRemove)
         }
     }
 
@@ -1764,6 +1771,26 @@ fun toggleAggregator() {
     fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.sendGroupMessage(groupId, text, media, replyToMessageId)
+        }
+    }
+
+    fun updateGroupChat(
+        groupId: String,
+        title: String,
+        description: String?,
+        avatarB64: String?,
+        allowInvites: Boolean,
+        allowSelfRemove: Boolean,
+        membersList: List<String>
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateGroupChat(groupId, title, description, avatarB64, allowInvites, allowSelfRemove, membersList)
+        }
+    }
+
+    fun deleteGroupChat(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.deleteGroupChat(groupId)
         }
     }
 

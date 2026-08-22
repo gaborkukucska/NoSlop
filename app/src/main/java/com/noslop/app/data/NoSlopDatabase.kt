@@ -46,7 +46,7 @@ import androidx.room.RoomDatabase
         SwipeTracker::class,
         GroupChat::class
     ],
-    version = 9,
+    version = 11,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -136,6 +136,20 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE group_chats ADD COLUMN description TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE group_chats ADD COLUMN allowMemberInvites INTEGER NOT NULL DEFAULT 1")
+                database.execSQL("ALTER TABLE group_chats ADD COLUMN allowMemberSelfRemove INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("ALTER TABLE group_chats ADD COLUMN avatarB64 TEXT DEFAULT NULL")
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -144,7 +158,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build()
                 INSTANCE = instance
                 instance

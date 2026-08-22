@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -44,6 +45,25 @@ fun GroupChatThreadScreen(
         } catch (e: Exception) { 1 }
     }
 
+    var showSettingsModal by remember { mutableStateOf(false) }
+    val allPeers by viewModel.peers.collectAsState()
+
+    if (showSettingsModal) {
+        GroupSettingsModal(
+            group = group,
+            allPeers = allPeers,
+            myPubKey = localKeys?.publicKeyB64,
+            onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members ->
+                viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members)
+            },
+            onDeleteGroup = {
+                viewModel.deleteGroupChat(group.groupId)
+                onBack()
+            },
+            onDismiss = { showSettingsModal = false }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // Top Header
         Row(
@@ -53,11 +73,14 @@ fun GroupChatThreadScreen(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
             }
-            Icon(Icons.Outlined.People, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(22.dp))
+            GroupAvatarDisplay(avatarB64 = group.avatarB64, size = 32)
             Spacer(modifier = Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = group.title, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 16.sp)
                 Text(text = "$memberCount members • Decentralized Group Session".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+            }
+            IconButton(onClick = { showSettingsModal = true }) {
+                Icon(Icons.Default.MoreVert, contentDescription = "Group Settings".tr, tint = TextLight)
             }
         }
 

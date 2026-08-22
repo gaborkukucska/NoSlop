@@ -663,7 +663,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    suspend fun createGroupChat(title: String, memberPubs: List<String>) {
+    suspend fun createGroupChat(
+        title: String,
+        memberPubs: List<String>,
+        avatarB64: String? = null,
+        description: String? = null,
+        allowMemberInvites: Boolean = true,
+        allowMemberSelfRemove: Boolean = true
+    ) {
         val myKeys = getLocalIdentity() ?: return
         val groupId = java.util.UUID.randomUUID().toString()
         val allMembers = (memberPubs + myKeys.publicKeyB64).distinct()
@@ -675,7 +682,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             title = title,
             adminPublicKeyB64 = myKeys.publicKeyB64,
             membersJson = membersJson,
-            createdAt = timestamp
+            createdAt = timestamp,
+            description = description,
+            allowMemberInvites = allowMemberInvites,
+            allowMemberSelfRemove = allowMemberSelfRemove,
+            avatarB64 = avatarB64
         )
         db.groupChatDao().insertGroupChat(group)
 
@@ -686,6 +697,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             title = title,
             adminPublicKeyB64 = myKeys.publicKeyB64,
             members = allMembers,
+            avatarB64 = avatarB64,
+            description = description,
             timestamp = timestamp,
             signature = signature
         )
@@ -766,6 +779,72 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 com.noslop.app.mesh.MeshTransport(this).sendPacket(peer.onionAddress, packet = packet)
             }
         }
+    }
+
+    suspend fun updateGroupChat(
+        groupId: String,
+        title: String,
+        description: String?,
+        avatarB64: String?,
+        allowInvites: Boolean,
+        allowSelfRemove: Boolean,
+        membersList: List<String>
+    ) {
+        val myKeys = getLocalIdentity() ?: return
+        val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val membersJson = com.google.gson.Gson().toJson(membersList.distinct())
+        val timestamp = System.currentTimeMillis()
+
+        val updatedGroup = existing.copy(
+            title = title,
+            description = description,
+            avatarB64 = avatarB64,
+            allowMemberInvites = allowInvites,
+            allowMemberSelfRemove = allowSelfRemove,
+            membersJson = membersJson
+        )
+        db.groupChatDao().insertGroupChat(updatedGroup)
+
+        val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
+            groupId = groupId,
+            title = title,
+            avatarB64 = avatarB64,
+            description = description,
+            addedMembers = membersList,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = myKeys.publicKeyB64,
+            type = "GROUP_UPDATE",
+            payload = com.google.gson.Gson().toJsonTree(updatePayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+    }
+
+    suspend fun deleteGroupChat(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        db.groupChatDao().deleteGroupChat(groupId)
+
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "$groupId|delete|${myKeys.publicKeyB64}|$timestamp"
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
+            groupId = groupId,
+            adminPublicKeyB64 = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = myKeys.publicKeyB64,
+            type = "GROUP_DELETE",
+            payload = com.google.gson.Gson().toJsonTree(deletePayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
     }
 
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()

@@ -9,5 +9,9 @@ data class GroupChat(
     val title: String,
     val adminPublicKeyB64: String,
     val membersJson: String, // Serialized list of member public keys
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val description: String? = null,
+    val allowMemberInvites: Boolean = true,
+    val allowMemberSelfRemove: Boolean = true,
+    val avatarB64: String? = null
 )
