@@ -416,23 +416,28 @@ object FeedParser {
 
     private fun extractFirstImage(html: String): String? {
         if (html.isBlank()) return null
-        val pattern = Regex("<img[^>]+src\\s*=\\s*['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
-        val matches = pattern.findAll(html)
-        for (match in matches) {
-            val url = match.groupValues[1].trim()
+        
+        val imgPattern = Regex("<img[^>]+(?:src|data-src|srcset)\\s*=\\s*['\"]?([^'\"\\s>]+)", RegexOption.IGNORE_CASE)
+        val imgMatches = imgPattern.findAll(html)
+        for (match in imgMatches) {
+            val url = match.groupValues[1].substringBefore(",").substringBefore(" ").trim()
             if (url.isBlank()) continue
             val lowerUrl = url.lowercase(Locale.US)
             if (lowerUrl.contains("pixel") || lowerUrl.contains("tracker") || lowerUrl.contains("1x1") ||
                 lowerUrl.contains("gravatar") || lowerUrl.contains("feedsportal") || lowerUrl.contains("badge") ||
-                lowerUrl.contains("icon") || lowerUrl.contains("logo") || lowerUrl.contains("spinner")) {
+                lowerUrl.contains("icon") || lowerUrl.contains("logo") || lowerUrl.contains("spinner") || lowerUrl.contains(".svg")) {
                 continue
             }
-            return normalizeUrl(url)
+            if (url.startsWith("http") || url.startsWith("//")) {
+                return normalizeUrl(url)
+            }
         }
         
-        val metaPattern = Regex("<meta[^>]+(?:property|name)=['\"](?:og|twitter):image['\"][^>]+content=['\"]([^'\"]+)['\"]", RegexOption.IGNORE_CASE)
+        val metaPattern = Regex("<meta[^>]+(?:property|name)\\s*=\\s*['\"]?(?:og|twitter):image['\"]?[^>]+content\\s*=\\s*['\"]?([^'\"\\s>]+)", RegexOption.IGNORE_CASE)
         val metaUrl = metaPattern.find(html)?.groupValues?.get(1)?.trim()
-        if (!metaUrl.isNullOrBlank()) return normalizeUrl(metaUrl)
+        if (!metaUrl.isNullOrBlank() && (metaUrl.startsWith("http") || metaUrl.startsWith("//"))) {
+            return normalizeUrl(metaUrl)
+        }
 
         return null
     }

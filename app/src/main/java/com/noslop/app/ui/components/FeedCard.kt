@@ -38,7 +38,7 @@ import java.util.Date
 import java.util.Locale
 
 private fun getSourceLabel(item: FeedItem): String {
-    return when (item.apiSource) {
+    val fromApi = when (item.apiSource) {
         "youtube" -> "YouTube"
         "reddit" -> "Reddit"
         "pexels" -> "Pexels"
@@ -49,11 +49,38 @@ private fun getSourceLabel(item: FeedItem): String {
         "nasa" -> "NASA"
         "vimeo" -> "Vimeo"
         "wikimedia" -> "Wikimedia"
-        else -> {
-            if (item.sourceId.contains("rss") || item.sourceId.contains("atom")) "RSS"
-            else "Article"
+        "wikipedia" -> "Wikipedia"
+        "hackernews", "hn" -> "Hacker News"
+        else -> null
+    }
+    if (fromApi != null) return fromApi
+
+    if (!item.sourceId.isNullOrBlank()) {
+        val cleanSource = item.sourceId
+            .removePrefix("api-")
+            .removePrefix("source-")
+            .removeSuffix("-search")
+            .replace("-", " ")
+            .replace("_", " ")
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { word -> word.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() } }
+        if (cleanSource.isNotBlank() && cleanSource != "Rss" && cleanSource != "Atom") {
+            return cleanSource
         }
     }
+
+    if (!item.url.isNullOrBlank()) {
+        return try {
+            val host = android.net.Uri.parse(item.url).host?.removePrefix("www.") ?: ""
+            if (host.isNotBlank()) {
+                val name = host.substringBefore(".")
+                name.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+            } else "Web"
+        } catch (_: Exception) { "Web" }
+    }
+
+    return "Web"
 }
 
 private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.coroutines.flow.flowOf(emptyList())

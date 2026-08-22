@@ -487,7 +487,7 @@ fun SegmentedArticleReader(
                                 java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.getDefault()).format(java.util.Date(publishedAt))
                             } catch (_: Exception) { null }
                         } else null
-                        val effectiveAuthor = author?.takeIf { it.isNotBlank() } ?: sourceLabel
+                        val effectiveAuthor = author?.takeIf { it.isNotBlank() && !it.equals("Article", ignoreCase = true) } ?: sourceLabel
                         val byline = listOfNotNull("By $effectiveAuthor", formattedDate).joinToString(" · ")
                         if (byline.isNotBlank()) {
                             Spacer(modifier = Modifier.height(8.dp))
