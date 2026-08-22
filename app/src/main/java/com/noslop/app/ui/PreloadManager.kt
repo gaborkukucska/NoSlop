@@ -314,13 +314,12 @@ object PreloadManager {
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Use a smaller buffer for preloads to save memory/bandwidth
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                1500,  // min buffer
-                10000, // max buffer
-                1000,  // buffer for playback
-                1500   // buffer for playback after rebuffer
+                1000,  // min buffer (1.0s)
+                15000, // max buffer (15s)
+                500,   // buffer for playback (0.5s - instant startup!)
+                1000   // buffer for playback after rebuffer (1.0s)
             )
             .build()
 

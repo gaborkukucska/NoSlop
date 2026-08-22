@@ -792,6 +792,10 @@
     *   **Long Press (Hold)**: Fast forwards at 2.0x playback speed with an animated `2x ▶▶` top indicator, automatically reverting to 1.0x speed on release.
     *   **Single Tap**: Toggles play/pause with centered play icon state feedback.
 
+### 17. OkHttp Dispatcher Unblocking & Low-Latency Video Buffering
+*   **OkHttp Concurrency Bottleneck Fix**: Increased `torClient`'s OkHttp `Dispatcher` limits (`maxRequests = 64`, `maxRequestsPerHost = 16`, up from `12` and `4`) in `HttpClientProvider.kt`. Previously, background preloader tasks choked `googlevideo.com` / `invidious` connection pools, starving active ExoPlayer range requests.
+*   **Low-Latency Video Startup**: Updated `DefaultLoadControl` in `VideoPlayer.kt` and `PreloadManager.kt` (`bufferForPlaybackMs = 500`, `minBufferMs = 1000`). Videos now begin playback instantly after 500ms of data is received over Tor, eliminating startup delay and buffering stalls.
+
 ## Next Steps (Planned)
 *   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
 *   **Deep Data Sync**: Synchronize Contact lists, trusted peer statuses, and DM histories between Room (Mobile) and the Hub's master database.

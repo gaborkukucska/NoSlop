@@ -416,9 +416,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     retryCount = 0
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {
-                    com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor with forceRestart...")
-                    kotlinx.coroutines.delay(8000)
-                    startTor(forceRestart = true)
+                    if (retryCount < 3) {
+                        retryCount++
+                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor with forceRestart (attempt $retryCount/3)...")
+                        kotlinx.coroutines.delay(5000L * retryCount)
+                        startTor(forceRestart = true)
+                    } else {
+                        com.noslop.app.debug.Logger.error("VM", "Tor failed after $retryCount retries. Halting auto-retry loop.")
+                    }
                 }
             }
         }

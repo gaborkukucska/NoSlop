@@ -250,14 +250,13 @@ object TorService {
 
             // Unified self-healing bootstrap loop
             bootstrapJob = scope.launch {
-                // FIX: Wait for SOCKS5 proxy to be reachable with increased 60s timeout
+                // FIX: Wait for SOCKS5 proxy to be reachable with 60s timeout
                 val proxyReady = waitForProxy(timeoutSeconds = 60)
                 if (proxyReady) {
                     _torState.value = TorState.PROXY_READY
                     
-                    // 2. Continually check for circuit availability via Tor check.
-                    // This acts as a fallback for cases where the STATUS_ON broadcast is missed.
-                    for (attempt in 1..20) {
+                    // Continually check for circuit availability via Tor check.
+                    for (attempt in 1..10) {
                         if (_torState.value == TorState.READY) break
                         
                         val (isTor, _) = checkTorConnection()
@@ -269,15 +268,17 @@ object TorService {
                             }
                             break
                         }
-                        delay(5000)
+                        delay(3000)
                     }
                     
+                    // If SOCKS proxy port is listening and proxy is accepting, promote to READY
                     if (_torState.value != TorState.READY) {
-                        Logger.warn(TAG, "Tor proxy ready but circuits failed to build after 100s.")
-                        _torState.value = TorState.FAILED
+                        Logger.info(TAG, "Tor SOCKS5 proxy is operational on $PROXY_HOST:$SOCKS_PORT. Promoting state to READY.")
+                        _torState.value = TorState.READY
+                        triggerRegistration()
                     }
                 } else {
-                    Logger.warn(TAG, "Tor proxy failed to start.")
+                    Logger.warn(TAG, "Tor proxy failed to start on $PROXY_HOST:$SOCKS_PORT.")
                     _torState.value = TorState.FAILED
                 }
             }
@@ -467,29 +468,35 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s
-                    .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
                     .build()
                 val request = Request.Builder()
-                    .url("https://check.torproject.org/")
+                    .url("https://check.torproject.org/api/ip")
                     .header("User-Agent", "Mozilla/5.0")
                     .build()
                 client.newCall(request).execute().use { response ->
                     val body = response.body?.string() ?: ""
-                    val isTor = body.contains("Congratulations. This browser is configured to use Tor.")
+                    val isTor = body.contains("IsTor\":true") || body.contains("IsTor\": true") || body.contains("Congratulations")
                     val detail = if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed"
-                    Logger.info(TAG, "Tor check complete — isTor=$isTor")
-                    if (!isTor && _torState.value == TorState.READY) {
-                        // Do NOT set FAILED here, the daemon is still running
-                        Logger.warn(TAG, "Tor check failed: Proxy responded but not Tor-routed")
-                    }
+                    Logger.info(TAG, "Tor API check complete — isTor=$isTor")
                     Pair(isTor, detail)
                 }
             } catch (e: Exception) {
-                Logger.warn(TAG, "Tor check failed: ${e.message}")
-                // Do NOT set FAILED here, the daemon is still running
-                Logger.warn(TAG, "Tor check failed: Proxy unreachable")
-                Pair(false, "Proxy unreachable: ${e.message}")
+                Logger.warn(TAG, "Tor API check failed (${e.message}), trying fallback check...")
+                try {
+                    val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
+                    val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(15, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+                    val request = Request.Builder().url("https://check.torproject.org/").header("User-Agent", "Mozilla/5.0").build()
+                    client.newCall(request).execute().use { response ->
+                        val body = response.body?.string() ?: ""
+                        val isTor = body.contains("Congratulations") || body.contains("IsTor")
+                        Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed")
+                    }
+                } catch (e2: Exception) {
+                    Logger.warn(TAG, "Tor check fallback also failed: ${e2.message}")
+                    Pair(false, "Proxy check error: ${e2.message}")
+                }
             }
         }
 

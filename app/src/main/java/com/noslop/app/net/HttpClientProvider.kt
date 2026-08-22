@@ -192,8 +192,8 @@ object HttpClientProvider {
      */
     val torClient: OkHttpClient by lazy {
         val dispatcher = okhttp3.Dispatcher().apply {
-            maxRequests = 12
-            maxRequestsPerHost = 4
+            maxRequests = 64
+            maxRequestsPerHost = 16
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
