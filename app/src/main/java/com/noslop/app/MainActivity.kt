@@ -55,15 +55,13 @@ class MainActivity : ComponentActivity() {
                                 kotlinx.coroutines.withTimeout(4000) {
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
-                                            val firstItem = items.first()
+                                            val firstItem = items.first { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
                                             val rawUrl = when(firstItem) {
                                                 is com.noslop.app.ui.UnifiedItem.Feed -> {
-                                                    val type = firstItem.item.mediaType
-                                                    if (type == "video" || type == "audio") firstItem.item.mediaUrl else null
+                                                    firstItem.item.mediaUrl ?: firstItem.item.url
                                                 }
                                                 is com.noslop.app.ui.UnifiedItem.Mesh -> {
-                                                    val type = firstItem.post.mediaType ?: firstItem.post.clearnetMediaType
-                                                    if (type == "video" || type == "audio") firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl else null
+                                                    firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl
                                                 }
                                                 is com.noslop.app.ui.UnifiedItem.Tutorial -> null
                                             }
@@ -84,11 +82,12 @@ class MainActivity : ComponentActivity() {
                                 // Caught timeout or our deliberate success cancellation
                             }
                             
-                            // 2. If the first item is media, aggressively pre-warm it before dropping the splash screen! (up to 4s)
+                            // 2. If the first item is media, aggressively pre-warm and wait for it before dropping the splash screen!
                             if (firstPreloadUrl != null) {
                                 try {
-                                    kotlinx.coroutines.withTimeout(4000) {
+                                    kotlinx.coroutines.withTimeout(5000) {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
+                                        com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
                                     }
                                 } catch (e: Exception) {
                                     // Timeout on preload

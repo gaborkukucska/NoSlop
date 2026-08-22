@@ -329,9 +329,7 @@ object YouTubeInternalClient {
         // ANDROID is the most reliable client — always try it first.
         // WEB_EMBED was removed: YouTube deprecated that client name (always returns 400).
         val clients = listOf(
-            Pair("ANDROID", "21.02.35") to "com.google.android.youtube/21.02.35 (Linux; U; Android 14; en_US) gzip",
-            Pair("IOS", "19.29.1") to "com.google.ios.youtube/19.29.1 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X)",
-            Pair("TVHTML5", "7.20240501.00.00") to "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/63.0.3239.84 TV Safari/537.36"
+            Pair("ANDROID", "21.02.35") to "com.google.android.youtube/21.02.35 (Linux; U; Android 14; en_US) gzip"
         )
         
         for ((clientInfo, userAgent) in clients) {

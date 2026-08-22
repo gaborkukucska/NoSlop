@@ -955,10 +955,10 @@ private fun ExoVideoPlayer(
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    1000,  // min buffer (1.0s)
-                    15000, // max buffer (15s)
-                    500,   // buffer for playback (0.5s - instant startup!)
-                    1000   // buffer for playback after rebuffer (1.0s)
+                    15000, // min buffer (15s)
+                    60000, // max buffer (60s)
+                    2000,  // buffer for playback (2s)
+                    5000   // buffer for playback after rebuffer (5s)
                 )
                 .build()
 

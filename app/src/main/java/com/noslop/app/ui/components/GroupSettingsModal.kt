@@ -1,5 +1,9 @@
 package com.noslop.app.ui.components
 
+import android.content.Context
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -7,9 +11,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PersonAdd
@@ -22,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -31,6 +39,29 @@ import com.noslop.app.ui.theme.*
 import com.noslop.app.util.tr
 
 val PRESET_GROUP_AVATARS = listOf("👥", "🚀", "💬", "🔒", "⚡", "🎨", "🌐", "🔥", "🛡️", "💎")
+
+fun uriToCompressedBase64(context: Context, uri: Uri): String? {
+    return try {
+        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
+        val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream) ?: return null
+        inputStream.close()
+
+        val maxDim = 256
+        val width = originalBitmap.width
+        val height = originalBitmap.height
+        val scale = maxDim.toFloat() / Math.max(width, height)
+        val scaledWidth = (width * scale).toInt().coerceAtLeast(1)
+        val scaledHeight = (height * scale).toInt().coerceAtLeast(1)
+
+        val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(originalBitmap, scaledWidth, scaledHeight, true)
+        val outputStream = java.io.ByteArrayOutputStream()
+        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
+        val bytes = outputStream.toByteArray()
+        "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    } catch (e: Exception) {
+        null
+    }
+}
 
 @Composable
 fun GroupAvatarDisplay(avatarB64: String?, size: Int = 40) {
@@ -78,11 +109,21 @@ fun GroupSettingsModal(
     onDeleteGroup: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var title by remember { mutableStateOf(group.title) }
     var description by remember { mutableStateOf(group.description ?: "") }
     var avatarB64 by remember { mutableStateOf(group.avatarB64 ?: "") }
     var allowInvites by remember { mutableStateOf(group.allowMemberInvites) }
     var allowSelfRemove by remember { mutableStateOf(group.allowMemberSelfRemove) }
+
+    val photoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            val converted = uriToCompressedBase64(context, it)
+            if (converted != null) avatarB64 = converted
+        }
+    }
     
     val currentMembers: List<String> = remember(group.membersJson) {
         try {
@@ -105,7 +146,13 @@ fun GroupSettingsModal(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 8.dp)
+            ) {
                 // Group Avatar Selection Header
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
@@ -113,9 +160,21 @@ fun GroupSettingsModal(
                 ) {
                     GroupAvatarDisplay(avatarB64 = avatarB64, size = 52)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("Group Avatar".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Tap preset icon below".tr, color = TextMuted, fontSize = 11.sp)
+                        Text("Upload custom photo or select emoji".tr, color = TextMuted, fontSize = 11.sp)
+                    }
+                    if (isAdmin) {
+                        OutlinedButton(
+                            onClick = { photoPickerLauncher.launch("image/*") },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                            border = BorderStroke(1.dp, AccentGreen),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Upload".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
@@ -213,8 +272,8 @@ fun GroupSettingsModal(
                     }
                 }
 
-                LazyColumn(modifier = Modifier.heightIn(max = 160.dp)) {
-                    items(membersList) { memberPub ->
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    membersList.forEach { memberPub ->
                         val peer = allPeers.find { it.publicKeyB64 == memberPub }
                         val displayName = peer?.handle ?: (memberPub.take(8) + "...")
                         val isMemberAdmin = memberPub == group.adminPublicKeyB64

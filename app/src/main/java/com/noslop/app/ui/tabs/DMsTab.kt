@@ -7,6 +7,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -798,12 +800,22 @@ fun CreateGroupDialog(
     onDismiss: () -> Unit,
     onCreate: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, selectedMemberPubs: List<String>) -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var avatarB64 by remember { mutableStateOf("👥") }
     var allowInvites by remember { mutableStateOf(true) }
     var allowSelfRemove by remember { mutableStateOf(true) }
     var selectedPubs by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val photoPickerLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: android.net.Uri? ->
+        uri?.let {
+            val converted = com.noslop.app.ui.components.uriToCompressedBase64(context, it)
+            if (converted != null) avatarB64 = converted
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -816,7 +828,13 @@ fun CreateGroupDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(top = 8.dp)
+            ) {
                 // Group Avatar Preset Row
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
@@ -824,9 +842,19 @@ fun CreateGroupDialog(
                 ) {
                     com.noslop.app.ui.components.GroupAvatarDisplay(avatarB64 = avatarB64, size = 48)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text("Group Avatar".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        Text("Select preset emoji avatar:".tr, color = TextMuted, fontSize = 11.sp)
+                        Text("Upload custom photo or select emoji".tr, color = TextMuted, fontSize = 11.sp)
+                    }
+                    OutlinedButton(
+                        onClick = { photoPickerLauncher.launch("image/*") },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                        border = BorderStroke(1.dp, AccentGreen),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(androidx.compose.material.icons.Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Upload".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -910,8 +938,8 @@ fun CreateGroupDialog(
                 if (peers.isEmpty()) {
                     Text("No trusted peers available to invite yet. Connect with peers to add them to groups.".tr, color = TextMuted, fontSize = 12.sp)
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 140.dp)) {
-                        items(peers) { peer ->
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        peers.forEach { peer ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
