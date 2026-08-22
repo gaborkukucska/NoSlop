@@ -169,10 +169,10 @@ class GossipServiceTest {
         
         // Setup strict filters
         val strictFilters = com.noslop.app.data.MeshFilterSettings(
-            allowIncomingReactions = false,
-            allowIncomingComments = false,
+            allowIncomingTextPosts = false,
             allowIncomingClearnetShares = false,
-            allowIncomingTextPosts = false
+            allowIncomingImagePosts = false,
+            allowIncomingVideoPosts = false
         )
         
         GossipService.initialize(

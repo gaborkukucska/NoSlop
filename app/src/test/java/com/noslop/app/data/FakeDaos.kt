@@ -38,11 +38,15 @@ class FakeFeedDao : FeedDao {
     override suspend fun deleteSource(source: FeedSource) {}
     override fun getAllItems(): Flow<List<FeedItem>> = flowOf(emptyList())
     override fun getSavedItems(): Flow<List<FeedItem>> = flowOf(emptyList())
+    override suspend fun searchLocalArticles(q: String, limit: Int): List<FeedItem> = emptyList()
+    override suspend fun searchLocalByType(q: String, type: String, limit: Int): List<FeedItem> = emptyList()
+    override suspend fun searchLocalAny(q: String, limit: Int): List<FeedItem> = emptyList()
     override suspend fun insertItems(items: List<FeedItem>) {}
     override suspend fun updateReadState(id: String, isRead: Boolean) {}
     override suspend fun updateSavedState(id: String, isSaved: Boolean) {}
     override suspend fun deleteExpiredItems(beforeTimestamp: Long) {}
     override suspend fun clearApiItems() {}
+    override suspend fun deleteYouTubeItems() {}
     override suspend fun clearUnsavedItems() {}
     override suspend fun clearApiSources() {}
 }
@@ -106,6 +110,7 @@ class FakeReactionDao : ReactionDao {
         flowOf(store.values.filter { it.postId == postId })
     override fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> = flowOf(emptyList())
     override suspend fun getReactionCountForPost(postId: String): Int = store.values.count { it.postId == postId }
+    override suspend fun deleteReactionsByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
 }
@@ -118,6 +123,7 @@ class FakeVoteDao : VoteDao {
     override suspend fun deleteVoteById(id: String) { store.remove(id) }
     override fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
         flowOf(store.values.filter { it.postId == postId })
+    override suspend fun deleteVotesByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
 }
 
@@ -144,9 +150,19 @@ class FakePostDao : PostDao {
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
+    override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
+    override suspend fun getPendingDeletionsByAuthor(authorId: String, maxBroadcasts: Int, limit: Int): List<MeshPost> =
+        posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId && it.deletionBroadcasts < maxBroadcasts }
+            .sortedBy { it.timestamp }.take(limit)
+    override suspend fun incrementDeletionBroadcast(id: String) {
+        posts[id]?.let { posts[id] = it.copy(deletionBroadcasts = it.deletionBroadcasts + 1) }
+    }
+    override suspend fun resetDeletionBroadcasts(authorId: String) {
+        posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId }
+            .forEach { posts[it.id] = it.copy(deletionBroadcasts = 0) }
+    }
     override suspend fun markPostOrphaned(id: String) {}
     override suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String) {}
-    override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
 }
 
 /** Fake [MessageDao] collecting stored messages. */
@@ -156,6 +172,13 @@ class FakeMessageDao : MessageDao {
     override suspend fun hasMessage(id: String): Int = if (messages.any { it.id == id }) 1 else 0
     override fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         flowOf(messages.filter { it.chatWithPeerPub == peerPub })
+    override suspend fun getMessagesWithPeerList(peerPub: String): List<ChatMessage> =
+        messages.filter { it.chatWithPeerPub == peerPub }
+    override suspend fun getMessageById(id: String): ChatMessage? =
+        messages.firstOrNull { it.id == id }
+    override suspend fun deleteMessageByIdAndSender(id: String, senderPub: String) {
+        messages.removeAll { it.id == id && it.senderPub == senderPub }
+    }
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())
     override suspend fun markAsRead(peerPub: String) {}
     override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }

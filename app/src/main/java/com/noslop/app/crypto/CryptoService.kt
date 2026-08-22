@@ -130,12 +130,14 @@ object CryptoService {
                 "tripcode=$tripcode | onion_prefix=${onion.take(16)}... | pubkey_hash=${rawPub.sha256Hex().take(12)}"
             )
 
+            val formattedDisplayName = if (handle.endsWith(".$tripcode")) handle else if (handle.isNotBlank()) "$handle.$tripcode" else tripcode
+
             IdentityKeys(
                 publicKeyB64 = pubB64,
                 privateKeyB64 = privB64,
                 tripcode = tripcode,
                 onionAddress = onion,
-                displayName = handle,
+                displayName = formattedDisplayName,
                 encPublicKeyB64 = encKeys.first,
                 encPrivateKeyB64 = encKeys.second
             )
