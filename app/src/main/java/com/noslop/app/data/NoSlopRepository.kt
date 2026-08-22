@@ -662,6 +662,63 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             com.noslop.app.mesh.GossipService.broadcast(packet)
         }
     }
+
+    suspend fun createGroupChat(title: String, memberPubs: List<String>) {
+        val myKeys = getLocalIdentity() ?: return
+        val groupId = java.util.UUID.randomUUID().toString()
+        val allMembers = (memberPubs + myKeys.publicKeyB64).distinct()
+        val membersJson = com.google.gson.Gson().toJson(allMembers)
+        val timestamp = System.currentTimeMillis()
+        
+        val group = GroupChat(
+            groupId = groupId,
+            title = title,
+            adminPublicKeyB64 = myKeys.publicKeyB64,
+            membersJson = membersJson,
+            createdAt = timestamp
+        )
+        db.groupChatDao().insertGroupChat(group)
+
+        val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+            groupId = groupId,
+            title = title,
+            adminPublicKeyB64 = myKeys.publicKeyB64,
+            members = allMembers,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = myKeys.publicKeyB64,
+            type = "GROUP_INVITE",
+            payload = com.google.gson.Gson().toJsonTree(invitePayload)
+        )
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members")
+    }
+
+    suspend fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
+        val myKeys = getLocalIdentity() ?: return
+        val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
+        if (peer.onionAddress.isNotBlank()) {
+            val typingPayload = com.noslop.app.mesh.TypingPayload(
+                chatWithPeerPub = myKeys.publicKeyB64,
+                isTyping = isTyping,
+                timestamp = System.currentTimeMillis()
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                targetUserId = peerPub,
+                type = "TYPING",
+                payload = com.google.gson.Gson().toJsonTree(typingPayload)
+            )
+            com.noslop.app.mesh.MeshTransport(this).sendPacket(peer.onionAddress, packet = packet)
+        }
+    }
+
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()

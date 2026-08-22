@@ -80,6 +80,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
     var showShareSheet by remember { mutableStateOf(false) }
     var showScanScreen by remember { mutableStateOf(false) }
+    var showCreateGroupDialog by remember { mutableStateOf(false) }
 
     var tabCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var myIdRect by remember { mutableStateOf(Rect.Zero) }
@@ -185,14 +186,78 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         Spacer(modifier = Modifier.width(4.dp))
                         Text("Add Peer".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
+
+                    Button(
+                        onClick = { showCreateGroupDialog = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen),
+                        border = BorderStroke(1.dp, AccentGreen),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(Icons.Outlined.People, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("New Group".tr, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
 
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
+            val groupChats by viewModel.groupChats.collectAsState()
             val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
+
+            if (showCreateGroupDialog) {
+                CreateGroupDialog(
+                    peers = rawContacts,
+                    onDismiss = { showCreateGroupDialog = false },
+                    onCreate = { title, selectedMembers ->
+                        viewModel.createGroupChat(title, selectedMembers)
+                    }
+                )
+            }
+
+            if (groupChats.isNotEmpty()) {
+                Text(
+                    text = "Group Chats".tr,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp)) {
+                    items(groupChats) { group ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                            border = BorderStroke(1.dp, BorderSubtle)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Outlined.People, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(28.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(group.title, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    val memberCount = try {
+                                        com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).size
+                                    } catch (e: Exception) { 1 }
+                                    Text("$memberCount members".tr, color = TextMuted, fontSize = 12.sp)
+                                }
+                                Box(
+                                    modifier = Modifier.background(AccentGreen.copy(alpha = 0.15f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text("Group".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
             val isTemporaryContactsCollapsed by viewModel.isTemporaryContactsCollapsed.collectAsState()
             
             val isContactsCollapsed by viewModel.isContactsCollapsed.collectAsState()
@@ -707,4 +772,97 @@ fun TutorialSpotlight(
             }
         }
     }
+}
+
+@Composable
+fun CreateGroupDialog(
+    peers: List<Peer>,
+    onDismiss: () -> Unit,
+    onCreate: (title: String, selectedMemberPubs: List<String>) -> Unit
+) {
+    var title by remember { mutableStateOf("") }
+    var selectedPubs by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceDark,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.People, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Create Group Chat".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Group Title".tr, color = TextMuted) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight,
+                        focusedBorderColor = AccentGreen,
+                        unfocusedBorderColor = BorderSubtle
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("Select Members:".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (peers.isEmpty()) {
+                    Text("No trusted peers available to invite yet. Connect with peers to add them to groups.".tr, color = TextMuted, fontSize = 12.sp)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                        items(peers) { peer ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        selectedPubs = if (selectedPubs.contains(peer.publicKeyB64)) {
+                                            selectedPubs - peer.publicKeyB64
+                                        } else {
+                                            selectedPubs + peer.publicKeyB64
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = selectedPubs.contains(peer.publicKeyB64),
+                                    onCheckedChange = { checked ->
+                                        selectedPubs = if (checked) selectedPubs + peer.publicKeyB64 else selectedPubs - peer.publicKeyB64
+                                    },
+                                    colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(peer.handle, color = TextLight, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onCreate(title, selectedPubs.toList())
+                        onDismiss()
+                    }
+                },
+                enabled = title.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+            ) {
+                Text("Create".tr, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel".tr, color = TextMuted)
+            }
+        }
+    )
 }

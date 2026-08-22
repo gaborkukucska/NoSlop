@@ -225,6 +225,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun createGroupChat(title: String, memberPubs: List<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.createGroupChat(title, memberPubs)
+        }
+    }
+
+    fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.sendTypingSignal(peerPub, isTyping)
+        }
+    }
+
     val meshPosts: StateFlow<List<MeshPost>> = repository.allMeshPosts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 

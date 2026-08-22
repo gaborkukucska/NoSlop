@@ -304,7 +304,14 @@ fun ChatThreadScreen(
                             }
                         }
                     }
-                    Text(text = "Direct E2EE session with ECDH agreement active".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                    val peerTypingStates by viewModel.peerTypingStates.collectAsState()
+                    val isPeerTyping = peerTypingStates[peer.publicKeyB64] == true
+
+                    if (isPeerTyping) {
+                        Text(text = "typing...".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen, fontWeight = FontWeight.Bold)
+                    } else {
+                        Text(text = "Direct E2EE session with ECDH agreement active".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                    }
                 }
 
                 var showMenu by remember { mutableStateOf(false) }
@@ -668,6 +675,7 @@ fun ChatThreadScreen(
         ChatInputBar(
             viewModel = viewModel,
             hasAttachment = attachedFile != null,
+            onTyping = { isTyping -> viewModel.sendTypingSignal(peer.publicKeyB64, isTyping) },
             onMediaAttached = { file -> attachedFile = file },
             onSendMessage = { text ->
                 val fileToProcess = attachedFile
@@ -717,6 +725,7 @@ fun ChatThreadScreen(
 fun ChatInputBar(
     viewModel: NoSlopViewModel,
     hasAttachment: Boolean,
+    onTyping: (Boolean) -> Unit,
     onMediaAttached: (java.io.File) -> Unit,
     onSendMessage: (String) -> Unit,
     onLaunchFilePicker: () -> Unit,
@@ -736,7 +745,10 @@ fun ChatInputBar(
 
         AndroidGifTextField(
             value = rawText,
-            onValueChange = { rawText = it },
+            onValueChange = { 
+                rawText = it
+                onTyping(it.isNotEmpty())
+            },
             hint = "Message...",
             onMediaAttached = onMediaAttached,
             sendOnEnter = isSendOnEnterEnabled,
