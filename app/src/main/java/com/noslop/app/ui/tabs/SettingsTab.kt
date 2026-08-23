@@ -62,6 +62,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
         MeshFiltersScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 5 })
     } else if (selectedSettingsScreen == 8) {
         ProfileScreen(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
+    } else if (selectedSettingsScreen == 9) {
+        CreatorStudioTab(viewModel = viewModel, onBack = { selectedSettingsScreen = 0 })
     } else {
         Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
             Text(
@@ -954,6 +956,16 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             unfocusedTextColor = TextLight
                                         )
                                     )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = { selectedSettingsScreen = 9 },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Open Creator Studio 🎬".tr, fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }

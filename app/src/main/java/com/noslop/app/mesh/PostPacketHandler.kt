@@ -23,6 +23,18 @@ class PostPacketHandler(
 
     suspend fun handlePost(packet: NetworkPacket): Boolean {
         val postPay = packet.getPostPayload() ?: return false
+        val filterSettings = try { repo.getMeshFilterSettings() ?: MeshFilterSettings() } catch (e: Exception) { MeshFilterSettings() }
+        if (postPay.clearnetUrl != null && !filterSettings.allowIncomingClearnetShares) {
+            Logger.info(TAG, "PostHandler: Mesh Filter dropped incoming clearnet share post ${postPay.id}")
+            return false
+        }
+        if (postPay.mediaMetadata != null) {
+            if (postPay.mediaMetadata.type == "image" && !filterSettings.allowIncomingImagePosts) return false
+            if (postPay.mediaMetadata.type == "video" && !filterSettings.allowIncomingVideoPosts) return false
+        } else if (postPay.clearnetUrl == null) {
+            if (!filterSettings.allowIncomingTextPosts) return false
+        }
+
         var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
         if (postPay.authorAvatarB64 != null) {
             payloadToVerify += "|${postPay.authorAvatarB64}"

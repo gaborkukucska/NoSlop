@@ -901,13 +901,31 @@ fun FullScreenMeshCardV2(
                     }
                     
                     if (post.content.isNotBlank() && !isArticle) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = post.content,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextLight,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        var isExpanded by remember(post.id) { mutableStateOf(false) }
+                        val annotatedContent = remember(post.content) { com.noslop.app.util.MarkdownUtils.parseMarkdown(post.content) }
+                        val isLongText = post.content.lines().size > 2 || post.content.length > 120
+
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = annotatedContent,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextLight,
+                                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
+                                overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (isLongText) {
+                                Text(
+                                    text = if (isExpanded) "show less".tr else "read more...".tr,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                                    color = AccentGreen,
+                                    modifier = Modifier
+                                        .clickable { isExpanded = !isExpanded }
+                                        .padding(top = 4.dp, bottom = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

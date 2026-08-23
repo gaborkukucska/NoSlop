@@ -88,6 +88,8 @@ class MeshPacketHandler(
             "GROUP_INVITE" -> handshake.handleGroupInvite(packet)
             "GROUP_UPDATE" -> handshake.handleGroupUpdate(packet)
             "GROUP_DELETE" -> handshake.handleGroupDelete(packet)
+            "GROUP_QUERY" -> handshake.handleGroupQuery(packet)
+            "GROUP_SYNC" -> handshake.handleGroupSync(packet)
             "TYPING" -> dm.handleTyping(packet)
             "READ_RECEIPT" -> dm.handleReadReceipt(packet)
             else -> {

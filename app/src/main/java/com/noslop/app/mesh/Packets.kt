@@ -283,6 +283,18 @@ data class GroupDeletePayload(
     val signature: String
 )
 
+data class GroupQueryPayload(
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("requester_id") val requesterId: String,
+    val timestamp: Long
+)
+
+data class GroupSyncPayload(
+    @SerializedName("group_chat_json") val groupChatJson: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class TypingPayload(
     @SerializedName("chat_with_peer_pub") val chatWithPeerPub: String,
     @SerializedName("is_typing") val isTyping: Boolean,
@@ -459,6 +471,14 @@ data class NetworkPacket(
 
     fun getGroupDeletePayload(): GroupDeletePayload? = if (type == "GROUP_DELETE" && payload != null) {
         Gson().fromJson(payload, GroupDeletePayload::class.java)
+    } else null
+
+    fun getGroupQueryPayload(): GroupQueryPayload? = if (type == "GROUP_QUERY" && payload != null) {
+        Gson().fromJson(payload, GroupQueryPayload::class.java)
+    } else null
+
+    fun getGroupSyncPayload(): GroupSyncPayload? = if (type == "GROUP_SYNC" && payload != null) {
+        Gson().fromJson(payload, GroupSyncPayload::class.java)
     } else null
 
     fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {

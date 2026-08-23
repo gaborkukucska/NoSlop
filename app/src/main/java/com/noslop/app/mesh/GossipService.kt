@@ -167,6 +167,7 @@ object GossipService {
                 delay(60_000)
                 cleanupStaleRoutes()
                 cleanupFailureTracking()
+                cleanupRateLimitsAndFirewall()
             }
         }
     }
@@ -188,6 +189,29 @@ object GossipService {
             if (now - entry.value.lastActivity > timeoutMs) {
                 iterator.remove()
                 Logger.info(TAG, "Cleaned up stale relay state for media ${entry.key}")
+            }
+        }
+    }
+
+    private fun cleanupRateLimitsAndFirewall() {
+        val now = System.currentTimeMillis()
+        val rateLimitWindowMs = 10_000L
+        val firewallTtlMs = 10 * 60 * 1000L
+
+        val rateLimitIter = senderRateLimits.entries.iterator()
+        while (rateLimitIter.hasNext()) {
+            val entry = rateLimitIter.next()
+            entry.value.removeAll { now - it > rateLimitWindowMs }
+            if (entry.value.isEmpty()) {
+                rateLimitIter.remove()
+            }
+        }
+
+        val firewallIter = firewallBuffer.entries.iterator()
+        while (firewallIter.hasNext()) {
+            val entry = firewallIter.next()
+            if (entry.value.isEmpty()) {
+                firewallIter.remove()
             }
         }
     }
@@ -575,9 +599,12 @@ object GossipService {
         
         val hubStatus = tx.repository.getAppSetting("hub_deployment_status")
         if (!hubStatus.isNullOrBlank()) {
-            pushPacketToHub?.invoke(packet)
-            Logger.info(TAG, "Hub is linked. Delegating broadcast of packet ${packet.id} to Hub.")
-            return
+            val pushed = pushPacketToHub?.invoke(packet) ?: false
+            if (pushed) {
+                Logger.info(TAG, "Hub is linked and reachable. Delegated broadcast of packet ${packet.id} to Hub.")
+                return
+            }
+            Logger.warn(TAG, "Hub is linked but push failed/unreachable. Falling back to direct Tor broadcast for packet ${packet.id}")
         }
         
         val dao = peerDao ?: return

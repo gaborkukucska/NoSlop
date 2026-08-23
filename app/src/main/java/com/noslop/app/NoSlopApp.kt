@@ -168,5 +168,24 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         } catch (e: Exception) {
             Logger.error("APP", "Failed to register WorkManager update check: ${e.message}")
         }
+
+        // Daily automated encrypted identity & DB backup push to Home Hub
+        try {
+            val hubSyncRequest = PeriodicWorkRequestBuilder<com.noslop.app.data.HubSyncWorker>(1, TimeUnit.DAYS)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+            WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "hub_backup_sync_daily",
+                ExistingPeriodicWorkPolicy.KEEP,
+                hubSyncRequest
+            )
+            Logger.info("APP", "WorkManager Periodic Hub sync registered successfully")
+        } catch (e: Exception) {
+            Logger.error("APP", "Failed to register WorkManager Hub sync: ${e.message}")
+        }
     }
 }

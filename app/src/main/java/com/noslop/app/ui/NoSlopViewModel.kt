@@ -511,8 +511,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }.collect { (feeds, meshes, keys) ->
                 if (_isOnboardingComplete.value && keys == null) return@collect
 
+                val filters = meshFilterSettings.value
                 allFeeds = feeds
-                allMeshes = meshes.filter { !it.isOrphaned }
+                allMeshes = meshes.filter { mesh ->
+                    if (mesh.isOrphaned) return@filter false
+                    if (mesh.authorPublicKeyB64 == keys?.publicKeyB64) return@filter true
+                    if (mesh.clearnetUrl != null && !filters.allowIncomingClearnetShares) return@filter false
+                    if (mesh.mediaType == "image" && !filters.allowIncomingImagePosts) return@filter false
+                    if (mesh.mediaType == "video" && !filters.allowIncomingVideoPosts) return@filter false
+                    if (mesh.mediaType.isNullOrEmpty() && mesh.clearnetUrl == null && !filters.allowIncomingTextPosts) return@filter false
+                    true
+                }
                 
                 if (_unifiedFeed.value.isEmpty()) {
                     val savedIdsStr = repository.getAppSetting("saved_feed_list")

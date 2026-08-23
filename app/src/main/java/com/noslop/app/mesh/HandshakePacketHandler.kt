@@ -627,4 +627,81 @@ class HandshakePacketHandler(
         Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet")
         return true
     }
+
+    suspend fun handleGroupQuery(packet: NetworkPacket): Boolean {
+        val query = packet.getGroupQueryPayload() ?: return false
+        val group = db.groupChatDao().getGroupChatById(query.groupId) ?: return false
+
+        val members = parseMembers(group.membersJson)
+        val requesterInGroup = members.contains(query.requesterId) || members.contains(packet.senderId)
+        if (!requesterInGroup) {
+            Logger.warn(TAG, "Rejected GROUP_QUERY ${query.groupId}: requester ${query.requesterId} is not a group member")
+            return false
+        }
+
+        val myKeys = repo.getLocalIdentity() ?: return false
+        val groupJson = com.google.gson.Gson().toJson(group)
+        val timestamp = System.currentTimeMillis()
+        val payloadToSign = "${group.groupId}|$groupJson|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val syncPayload = GroupSyncPayload(
+            groupChatJson = groupJson,
+            timestamp = timestamp,
+            signature = signature
+        )
+
+        val syncPacket = NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            hops = 1,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = packet.senderId,
+            type = "GROUP_SYNC",
+            payload = com.google.gson.Gson().toJsonTree(syncPayload)
+        )
+        GossipService.broadcast(syncPacket)
+        Logger.info(TAG, "Responded to GROUP_QUERY for group ${group.title} (${query.groupId}) to ${packet.senderId}")
+        return true
+    }
+
+    suspend fun handleGroupSync(packet: NetworkPacket): Boolean {
+        val sync = packet.getGroupSyncPayload() ?: return false
+        val group = try {
+            com.google.gson.Gson().fromJson(sync.groupChatJson, GroupChat::class.java)
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed to parse GroupChat from GROUP_SYNC: ${e.message}")
+            return false
+        } ?: return false
+
+        val payloadToVerify = "${group.groupId}|${sync.groupChatJson}|${sync.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, sync.signature, packet.senderId) &&
+            !CryptoService.verify(payloadToVerify, sync.signature, group.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: signature verification failed")
+            return false
+        }
+
+        val myKeys = repo.getLocalIdentity()
+        val burnable = repo.getBurnableIdentity()
+        val members = parseMembers(group.membersJson)
+        val meInGroup = members.any {
+            it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
+        }
+        if (!meInGroup) {
+            Logger.warn(TAG, "Rejected GROUP_SYNC ${group.groupId}: our identity is not in the group members list")
+            return false
+        }
+
+        val existing = db.groupChatDao().getGroupChatById(group.groupId)
+        if (existing == null) {
+            db.groupChatDao().insertGroupChat(group)
+            Logger.info(TAG, "Received new group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
+            return true
+        }
+
+        if (group.createdAt >= existing.createdAt) {
+            db.groupChatDao().insertGroupChat(group)
+            Logger.info(TAG, "Synced updated group chat '${group.title}' (${group.groupId}) via GROUP_SYNC")
+        }
+        return true
+    }
 }

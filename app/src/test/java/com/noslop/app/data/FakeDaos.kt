@@ -184,7 +184,17 @@ class FakeMessageDao : MessageDao {
         messages.removeAll { it.id == id && it.senderPub == senderPub }
     }
     override fun getConversations(): Flow<List<ChatMessage>> = flowOf(messages.toList())
-    override suspend fun markAsRead(peerPub: String) {}
+    override suspend fun markAsRead(peerPub: String) {
+        val updated = messages.map { if (it.chatWithPeerPub == peerPub) it.copy(isRead = true) else it }
+        messages.clear()
+        messages.addAll(updated)
+    }
+    override suspend fun markAsReadById(messageId: String) {
+        val index = messages.indexOfFirst { it.id == messageId }
+        if (index != -1) {
+            messages[index] = messages[index].copy(isRead = true)
+        }
+    }
     override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }
 }
 

@@ -875,6 +875,42 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         com.noslop.app.mesh.GossipService.broadcast(packet)
     }
 
+    suspend fun requestGroupCatchup(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val group = db.groupChatDao().getGroupChatById(groupId)
+        val members = if (group != null) {
+            try {
+                com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+            } catch (e: Exception) { emptyList() }
+        } else emptyList()
+
+        val timestamp = System.currentTimeMillis()
+        val queryPayload = com.noslop.app.mesh.GroupQueryPayload(
+            groupId = groupId,
+            requesterId = myKeys.publicKeyB64,
+            timestamp = timestamp
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = myKeys.publicKeyB64,
+            type = "GROUP_QUERY",
+            payload = com.google.gson.Gson().toJsonTree(queryPayload)
+        )
+
+        if (members.isNotEmpty()) {
+            members.filter { it != myKeys.publicKeyB64 }.forEach { memberPub ->
+                val memberPacket = packet.copy(targetUserId = memberPub)
+                val peer = peerDao.getPeerByPublicKey(memberPub)
+                if (peer != null && peer.onionAddress.isNotBlank()) {
+                    meshTransport.sendPacket(peer.onionAddress, packet = memberPacket)
+                }
+            }
+        } else {
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+        }
+    }
+
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
@@ -915,6 +951,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun setAppLanguage(lang: String) = appSettingDao.insertSetting(AppSetting("app_language", lang))
     
     suspend fun getLocalIdentity(): CryptoService.IdentityKeys? = identityRepository.loadIdentity()
+    suspend fun getWordCloudMnemonic(): String = identityRepository.getMnemonic() ?: ""
     suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
     suspend fun updateOnionAddress(address: String) {

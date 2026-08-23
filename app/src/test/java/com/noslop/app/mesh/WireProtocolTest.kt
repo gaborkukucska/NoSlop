@@ -165,6 +165,34 @@ class WireProtocolTest {
         assertNull(restored.payload)
     }
 
+    @Test
+    fun groupQueryPayload_roundTrips() {
+        val query = GroupQueryPayload(groupId = "grp-1", requesterId = "req-123", timestamp = 1700000000000L)
+        val packet = NetworkPacket(
+            senderId = "req-123",
+            type = "GROUP_QUERY",
+            payload = gson.toJsonTree(query)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupQueryPayload()
+        assertNotNull(extracted)
+        assertEquals("grp-1", extracted?.groupId)
+        assertEquals("req-123", extracted?.requesterId)
+    }
+
+    @Test
+    fun groupSyncPayload_roundTrips() {
+        val sync = GroupSyncPayload(groupChatJson = "{\"title\":\"Mesh Devs\"}", timestamp = 1700000000000L, signature = "sig-abc")
+        val packet = NetworkPacket(
+            senderId = "admin-1",
+            type = "GROUP_SYNC",
+            payload = gson.toJsonTree(sync)
+        )
+        val extracted = NetworkPacket.fromJson(packet.toJson()).getGroupSyncPayload()
+        assertNotNull(extracted)
+        assertEquals("{\"title\":\"Mesh Devs\"}", extracted?.groupChatJson)
+        assertEquals("sig-abc", extracted?.signature)
+    }
+
     private fun samplePost() = PostPayload(
         id = "post-1",
         authorId = "author-1",

@@ -22,6 +22,19 @@ object BackupManager {
     private const val DB_NAME = "mesh.db"
     private const val PREFS_NAME = "noslop_identity_secure" // This might vary if fallback was used
 
+    fun createEncryptedBackupFile(context: Context, mnemonic: String): File? {
+        val backupFile = File(context.cacheDir, "noslop_backup_export.enc")
+        return try {
+            FileOutputStream(backupFile).use { fos ->
+                val success = exportData(context, mnemonic, fos)
+                if (success) backupFile else null
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "createEncryptedBackupFile failed: ${e.message}")
+            null
+        }
+    }
+
     fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {
         Logger.info(TAG, "Starting data export...")
         return try {

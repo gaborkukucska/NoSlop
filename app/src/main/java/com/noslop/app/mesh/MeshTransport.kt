@@ -25,6 +25,9 @@ class MeshTransport(
 
     @Volatile private var listening = false
     private val torSemaphore = kotlinx.coroutines.sync.Semaphore(24) // Limit concurrent Tor circuits (increased for highly parallel media transfers)
+    private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
+    private val MAX_SIMULTANEOUS_CONNECTIONS = 32
+
     fun isListening(): Boolean = listening
 
     fun startListening() {
@@ -62,8 +65,15 @@ class MeshTransport(
 
     private suspend fun handleIncomingConnection(socket: Socket) = withContext(Dispatchers.IO) {
         val clientIp = socket.remoteSocketAddress?.toString() ?: "unknown"
-        Logger.info(TAG, "Incoming TCP connection from $clientIp")
+        if (activeConnections.get() >= MAX_SIMULTANEOUS_CONNECTIONS) {
+            Logger.warn(TAG, "Rejecting connection from $clientIp: active connection limit ($MAX_SIMULTANEOUS_CONNECTIONS) reached")
+            try { socket.close() } catch (e: Exception) {}
+            return@withContext
+        }
+        activeConnections.incrementAndGet()
+        Logger.info(TAG, "Incoming TCP connection from $clientIp (active: ${activeConnections.get()})")
         try {
+            socket.soTimeout = 30000 // 30-second read timeout
             val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
             var line: String?
             while (reader.readLine().also { line = it } != null) {
@@ -81,6 +91,7 @@ class MeshTransport(
         } catch (e: Exception) {
             Logger.warn(TAG, "Error handling incoming client $clientIp: ${e.message}")
         } finally {
+            activeConnections.decrementAndGet()
             try {
                 socket.close()
             } catch (e: Exception) {

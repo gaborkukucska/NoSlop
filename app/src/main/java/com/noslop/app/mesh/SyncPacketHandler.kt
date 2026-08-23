@@ -268,8 +268,20 @@ class SyncPacketHandler(
 
     suspend fun handleSyncResponse(packet: NetworkPacket): Boolean {
         val syncPay = packet.getSyncResponsePayload() ?: return false
+        val filterSettings = try { repo.getMeshFilterSettings() ?: MeshFilterSettings() } catch (e: Exception) { MeshFilterSettings() }
         var stored = 0
         for (postPay in syncPay.posts) {
+            if (postPay.clearnetUrl != null && !filterSettings.allowIncomingClearnetShares) {
+                Logger.info(TAG, "Sync: Mesh Filter dropped incoming clearnet share post ${postPay.id}")
+                continue
+            }
+            if (postPay.mediaMetadata != null) {
+                if (postPay.mediaMetadata.type == "image" && !filterSettings.allowIncomingImagePosts) continue
+                if (postPay.mediaMetadata.type == "video" && !filterSettings.allowIncomingVideoPosts) continue
+            } else if (postPay.clearnetUrl == null) {
+                if (!filterSettings.allowIncomingTextPosts) continue
+            }
+
             var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
             if (postPay.authorAvatarB64 != null) {
                 payloadToVerify += "|${postPay.authorAvatarB64}"
