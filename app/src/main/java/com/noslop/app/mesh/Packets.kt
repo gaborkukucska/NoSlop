@@ -72,7 +72,8 @@ data class MediaRequestPayload(
     @SerializedName("byte_offset") val byteOffset: Long? = null,
     @SerializedName("byte_length") val byteLength: Int? = null,
     @SerializedName("access_key") val accessKey: String? = null,
-    @SerializedName("hls_file") val hlsFile: String? = null
+    @SerializedName("hls_file") val hlsFile: String? = null,
+    @SerializedName("origin_onion") val originOnion: String? = null
 )
 
 data class MediaChunkPayload(
@@ -93,7 +94,8 @@ data class MediaRelayRequestPayload(
 )
 
 data class MediaRecoveryFoundPayload(
-    @SerializedName("media_id") val mediaId: String
+    @SerializedName("media_id") val mediaId: String,
+    @SerializedName("onion_address") val onionAddress: String? = null
 )
 
 data class MediaPendingPayload(

@@ -452,13 +452,14 @@ object GossipService {
             scope.launch {
                 val isTargetTemp = peerDao?.getPeerByPublicKey(senderId)?.isTemporary == true
                 val mySenderId = if (isTargetTemp) transport?.repository?.getBurnableIdentity()?.publicKeyB64 ?: localPublicKeyB64 else localPublicKeyB64
+                val myOnion = transport?.repository?.getLocalIdentity()?.onionAddress
                 val foundPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
                     senderId = mySenderId,
                     targetUserId = senderId,
                     type = "MEDIA_RECOVERY_FOUND",
-                    payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
+                    payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
                 )
                 transport?.sendPacket(senderId, Constants.MESH_PORT, foundPacket)
             }
@@ -515,13 +516,14 @@ object GossipService {
                         val isTargetTemp = peer.isTemporary
                         val mySenderId = if (isTargetTemp) transport?.repository?.getBurnableIdentity()?.publicKeyB64 ?: localPublicKeyB64 else localPublicKeyB64
                         
+                        val myOnion = transport?.repository?.getLocalIdentity()?.onionAddress
                         val foundPacket = NetworkPacket(
                             id = UUID.randomUUID().toString(),
                             hops = 3,
                             senderId = mySenderId,
                             targetUserId = listenerId,
                             type = "MEDIA_RECOVERY_FOUND",
-                            payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId))
+                            payload = com.google.gson.Gson().toJsonTree(MediaRecoveryFoundPayload(mediaId = mediaId, onionAddress = myOnion))
                         )
                         
                         val hubStatus = transport?.repository?.getAppSetting("hub_deployment_status")

@@ -612,7 +612,7 @@ fun UnifiedFeedTab(
 
     val activeFilterLabel = remember(filterMode, searchQuery) {
         buildString {
-            if (filterMode != "Live Feed") append(filterMode)
+            if (filterMode != "Live Feed" && filterMode != "Mesh") append(filterMode)
             if (searchQuery.isNotBlank()) {
                 if (isNotEmpty()) append(" · ")
                 append("\"$searchQuery\"")
@@ -930,14 +930,96 @@ fun UnifiedFeedTab(
             }
         }
 
-        // ─── Floating search icon (top-right, semi-transparent) ───
-        Box(
+        // ─── Floating Top Bar Header (Notifications, All/Mesh Switch, Search/Filter) ───
+        Row(
             modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 12.dp, end = 12.dp)
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(top = 12.dp, start = 12.dp, end = 12.dp)
                 .zIndex(10f)
-                .graphicsLayer { translationY = topSlideOffset }
+                .graphicsLayer { translationY = topSlideOffset },
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            // Notifications Icon (Top Left)
+            IconButton(
+                onClick = { onTabChange(4) },
+                modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
+            ) {
+                BadgedBox(
+                    badge = {
+                        if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
+                    }
+                ) {
+                    Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
+                }
+            }
+
+            // Quick "All / Mesh" Switch (Center) — hidden when a custom filter chip/search is active
+            val showQuickSwitch = activeFilterLabel.isBlank() && searchQuery.isBlank()
+            if (showQuickSwitch) {
+                val isMeshOnly = filterMode == "Mesh"
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = SurfaceDark.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    modifier = Modifier.padding(horizontal = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(3.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // "All" option
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (!isMeshOnly) AccentGreen else Color.Transparent)
+                                .clickable {
+                                    filterMode = "Live Feed"
+                                    viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "All".tr,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (!isMeshOnly) PrimaryBlack else TextMuted
+                            )
+                        }
+
+                        // "Mesh" option
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(if (isMeshOnly) AccentGreen else Color.Transparent)
+                                .clickable {
+                                    filterMode = "Mesh"
+                                    viewModel.syncFilterMode("Mesh", forceRefresh = true)
+                                }
+                                .padding(horizontal = 14.dp, vertical = 6.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.Hub,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(12.dp),
+                                    tint = if (isMeshOnly) PrimaryBlack else TextMuted
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Mesh".tr,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isMeshOnly) PrimaryBlack else TextMuted
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Search & Filter (Top Right)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (activeFilterLabel.isNotBlank()) {
                     Box(
@@ -977,30 +1059,6 @@ fun UnifiedFeedTab(
                     modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Search & Filter".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
-                }
-            }
-        }
-
-        // ─── Floating notifications icon & refresh indicator (top-left) ───
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(top = 12.dp, start = 12.dp)
-                .zIndex(10f)
-                .graphicsLayer { translationY = topSlideOffset }
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = { onTabChange(4) },
-                    modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
-                ) {
-                    BadgedBox(
-                        badge = {
-                            if (unreadNotifs > 0) Badge(containerColor = DestructiveRed) { Text(unreadNotifs.toString()) }
-                        }
-                    ) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Notifications".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
-                    }
                 }
             }
         }

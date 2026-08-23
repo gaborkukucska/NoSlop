@@ -364,7 +364,7 @@ class HandshakePacketHandler(
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 onionAddress = announcePay.onionAddress,
-                isTemporary = peer.isTemporary,
+                isTemporary = if (peer.isTrusted) false else true,
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,

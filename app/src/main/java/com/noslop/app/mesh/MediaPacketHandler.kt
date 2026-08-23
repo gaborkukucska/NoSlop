@@ -35,7 +35,7 @@ class MediaPacketHandler(
 
     suspend fun handleMediaRecoveryFound(packet: NetworkPacket): Boolean {
         val found = packet.getMediaRecoveryFoundPayload() ?: return false
-        MediaManager.handleRecoveryFound(packet.senderId, found.mediaId)
+        MediaManager.handleRecoveryFound(packet.senderId, found.mediaId, found.onionAddress)
         return true
     }
 }

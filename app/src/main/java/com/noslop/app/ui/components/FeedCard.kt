@@ -439,6 +439,18 @@ fun FullScreenMeshCardV2(
     }
 
     val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
+    val allPeers by (viewModel?.peers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+    val resolveOriginOnion: () -> String? = {
+        val rawOrigin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+        if (rawOrigin.endsWith(".onion")) {
+            rawOrigin
+        } else {
+            val authorPub = post.authorPublicKeyB64
+            if (authorPub.isNotBlank()) {
+                allPeers.find { it.publicKeyB64 == authorPub }?.onionAddress?.takeIf { it.endsWith(".onion") }
+            } else null
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -488,7 +500,7 @@ fun FullScreenMeshCardV2(
                                                 size = post.mediaSize,
                                                 chunkCount = if (post.mediaSize > 0) (post.mediaSize / (256 * 1024)).toInt() + 1 else 999
                                             )
-                                            val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                            val origin = resolveOriginOnion()
                                             viewModel?.startMediaDownload(accurateMeta, origin)
                                         }
                                         .padding(16.dp),
@@ -550,7 +562,7 @@ fun FullScreenMeshCardV2(
                                                 size = post.mediaSize,
                                                 chunkCount = if (post.mediaSize > 0) (post.mediaSize / (256 * 1024)).toInt() + 1 else 999
                                             )
-                                            val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                            val origin = resolveOriginOnion()
                                             viewModel?.startMediaDownload(accurateMeta, origin)
                                         }
                                         .padding(16.dp),
@@ -604,7 +616,7 @@ fun FullScreenMeshCardV2(
                                         .clickable {
                                             val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId ?: "")
                                             if (meta != null) {
-                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                                val origin = resolveOriginOnion()
                                                 viewModel?.startMediaDownload(meta, origin)
                                             }
                                         }
@@ -671,7 +683,7 @@ fun FullScreenMeshCardV2(
                                         if (rawMediaId != null) {
                                             val meta = com.noslop.app.mesh.MediaManager.getMetadataSync(rawMediaId)
                                             if (meta != null) {
-                                                val origin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
+                                                val origin = resolveOriginOnion()
                                                 viewModel?.startMediaDownload(meta, origin)
                                             }
                                         }

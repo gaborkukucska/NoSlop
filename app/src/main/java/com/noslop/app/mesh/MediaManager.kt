@@ -282,7 +282,8 @@ object MediaManager {
         startDownload(metadata, peerOnion)
     }
 
-    suspend fun startDownload(metadata: MediaMetadata, peerOnion: String?) {
+    suspend fun startDownload(metadata: MediaMetadata, rawPeerOnion: String?) {
+        val peerOnion = if (rawPeerOnion != null && rawPeerOnion.endsWith(".onion")) rawPeerOnion else null
         if (activeDownloads.containsKey(metadata.id)) {
             val dl = activeDownloads[metadata.id]!!
             if (dl.peerOnion == null && peerOnion != null) {
@@ -500,16 +501,17 @@ object MediaManager {
             val offset = req.first
             val length = req.second
 
-            val payload = MediaRequestPayload(
-                mediaId = dl.metadata.id,
-                chunkIndex = (offset / MIN_CHUNK_SIZE).toInt(), // Legacy fallback
-                chunkSize = length,
-                byteOffset = offset,
-                byteLength = length,
-                accessKey = dl.metadata.accessKey
-            )
-
             scope.launch {
+                val myOnion = repo.getLocalIdentity()?.onionAddress
+                val payload = MediaRequestPayload(
+                    mediaId = dl.metadata.id,
+                    chunkIndex = (offset / MIN_CHUNK_SIZE).toInt(), // Legacy fallback
+                    chunkSize = length,
+                    byteOffset = offset,
+                    byteLength = length,
+                    accessKey = dl.metadata.accessKey,
+                    originOnion = myOnion
+                )
                 val targetPeer = repo.peerDao.getAllPeersList().find { it.onionAddress == peer }
                 val targetPubKey = targetPeer?.publicKeyB64
                 val isTargetTemp = targetPeer?.isTemporary == true
@@ -694,12 +696,12 @@ object MediaManager {
         GossipService.broadcast(packet)
     }
 
-    fun handleRecoveryFound(senderId: String, mediaId: String) {
+    fun handleRecoveryFound(senderId: String, mediaId: String, foundOnion: String? = null) {
         val dl = activeDownloads[mediaId] ?: return
         if (dl.status == ActiveDownload.Status.RECOVERING) {
             scope.launch {
                 val recoveryPeer = repository?.peerDao?.getPeerByPublicKey(senderId)
-                val onion = recoveryPeer?.onionAddress
+                val onion = foundOnion?.takeIf { it.endsWith(".onion") } ?: recoveryPeer?.onionAddress
                 if (onion != null) {
                     Logger.info(TAG, "Media $mediaId found at $senderId (onion: $onion)")
                     dl.peerOnion = onion
@@ -717,7 +719,11 @@ object MediaManager {
         val repo = repository ?: return
         scope.launch {
             val targetOnion = repo.peerDao.getPeerByPublicKey(senderId)?.onionAddress
-            if (targetOnion.isNullOrBlank()) return@launch
+                ?: payload.originOnion?.takeIf { it.endsWith(".onion") }
+            if (targetOnion.isNullOrBlank()) {
+                Logger.warn(TAG, "Cannot resolve targetOnion for sender $senderId to return MEDIA_CHUNK")
+                return@launch
+            }
 
             // Handle Metadata requests
             if (payload.chunkSize == 0 && (payload.byteLength == null || payload.byteLength == 0)) {

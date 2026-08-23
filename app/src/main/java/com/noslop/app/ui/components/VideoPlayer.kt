@@ -797,6 +797,11 @@ private fun ExoVideoPlayer(
             kotlinx.coroutines.delay(2000L)
             val p = exoPlayer ?: continue
             try {
+                // Do not count stalled samples if player is paused by user or in IDLE state
+                if (!p.playWhenReady || p.playbackState == androidx.media3.common.Player.STATE_IDLE) {
+                    stalledSamples = 0
+                    continue
+                }
                 if (p.playbackState == androidx.media3.common.Player.STATE_READY && p.isPlaying) {
                     return@LaunchedEffect  // healthy; stop sampling
                 }
@@ -819,21 +824,14 @@ private fun ExoVideoPlayer(
                 }
 
                 // --- NOSLOP_TOR_CIRCUIT_V1 ---
-                // Zero bytes after 12s means the stream never began arriving.
-                // googlevideo URLs are IP-locked to the exit that resolved them,
-                // and large exits are routinely blocked by Google — the captured
-                // log had all 27 URLs on ip=185.220.101.15 with one video
-                // playing.
-                //
-                // The answer is a DIFFERENT EXIT, not a different network. Ask
-                // Tor for a new circuit and re-resolve. Traffic never leaves
-                // Tor; if this does not work the video is reported unavailable.
-                if (stalledSamples >= 6 && bufPos == 0L && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
+                // Zero bytes after 12s for googlevideo URLs over Tor means the exit is likely blocked.
+                if (stalledSamples >= 6 && bufPos == 0L && rawUrl.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "Zero bytes over Tor after 12s — this exit is likely blocked " +
                             "for googlevideo. Requesting a new Tor circuit and re-resolving. | $rawUrl"
                     )
+                    stalledSamples = 0
                     com.noslop.app.tor.TorService.setTorStatusMessage(
                         "Tor exit blocked by this provider — trying a new route…"
                     )

@@ -962,8 +962,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         }
                     }
                 }
-
                 }
+
                 if (selectedTabIndex == 2) {
                 item {
                     Text(
@@ -1104,7 +1104,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         }
                     }
                 }
-
                 }
                 if (selectedTabIndex == 3) {
                 item {
@@ -1384,6 +1383,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                         Text("About NoSlop".tr, color = TextMuted)
                     }
                 } // End Tab 3
+                }
 
                 if (selectedTabIndex == 4 && isCreatorEnabled) {
                     item {

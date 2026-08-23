@@ -818,6 +818,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (actualFilter == "My Content" && localPubKey != null) {
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == localPubKey }
             unseenFeeds = emptyList()
+        } else if (actualFilter == "P2P Mesh" || actualFilter == "Mesh") {
+            unseenFeeds = emptyList()
+            if (localPubKey != null) {
+                unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
+            }
         } else if (actualFilter?.startsWith("Author:") == true) {
             val authorPub = actualFilter.substringAfter("Author:")
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == authorPub }
