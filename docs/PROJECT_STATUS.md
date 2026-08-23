@@ -1,5 +1,34 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-23) — Media Downloads, Feed Controls & UI Polish
+
+### 1. Un-paired Public Mesh Media Downloads & Return Routing
+* **Target Onion Resolution in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt)**: Added `resolveOriginOnion()`. When downloading media attached to a post, if `mediaUrl` lacks an embedded `.onion` host, the UI resolves the author's public key against `allPeers` (including discoverable creators) and passes their valid Tor onion address to `MediaManager.startMediaDownload`.
+* **Request Payload Origin Address (`origin_onion`)**: Added `@SerializedName("origin_onion") val originOnion: String? = null` to `MediaRequestPayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt). `MediaManager.requestNextChunks` includes the requester's Tor onion address in every `MEDIA_REQUEST` packet.
+* **Un-paired Return Packet Routing**: Updated `handleMediaRequest` in [MediaManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MediaManager.kt). If the requesting `senderId` is an un-paired peer not present in `peerDao`, User C falls back to `payload.originOnion` to return `MEDIA_CHUNK` packets directly to the requester over Tor SOCKS5.
+* **Recovery Payload Address**: Added `onion_address` to `MediaRecoveryFoundPayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt) and updated [GossipService.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/GossipService.kt) and [MediaPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/MediaPacketHandler.kt) so mesh recovery responses carry the source node's Tor onion address directly.
+
+### 2. Discoverable Creators List Query Fix
+* **Relaxed Query in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt)**: Updated `getDiscoverablePeers()` query to `SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 ORDER BY lastSeenAt DESC`. Removed restrictive `isOnline = 1 AND isTemporary = 1` filters that caused discoverable creators to vanish from the Discoverable list if background 3-minute inactivity cleanup ran.
+* **Discoverable Peer Updates in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt)**: Preserved `isTemporary = if (peer.isTrusted) false else true` when handling `ANNOUNCE_DISCOVERABLE` updates for existing peer entries.
+
+### 3. Top Header Bar "All / Mesh" Quick Switch
+* **Unified Segmented Toggle**: Added an `All / Mesh` quick switch in the center header of [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt).
+* **Standardized Filter Key**: Standardized the filter mode string to `"Mesh"`.
+* **Clean UI State & Feed Restoral**: Excluded `"Mesh"` from creating a top-right filter chip in `activeFilterLabel` so the quick toggle stays active on screen on the `Mesh` side. Tapping `All` restores `"Live Feed"` and calls `syncFilterMode("Live Feed", forceRefresh = true)`, populating the full feed without returning an empty screen.
+
+### 4. Tor Notification Loop Fix in ExoPlayer Diagnostic Loop
+* **ExoPlayer Sample Guard in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt)**: Added checks (`!p.playWhenReady || p.playbackState == Player.STATE_IDLE`) so paused videos, offscreen slides, or idle players reset `stalledSamples = 0`.
+* **YouTube Circuit Rotation Scoping**: Restricted Tor exit rotation and toast status updates strictly to YouTube `googlevideo` IP-locked streams, preventing repeated *"Tor exit blocked by this provider..."* notification spam on emulated devices.
+
+### 5. Slide Post Description Text UI/UX Improvements
+* **Scrollable Container & Tap-to-Collapse**: Wrapped expanded post description cards in `heightIn(max = 240.dp)` with `.verticalScroll(textScrollState)` in [FeedCard.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/FeedCard.kt). Tapping anywhere on the expanded text card or `show less ▲` collapses description text back to its 2-line minimised state. Markdown formatting is fully rendered.
+
+### 6. Settings Sub-Tab Navigation
+* **Studio Sub-Tab in Settings**: Added a 5th sub-tab (`Studio`) inside [SettingsTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/tabs/SettingsTab.kt) when Creator Mode is enabled.
+
+---
+
 ## Completed Changes (2026-08-23) — Security Audit Follow-Up
 
 ### 1. Group Packet Authentication (`NOSLOP_GROUP_AUTH_V1`)

@@ -537,10 +537,10 @@ before insertion via `commentDao`/`reactionDao`.
 
 | Type | Payload | Role |
 |---|---|---|
-| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, access_key?, hls_file?}` | Requests a specific chunk of a media item by index |
+| `MEDIA_REQUEST` | `MediaRequestPayload {media_id, chunk_index, chunk_size, byte_offset?, byte_length?, access_key?, hls_file?, origin_onion?}` | Requests a specific chunk of a media item by index. `origin_onion` conveys the requester's Tor onion address so un-paired peers can return chunks directly. |
 | `MEDIA_CHUNK` | `MediaChunkPayload {media_id, chunk_index, total_chunks, data (Base64), total_size?}` | Carries one chunk's bytes. `total_size` (optional Long) communicates the sender's known file size so receivers with indeterminate metadata can compute accurate download progress. |
 | `MEDIA_RELAY_REQUEST` | `MediaRelayRequestPayload {media_id, origin_node?, owner_id?, access_key?, metadata?}` | Broadcast to trusted peers when the direct author is unreachable/unknown |
-| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id}` | Sent back along the relay chain once the media's source node is located |
+| `MEDIA_RECOVERY_FOUND` | `MediaRecoveryFoundPayload {media_id, onion_address?}` | Sent back along the relay chain once the media's source node is located; `onion_address` provides the source's direct Tor onion address. |
 | `MEDIA_PENDING` | `MediaPendingPayload {media_id, chunk_index}` | Signals an in-flight/awaited chunk — used by the AIMD inflight-tracking state in `MediaManager` |
 | `MEDIA_TRANSFER_ACK` | `MediaTransferAckPayload {media_id}` | Transfer-completion acknowledgement |
 
