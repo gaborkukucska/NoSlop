@@ -42,7 +42,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
 
     var selectedSettingsScreen by remember { mutableStateOf(0) }
     var selectedTabIndex by remember { mutableStateOf(0) }
-    val tabTitles = listOf("General".tr, "Network".tr, "Content".tr, "System".tr)
+    val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
+    val tabTitles = if (isCreatorEnabled) listOf("General".tr, "Network".tr, "Content".tr, "System".tr, "Studio".tr) else listOf("General".tr, "Network".tr, "Content".tr, "System".tr)
     var showDonationModal by remember { mutableStateOf(false) }
     var showAboutModal by remember { mutableStateOf(false) }
 
@@ -956,16 +957,6 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             unfocusedTextColor = TextLight
                                         )
                                     )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Button(
-                                        onClick = { selectedSettingsScreen = 9 },
-                                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                                    ) {
-                                        Icon(Icons.Default.Movie, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Open Creator Studio 🎬".tr, fontWeight = FontWeight.Bold)
-                                    }
                                 }
                             }
                         }
@@ -1392,8 +1383,13 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                     ) {
                         Text("About NoSlop".tr, color = TextMuted)
                     }
-                }
                 } // End Tab 3
+
+                if (selectedTabIndex == 4 && isCreatorEnabled) {
+                    item {
+                        CreatorStudioTab(viewModel = viewModel)
+                    }
+                }
             }
         }
     }

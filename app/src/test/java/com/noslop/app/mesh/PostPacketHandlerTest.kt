@@ -42,7 +42,9 @@ class PostPacketHandlerTest {
         every { db.postDao() } returns postDao
         every { db.peerDao() } returns peerDao
         identity = CryptoService.generateIdentity("alice")
-        handler = PostPacketHandler(repo = mockk(relaxed = true), db = db)
+        val repo = mockk<com.noslop.app.data.NoSlopRepository>(relaxed = true)
+        io.mockk.coEvery { repo.getMeshFilterSettings() } returns com.noslop.app.data.MeshFilterSettings()
+        handler = PostPacketHandler(repo = repo, db = db)
     }
 
     /** Builds a POST packet whose signature covers [signedContent] but whose body carries [bodyContent]. */

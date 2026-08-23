@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -905,19 +907,41 @@ fun FullScreenMeshCardV2(
                         var isExpanded by remember(post.id) { mutableStateOf(false) }
                         val annotatedContent = remember(post.content) { com.noslop.app.util.MarkdownUtils.parseMarkdown(post.content) }
                         val isLongText = post.content.lines().size > 2 || post.content.length > 120
+                        val textScrollState = androidx.compose.foundation.rememberScrollState()
 
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = annotatedContent,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = TextLight,
-                                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
-                                overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (isExpanded) {
+                                        Modifier
+                                            .heightIn(max = 240.dp)
+                                            .background(Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(8.dp))
+                                            .padding(8.dp)
+                                            .clickable { isExpanded = false }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .then(if (isExpanded) Modifier.verticalScroll(textScrollState) else Modifier)
+                            ) {
+                                Text(
+                                    text = annotatedContent,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextLight,
+                                    maxLines = if (isExpanded) Int.MAX_VALUE else 2,
+                                    overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                             if (isLongText) {
                                 Text(
-                                    text = if (isExpanded) "show less".tr else "read more...".tr,
+                                    text = if (isExpanded) "show less ▲".tr else "read more... ▼".tr,
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
                                     color = AccentGreen,
                                     modifier = Modifier
