@@ -82,7 +82,7 @@ class PreferencesRepository(
 
     /** Get the user's negative keywords, parsed and trimmed into a list. */
     suspend fun getUserNegativeKeywords(): List<String> = withContext(Dispatchers.IO) {
-        val str = appSettingDao.getSetting("negative_keywords") ?: ""
+        val str = appSettingDao.getSetting("negative_keywords") ?: "advertisement, ad, advert, commercial, best deal, coupon, promo code"
         str.split(",").map { it.trim() }.filter { it.isNotEmpty() }
     }
 
@@ -212,7 +212,7 @@ class PreferencesRepository(
     }
 
     suspend fun getChannelCutoffSettings(): Triple<Boolean, Int, Int> = withContext(Dispatchers.IO) {
-        val enabled = appSettingDao.getSetting("channel_cutoff_enabled") == "true"
+        val enabled = appSettingDao.getSetting("channel_cutoff_enabled")?.let { it == "true" } ?: true
         val year = appSettingDao.getSetting("channel_cutoff_year")?.toIntOrNull() ?: 2022
         val month = appSettingDao.getSetting("channel_cutoff_month")?.toIntOrNull() ?: 1
         Triple(enabled, year, month)

@@ -4,7 +4,7 @@ import com.google.gson.Gson
 
 data class MeshFilterSettings(
     val allowIncomingTextPosts: Boolean = true,
-    val allowIncomingClearnetShares: Boolean = true,
+    val allowIncomingClearnetShares: Boolean = false,
     val allowOutgoingClearnetShares: Boolean = true,
     val allowIncomingImagePosts: Boolean = true,
     val allowIncomingVideoPosts: Boolean = true

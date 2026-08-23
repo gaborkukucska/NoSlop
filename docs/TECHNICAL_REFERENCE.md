@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.4.0-alpha`, Room schema version 8 — see §10, compileSdk/targetSdk
+versionName `0.4.0-alpha`, Room schema version 11 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -549,7 +549,7 @@ Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
 - `settings.maxFileSizeMB` — if `metadata.size > maxBytes && size > 0`, skip
   (a `size == 0` placeholder, as used by `MediaProxyService`'s synthetic
   metadata, bypasses this check). The Settings UI slider allows values from
-  1MB to 1000MB (1GB), defaulting to 10MB.
+  1MB to 1000MB (1GB), defaulting to 250MB.
 
 ### 6.4 Local Streaming Proxy (`MediaProxyService.kt`)
 

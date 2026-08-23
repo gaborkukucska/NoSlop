@@ -40,6 +40,61 @@ fun normalizeFeedItemId(rawId: String, link: String = ""): String {
     return rawId.ifBlank { cleanUrl }
 }
 
+fun normalizeUrlKey(url: String?): String {
+    if (url.isNullOrBlank()) return ""
+    var clean = url.trim().lowercase(java.util.Locale.US)
+    clean = clean.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    
+    // YouTube / Invidious video ID preservation
+    if (clean.contains("youtube.com/watch") || clean.contains("invidious") || clean.contains("yewtu.be")) {
+        val videoId = clean.substringAfter("v=").substringBefore("&").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (clean.contains("youtu.be/")) {
+        val videoId = clean.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    
+    // Vimeo video ID preservation
+    if (clean.contains("vimeo.com/")) {
+        val videoId = clean.substringAfter("vimeo.com/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "vimeo_$videoId"
+    }
+
+    clean = clean.substringBefore("?").substringBefore("#").trimEnd('/')
+    return clean
+}
+
+fun getCanonicalItemKey(item: com.noslop.app.ui.UnifiedItem): String {
+    return when (item) {
+        is com.noslop.app.ui.UnifiedItem.Feed -> {
+            val feedItem = item.item
+            val rawUrl = feedItem.url ?: feedItem.mediaUrl ?: ""
+            val normUrl = normalizeUrlKey(rawUrl)
+            if (normUrl.isNotBlank()) {
+                "url_$normUrl"
+            } else {
+                val titleKey = feedItem.title.trim().lowercase(java.util.Locale.US).replace(Regex("[^a-z0-9]"), "")
+                if (titleKey.length > 10) "title_$titleKey"
+                else normalizeFeedItemId(item.id, rawUrl)
+            }
+        }
+        is com.noslop.app.ui.UnifiedItem.Mesh -> {
+            val post = item.post
+            val rawUrl = post.clearnetUrl ?: post.mediaUrl ?: ""
+            val normUrl = normalizeUrlKey(rawUrl)
+            if (normUrl.isNotBlank()) {
+                "mesh_url_$normUrl"
+            } else {
+                val titleKey = (post.clearnetTitle ?: post.content).take(80).trim().lowercase(java.util.Locale.US).replace(Regex("[^a-z0-9]"), "")
+                if (titleKey.length > 10) "mesh_title_$titleKey"
+                else item.id
+            }
+        }
+        is com.noslop.app.ui.UnifiedItem.Tutorial -> item.id
+    }
+}
+
 class EngagementRepository(
     private val viewedHistoryDao: ViewedHistoryDao,
     private val swipeTrackerDao: SwipeTrackerDao,

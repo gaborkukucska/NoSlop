@@ -1,5 +1,31 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-23)
+
+### 1. First-Install Default Settings Alignment
+*   **Media Quality Defaults**: Set default `videoQuality`, `audioQuality`, and `imageQuality` to **Medium** (`"medium"`) in [MediaSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MediaSettings.kt).
+*   **Automatic Media Download**: Set master toggle **ON** (`enabled = true`), download size ceiling to **`250MB`**, `autoDownloadFriends = true` (friends ON), and `autoDownloadPublic = false` (public OFF) in [MediaSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MediaSettings.kt).
+*   **Content Mix Ratio**: Default content mix set to **50% Video**, **10% Audio**, **10% Image**, **10% Article**, and **20% Mesh** in [FeedMixSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/FeedMixSettings.kt).
+*   **Mesh Filters**: All Mesh filters **ON** (`true`) by default, EXCEPT *Clearnet Shares Allow Incoming*, which is **OFF** (`allowIncomingClearnetShares = false`) in [MeshFilterSettings.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/MeshFilterSettings.kt).
+*   **Default Negative Filters**: Added default user block keywords: `advertisement, ad, advert, commercial, best deal, coupon, promo code` in [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt).
+*   **Channel Creation Cut-Off Date**: Cut-off date enabled by default (`enabled = true`) and set to **January 2022** (`year = 2022`, `month = 1`) in [PreferencesRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/PreferencesRepository.kt) and [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt).
+
+### 2. Video Stream Preservation & Canonical Deduplication
+*   **YouTube/Vimeo Parameter Preservation**: Updated `normalizeUrlKey(url)` in [EngagementRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/EngagementRepository.kt) to extract and preserve unique video IDs (`yt_VIDEO_ID`, `vimeo_VIDEO_ID`) before stripping query parameters. This prevents YouTube and Vimeo videos from being incorrectly collapsed into a single key (`"url_youtube.com/watch"`) during feed deduplication.
+*   **Back-to-Back Feed Deduplication**: Applied `getCanonicalItemKey` across [NoSlopViewModel.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt) and [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to eliminate duplicate article and video cards back-to-back.
+
+### 3. OpenGraph Lead Image Resolution & Image Quality Ceilings
+*   **OpenGraph Lead Image Resolver**: Created [ArticleMetadataResolver.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/ArticleMetadataResolver.kt). For RSS feeds like Rolling Stone (`rollingstone.com/feed/`) and Al Jazeera (`aljazeera.com/xml/rss/all.xml`) that lack embedded XML images, `SegmentedArticleReader` asynchronously fetches the OpenGraph `og:image` or `twitter:image` lead image directly from the article webpage and caches it in memory.
+*   **Image Quality Ceilings**: Upgraded downscaling size ceilings in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) (`low` $\rightarrow$ `1080px`, `medium` $\rightarrow$ `1440px`, `high`/default $\rightarrow$ `1920px`) so article hero cards and lead thumbnails remain crisp on high-DPI displays even on Low quality setting.
+
+### 4. Segmented Article Reader & Byline Unification
+*   **Source & Byline Unification**: Replaced generic `"By Article"` author placeholders with clean human-readable source and author labels (`By TechCrunch · Aug 23, 2026`, `By BBC News`, `By Wikipedia`) derived from domain names, `apiSource`, or `sourceId`.
+*   **Page 1 Uncropped Lead Image**: Rendered uncropped lead image (`ContentScale.Fit`) in a rounded container (`heightIn(max = 200.dp)`) at the top of Page 1.
+*   **Viewport-Aware Text Pagination**: Created `splitArticleContent(text, firstChunkSize = 320, normalChunkSize = 550)` in [MediaComponents.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/MediaComponents.kt) so Page 1 text fits cleanly under the lead image without vertical scrolling.
+*   **Zero-Delay Image Preloading**: Enqueued Coil `fitRequest` image load inside a `LaunchedEffect` on Page 0 so Page 1's lead image displays instantly upon side-swiping.
+
+---
+
 ## Completed Changes (2026-08-22)
 
 ### 1. Network & Security Hardening

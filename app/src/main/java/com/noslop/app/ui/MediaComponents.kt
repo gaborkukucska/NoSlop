@@ -378,16 +378,55 @@ fun SegmentedArticleReader(
     publishedAt: Long = 0L
 ) {
     val rawContent = content.ifBlank { "" }
-    val segments: List<String> = remember(rawContent) { splitIntoSegments(rawContent, 800) }
-    // Page count = 1 (Hero) + maxOf(1, segments.size)
-    // We ensure at least one text page even if empty to show the "Read Full Article" button
-    val effectiveSegments = if (segments.isEmpty()) listOf("") else segments
-    val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
-
-    var showWebView by remember { mutableStateOf(false) }
-    val safeThumbnailUrl = sanitizeImageUrl(thumbnailUrl)
     val context = LocalContext.current
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
+    
+    var resolvedThumbnailUrl by remember(thumbnailUrl, articleUrl) {
+        mutableStateOf(sanitizeImageUrl(thumbnailUrl) ?: com.noslop.app.feeds.api.ArticleMetadataResolver.getCachedImage(articleUrl))
+    }
+
+    LaunchedEffect(articleUrl, resolvedThumbnailUrl) {
+        if (resolvedThumbnailUrl.isNullOrBlank() && !articleUrl.isNullOrBlank()) {
+            val ogImage = com.noslop.app.feeds.api.ArticleMetadataResolver.resolveLeadImage(articleUrl)
+            if (!ogImage.isNullOrBlank()) {
+                resolvedThumbnailUrl = sanitizeImageUrl(ogImage)
+            }
+        }
+    }
+
+    val safeThumbnailUrl = resolvedThumbnailUrl
+    val hasLeadImage = !safeThumbnailUrl.isNullOrBlank()
+
+    // Page 1 gets a smaller text chunk (~320 chars) when a lead image is present so image + text fit on screen without vertical scrolling!
+    val segments: List<String> = remember(rawContent, hasLeadImage) {
+        if (hasLeadImage) {
+            splitArticleContent(rawContent, firstChunkSize = 320, normalChunkSize = 550)
+        } else {
+            splitArticleContent(rawContent, firstChunkSize = 550, normalChunkSize = 550)
+        }
+    }
+    val effectiveSegments = if (segments.isEmpty()) listOf("") else segments
+    val pagerState = rememberPagerState(pageCount = { effectiveSegments.size + 1 })
+    var showWebView by remember { mutableStateOf(false) }
+
+    // Preload Page 1 fit image into Coil memory cache while user reads Hero slide (Page 0)
+    LaunchedEffect(safeThumbnailUrl, mediaSettings.imageQuality) {
+        if (!safeThumbnailUrl.isNullOrBlank()) {
+            val fitRequest = coil.request.ImageRequest.Builder(context)
+                .data(safeThumbnailUrl)
+                .apply {
+                    when (mediaSettings.imageQuality) {
+                        "low" -> size(1080)
+                        "medium" -> size(1440)
+                        else -> size(1920)
+                    }
+                }
+                .memoryCacheKey(safeThumbnailUrl + "_fit_" + mediaSettings.imageQuality)
+                .diskCacheKey(safeThumbnailUrl + "_fit_" + mediaSettings.imageQuality)
+                .build()
+            coil.Coil.imageLoader(context).enqueue(fitRequest)
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         HorizontalPager(
@@ -406,8 +445,9 @@ fun SegmentedArticleReader(
                             .data(safeThumbnailUrl)
                             .apply {
                                 when (mediaSettings.imageQuality) {
-                                    "low" -> size(640)
-                                    "medium" -> size(960)
+                                    "low" -> size(1080)
+                                    "medium" -> size(1440)
+                                    else -> size(1920)
                                 }
                             }
                             .memoryCacheKey(safeThumbnailUrl + "_" + mediaSettings.imageQuality)
@@ -502,17 +542,53 @@ fun SegmentedArticleReader(
             } else {
                 // Pages 1 to N: Text Content
                 val segmentIndex = page - 1
+                val isFirstTextPage = segmentIndex == 0
+                var leadImageFailed by remember(safeThumbnailUrl) { mutableStateOf(safeThumbnailUrl.isNullOrBlank()) }
+                val showLeadImageOnPage1 = isFirstTextPage && !safeThumbnailUrl.isNullOrBlank() && !leadImageFailed
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 32.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(horizontal = 24.dp, vertical = 20.dp),
+                    contentAlignment = if (showLeadImageOnPage1) Alignment.TopCenter else Alignment.Center
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.Start,
-                        verticalArrangement = Arrangement.Center
+                        horizontalAlignment = Alignment.Start
                     ) {
+                        if (showLeadImageOnPage1) {
+                            val imageRequest = coil.request.ImageRequest.Builder(context)
+                                .data(safeThumbnailUrl)
+                                .apply {
+                                    when (mediaSettings.imageQuality) {
+                                        "low" -> size(1080)
+                                        "medium" -> size(1440)
+                                        else -> size(1920)
+                                    }
+                                }
+                                .memoryCacheKey(safeThumbnailUrl + "_fit_" + mediaSettings.imageQuality)
+                                .diskCacheKey(safeThumbnailUrl + "_fit_" + mediaSettings.imageQuality)
+                                .build()
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 200.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SurfaceDark),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                AsyncImage(
+                                    model = imageRequest,
+                                    contentDescription = "Lead Article Image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Fit,
+                                    onError = { leadImageFailed = true }
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(14.dp))
+                        }
+
                         if (effectiveSegments[segmentIndex].isNotBlank()) {
                             Text(
                                 text = effectiveSegments[segmentIndex],
@@ -522,8 +598,7 @@ fun SegmentedArticleReader(
                                     fontSize = 17.sp
                                 ),
                                 color = TextLight,
-                                textAlign = TextAlign.Start,
-                                overflow = TextOverflow.Ellipsis
+                                textAlign = TextAlign.Start
                             )
                         } else {
                             Text(
@@ -641,29 +716,24 @@ fun ArticleWebViewDialog(url: String, title: String, onDismiss: () -> Unit) {
     }
 }
 
-private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
+private fun splitArticleContent(text: String, firstChunkSize: Int, normalChunkSize: Int): List<String> {
     if (text.isBlank()) return emptyList()
-    if (text.length <= chunkSize) return listOf(text)
-    
     val pages = mutableListOf<String>()
     var start = 0
+    var isFirst = true
+
     while (start < text.length) {
-        var end = (start + chunkSize).coerceAtMost(text.length)
+        val currentChunkSize = if (isFirst) firstChunkSize else normalChunkSize
+        var end = (start + currentChunkSize).coerceAtMost(text.length)
         if (end < text.length) {
-            // Look for the last paragraph break or sentence break within the chunk
             val searchRange = text.substring(start, end)
-            
-            // Prefer paragraph breaks (\n\n)
             var breakPoint = searchRange.lastIndexOf("\n\n")
-            if (breakPoint < chunkSize / 2) {
-                // Fallback to sentence break
+            if (breakPoint < currentChunkSize / 2) {
                 breakPoint = searchRange.lastIndexOf(". ")
             }
-            if (breakPoint < chunkSize / 2) {
-                // Fallback to space
+            if (breakPoint < currentChunkSize / 2) {
                 breakPoint = searchRange.lastIndexOf(" ")
             }
-            
             if (breakPoint > 0) {
                 end = start + breakPoint + 1
             }
@@ -673,6 +743,7 @@ private fun splitIntoSegments(text: String, chunkSize: Int): List<String> {
             pages.add(segment)
         }
         start = end
+        isFirst = false
     }
     return if (pages.isEmpty()) listOf(text) else pages
 }

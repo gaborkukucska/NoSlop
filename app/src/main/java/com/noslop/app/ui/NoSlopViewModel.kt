@@ -327,7 +327,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _bannedChannels = MutableStateFlow<List<String>>(emptyList())
     val bannedChannels: StateFlow<List<String>> = _bannedChannels.asStateFlow()
 
-    private val _channelCutoffSettings = MutableStateFlow<Triple<Boolean, Int, Int>>(Triple(false, 2022, 1))
+    private val _channelCutoffSettings = MutableStateFlow<Triple<Boolean, Int, Int>>(Triple(true, 2022, 1))
     val channelCutoffSettings: StateFlow<Triple<Boolean, Int, Int>> = _channelCutoffSettings.asStateFlow()
 
     val allSources: Flow<List<com.noslop.app.data.FeedSource>> = repository.allSources
@@ -994,7 +994,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     currentList.add(insertIndex, item)
                 }
                 
-                _unifiedFeed.value = currentList
+                _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 viewModelScope.launch {
                     kotlinx.coroutines.delay(150)
                     if (upFront.isNotEmpty()) {
@@ -1002,7 +1002,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                _unifiedFeed.value = _unifiedFeed.value + batch
+                _unifiedFeed.value = (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 if (isInitialLoad) {
                     viewModelScope.launch {
                         kotlinx.coroutines.delay(150)
@@ -1233,7 +1233,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 currentList.add(insertIndex, item)
             }
             
-            _unifiedFeed.value = currentList
+            _unifiedFeed.value = currentList.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             viewModelScope.launch {
                 kotlinx.coroutines.delay(150)
                 if (upFront.isNotEmpty()) {
@@ -1241,7 +1241,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
         } else {
-            _unifiedFeed.value = _unifiedFeed.value + finalBatch
+            _unifiedFeed.value = (_unifiedFeed.value + finalBatch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
             // Force the Pager to snap to the top (Index 0) on fresh filter loads
             if (isInitialLoad) {
                 viewModelScope.launch {

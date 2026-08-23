@@ -8,10 +8,10 @@ data class FeedMixSettings(
     val imageEnabled: Boolean = true,
     val articleEnabled: Boolean = true,
     val meshEnabled: Boolean = true,
-    val videoPercent: Int = 20,
-    val audioPercent: Int = 20,
-    val imagePercent: Int = 20,
-    val articlePercent: Int = 20,
+    val videoPercent: Int = 50,
+    val audioPercent: Int = 10,
+    val imagePercent: Int = 10,
+    val articlePercent: Int = 10,
     val meshPercent: Int = 20
 ) {
     fun toJson(): String = Gson().toJson(this)
