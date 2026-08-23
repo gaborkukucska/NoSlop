@@ -59,7 +59,13 @@ properties use `camelCase`.
 
 ---
 
-## 2. Full Packet Type Catalog (24 distinct type strings)
+## 2. Full Packet Type Catalog
+
+> The numbered rows below group some families onto one line (row 19 covers
+> six media types), so the row count is not the number of distinct `type`
+> strings. The authoritative list is the `when (packet.type)` block in
+> `MeshPacketHandler.handleIncomingPacket`, plus `MEDIA_RELAY_REQUEST` and
+> `MEDIA_PENDING`, which `GossipService` intercepts before dispatch.
 
 `Packets.kt`'s `type` field KDoc comment lists 19 non-media type strings;
 together with the 6 `MEDIA_*` types (§5) and `CONNECTION_REJECTED`, that's
@@ -91,8 +97,8 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 |---|---|---|---|---|---|
 | 1 | `POST` | `PostPayload` | `id\|authorId\|content\|timestamp` (+`\|authorAvatarB64` if set) | `PostPacketHandler.handlePost` | `postDao.insertPost`; triggers media auto-download |
 | 2 | `MESSAGE` | `EncryptedPayload` | n/a (encryption is the auth) | `DmPacketHandler.handleDirectMessage` | `messageDao.insertMessage`; auto-download if media |
-| 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | carried but **not verified** on receipt | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
-| 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | carried but **not verified** on receipt | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
+| 3 | `CONNECTION_REQUEST` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleConnectionRequest` | inserts untrusted `Peer`, sets `_incomingRequestFlow` |
+| 4 | `USER_HANDSHAKE` | `PeerHandshakePayload` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64`, `\|bio` if set) | `HandshakePacketHandler.handleUserHandshake` | upserts `Peer` with `isTrusted = true` |
 | 5 | `SYNC_REQUEST` | `SyncRequestPayload` | n/a | `SyncPacketHandler.handleSyncRequest` | none — replies `SYNC_RESPONSE` |
 | 6 | `SYNC_RESPONSE` | `SyncResponsePayload` | per-post `id\|authorId\|content\|timestamp` | `SyncPacketHandler.handleSyncResponse` | `postDao.insertPost` per valid post; also processes `comments`/`reactions` arrays |
 | 7 | `INVENTORY_SYNC_REQUEST` | `InventorySyncRequestPayload` | n/a | `SyncPacketHandler.handleInventorySyncRequest` | none — replies with a `SYNC_RESPONSE` containing only missing/updated posts + their comments/reactions |
@@ -109,6 +115,11 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 18 | `DELETE_POST` | `DeletePostPayload` | `postId\|authorId\|timestamp` | `PostPacketHandler.handleDeletePost` | marks `mesh_posts.isOrphaned = true` if `!isOrphaned && timestamp >= existingPost.timestamp` |
 | 19 | `MEDIA_REQUEST` / `MEDIA_CHUNK` / `MEDIA_RELAY_REQUEST` / `MEDIA_RECOVERY_FOUND` / `MEDIA_PENDING` / `MEDIA_TRANSFER_ACK` | see §5 | none | see §5 for routing (`GossipService` vs `MediaPacketHandler`/`MediaManager`) | see §5 |
 | 20 | `CONNECTION_REJECTED` | `ConnectionRejectedPayload` | `fromUserId\|timestamp` (signed) | `HandshakePacketHandler.handleConnectionRejected` | Deletes the untrusted `Peer` locally and triggers a decline notification |
+| 21 | `GROUP_INVITE` | `GroupInvitePayload` | `groupId\|title\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupInvite` | `groupChatDao.insertGroupChat` — only if the signature verifies against `adminPublicKeyB64`, our identity is in `members`, and any existing group of that id has the same admin |
+| 22 | `GROUP_UPDATE` | `GroupUpdatePayload` | `groupId\|title\|signerPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupUpdate` | `groupChatDao.insertGroupChat` with the merged member list, or `deleteGroupChat` if the update removed us |
+| 23 | `GROUP_DELETE` | `GroupDeletePayload` | `groupId\|delete\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupDelete` | `groupChatDao.deleteGroupChat` — admin only, signature-verified |
+| 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
+| 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
 
 Notes:
 
@@ -131,6 +142,27 @@ Notes:
 - Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) verify the signature
   on receipt covering `fromUserId|fromUsername|fromHomeNode|timestamp`
   (+ optional `authorAvatarB64` and `bio`). The verification gap has been closed.
+- Rows 21–23 (the `GROUP_*` family): all three carry a signature and all
+  three verify it. `GROUP_INVITE` and `GROUP_DELETE` verify against the
+  `adminPublicKeyB64` in the payload, and `GROUP_DELETE` additionally
+  requires that key to equal the *stored* group's admin — a packet-supplied
+  key matching itself proves nothing.
+
+  `GROUP_UPDATE` is the awkward one: it has no signer field, and
+  `GossipService.forwardPacket` re-stamps `senderId` on relay, so neither
+  can identify who signed it. `resolveUpdateSigner` recovers the signer by
+  testing the signature against the admin key and each current member key in
+  turn — O(members) Ed25519 verifies, on this packet type only. Once the
+  signer is known, authorisation is per-field: only the admin may change
+  title / description / avatar; a non-admin may add members only when
+  `allowMemberInvites` is set, and may remove only itself and only when
+  `allowMemberSelfRemove` is set. The admin can never be removed by an
+  inbound packet. These two switches live on the `GroupChat` entity and were
+  previously stored but never enforced on the wire.
+- Rows 24–25 (`TYPING`/`READ_RECEIPT`) are unsigned by design — they carry
+  no durable state and are cheap to spoof. `READ_RECEIPT` marks exactly the
+  message named by `messageId`; it used to mark the whole conversation read
+  and ignore that field entirely.
 
 ---
 
@@ -169,13 +201,26 @@ Every payload class in `Packets.kt`, with wire (`snake_case`) field names.
 | `id` | String | Unique message ID |
 | `nonce` | String | Initialization Vector/Nonce for encryption |
 | `ciphertext` | String | Encrypted payload (Base64) |
-| `group_id`? | String | Reserved, unused — group chats are not implemented (see GAP_ANALYSIS.md §3) |
+| `group_id`? | String | Set when this DM is one fan-out leg of a group message; the receiver files it under this group's thread instead of a 1:1 thread. `null` for ordinary DMs. |
 | `timestamp`? | Long | Epoch timestamp |
 
 If a DM carries media, the decrypted plaintext is a JSON object
 `{"content": "<text>", "media": <MediaMetadata>}` rather than raw text;
 `handleDirectMessage` attempts to parse it as JSON and falls back to raw
 text if parsing fails.
+
+**Group messages** ride on this same `MESSAGE` type. `sendGroupMessage`
+encrypts the body once per member with that member's X25519 key and sends N
+separate packets, each carrying the same `group_id` and the same message
+`id`. The plaintext JSON also carries a `groupId` field, which
+`handleDirectMessage` reads as a fallback for senders that only populate it
+there. On receipt, a packet with a resolved group id is checked against the
+local `GroupChat` — unknown group, or a sender who is not a member, and the
+packet is dropped. Accepted group messages are stored with
+`chatWithPeerPub = groupId` (matching what the sender's own local echo does)
+and with the *decrypted* text in the `ciphertext` column, because a group
+thread has no single counterparty key for the chat screen to decrypt against
+at render time.
 
 ### CONNECTION_REQUEST / USER_HANDSHAKE
 **Type:** `CONNECTION_REQUEST` or `USER_HANDSHAKE` · class `PeerHandshakePayload` (shared, unified type per milestone 56)
@@ -334,6 +379,79 @@ There is **no** separate `INVENTORY_SYNC_RESPONSE` type — both `SYNC_REQUEST`
 and `INVENTORY_SYNC_REQUEST` reply using this same `SYNC_RESPONSE` type,
 distinguished only by whether `comments`/`reactions` are populated (older
 timestamp-based replies leave them `null`).
+
+### GROUP_INVITE
+**Type:** `GROUP_INVITE` · class `GroupInvitePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier (UUID, minted by the creator) |
+| `title` | String | Group name |
+| `admin_public_key` | String | Creator's Ed25519 key; also the verifying key for the signature |
+| `members` | Array\<String\> | Full member list as Ed25519 public keys |
+| `avatar_b64`? | String | Group picture |
+| `description`? | String | Group description |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId\|title\|adminPublicKeyB64\|timestamp` |
+
+Rejected unless the signature verifies against `admin_public_key`, our own
+(or burnable) identity appears in `members`, and — if we already hold a group
+with this `group_id` — the admin key matches the stored one. An inbound
+packet can never reassign a group's admin.
+
+### GROUP_UPDATE
+**Type:** `GROUP_UPDATE` · class `GroupUpdatePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `title`? | String | New title, or the unchanged current title |
+| `avatar_b64`? | String | New group picture |
+| `description`? | String | New description |
+| `added_members`? | Array\<String\> | Members added by this update (a delta, not the full list) |
+| `removed_members`? | Array\<String\> | Members removed by this update |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId\|title\|signerPublicKeyB64\|timestamp` |
+
+`added_members` / `removed_members` are genuine deltas computed by
+`NoSlopRepository.updateGroupChat` against the stored member list. They were
+previously the *whole* new member list in `added_members` with
+`removed_members` never populated, which is why removals could not propagate:
+the receiver does `addAll(added)` then `distinct()`.
+
+There is no signer field — see the note under §2 rows 21–23 for how the
+signer is recovered and what each role is permitted to change.
+
+### GROUP_DELETE
+**Type:** `GROUP_DELETE` · class `GroupDeletePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `group_id` | String | Group identifier |
+| `admin_public_key` | String | Claimed admin key; must equal the stored group's admin |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+
+### TYPING
+**Type:** `TYPING` · class `TypingPayload` · **unsigned**
+
+| Field | Type | Description |
+|---|---|---|
+| `chat_with_peer_pub` | String | Sender's own public key, i.e. which thread the indicator belongs to from the receiver's point of view |
+| `is_typing` | Boolean | Whether the indicator should show |
+| `timestamp` | Long | Epoch milliseconds |
+
+### READ_RECEIPT
+**Type:** `READ_RECEIPT` · class `ReadReceiptPayload` · **unsigned**
+
+| Field | Type | Description |
+|---|---|---|
+| `message_id` | String | The specific message being acknowledged |
+| `reader_public_key` | String | Reader's public key |
+| `timestamp` | Long | Epoch milliseconds |
+
+Blank `message_id` is rejected. Neither of these two types is signed, so
+neither should be treated as evidence of anything.
 
 ---
 
@@ -514,6 +632,10 @@ and still accurate.
 | `DELETE_POST` | `postId\|authorId\|timestamp` |
 | `CONNECTION_REJECTED` | `fromUserId\|timestamp` |
 | `CONNECTION_REQUEST` / `USER_HANDSHAKE` | `fromUserId\|fromUsername\|fromHomeNode\|timestamp` (+`\|authorAvatarB64` if set) (+`\|bio` if set) |
+| `GROUP_INVITE` | `groupId\|title\|adminPublicKeyB64\|timestamp` |
+| `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
+| `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+| `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64
 no-wrap encoding, over the UTF-8 bytes of the literal pipe-delimited string.

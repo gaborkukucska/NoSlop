@@ -198,6 +198,11 @@ interface MessageDao {
     @Query("UPDATE chat_messages SET isRead = 1 WHERE chatWithPeerPub = :peerPub")
     suspend fun markAsRead(peerPub: String)
 
+    // Adding a @Query does not change the Room identity hash, so no schema
+    // version bump is needed here.
+    @Query("UPDATE chat_messages SET isRead = 1 WHERE id = :messageId")
+    suspend fun markAsReadById(messageId: String)
+
     @Query("DELETE FROM chat_messages WHERE chatWithPeerPub = :peerPub")
     suspend fun deleteMessagesWithPeer(peerPub: String)
 }

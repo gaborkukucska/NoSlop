@@ -71,12 +71,44 @@ class DmPacketHandler(
                 // Not JSON, use raw plaintext
             }
 
+            // --- NOSLOP_GROUP_DM_V1 ---
+            // A group message must land in the group thread, not in the 1:1 DM
+            // thread with whoever happened to send it. sendGroupMessage keys
+            // its local echo on groupId, so match that here. groupId is read
+            // from the payload, falling back to the plaintext body for peers
+            // that only populate it there.
+            var groupId: String? = msgPay.groupId?.takeIf { it.isNotBlank() }
+            if (groupId == null) {
+                try {
+                    val gObj = com.google.gson.Gson().fromJson(plaintext, com.google.gson.JsonObject::class.java)
+                    if (gObj.has("groupId")) groupId = gObj.get("groupId").asString?.takeIf { it.isNotBlank() }
+                } catch (e: Exception) { /* not JSON -- an ordinary 1:1 DM */ }
+            }
+            if (groupId != null) {
+                val group = db.groupChatDao().getGroupChatById(groupId)
+                if (group == null) {
+                    Logger.warn(TAG, "Dropping group message for unknown group $groupId")
+                    return false
+                }
+                val members: List<String> = try {
+                    com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+                } catch (e: Exception) { emptyList() }
+                if (!members.contains(packet.senderId)) {
+                    Logger.warn(TAG, "Dropping group message for $groupId: sender is not a member")
+                    return false
+                }
+            }
+
+            val threadKey = groupId ?: packet.senderId
             val msg = ChatMessage(
                 id = msgPay.id,
-                chatWithPeerPub = packet.senderId,
+                chatWithPeerPub = threadKey,
                 senderPub = packet.senderId,
-                ciphertext = msgPay.ciphertext,
-                nonce = msgPay.nonce,
+                // A group thread has no single counterparty key to decrypt
+                // against at render time, so store the resolved plaintext --
+                // the same convention sendGroupMessage uses for its own echo.
+                ciphertext = if (groupId != null) finalContent else msgPay.ciphertext,
+                nonce = if (groupId != null) "" else msgPay.nonce,
                 timestamp = msgPay.timestamp ?: System.currentTimeMillis(),
                 mediaId = mediaId,
                 mediaType = mediaType,
@@ -154,7 +186,10 @@ class DmPacketHandler(
     suspend fun handleReadReceipt(packet: NetworkPacket): Boolean {
         val receipt = packet.getReadReceiptPayload() ?: return false
         Logger.debug(TAG, "Received READ_RECEIPT for message ${receipt.messageId} from ${packet.senderId}")
-        messageDao.markAsRead(packet.senderId)
+        // Was markAsRead(packet.senderId), which marked the entire conversation
+        // read and ignored the messageId the packet actually carries.
+        if (receipt.messageId.isBlank()) return false
+        messageDao.markAsReadById(receipt.messageId)
         repo.triggerDmSync()
         return true
     }

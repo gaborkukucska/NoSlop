@@ -3,6 +3,8 @@ package com.noslop.app.util
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.noslop.app.debug.Logger
@@ -44,6 +46,10 @@ object LanguageManager {
 val String.tr: String
     @Composable
     get() {
-        LanguageManager.currentLanguage.collectAsState()
-        return LanguageManager.translate(this)
+        // --- NOSLOP_I18N_RECOMPOSE_V1 ---
+        // collectAsState() used to be called and its result discarded. Compose
+        // only invalidates a composable that READS a state value, so switching
+        // language left every already-composed screen in the old language.
+        val lang by LanguageManager.currentLanguage.collectAsState()
+        return remember(lang, this) { LanguageManager.translate(this) }
     }

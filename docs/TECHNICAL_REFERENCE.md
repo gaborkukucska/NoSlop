@@ -230,6 +230,36 @@ If a DM carries media, the plaintext is actually a JSON object
 attempts to parse decrypted plaintext as JSON and falls back to treating it
 as raw text if parsing fails.
 
+### 3.5.1 Group Message Fan-Out
+
+There is no group-wide symmetric key. `NoSlopRepository.sendGroupMessage`
+encrypts the message body once per member using **that member's** X25519
+public key and the sender's own X25519 private key
+(`IdentityKeys.encPrivateKeyB64` — note this is a different key from the
+Ed25519 `privateKeyB64` used for signing), then sends N separate `MESSAGE`
+packets. Each leg carries the same `EncryptedPayload.groupId` and the same
+message `id`.
+
+```
+for member in group.members - self:
+    ciphertext, nonce = encryptDM(bodyJson, member.encPub, my.encPriv)
+    send MESSAGE { id, ciphertext, nonce, groupId, timestamp } -> member
+```
+
+The trade-off is the same one gChat makes: O(N) encryption work per message,
+in exchange for never having to rotate a shared key when membership changes.
+
+Encryption failure is not silent. `encryptDM` returns `Pair("", "")` rather
+than throwing on any failure, so `sendGroupMessage` checks for a blank
+ciphertext or nonce and skips that recipient with an error log instead of
+transmitting an empty payload.
+
+**Known limitation.** DM encryption is static-static X25519: the shared
+secret between any two identities is the same for every message they ever
+exchange. There is no forward secrecy and no ratchet, so compromise of one
+long-term private key retroactively decrypts that pair's entire history.
+Group messages inherit this, once per member.
+
 ### 3.6 Tor Hidden Service Key Expansion
 
 `getRawEd25519Seed(privKeyB64)` converts the app's PKCS#8 Ed25519 private key
@@ -682,7 +712,7 @@ and continue using natural trending/hot sorting.
 | Client | Auth | Notes |
 |---|---|---|
 | `YouTubeInternalClient` | none | Primary YouTube integration via InnerTube API. Marked `requiresUserKey = false` in `ApiKeyRepository.SERVICES` (InnerTube proxy & direct fallbacks). Bypasses PoToken using TVHTML5 and native Android/iOS client spoofing. Prioritizes HLS streams for native ExoPlayer playback. |
-| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool |
+| `InvidiousApiClient` | none | Legacy YouTube fallback via Invidious instance pool. Routed through the Tor SOCKS proxy whenever `HttpClientProvider.useTorForClearnet` is set (`probeClientTor`), falling back to a direct client only when the user has turned Tor routing off. Instances are **raced**, not walked: batches of `RACE_WIDTH` (4) are queried in parallel and the first usable answer wins. Losing racers are cancelled through OkHttp `enqueue`/`Call.cancel` so their Tor circuits are released immediately rather than pinned until the read timeout, and a cancelled racer is not marked failed — otherwise every race would blacklist three healthy instances. |
 | `RedditApiClient` | none | `fetchSubreddit(sub, sort)`, `searchReddit(query, recentOnly)` — decodes `&amp;` preview URLs and preserves article classification for link/text posts |
 | `InternetArchiveClient` | none | `getPopularVideos()`, `getPopularAudio()`, `searchAudio(query)` — supports keyless MP3/FLAC music and podcast browsing |
 | `OpenverseApiClient` | none | `searchAudio(query)`, `searchImages(query)` — CC-licensed audio and photography, 5 min rate-limit cooldown |

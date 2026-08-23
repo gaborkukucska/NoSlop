@@ -728,7 +728,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 type = "TYPING",
                 payload = com.google.gson.Gson().toJsonTree(typingPayload)
             )
-            com.noslop.app.mesh.MeshTransport(this).sendPacket(peer.onionAddress, packet = packet)
+            meshTransport.sendPacket(peer.onionAddress, packet = packet)
         }
     }
 
@@ -767,8 +767,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
             if (peer.onionAddress.isNotBlank()) {
                 val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
-                val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.privateKeyB64)
-                val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, timestamp = timestamp)
+                // --- NOSLOP_GROUP_DM_V1 ---
+                // encryptDM expects the X25519 key. This used to pass
+                // myKeys.privateKeyB64 (Ed25519); decodeX25519PrivateKey threw,
+                // encryptDM caught it and returned Pair("", ""), and every group
+                // message went out empty with no error surfaced anywhere.
+                val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
+                if (ciphertext.isBlank() || nonce.isBlank()) {
+                    Logger.error("REPOSITORY", "Group message encryption failed for a member -- not sending")
+                    continue
+                }
+                // groupId has to ride on the payload or the receiver has no way
+                // to route this into the group thread.
+                val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
                 val packet = com.noslop.app.mesh.NetworkPacket(
                     id = java.util.UUID.randomUUID().toString(),
                     senderId = myKeys.publicKeyB64,
@@ -776,7 +787,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     type = "MESSAGE",
                     payload = com.google.gson.Gson().toJsonTree(msgPayload)
                 )
-                com.noslop.app.mesh.MeshTransport(this).sendPacket(peer.onionAddress, packet = packet)
+                meshTransport.sendPacket(peer.onionAddress, packet = packet)
             }
         }
     }
@@ -792,7 +803,22 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     ) {
         val myKeys = getLocalIdentity() ?: return
         val existing = db.groupChatDao().getGroupChatById(groupId) ?: return
-        val membersJson = com.google.gson.Gson().toJson(membersList.distinct())
+
+        // --- NOSLOP_GROUP_DELTA_V1 ---
+        // This used to send addedMembers = membersList, i.e. the COMPLETE new
+        // member list, and never set removedMembers at all. The receiver does
+        // addAll(added) then distinct(), so a removal could never propagate --
+        // the removed member stayed in every other peer's copy of the group and
+        // kept receiving its messages. Diff against the stored list and send
+        // the actual deltas instead.
+        val previousMembers: List<String> = try {
+            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        val newMembers = membersList.distinct()
+        val addedMembers = newMembers.filter { it !in previousMembers }
+        val removedMembers = previousMembers.filter { it !in newMembers }
+
+        val membersJson = com.google.gson.Gson().toJson(newMembers)
         val timestamp = System.currentTimeMillis()
 
         val updatedGroup = existing.copy(
@@ -812,10 +838,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             title = title,
             avatarB64 = avatarB64,
             description = description,
-            addedMembers = membersList,
+            addedMembers = addedMembers.takeIf { it.isNotEmpty() },
+            removedMembers = removedMembers.takeIf { it.isNotEmpty() },
             timestamp = timestamp,
             signature = signature
         )
+        Logger.info("REPOSITORY", "Group $groupId update: +${addedMembers.size} / -${removedMembers.size} member(s)")
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = java.util.UUID.randomUUID().toString(),
             senderId = myKeys.publicKeyB64,

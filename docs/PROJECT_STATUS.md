@@ -1,5 +1,55 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-23) — Security Audit Follow-Up
+
+### 1. Group Packet Authentication (`NOSLOP_GROUP_AUTH_V1`)
+
+*   **Signature verification for the whole `GROUP_*` family**: `GROUP_INVITE`, `GROUP_UPDATE` and `GROUP_DELETE` each carried a `signature` field that was never checked in [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt). Any trusted peer could rename a group, replace its avatar, or add and remove arbitrary members. All three now verify, matching every other handler in the class.
+*   **Signer recovery for `GROUP_UPDATE`**: the payload has no signer field, and `GossipService.forwardPacket` re-stamps `senderId` on relay, so neither identifies who signed. `resolveUpdateSigner` recovers the signer by testing the signature against the admin key and each current member key in turn — O(members) Ed25519 verifies on this packet type only, and no wire-format change.
+*   **Role authorisation**: only the admin may change title / description / avatar; a non-admin may add members only when `allowMemberInvites` is set, and may remove only itself and only when `allowMemberSelfRemove` is set; the admin can never be removed by an inbound packet. Both switches already existed on the `GroupChat` entity and were surfaced in `GroupSettingsModal` — they were simply never enforced on the wire.
+*   **`GROUP_INVITE` hardening**: an invite is rejected unless our own (or burnable) identity appears in `members`, and an inbound packet can no longer reassign the admin of a group we already hold.
+*   **`GROUP_DELETE` hardening**: the packet-supplied `adminPublicKeyB64` must equal the *stored* group's admin **and** the signature must verify against it. Previously only the first check ran, which proves nothing on its own.
+
+### 2. Group Messaging Fixes (`NOSLOP_GROUP_DM_V1`)
+
+*   **Wrong key in `sendGroupMessage`**: [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) passed `myKeys.privateKeyB64` (Ed25519) to `CryptoService.encryptDM`, which expects the X25519 key. `decodeX25519PrivateKey` threw, `encryptDM` caught it and returned `Pair("", "")`, and **every group message went out with an empty ciphertext and empty nonce**, silently. Now uses `encPrivateKeyB64`, and a blank result skips that recipient with an error log rather than transmitting an empty payload.
+*   **`groupId` now set on the payload**: `EncryptedPayload.groupId` was never populated, so a receiver had no way to route the message to a group thread.
+*   **Inbound routing**: [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt) filed group messages under `chatWithPeerPub = packet.senderId`, i.e. into the 1:1 DM thread with whoever sent them. They now resolve the group id (payload first, decrypted-plaintext `groupId` as fallback), verify the sender is a member of a group we hold, and store under `chatWithPeerPub = groupId` — matching the convention the sender's own local echo already used.
+*   **Member removal propagation (`NOSLOP_GROUP_DELTA_V1`)**: `updateGroupChat` sent `addedMembers = membersList`, the *complete* new member list, and never populated `removedMembers`. Since the receiver does `addAll(added)` then `distinct()`, a removal could never propagate — the removed member stayed in every other peer's copy of the group and kept receiving its messages. It now diffs against the stored member list and sends real deltas. `handleGroupUpdate` deletes the group locally when the update removes our own identity.
+
+### 3. Tor Routing Gap in the Invidious Client (`NOSLOP_INVIDIOUS_TOR_V1`)
+
+*   **Search and stream resolution were leaking the user's IP**: `probeClient` in [InvidiousApiClient.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/feeds/api/InvidiousApiClient.kt) was built with no `.proxy()` at all, so every search query, video-ID resolution and channel lookup went to Invidious instances **over the user's real IP** — while the Tor-respecting `client` val declared ten lines above was never referenced anywhere in the file. Split into `probeClientTor` (SOCKS to the local Tor port, no custom DNS so hostnames resolve at the exit) and `probeClientDirect`, selected by `HttpClientProvider.useTorForClearnet`. The dead `client` val was removed.
+
+### 4. Invidious Instance Racing (`NOSLOP_INSTANCE_RACE_V1`)
+
+*   **Parallel instance selection**: all five instance loops (`resolveStreamUrl`, `searchVideos`, `getTrendingVideos`, `searchChannels`, `getChannelJoinedTimestamp`) were strictly sequential — try one, wait for it to answer or time out, then try the next — which over Tor meant tens of seconds of spinner whenever the first instance happened to be slow. They now share one `raceInstances` helper that fires batches of `RACE_WIDTH` (4) in parallel and takes the first usable answer.
+*   **Real cancellation**: switched from `Call.execute()` to `Call.enqueue()` behind a `suspendCancellableCoroutine`, so cancelling a losing racer actually cancels the HTTP call and frees its Tor circuit. `execute()` blocks a thread that coroutine cancellation cannot interrupt, which would have pinned circuits until the read timeout — the same starvation `NOSLOP_TOR_STARVATION_V1` in `MeshTransport` exists to avoid.
+*   **Cancellation is not failure**: `queryInstance` catches and rethrows `CancellationException` *before* the general handler, so losing racers are never passed to `markInstanceFailed`. Without that, every race would blacklist three healthy instances and drive the pool into all-cooldown fast-fail.
+
+### 5. Read Receipts, Transport Reuse, and i18n Recomposition
+
+*   **`READ_RECEIPT` honours `messageId`**: `handleReadReceipt` called `messageDao.markAsRead(packet.senderId)`, marking the **entire conversation** read and ignoring the `messageId` the packet carries. Added `MessageDao.markAsReadById` in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt) (a new `@Query` does not change Room's identity hash, so no schema version bump was needed).
+*   **Shared `MeshTransport` (`NOSLOP_TOR_STARVATION_V1` follow-up)**: `sendTypingSignal` and `sendGroupMessage` each constructed `MeshTransport(this)` per send. Every instance carries its own `Semaphore(24)` and its own never-cancelled `CoroutineScope`, so they bypassed the shared Tor circuit budget entirely and leaked a scope per call — `sendGroupMessage` did it *inside* the member loop. Both now use the repository's shared `meshTransport`.
+*   **Language switching now recomposes (`NOSLOP_I18N_RECOMPOSE_V1`)**: the `String.tr` extension in [LanguageManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/util/LanguageManager.kt) called `collectAsState()` and discarded the result. Compose only invalidates a composable that *reads* a state value, so changing language left every already-composed screen in the old language until something unrelated forced recomposition.
+
+### 6. Documentation Accuracy
+
+*   **README claims corrected**: the blanket "All network traffic is routed through Tor by default" now states the actual carve-outs (update check and APK download go direct so they work before Tor bootstraps); the rate-limit claim now names which packet types the 20-per-10s limiter actually covers; "the network rejects forgeries" now enumerates the verified families and names `TYPING`/`READ_RECEIPT` as deliberately unsigned. Group chats documented as a shipped feature.
+*   **[WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)**: added catalog rows and payload field tables for `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` / `TYPING` / `READ_RECEIPT`, added the group signed-string formats to the consolidated §7 table, corrected `EncryptedPayload.group_id` (no longer "reserved, unused"), and removed the stale "not verified on receipt" text on the handshake rows that the note beneath already contradicted.
+*   **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)**: new §3.5.1 on group message fan-out, including the explicit note that DM encryption is static-static X25519 with **no forward secrecy**.
+*   **[GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)**: §3 restated from "absent" to "partially implemented", with the remaining gaps against the gChat spec named — chiefly the missing `GROUP_QUERY`/`GROUP_SYNC` catch-up, the single-admin model, and no ban list.
+
+### Known Issues Not Addressed In This Pass
+
+*   **SSH host key auto-accept during Hub deployment** — `SshDeployer.promptYesNo` returns `true` unconditionally, so any host key is accepted silently, and the user's Ed25519 *and* X25519 private keys are transmitted over that session. On a compromised LAN this is a full, silent, unrecoverable identity compromise. Mitigated in practice by deployment happening over a trusted local network; a pairing-QR flow that keeps the identity out of the SSH channel is the intended replacement.
+*   **`MeshTransport.handleIncomingConnection`** reads unbounded lines with no `soTimeout` and no connection cap — a remote OOM / slowloris vector for anyone who knows the onion address.
+*   **`GossipService.senderRateLimits` and `firewallBuffer`** are unbounded maps keyed on attacker-supplied `senderId` and are never swept.
+*   **`GossipService.broadcast`** discards the return value of `pushPacketToHub` and has no direct-Tor fallback, unlike `MeshTransport.sendPacket` — with a linked-but-offline Hub, outbound broadcasts are silently dropped.
+*   **Tripcodes are 6 base32 characters (30 bits)** and therefore grindable for targeted collision; they should not be treated as an identity check.
+
+---
+
 ## Completed Changes (2026-08-23)
 
 ### 1. First-Install Default Settings Alignment

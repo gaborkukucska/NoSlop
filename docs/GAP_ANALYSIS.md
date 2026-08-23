@@ -58,7 +58,8 @@ gChat/HAI-Net but have **no equivalent** in NoSlop:
 | `IDENTITY_UPDATE` | gChat | Propagates changes to display name / avatar / bio to peers without a full re-handshake | **Done** — Handled when `handle` (the user's display name) or avatar is changed in settings |
 | `ANNOUNCE_PEER` | gChat | Lightweight "I'm online" heartbeat carrying `onionAddress` + `alias`; drives gChat's "Live Contact Sync" (instant green/online indicator) | **Done** — `ANNOUNCE_PEER` implemented in Phase 1 |
 | `FOLLOW` / `UNFOLLOW` | gChat | Asymmetric "follow" relationship distinct from the symmetric Trusted Peer / firewall relationship | Absent — NoSlop's only relationship model is binary trust (`Peer.isTrusted`) |
-| `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` / `GROUP_QUERY` / `GROUP_SYNC` | gChat | Full decentralized group-chat packet family (see §3) | Absent — NoSlop README Phase 2 lists "Group Chats" as planned but no schema exists |
+| `GROUP_INVITE` / `GROUP_UPDATE` / `GROUP_DELETE` | gChat, NoSlop | Group create / membership change / teardown | **Implemented** — signed, verified, role-authorised (see §3) |
+| `GROUP_QUERY` / `GROUP_SYNC` | gChat | Group state catch-up after a member reconnects | Absent — a NoSlop member offline during a `GROUP_UPDATE` never learns of it (see §3) |
 | `TYPING` | gChat | Ephemeral typing-indicator packet (not persisted) | Absent |
 | `READ_RECEIPT` | gChat | Per-message read acknowledgement | Absent |
 | `INVENTORY_SYNC_REQUEST` / `INVENTORY_SYNC_RESPONSE` | gChat | Hash-based inventory diffing — peer sends a list of `{id, hash}` pairs; the other side replies only with posts the requester is missing | **Done** — Replaced legacy sync with `INVENTORY_SYNC_REQUEST` in Phase 2 |
@@ -107,12 +108,32 @@ describes additional behavior not yet present in NoSlop:
 
 ---
 
-## 3. Group Chats — Full Spec Exists in gChat, Absent in NoSlop
+## 3. Group Chats — Partially Implemented in NoSlop
 
-NoSlop's README lists "Group Chats" as a Phase 2 planned feature with no
-schema. gChat already has a complete, working implementation
-(`GroupSettingsModal.tsx`, `groups.rs` in hainet-social, and the `GroupSchema`
-in `packetSchema.ts`). The relevant spec:
+**Status: substantially implemented, with named gaps.** NoSlop now has a
+`GroupChat` Room entity, `GroupChatDao`, the `GROUP_INVITE` / `GROUP_UPDATE`
+/ `GROUP_DELETE` packet family, per-recipient encryption fan-out in
+`NoSlopRepository.sendGroupMessage`, and a `GroupSettingsModal` UI. All three
+group packets are signature-verified and role-authorised on receipt — see
+WIRE_PROTOCOL_REFERENCE.md §2 rows 21–23 for the exact rules.
+
+What still differs from the gChat spec below:
+
+- **No `GROUP_QUERY` / `GROUP_SYNC`.** A member who is offline when a
+  `GROUP_UPDATE` is broadcast never learns about it, and has no way to ask
+  for the current state on reconnect. This is the largest remaining gap and
+  the one most likely to be noticed in practice.
+- **Single admin, no admin list, no bans.** `GroupChat.adminPublicKeyB64` is
+  one key. gChat separates `ownerId` from an `admins` array and supports
+  `bannedIds`; NoSlop has neither, so there is no kick-and-stay-kicked.
+- **No `allowMemberNameChange`.** NoSlop has `allowMemberInvites` and
+  `allowMemberSelfRemove` (both now enforced on the wire, not just stored).
+- **Last-write-wins on concurrent updates.** Two members adding people at
+  the same time produce two `GROUP_UPDATE`s with no ordering or merge rule
+  beyond delta application; the union usually survives, but concurrent
+  metadata edits do not.
+
+The original gChat spec, retained for reference:
 
 ```
 GroupSchema = {
@@ -427,8 +448,13 @@ implementation effort vs. value:
 - [x] `IDENTITY_UPDATE` packet for profile-change propagation (§1)
 - [ ] `FOLLOW`/`UNFOLLOW` asymmetric relationship model (§1)
 - [x] `USER_EXIT` graceful-shutdown broadcast on logout (§5)
-- [ ] Group chats: `Group` entity + `GROUP_*` packets + multi-recipient
-      encryption fan-out (§3)
+- [x] Group chats: `GroupChat` entity + `GROUP_INVITE`/`GROUP_UPDATE`/
+      `GROUP_DELETE` packets + per-recipient encryption fan-out, all
+      signature-verified and role-authorised (§3)
+- [ ] Group state catch-up: `GROUP_QUERY` / `GROUP_SYNC` so a member offline
+      during an update can resynchronise on reconnect (§3)
+- [ ] Group admin list + bans (`admins[]`, `bannedIds[]`) — NoSlop has a
+      single admin key and no ban list (§3)
 - [ ] User-selectable theme palettes (low priority, §8)
 - [ ] Document NoSlop's potential future role as a HAI-Net hub
       "frontend client" (§9) — architecture discussion, not code

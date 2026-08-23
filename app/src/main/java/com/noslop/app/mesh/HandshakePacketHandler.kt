@@ -466,8 +466,60 @@ class HandshakePacketHandler(
         return true
     }
 
+    // --- NOSLOP_GROUP_AUTH_V1 ---
+    // GROUP_INVITE / GROUP_UPDATE / GROUP_DELETE all carry a `signature`
+    // field that was never checked, so any trusted peer could rename a group,
+    // swap its avatar, or add and remove arbitrary members. Every other
+    // handler in this class verifies its payload; these three now do too.
+    //
+    // GROUP_UPDATE has no signer field, and GossipService.forwardPacket
+    // re-stamps packet.senderId on relay -- so senderId cannot identify the
+    // signer. We recover it by testing the signature against each current
+    // member's key. That is O(members) Ed25519 verifies on GROUP_UPDATE only,
+    // and needs no wire-format change.
+    private fun parseMembers(membersJson: String): MutableList<String> = try {
+        com.google.gson.Gson().fromJson(membersJson, Array<String>::class.java).toMutableList()
+    } catch (e: Exception) { mutableListOf() }
+
+    private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
+        val title = update.title ?: existing.title
+        val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
+        for (candidate in candidates) {
+            if (candidate.isBlank()) continue
+            val payloadToVerify = "${update.groupId}|$title|$candidate|${update.timestamp}"
+            if (CryptoService.verify(payloadToVerify, update.signature, candidate)) return candidate
+        }
+        return null
+    }
+
     suspend fun handleGroupInvite(packet: NetworkPacket): Boolean {
         val invite = packet.getGroupInvitePayload() ?: return false
+
+        val payloadToVerify = "${invite.groupId}|${invite.title}|${invite.adminPublicKeyB64}|${invite.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, invite.signature, invite.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: bad admin signature")
+            return false
+        }
+
+        // Only accept an invite that actually names us -- otherwise anyone can
+        // push arbitrary groups into our chat list.
+        val myKeys = repo.getLocalIdentity()
+        val burnable = repo.getBurnableIdentity()
+        val meInGroup = invite.members.any {
+            it == myKeys?.publicKeyB64 || (burnable != null && it == burnable.publicKeyB64)
+        }
+        if (!meInGroup) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: our identity is not in the member list")
+            return false
+        }
+
+        // An existing group's admin may never be reassigned by an inbound packet.
+        val existing = db.groupChatDao().getGroupChatById(invite.groupId)
+        if (existing != null && existing.adminPublicKeyB64 != invite.adminPublicKeyB64) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: admin key does not match the stored group")
+            return false
+        }
+
         val membersJson = com.google.gson.Gson().toJson(invite.members)
         val group = GroupChat(
             groupId = invite.groupId,
@@ -486,33 +538,93 @@ class HandshakePacketHandler(
     suspend fun handleGroupUpdate(packet: NetworkPacket): Boolean {
         val update = packet.getGroupUpdatePayload() ?: return false
         val existing = db.groupChatDao().getGroupChatById(update.groupId) ?: return false
-        var currentMembers: MutableList<String> = try {
-            com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toMutableList()
-        } catch (e: Exception) { mutableListOf() }
-        
-        update.addedMembers?.let { currentMembers.addAll(it) }
-        update.removedMembers?.let { currentMembers.removeAll(it.toSet()) }
+
+        val currentMembers = parseMembers(existing.membersJson)
+
+        val signer = resolveUpdateSigner(update, existing, currentMembers)
+        if (signer == null) {
+            Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: signature matches no current member")
+            return false
+        }
+        val isAdmin = signer == existing.adminPublicKeyB64
+
+        val added = update.addedMembers.orEmpty()
+        val removed = update.removedMembers.orEmpty()
+
+        // Authorise per field. These are the same two switches the group
+        // settings UI already exposes (allowMemberInvites / allowMemberSelfRemove)
+        // and that were stored on the entity but never enforced on the wire.
+        if (!isAdmin) {
+            val metadataChanged =
+                (update.title != null && update.title != existing.title) ||
+                (update.description != null && update.description != existing.description) ||
+                (update.avatarB64 != null && update.avatarB64 != existing.avatarB64)
+            if (metadataChanged) {
+                Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: only the admin may change group metadata")
+                return false
+            }
+            if (added.isNotEmpty() && !existing.allowMemberInvites) {
+                Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: member invites are disabled for this group")
+                return false
+            }
+            if (removed.isNotEmpty()) {
+                val selfRemovalOnly = removed.size == 1 && removed[0] == signer
+                if (!selfRemovalOnly || !existing.allowMemberSelfRemove) {
+                    Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: a member may only remove themselves")
+                    return false
+                }
+            }
+        }
+        if (removed.contains(existing.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_UPDATE ${update.groupId}: the admin cannot be removed")
+            return false
+        }
+
+        currentMembers.addAll(added)
+        currentMembers.removeAll(removed.toSet())
         val updatedTitle = update.title ?: existing.title
-        
+
         val updatedGroup = existing.copy(
             title = updatedTitle,
             description = update.description ?: existing.description,
             avatarB64 = update.avatarB64 ?: existing.avatarB64,
             membersJson = com.google.gson.Gson().toJson(currentMembers.distinct())
         )
+        // --- NOSLOP_GROUP_DELTA_V1 ---
+        // If this update removed us, drop the group locally rather than leaving
+        // a thread in the chat list for a group we are no longer part of.
+        val myPub = repo.getLocalIdentity()?.publicKeyB64
+        val myBurnable = repo.getBurnableIdentity()?.publicKeyB64
+        val stillAMember = currentMembers.any { it == myPub || (myBurnable != null && it == myBurnable) }
+        if (!stillAMember) {
+            db.groupChatDao().deleteGroupChat(update.groupId)
+            Logger.info(TAG, "Left group chat ${update.groupId}: we were removed by ${if (isAdmin) "the admin" else "a member"}")
+            return true
+        }
+
         db.groupChatDao().insertGroupChat(updatedGroup)
-        Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId})")
+        Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId}) by ${if (isAdmin) "admin" else "member"}")
         return true
     }
 
     suspend fun handleGroupDelete(packet: NetworkPacket): Boolean {
         val del = packet.getGroupDeletePayload() ?: return false
         val existing = db.groupChatDao().getGroupChatById(del.groupId) ?: return false
-        if (existing.adminPublicKeyB64 == del.adminPublicKeyB64) {
-            db.groupChatDao().deleteGroupChat(del.groupId)
-            Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet")
-            return true
+
+        // The stored admin key is the authority -- a packet-supplied key that
+        // matches it proves nothing on its own, so verify the signature too.
+        if (existing.adminPublicKeyB64 != del.adminPublicKeyB64) {
+            Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: not from the stored admin")
+            return false
         }
-        return false
+        val payloadToVerify = "${del.groupId}|delete|${del.adminPublicKeyB64}|${del.timestamp}"
+        if (!CryptoService.verify(payloadToVerify, del.signature, del.adminPublicKeyB64)) {
+            Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: bad admin signature")
+            return false
+        }
+
+        db.groupChatDao().deleteGroupChat(del.groupId)
+        Logger.info(TAG, "Deleted group chat (${del.groupId}) via admin delete packet")
+        return true
     }
 }
