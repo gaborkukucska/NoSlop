@@ -147,6 +147,11 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         sourceCache.remove(cacheKey)
     }
 
+    if (!HttpClientProvider.isNetworkReady && rawUrl.startsWith("http")) {
+        Logger.info("VIDEO_RESOLVE", "Network not ready, awaiting network before resolving: $rawUrl")
+        HttpClientProvider.awaitNetworkReady(5_000L)
+    }
+
     val mutex = resolveMutexes.computeIfAbsent(cacheKey) { kotlinx.coroutines.sync.Mutex() }
 
     val resolveStartedMs = System.currentTimeMillis()
@@ -156,7 +161,12 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
             freshOrNull()?.let { return@withLock it }
         }
         val result = doResolve(rawUrl, quality)
-        sourceCache[cacheKey] = CachedSource(result, expiryOfSource(result))
+        val expiryMs = if ((result is VideoSource.Embed || result is VideoSource.Unavailable) && !HttpClientProvider.isNetworkReady) {
+            System.currentTimeMillis() + 10_000L
+        } else {
+            expiryOfSource(result)
+        }
+        sourceCache[cacheKey] = CachedSource(result, expiryMs)
         result
     }
     // Drop the mutex only after releasing it, otherwise a concurrent caller can
@@ -333,8 +343,10 @@ private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSou
             ytDirectFailCount = 0
             return VideoSource.Direct(streamUrl)
         }
-        ytDirectFailCount++
-        ytDirectFailTimestamp = System.currentTimeMillis()
+        if (HttpClientProvider.isNetworkReady) {
+            ytDirectFailCount++
+            ytDirectFailTimestamp = System.currentTimeMillis()
+        }
     }
 
     val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1"

@@ -45,26 +45,30 @@ object PreloadManager {
     // players meant ~700MB downloading concurrently alongside the visible
     // video. Nothing reached STATE_READY. Two is enough to make a swipe feel
     // instant without starving the slide the user is actually looking at.
-    private const val MAX_PRELOAD = 2
+    // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
+    // Increased to 4 so 1 previous video + 2 upcoming videos + current video
+    // can coexist in warm cache without continuous eviction thrashing.
+    private const val MAX_PRELOAD = 4
 
     // Don't bother buffering a stream that dies before the user can plausibly
     // reach it; VideoPlayer will re-resolve on arrival instead.
     private const val MIN_USEFUL_TTL_MS = 30_000L
 
     // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
-    // Above this, prebuffering costs far more than it saves: a multi-hundred-MB
-    // progressive file cannot be meaningfully warmed on a phone connection, and
-    // the bandwidth it consumes is taken directly from the video on screen.
+    // Above this, prebuffering costs far more than it saves: multi-hundred-MB
+    // progressive files (e.g. 2-hour podcasts > 350MB) cannot be meaningfully
+    // warmed on a mobile connection, and the bandwidth it consumes is taken
+    // directly from the video on screen.
     // googlevideo advertises the full content length in clen=.
-    private const val MAX_PREBUFFER_BYTES = 80L * 1024 * 1024
+    private const val MAX_PREBUFFER_BYTES = 500L * 1024 * 1024
 
     /**
      * NOSLOP_TOR_GATE_UI_V1
      *
      * Over Tor the warm players compete with the visible one for a single slow
-     * circuit, so the ceiling must be far tighter on 'low' than the clearnet
-     * default. Honours the Content-over-Tor toggle: with Tor off, the original
-     * ceiling applies.
+     * circuit. Ceiling guards against giant multi-hundred MB podcasts, allowing
+     * normal 2-15 minute videos (30MB-200MB) to prebuffer into ExoPlayer (which
+     * only buffers up to 15s of playback).
      */
     private fun prebufferCeilingBytes(): Long {
         val vQuality = try {
@@ -72,9 +76,9 @@ object PreloadManager {
         } catch (_: Exception) { "high" }
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         return when (vQuality) {
-            "low" -> if (overTor) 12L * 1024 * 1024 else 25L * 1024 * 1024
-            "medium" -> if (overTor) 30L * 1024 * 1024 else 50L * 1024 * 1024
-            else -> if (overTor) 40L * 1024 * 1024 else MAX_PREBUFFER_BYTES
+            "low" -> if (overTor) 150L * 1024 * 1024 else 250L * 1024 * 1024
+            "medium" -> if (overTor) 250L * 1024 * 1024 else 350L * 1024 * 1024
+            else -> if (overTor) 350L * 1024 * 1024 else MAX_PREBUFFER_BYTES
         }
     }
 
@@ -164,6 +168,14 @@ object PreloadManager {
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
         if (rawUrl.isBlank()) return
+
+        if (!com.noslop.app.net.HttpClientProvider.isNetworkReady && rawUrl.startsWith("http")) {
+            Logger.info("PRELOAD", "Network not ready, awaiting network before preWarm: $rawUrl")
+            if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(10_000L)) {
+                Logger.warn("PRELOAD", "Network not ready after timeout, skipping preWarm for: $rawUrl")
+                return
+            }
+        }
 
         val deferred = CompletableDeferred<Unit>()
         val existing = pendingTasks.putIfAbsent(rawUrl, deferred)

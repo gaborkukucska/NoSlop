@@ -85,7 +85,8 @@ class MainActivity : ComponentActivity() {
                             // 2. If the first item is media, aggressively pre-warm and wait for it before dropping the splash screen!
                             if (firstPreloadUrl != null) {
                                 try {
-                                    kotlinx.coroutines.withTimeout(5000) {
+                                    kotlinx.coroutines.withTimeout(6000) {
+                                        com.noslop.app.net.HttpClientProvider.awaitNetworkReady(3000L)
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
                                         com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
                                     }
