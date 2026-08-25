@@ -34,7 +34,7 @@ object GossipService {
     private val peerSendFailures = ConcurrentHashMap<String, Pair<Int, Long>>() // count, lastFailureTime
     private val PEER_FAILURE_THRESHOLD = 3
     private val PEER_FAILURE_WINDOW_MS = 5 * 60 * 1000L // 5 minutes
-    private val PEER_COOLDOWN_MS = 10 * 60 * 1000L // 10 minutes cooldown
+    private val PEER_COOLDOWN_MS = 30 * 1000L // 30 seconds cooldown
 
     fun recordDeletedPeer(publicKeyB64: String) {
         recentlyDeletedPeers[publicKeyB64] = System.currentTimeMillis()
@@ -53,7 +53,7 @@ object GossipService {
         peerSendFailures[peerOnionAddress] = effectiveCount to now
         
         if (effectiveCount >= PEER_FAILURE_THRESHOLD) {
-            Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times in ${PEER_FAILURE_WINDOW_MS/1000}s. Cooldown for ${PEER_COOLDOWN_MS/60000}m")
+            Logger.warn(TAG, "Peer $peerOnionAddress has failed $effectiveCount times in ${PEER_FAILURE_WINDOW_MS/1000}s. Cooldown for ${PEER_COOLDOWN_MS/1000}s")
         }
     }
 

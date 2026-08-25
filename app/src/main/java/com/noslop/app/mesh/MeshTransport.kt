@@ -130,7 +130,10 @@ class MeshTransport(
 
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST"
         val isCriticalPacket = packet.type == "CONNECTION_REQUEST" ||
-            packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE"
+            packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE" ||
+            packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" ||
+            packet.type == "GROUP_DELETE" || packet.type == "DELETE_MESSAGE" ||
+            packet.type == "CHAT_REACTION"
 
         // --- NOSLOP_TOR_STARVATION_V1 ---
         // Enforce the peer cooldown HERE rather than only in
@@ -201,6 +204,7 @@ class MeshTransport(
                     try { socket.shutdownOutput() } catch (e: Exception) {} // Let Tor proxy know we are done writing
                     delay(150) // Brief pause to ensure Tor flushes the TCP buffer to the network
                     Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt/$maxAttempts)")
+                    GossipService.recordSendSuccess(onionAddress)
                     return@withContext true
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Send attempt $attempt/$maxAttempts to $onionAddress failed: ${e.message}")
@@ -229,6 +233,7 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
+            GossipService.recordSendFailure(onionAddress)
             return@withContext pushedToHub
         } finally {
             torSemaphore.release()

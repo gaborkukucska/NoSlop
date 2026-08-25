@@ -376,6 +376,7 @@ class HandshakePacketHandler(
             if (cameBackOnline) {
                 refreshDeletionBudgetFor(peer.handle)
             }
+            GossipService.recordSendSuccess(announcePay.onionAddress)
             resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
         }
         return true
@@ -597,13 +598,14 @@ class HandshakePacketHandler(
 
         notificationDao.insertNotification(
             NotificationItem(
-                id = UUID.randomUUID().toString(),
+                id = "group_invite_${invite.groupId}",
                 type = "GROUP_INVITE",
                 title = title,
                 body = body,
                 targetRoute = route,
                 iconType = "group",
-                senderPub = invite.adminPublicKeyB64
+                senderPub = invite.adminPublicKeyB64,
+                timestamp = invite.timestamp
             )
         )
 

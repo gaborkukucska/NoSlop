@@ -707,7 +707,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             signature = signature
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
-            id = java.util.UUID.randomUUID().toString(),
+            id = "group_invite_${groupId}",
             senderId = myKeys.publicKeyB64,
             type = "GROUP_INVITE",
             payload = com.google.gson.Gson().toJsonTree(invitePayload)
@@ -718,7 +718,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         for (memberPub in allMembers) {
             if (memberPub == myKeys.publicKeyB64) continue
             val memberPacket = packet.copy(
-                id = java.util.UUID.randomUUID().toString(),
+                id = "group_invite_${groupId}_${memberPub}",
                 targetUserId = memberPub
             )
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
@@ -1028,7 +1028,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             signature = signature
         )
         val packet = com.noslop.app.mesh.NetworkPacket(
-            id = java.util.UUID.randomUUID().toString(),
+            id = "group_invite_${groupId}",
             senderId = myKeys.publicKeyB64,
             type = "GROUP_INVITE",
             payload = com.google.gson.Gson().toJsonTree(invitePayload)
@@ -1039,7 +1039,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         for (memberPub in members) {
             if (memberPub == myKeys.publicKeyB64) continue
             val memberPacket = packet.copy(
-                id = java.util.UUID.randomUUID().toString(),
+                id = "group_invite_${groupId}_${memberPub}",
                 targetUserId = memberPub
             )
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
