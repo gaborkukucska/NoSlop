@@ -931,6 +931,54 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    suspend fun leaveGroupChat(groupId: String) {
+        val myKeys = getLocalIdentity()
+        val burnable = getBurnableIdentity()
+        val existing = db.groupChatDao().getGroupChatById(groupId)
+
+        // Always delete locally first so the user is immediately free of the group
+        db.groupChatDao().deleteGroupChat(groupId)
+
+        if (existing != null && myKeys != null) {
+            val previousMembers: List<String> = try {
+                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toList()
+            } catch (e: Exception) { emptyList() }
+
+            val localKeySet = setOfNotNull(
+                myKeys.publicKeyB64,
+                myKeys.onionAddress,
+                burnable?.publicKeyB64,
+                burnable?.onionAddress
+            )
+
+            val newMembers = previousMembers.filter { it !in localKeySet }
+            val removedMembers = previousMembers.filter { it in localKeySet }
+            val finalRemoved = if (removedMembers.isNotEmpty()) removedMembers else listOf(myKeys.publicKeyB64)
+
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "$groupId|${existing.title}|${myKeys.publicKeyB64}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
+                groupId = groupId,
+                title = existing.title,
+                avatarB64 = existing.avatarB64,
+                description = existing.description,
+                addedMembers = null,
+                removedMembers = finalRemoved,
+                timestamp = timestamp,
+                signature = signature
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                type = "GROUP_UPDATE",
+                payload = com.google.gson.Gson().toJsonTree(updatePayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+            Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${finalRemoved.size} key(s) and deleted locally")
+        }
+    }
+
     suspend fun requestGroupCatchup(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
         val group = db.groupChatDao().getGroupChatById(groupId)

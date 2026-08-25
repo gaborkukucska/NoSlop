@@ -65,6 +65,11 @@ fun GroupChatThreadScreen(
     }
 
     var showSettingsModal by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showClearConfirm by remember { mutableStateOf(false) }
+    var selectedMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val isSelectionMode = selectedMessageIds.isNotEmpty()
+
     val allPeers by viewModel.peers.collectAsState()
 
     // ── Media attachment state ──
@@ -110,13 +115,13 @@ fun GroupChatThreadScreen(
                 }
 
                 var finalName = originalName
-                if (finalName == null || !finalName!!.contains(".")) {
+                if (finalName == null || !finalName.contains(".")) {
                     val mimeExt = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(resolvedMimeType)
                     val extension = if (mimeExt != null) ".$mimeExt" else ".bin"
                     finalName = (finalName ?: "group_attach_${System.currentTimeMillis()}") + extension
                 }
 
-                val safeName = finalName!!.replace(" ", "_")
+                val safeName = finalName.replace(" ", "_")
                 val tempFile = java.io.File(context.cacheDir, safeName)
                 contentResolver.openInputStream(uri)?.use { input ->
                     tempFile.outputStream().use { output -> input.copyTo(output) }
@@ -226,6 +231,10 @@ fun GroupChatThreadScreen(
             onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members ->
                 viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members)
             },
+            onLeaveGroup = {
+                viewModel.leaveGroupChat(group.groupId)
+                onBack()
+            },
             onDeleteGroup = {
                 viewModel.deleteGroupChat(group.groupId)
                 onBack()
@@ -234,7 +243,7 @@ fun GroupChatThreadScreen(
         )
     }
 
-    // Inline camera UI (same pattern as ChatThreadScreen)
+    // Inline camera UI
     if (showCamera) {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black).zIndex(10f)) {
             val previewView = remember { androidx.camera.view.PreviewView(context) }
@@ -295,23 +304,85 @@ fun GroupChatThreadScreen(
     }
 
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
-        // Top Header
-        Row(
-            modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
+        // Top Header (Normal Mode vs Selection Mode)
+        if (isSelectionMode) {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { selectedMessageIds = emptySet() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
+                }
+                Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = {
+                    viewModel.deleteDirectMessages(selectedMessageIds.toList(), group.groupId)
+                    selectedMessageIds = emptySet()
+                }) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete".tr, tint = DestructiveRed)
+                }
             }
-            GroupAvatarDisplay(avatarB64 = group.avatarB64, size = 32)
-            Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = group.title, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 16.sp)
-                Text(text = "$memberCount members • Decentralized Group Session".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = "Back".tr, tint = AccentGreen)
+                }
+                GroupAvatarDisplay(avatarB64 = group.avatarB64, size = 32)
+                Spacer(modifier = Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = group.title, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 16.sp)
+                    Text(text = "$memberCount members • Decentralized Group Session".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                }
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Options".tr, tint = TextLight)
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(SurfaceDark)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Group Settings".tr, color = TextLight) },
+                            onClick = {
+                                showMenu = false
+                                showSettingsModal = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear Chat".tr, color = DestructiveRed) },
+                            onClick = {
+                                showMenu = false
+                                showClearConfirm = true
+                            }
+                        )
+                    }
+                }
             }
-            IconButton(onClick = { showSettingsModal = true }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "Group Settings".tr, tint = TextLight)
-            }
+        }
+
+        if (showClearConfirm) {
+            AlertDialog(
+                onDismissRequest = { showClearConfirm = false },
+                containerColor = SurfaceDark,
+                title = { Text("Clear Chat?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                text = { Text("This will delete all messages in this group chat locally.".tr, color = TextLight) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.clearChat(group.groupId)
+                            showClearConfirm = false
+                            onBack()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                    ) { Text("Clear".tr, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearConfirm = false }) { Text("Cancel".tr, color = TextMuted) }
+                }
+            )
         }
 
         // Messages List
@@ -332,6 +403,7 @@ fun GroupChatThreadScreen(
                 val isMyMessage = msg.senderPub == localKeys?.publicKeyB64
                 val senderPeer = allPeers.find { it.publicKeyB64 == msg.senderPub }
                 val senderName = senderPeer?.handle ?: msg.senderPub.take(8) + "..."
+                val isSelected = selectedMessageIds.contains(msg.id)
 
                 val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
                 var showReactionPicker by remember { mutableStateOf(false) }
@@ -341,184 +413,216 @@ fun GroupChatThreadScreen(
                     msg.mediaId?.let { com.noslop.app.mesh.MediaManager.getMetadataSync(it) }
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth()
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color.Transparent)
                         .pointerInput(Unit) {
-                            detectTapGestures(onLongPress = { showReactionPicker = !showReactionPicker })
+                            detectTapGestures(
+                                onLongPress = {
+                                    if (!isSelectionMode) selectedMessageIds = selectedMessageIds + msg.id
+                                },
+                                onTap = {
+                                    if (isSelectionMode) {
+                                        if (isSelected) selectedMessageIds = selectedMessageIds - msg.id
+                                        else selectedMessageIds = selectedMessageIds + msg.id
+                                    }
+                                }
+                            )
                         }
                         .padding(vertical = 2.dp),
-                    horizontalArrangement = if (isMyMessage) Arrangement.End else Arrangement.Start
+                    contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
                 ) {
-                    Column(horizontalAlignment = if (isMyMessage) Alignment.End else Alignment.Start) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isMyMessage) AccentGreen.copy(alpha = 0.2f) else SurfaceDark)
-                                .padding(10.dp)
-                                .widthIn(max = 280.dp)
-                        ) {
-                            Column {
-                                if (!isMyMessage) {
-                                    Text(
-                                        text = senderName,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = AccentGreen
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isSelectionMode && !isMyMessage) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = null,
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
 
-                                // Reply-to preview
-                                if (msg.replyToMessageId != null) {
-                                    val replyMsg = messages.find { it.id == msg.replyToMessageId }
-                                    if (replyMsg != null) {
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(PrimaryBlack.copy(alpha = 0.2f)).padding(4.dp)
-                                        ) {
-                                            val replySender = allPeers.find { it.publicKeyB64 == replyMsg.senderPub }?.handle ?: replyMsg.senderPub.take(8)
-                                            Text(
-                                                text = "$replySender: ${replyMsg.ciphertext.take(60)}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = if (isMyMessage) PrimaryBlack.copy(alpha = 0.7f) else TextMuted
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.height(4.dp))
+                        Column(horizontalAlignment = if (isMyMessage) Alignment.End else Alignment.Start) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isMyMessage) AccentGreen.copy(alpha = 0.2f) else SurfaceDark)
+                                    .padding(10.dp)
+                                    .widthIn(max = 280.dp)
+                            ) {
+                                Column {
+                                    if (!isMyMessage) {
+                                        Text(
+                                            text = senderName,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = AccentGreen
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
                                     }
-                                }
 
-                                // Message text
-                                if (msg.ciphertext.isNotEmpty()) {
-                                    Text(text = msg.ciphertext, color = TextLight, fontSize = 14.sp)
-                                }
+                                    // Reply-to preview
+                                    if (msg.replyToMessageId != null) {
+                                        val replyMsg = messages.find { it.id == msg.replyToMessageId }
+                                        if (replyMsg != null) {
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(4.dp)).background(PrimaryBlack.copy(alpha = 0.2f)).padding(4.dp)
+                                            ) {
+                                                val replySender = allPeers.find { it.publicKeyB64 == replyMsg.senderPub }?.handle ?: replyMsg.senderPub.take(8)
+                                                Text(
+                                                    text = "$replySender: ${replyMsg.ciphertext.take(60)}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = if (isMyMessage) PrimaryBlack.copy(alpha = 0.7f) else TextMuted
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                        }
+                                    }
 
-                                // Media rendering
-                                msg.mediaId?.let { mid ->
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(mid, msg.mediaType)
-                                    val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
-                                    val isGif = mid.endsWith(".gif", ignoreCase = true) || mid.startsWith("noslop-gif://") || parsedMediaMetadata?.mimeType == "image/gif"
-                                    val isFile = msg.mediaType == "file" || (!isVideo && !isGif && msg.mediaType != "image" && msg.mediaType != "audio")
+                                    // Message text
+                                    if (msg.ciphertext.isNotEmpty()) {
+                                        Text(text = msg.ciphertext, color = TextLight, fontSize = 14.sp)
+                                    }
 
-                                    if (isFile) {
-                                        val progress = downloadProgress[mid] ?: 0
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).clickable {
-                                                if (isDownloaded) {
-                                                    val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                    val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, mid, meta?.filename ?: mid)
-                                                    if (saved) android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), android.widget.Toast.LENGTH_SHORT).show()
-                                                } else {
+                                    // Media rendering
+                                    msg.mediaId?.let { mid ->
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        val isDownloaded = com.noslop.app.mesh.MediaManager.isMediaDownloaded(mid, msg.mediaType)
+                                        val isVideo = msg.mediaType == "video" || mid.endsWith(".mp4")
+                                        val isGif = mid.endsWith(".gif", ignoreCase = true) || mid.startsWith("noslop-gif://") || parsedMediaMetadata?.mimeType == "image/gif"
+                                        val isFile = msg.mediaType == "file" || (!isVideo && !isGif && msg.mediaType != "image" && msg.mediaType != "audio")
+
+                                        if (isFile) {
+                                            val progress = downloadProgress[mid] ?: 0
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).clickable {
+                                                    if (isDownloaded) {
+                                                        val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                        val saved = com.noslop.app.mesh.MediaManager.exportToPublicDownloads(context, mid, meta?.filename ?: mid)
+                                                        if (saved) android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), android.widget.Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
+                                                        if (meta != null) viewModel.startMediaDownload(meta, senderPeer?.onionAddress)
+                                                    }
+                                                }.padding(12.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(Icons.Default.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(28.dp))
+                                                    Spacer(modifier = Modifier.width(8.dp))
+                                                    Column(modifier = Modifier.weight(1f)) {
+                                                        Text(parsedMediaMetadata?.filename ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                        if (isDownloaded) Text("Tap to save".tr, color = AccentGreen, fontSize = 10.sp)
+                                                        else if (downloadProgress.containsKey(mid)) {
+                                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.fillMaxWidth())
+                                                        } else Text("Tap to download".tr, color = TextMuted, fontSize = 10.sp)
+                                                    }
+                                                }
+                                            }
+                                        } else if (isDownloaded || isMyMessage) {
+                                            val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp, max = 200.dp).clip(RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
+                                                    if (isVideo) fullscreenVideo = localFile?.absolutePath else if (!isGif) fullscreenImage = localFile?.absolutePath
+                                                },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isGif) {
+                                                    val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
+                                                        val url = mid.removePrefix("noslop-gif://")
+                                                        if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
+                                                    } else if (localFile != null) localFile else null
+                                                    coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
+                                                } else if (!isVideo && localFile != null) {
+                                                    coil.compose.AsyncImage(model = localFile, contentDescription = "Media".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                                } else if (isVideo) {
+                                                    val meta = parsedMediaMetadata
+                                                    if (meta?.thumbnailB64 != null) {
+                                                        val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
+                                                        coil.compose.AsyncImage(model = decoded, contentDescription = "Video".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                                    }
+                                                    Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video".tr, modifier = Modifier.size(48.dp), tint = Color.White)
+                                                }
+                                            }
+                                        } else {
+                                            val progress = downloadProgress[mid] ?: 0
+                                            Box(
+                                                modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
                                                     val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
                                                     if (meta != null) viewModel.startMediaDownload(meta, senderPeer?.onionAddress)
-                                                }
-                                            }.padding(12.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(Icons.Default.InsertDriveFile, contentDescription = "File".tr, tint = AccentGreen, modifier = Modifier.size(28.dp))
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(parsedMediaMetadata?.filename ?: "Attached File", color = TextLight, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                                    if (isDownloaded) Text("Tap to save".tr, color = AccentGreen, fontSize = 10.sp)
-                                                    else if (downloadProgress.containsKey(mid)) {
-                                                        LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.fillMaxWidth())
-                                                    } else Text("Tap to download".tr, color = TextMuted, fontSize = 10.sp)
-                                                }
-                                            }
-                                        }
-                                    } else if (isDownloaded || isMyMessage) {
-                                        val localFile = com.noslop.app.mesh.MediaManager.getLocalFile(mid, msg.mediaType)
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp, max = 200.dp).clip(RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
-                                                if (isVideo) fullscreenVideo = localFile?.absolutePath else if (!isGif) fullscreenImage = localFile?.absolutePath
-                                            },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            if (isGif) {
-                                                val gifModel: Any? = if (mid.startsWith("noslop-gif://")) {
-                                                    val url = mid.removePrefix("noslop-gif://")
-                                                    if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
-                                                } else if (localFile != null) localFile else null
-                                                coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
-                                            } else if (!isVideo && localFile != null) {
-                                                coil.compose.AsyncImage(model = localFile, contentDescription = "Media".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                            } else if (isVideo) {
-                                                val meta = parsedMediaMetadata
-                                                if (meta?.thumbnailB64 != null) {
-                                                    val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
-                                                    coil.compose.AsyncImage(model = decoded, contentDescription = "Video".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                                }
-                                                Icon(Icons.Default.PlayCircleOutline, contentDescription = "Play Video".tr, modifier = Modifier.size(48.dp), tint = Color.White)
-                                            }
-                                        }
-                                    } else {
-                                        val progress = downloadProgress[mid] ?: 0
-                                        Box(
-                                            modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
-                                                val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                if (meta != null) viewModel.startMediaDownload(meta, senderPeer?.onionAddress)
-                                            },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(32.dp))
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                if (progress > 0) {
-                                                    LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
-                                                    Text("$progress%", color = TextLight, fontSize = 10.sp)
-                                                } else {
-                                                    Text("Tap to Download".tr, color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                    Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(32.dp))
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    if (progress > 0) {
+                                                        LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
+                                                        Text("$progress%", color = TextLight, fontSize = 10.sp)
+                                                    } else {
+                                                        Text("Tap to Download".tr, color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                // Timestamp + reaction/reply icons
-                                Row(
-                                    modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
-                                        color = TextMuted,
-                                        fontSize = 9.sp
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(Icons.Default.AddReaction, contentDescription = "React".tr, tint = TextMuted, modifier = Modifier.size(12.dp).clickable { showReactionPicker = true })
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Reply".tr, tint = TextMuted, modifier = Modifier.size(12.dp).clickable { replyingToMessageId = msg.id })
-                                }
-                            }
-                        }
-
-                        // Reactions display
-                        if (reactions.isNotEmpty()) {
-                            val grouped = reactions.groupBy { it.reactionType }
-                            Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                grouped.forEach { (type, reacts) ->
-                                    Box(
-                                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(SurfaceDark).clickable { viewModel.reactToGroupChat(msg.id, type, group.groupId) }.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    // Timestamp + reaction/reply icons
+                                    Row(
+                                        modifier = Modifier.align(Alignment.End).padding(top = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(text = "$type ${reacts.size}", fontSize = 12.sp, color = if (reacts.any { it.authorPublicKeyB64 == localKeys?.publicKeyB64 }) AccentGreen else TextMuted)
+                                        Text(
+                                            text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(msg.timestamp)),
+                                            color = TextMuted,
+                                            fontSize = 9.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(Icons.Default.AddReaction, contentDescription = "React".tr, tint = TextMuted, modifier = Modifier.size(12.dp).clickable { showReactionPicker = true })
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Reply".tr, tint = TextMuted, modifier = Modifier.size(12.dp).clickable { replyingToMessageId = msg.id })
                                     }
+                                }
+                            }
+
+                            // Reactions display
+                            if (reactions.isNotEmpty()) {
+                                val grouped = reactions.groupBy { it.reactionType }
+                                Row(modifier = Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    grouped.forEach { (type, reacts) ->
+                                        Box(
+                                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(SurfaceDark).clickable { viewModel.reactToGroupChat(msg.id, type, group.groupId) }.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(text = "$type ${reacts.size}", fontSize = 12.sp, color = if (reacts.any { it.authorPublicKeyB64 == localKeys?.publicKeyB64 }) AccentGreen else TextMuted)
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Reaction picker
+                            if (showReactionPicker) {
+                                val emojis = listOf("👍", "❤️", "😂", "😮", "😢", "🔥")
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    emojis.forEach { emoji ->
+                                        Text(text = emoji, fontSize = 20.sp, modifier = Modifier.clickable { viewModel.reactToGroupChat(msg.id, emoji, group.groupId); showReactionPicker = false })
+                                    }
+                                    Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = TextMuted, modifier = Modifier.size(20.dp).clickable { showReactionPicker = false })
+                                    Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Reply".tr, tint = TextMuted, modifier = Modifier.size(20.dp).clickable { replyingToMessageId = msg.id; showReactionPicker = false })
                                 }
                             }
                         }
 
-                        // Reaction picker
-                        if (showReactionPicker) {
-                            val emojis = listOf("👍", "❤️", "😂", "😮", "😢", "🔥")
-                            Row(
-                                modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(16.dp)).background(SurfaceDark).padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                emojis.forEach { emoji ->
-                                    Text(text = emoji, fontSize = 20.sp, modifier = Modifier.clickable { viewModel.reactToGroupChat(msg.id, emoji, group.groupId); showReactionPicker = false })
-                                }
-                                Icon(Icons.Default.Close, contentDescription = "Close".tr, tint = TextMuted, modifier = Modifier.size(20.dp).clickable { showReactionPicker = false })
-                                Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "Reply".tr, tint = TextMuted, modifier = Modifier.size(20.dp).clickable { replyingToMessageId = msg.id; showReactionPicker = false })
-                            }
+                        if (isSelectionMode && isMyMessage) {
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = null,
+                                colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack, uncheckedColor = TextMuted)
+                            )
                         }
                     }
                 }
@@ -566,7 +670,7 @@ fun GroupChatThreadScreen(
             }
         }
 
-        // Input bar — fully wired
+        // Input bar
         ChatInputBar(
             viewModel = viewModel,
             hasAttachment = attachedFile != null,

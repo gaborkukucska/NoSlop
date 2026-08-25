@@ -49,22 +49,28 @@ fun uriToCompressedBase64(context: Context, uri: Uri): String? {
         val maxDim = 256
         val width = originalBitmap.width
         val height = originalBitmap.height
-        val scale = maxDim.toFloat() / Math.max(width, height)
-        val scaledWidth = (width * scale).toInt().coerceAtLeast(1)
-        val scaledHeight = (height * scale).toInt().coerceAtLeast(1)
+        var newWidth = width
+        var newHeight = height
+        if (width > maxDim || height > maxDim) {
+            val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
+            newWidth = (width * ratio).toInt()
+            newHeight = (height * ratio).toInt()
+        }
+        val scaled = if (newWidth != width || newHeight != height) {
+            android.graphics.Bitmap.createScaledBitmap(originalBitmap, newWidth, newHeight, true)
+        } else originalBitmap
 
-        val scaledBitmap = android.graphics.Bitmap.createScaledBitmap(originalBitmap, scaledWidth, scaledHeight, true)
         val outputStream = java.io.ByteArrayOutputStream()
-        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, outputStream)
-        val bytes = outputStream.toByteArray()
-        "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, 75, outputStream)
+        val byteArray = outputStream.toByteArray()
+        "data:image/jpeg;base64," + android.util.Base64.encodeToString(byteArray, android.util.Base64.NO_WRAP)
     } catch (e: Exception) {
         null
     }
 }
 
 @Composable
-fun GroupAvatarDisplay(avatarB64: String?, size: Int = 40) {
+fun GroupAvatarDisplay(avatarB64: String?, size: Int = 48) {
     Box(
         modifier = Modifier
             .size(size.dp)
@@ -106,6 +112,7 @@ fun GroupSettingsModal(
     allPeers: List<Peer>,
     myPubKey: String?,
     onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>) -> Unit,
+    onLeaveGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -124,7 +131,7 @@ fun GroupSettingsModal(
             if (converted != null) avatarB64 = converted
         }
     }
-    
+
     val currentMembers: List<String> = remember(group.membersJson) {
         try {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
@@ -132,6 +139,8 @@ fun GroupSettingsModal(
     }
     var membersList by remember { mutableStateOf(currentMembers) }
     var showAddMemberDialog by remember { mutableStateOf(false) }
+    var showLeaveConfirmDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
 
     val isAdmin = myPubKey == group.adminPublicKeyB64
 
@@ -158,113 +167,123 @@ fun GroupSettingsModal(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GroupAvatarDisplay(avatarB64 = avatarB64, size = 52)
+                    GroupAvatarDisplay(avatarB64 = avatarB64, size = 56)
                     Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Group Avatar".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("Upload custom photo or select emoji".tr, color = TextMuted, fontSize = 11.sp)
-                    }
-                    if (isAdmin) {
-                        OutlinedButton(
-                            onClick = { photoPickerLauncher.launch("image/*") },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
-                            border = BorderStroke(1.dp, AccentGreen),
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Upload".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Column {
+                        if (isAdmin) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { photoPickerLauncher.launch("image/*") },
+                                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(32.dp)
+                                ) {
+                                    Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Upload Photo".tr, fontSize = 11.sp)
+                                }
+                            }
+                        } else {
+                            Text(group.title, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                     }
                 }
 
+                // Preset Emoji Avatar Picker Row (Admin only)
                 if (isAdmin) {
+                    Text("Avatar Emoji Presets".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
+                    Spacer(modifier = Modifier.height(4.dp))
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                     ) {
-                        items(PRESET_GROUP_AVATARS) { preset ->
+                        items(PRESET_GROUP_AVATARS) { emoji ->
                             Box(
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(CircleShape)
-                                    .background(if (avatarB64 == preset) AccentGreen.copy(alpha = 0.3f) else SurfaceDark)
-                                    .clickable { avatarB64 = preset },
+                                    .background(if (avatarB64 == emoji) AccentGreen.copy(alpha = 0.3f) else PrimaryBlack)
+                                    .clickable { avatarB64 = emoji },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(preset, fontSize = 18.sp)
+                                Text(text = emoji, fontSize = 18.sp)
                             }
                         }
                     }
                 }
 
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text("Group Name".tr, color = TextMuted) },
-                    enabled = isAdmin,
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextLight,
-                        unfocusedTextColor = TextLight,
-                        focusedBorderColor = AccentGreen,
-                        unfocusedBorderColor = BorderSubtle
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(12.dp))
+                // Title Input (Admin editable)
+                if (isAdmin) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { title = it },
+                        label = { Text("Group Title".tr) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedLabelColor = AccentGreen,
+                            unfocusedLabelColor = TextMuted,
+                            focusedTextColor = TextLight,
+                            unfocusedTextColor = TextLight
+                        ),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    label = { Text("Description".tr, color = TextMuted) },
-                    enabled = isAdmin,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = TextLight,
-                        unfocusedTextColor = TextLight,
-                        focusedBorderColor = AccentGreen,
-                        unfocusedBorderColor = BorderSubtle
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        label = { Text("Description (Optional)".tr) },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AccentGreen,
+                            unfocusedBorderColor = BorderSubtle,
+                            focusedLabelColor = AccentGreen,
+                            unfocusedLabelColor = TextMuted,
+                            focusedTextColor = TextLight,
+                            unfocusedTextColor = TextLight
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
 
+                // Permissions Toggles (Admin editable)
                 if (isAdmin) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Allow members to invite".tr, color = TextLight, fontSize = 13.sp)
+                        Text("Allow Members to Invite Peers".tr, color = TextLight, style = MaterialTheme.typography.bodySmall)
                         Switch(
                             checked = allowInvites,
                             onCheckedChange = { allowInvites = it },
                             colors = SwitchDefaults.colors(checkedThumbColor = PrimaryBlack, checkedTrackColor = AccentGreen)
                         )
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Allow members to leave".tr, color = TextLight, fontSize = 13.sp)
+                        Text("Allow Members to Self-Leave".tr, color = TextLight, style = MaterialTheme.typography.bodySmall)
                         Switch(
                             checked = allowSelfRemove,
                             onCheckedChange = { allowSelfRemove = it },
                             colors = SwitchDefaults.colors(checkedThumbColor = PrimaryBlack, checkedTrackColor = AccentGreen)
                         )
                     }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
 
+                // Members List Header
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Members (${membersList.size}):".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Members (${membersList.size})".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     if (isAdmin || allowInvites) {
                         IconButton(onClick = { showAddMemberDialog = true }) {
                             Icon(Icons.Default.PersonAdd, contentDescription = "Add Member".tr, tint = AccentGreen)
@@ -272,21 +291,24 @@ fun GroupSettingsModal(
                     }
                 }
 
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     membersList.forEach { memberPub ->
                         val peer = allPeers.find { it.publicKeyB64 == memberPub }
-                        val displayName = peer?.handle ?: (memberPub.take(8) + "...")
+                        val name = peer?.handle ?: (memberPub.take(8) + "...")
                         val isMemberAdmin = memberPub == group.adminPublicKeyB64
+
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(
-                                text = displayName + (if (isMemberAdmin) " (Admin)".tr else ""),
-                                color = if (isMemberAdmin) AccentGreen else TextLight,
-                                fontSize = 13.sp
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(name, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                if (isMemberAdmin) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("(Admin)".tr, color = AccentGreen, fontSize = 10.sp)
+                                }
+                            }
                             if (isAdmin && !isMemberAdmin) {
                                 IconButton(onClick = { membersList = membersList - memberPub }) {
                                     Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed, modifier = Modifier.size(18.dp))
@@ -295,38 +317,20 @@ fun GroupSettingsModal(
                         }
                     }
                 }
-            }
-        },
-        confirmButton = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
-                        onDismiss()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Save Changes".tr, fontWeight = FontWeight.Bold)
-                }
 
+                // Leave / Delete Group Button inside body
+                Spacer(modifier = Modifier.height(16.dp))
                 if (isAdmin) {
                     Button(
-                        onClick = {
-                            onDeleteGroup()
-                            onDismiss()
-                        },
+                        onClick = { showDeleteConfirmDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Delete Group Chat".tr, fontWeight = FontWeight.Bold)
                     }
-                } else if (allowSelfRemove && myPubKey != null) {
+                } else if (allowSelfRemove) {
                     Button(
-                        onClick = {
-                            onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList - myPubKey)
-                            onDismiss()
-                        },
+                        onClick = { showLeaveConfirmDialog = true },
                         colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = DestructiveRed),
                         border = BorderStroke(1.dp, DestructiveRed),
                         modifier = Modifier.fillMaxWidth()
@@ -336,12 +340,67 @@ fun GroupSettingsModal(
                 }
             }
         },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+            ) {
+                Text("Save Changes".tr, fontWeight = FontWeight.Bold)
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) {
                 Text("Cancel".tr, color = TextMuted)
             }
         }
     )
+
+    if (showLeaveConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showLeaveConfirmDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Leave Group Chat?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to leave this group chat? You will no longer receive messages from this group.".tr, color = TextLight) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLeaveConfirmDialog = false
+                        onLeaveGroup()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                ) { Text("Leave".tr, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showLeaveConfirmDialog = false }) { Text("Cancel".tr, color = TextMuted) }
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            containerColor = SurfaceDark,
+            title = { Text("Delete Group Chat?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+            text = { Text("Are you sure you want to delete this group chat? This action will remove the group for all members.".tr, color = TextLight) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        onDeleteGroup()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                ) { Text("Delete".tr, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmDialog = false }) { Text("Cancel".tr, color = TextMuted) }
+            }
+        )
+    }
 
     if (showAddMemberDialog) {
         val availablePeers = allPeers.filter { it.isTrusted && !membersList.contains(it.publicKeyB64) }

@@ -1808,6 +1808,12 @@ fun toggleAggregator() {
         }
     }
 
+    fun leaveGroupChat(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.leaveGroupChat(groupId)
+        }
+    }
+
 
     fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
         viewModelScope.launch { repository.deleteDirectMessages(messageIds, peerPubB64) }
