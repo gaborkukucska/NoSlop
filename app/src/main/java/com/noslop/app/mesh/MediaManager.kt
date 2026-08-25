@@ -50,7 +50,63 @@ object MediaManager {
                 delay(2000)
             }
         }
+        // Auto-resume incomplete downloads after a delay to let Tor circuits establish
+        scope.launch {
+            delay(8000)
+            restorePendingDownloads()
+        }
         Logger.info(TAG, "MediaManager initialized successfully with direct-to-disk dynamic chunks")
+    }
+
+    /** Serializable entry for persisting the download queue across app restarts. */
+    private data class PendingDownloadEntry(
+        val metadata: MediaMetadata,
+        val peerOnion: String?
+    )
+
+    /** Persist active download metadata to AppSettings so they survive app restart. */
+    private fun persistDownloadQueue() {
+        val repo = repository ?: return
+        scope.launch {
+            try {
+                val entries = activeDownloads.values
+                    .filter { it.status != ActiveDownload.Status.COMPLETED && it.status != ActiveDownload.Status.ERROR }
+                    .map { PendingDownloadEntry(it.metadata, it.peerOnion ?: it.savedPeerOnion) }
+                if (entries.isEmpty()) {
+                    repo.putAppSetting("pending_downloads", "")
+                } else {
+                    repo.putAppSetting("pending_downloads", com.google.gson.Gson().toJson(entries))
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to persist download queue: ${e.message}")
+            }
+        }
+    }
+
+    /** Restore downloads that were in-flight when the app was killed. */
+    private suspend fun restorePendingDownloads() {
+        val repo = repository ?: return
+        val json = repo.getAppSetting("pending_downloads")
+        if (json.isNullOrEmpty()) return
+        try {
+            val entries = com.google.gson.Gson().fromJson(json, Array<PendingDownloadEntry>::class.java)
+            var resumed = 0
+            for (entry in entries) {
+                if (activeDownloads.containsKey(entry.metadata.id)) continue
+                if (isMediaDownloaded(entry.metadata.id, entry.metadata.type)) continue
+                val mediaDir = getMediaDirectory(entry.metadata.type)
+                val partFile = File(mediaDir, "${entry.metadata.id}.part")
+                if (partFile.exists() && partFile.length() > 0) {
+                    Logger.info(TAG, "Auto-resuming download: ${entry.metadata.id} (${partFile.length()} bytes on disk)")
+                    startDownload(entry.metadata, entry.peerOnion)
+                    resumed++
+                }
+            }
+            if (resumed > 0) Logger.info(TAG, "Auto-resumed $resumed incomplete download(s)")
+            else Logger.info(TAG, "No incomplete downloads to resume")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to restore pending downloads: ${e.message}")
+        }
     }
 
     class ActiveDownload(
@@ -360,6 +416,7 @@ object MediaManager {
         }
         
         activeDownloads[metadata.id] = dl
+        persistDownloadQueue()
         val initialProgress = if (dl.totalBytes > 0 && dl.contiguousBytes > 0) {
             (dl.contiguousBytes * 100 / dl.totalBytes).toInt().coerceIn(0, 99)
         } else 0
@@ -646,6 +703,7 @@ object MediaManager {
             
             updateWakeLock()
             activeDownloads.remove(dl.metadata.id)
+            persistDownloadQueue()
 
             // Send ACK
             val ack = MediaTransferAckPayload(mediaId = dl.metadata.id)

@@ -882,28 +882,53 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             payload = com.google.gson.Gson().toJsonTree(updatePayload)
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        // If we removed ourselves from the group, delete the group locally
+        // (the broadcast only reaches other nodes — we never process our own packet)
+        if (removedMembers.contains(myKeys.publicKeyB64)) {
+            db.groupChatDao().deleteGroupChat(groupId)
+            Logger.info("REPOSITORY", "Left group $groupId: removed self from members and deleted locally")
+        }
     }
 
     suspend fun deleteGroupChat(groupId: String) {
         val myKeys = getLocalIdentity() ?: return
-        db.groupChatDao().deleteGroupChat(groupId)
+        val existing = db.groupChatDao().getGroupChatById(groupId)
 
-        val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$groupId|delete|${myKeys.publicKeyB64}|$timestamp"
-        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-        val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
-            groupId = groupId,
-            adminPublicKeyB64 = myKeys.publicKeyB64,
-            timestamp = timestamp,
-            signature = signature
-        )
-        val packet = com.noslop.app.mesh.NetworkPacket(
-            id = java.util.UUID.randomUUID().toString(),
-            senderId = myKeys.publicKeyB64,
-            type = "GROUP_DELETE",
-            payload = com.google.gson.Gson().toJsonTree(deletePayload)
-        )
-        com.noslop.app.mesh.GossipService.broadcast(packet)
+        if (existing != null && existing.adminPublicKeyB64 == myKeys.publicKeyB64) {
+            // Admin: broadcast GROUP_DELETE so all members drop the group
+            db.groupChatDao().deleteGroupChat(groupId)
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "$groupId|delete|${myKeys.publicKeyB64}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
+                groupId = groupId,
+                adminPublicKeyB64 = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                type = "GROUP_DELETE",
+                payload = com.google.gson.Gson().toJsonTree(deletePayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(packet)
+            Logger.info("REPOSITORY", "Admin deleted group $groupId and broadcast GROUP_DELETE")
+        } else if (existing != null) {
+            // Non-admin: remove self from member list via GROUP_UPDATE, then delete locally
+            val members: MutableList<String> = try {
+                com.google.gson.Gson().fromJson(existing.membersJson, Array<String>::class.java).toMutableList()
+            } catch (e: Exception) { mutableListOf() }
+            members.remove(myKeys.publicKeyB64)
+            updateGroupChat(groupId, existing.title, existing.description, existing.avatarB64,
+                existing.allowMemberInvites, existing.allowMemberSelfRemove, members)
+            // updateGroupChat auto-deletes locally when self is removed
+            Logger.info("REPOSITORY", "Non-admin left group $groupId via GROUP_UPDATE")
+        } else {
+            // Group not found locally — just ensure cleanup
+            db.groupChatDao().deleteGroupChat(groupId)
+        }
     }
 
     suspend fun requestGroupCatchup(groupId: String) {
