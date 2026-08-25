@@ -245,7 +245,14 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             val routeClean = initialRoute.substringBeforeLast("-")
             if (routeClean.startsWith("chat/")) {
                 selectedTab = 1
+                viewModel.selectGroupChat(null)
                 viewModel.selectChatPeer(routeClean.substringAfter("chat/"))
+            } else if (routeClean.startsWith("group_chat/")) {
+                selectedTab = 1
+                viewModel.selectChatPeer(null)
+                viewModel.selectGroupChat(routeClean.substringAfter("group_chat/"))
+            } else if (routeClean.startsWith("group_invite/")) {
+                selectedTab = 4
             } else if (routeClean.startsWith("post/")) {
                 selectedTab = 0
                 val routeData = routeClean.removePrefix("post/")
@@ -455,7 +462,14 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                         onNavigateToRoute = { route ->
                             if (route.startsWith("chat/")) {
                                 selectedTab = 1
+                                viewModel.selectGroupChat(null)
                                 viewModel.selectChatPeer(route.substringAfter("chat/"))
+                            } else if (route.startsWith("group_chat/")) {
+                                selectedTab = 1
+                                viewModel.selectChatPeer(null)
+                                viewModel.selectGroupChat(route.substringAfter("group_chat/"))
+                            } else if (route.startsWith("group_invite/")) {
+                                selectedTab = 4 // Notifications tab
                             } else if (route.startsWith("post/")) {
                             selectedTab = 0
                             val routeData = route.removePrefix("post/")

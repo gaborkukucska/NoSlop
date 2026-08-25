@@ -105,7 +105,9 @@ fun NotificationsScreen(viewModel: NoSlopViewModel, onNavigateToRoute: (String) 
                             }
                         },
                         onAccept = { notifId, senderPub -> viewModel.acceptConnectionFromNotification(notifId, senderPub) },
-                        onDecline = { notifId, senderPub -> viewModel.rejectConnectionFromNotification(notifId, senderPub) }
+                        onDecline = { notifId, senderPub -> viewModel.rejectConnectionFromNotification(notifId, senderPub) },
+                        onAcceptGroup = { notifId, targetRoute -> viewModel.acceptGroupInviteFromNotification(notifId, targetRoute) },
+                        onDeclineGroup = { notifId, targetRoute -> viewModel.declineGroupInviteFromNotification(notifId, targetRoute) }
                     )
                 }
             }
@@ -118,13 +120,16 @@ fun NotificationCard(
     notif: com.noslop.app.data.NotificationItem, 
     onClick: () -> Unit,
     onAccept: (String, String) -> Unit,
-    onDecline: (String, String) -> Unit
+    onDecline: (String, String) -> Unit,
+    onAcceptGroup: (String, String?) -> Unit = { _, _ -> },
+    onDeclineGroup: (String, String?) -> Unit = { _, _ -> }
 ) {
     val icon = when (notif.iconType) {
         "dm" -> Icons.Default.Email
         "comment" -> Icons.Default.ChatBubble
         "reaction" -> Icons.Default.Favorite
         "handshake" -> Icons.Default.Person
+        "group" -> Icons.Default.People
         else -> Icons.Default.Notifications
     }
 
@@ -177,7 +182,7 @@ fun NotificationCard(
                 )
             }
             
-            if (!notif.isRead && notif.type != "CONNECTION_REQUEST") {
+            if (!notif.isRead && notif.type != "CONNECTION_REQUEST" && notif.type != "GROUP_INVITE") {
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(AccentGreen))
             }
@@ -200,6 +205,29 @@ fun NotificationCard(
                 }
                 OutlinedButton(
                     onClick = { notif.senderPub?.let { onDecline(notif.id, it) } },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Decline".tr)
+                }
+            }
+        } else if (notif.type == "GROUP_INVITE") {
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 64.dp), // align with main text
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = { onAcceptGroup(notif.id, notif.targetRoute) },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Accept".tr, color = PrimaryBlack, fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = { onDeclineGroup(notif.id, notif.targetRoute) },
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
                     modifier = Modifier.weight(1f)
                 ) {

@@ -712,6 +712,37 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members")
     }
 
+    suspend fun acceptGroupInvite(groupId: String) {
+        val setting = db.appSettingDao().getSetting("pending_group_invite_$groupId")
+        if (!setting.isNullOrBlank()) {
+            try {
+                val invite = com.google.gson.Gson().fromJson(setting, com.noslop.app.mesh.GroupInvitePayload::class.java)
+                val membersJson = com.google.gson.Gson().toJson(invite.members)
+                val group = GroupChat(
+                    groupId = invite.groupId,
+                    title = invite.title,
+                    adminPublicKeyB64 = invite.adminPublicKeyB64,
+                    membersJson = membersJson,
+                    createdAt = invite.timestamp,
+                    description = invite.description,
+                    allowMemberInvites = true,
+                    allowMemberSelfRemove = true,
+                    avatarB64 = invite.avatarB64
+                )
+                db.groupChatDao().insertGroupChat(group)
+                db.appSettingDao().removeSetting("pending_group_invite_$groupId")
+                Logger.info("REPOSITORY", "Accepted group invite for '${invite.title}' ($groupId)")
+            } catch (e: Exception) {
+                Logger.error("REPOSITORY", "Failed to parse pending group invite for $groupId: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun declineGroupInvite(groupId: String) {
+        db.appSettingDao().removeSetting("pending_group_invite_$groupId")
+        Logger.info("REPOSITORY", "Declined group invite for $groupId")
+    }
+
     suspend fun sendTypingSignal(peerPub: String, isTyping: Boolean) {
         val myKeys = getLocalIdentity() ?: return
         val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
@@ -1338,6 +1369,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String): Boolean =
         meshSocialRepository.reactToChat(messageId, reactionType, recipientPubB64)
+
+    suspend fun reactToGroupChat(messageId: String, reactionType: String, groupId: String): Boolean =
+        meshSocialRepository.reactToGroupChat(messageId, reactionType, groupId)
 
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean =
         meshSocialRepository.reactToComment(commentId, reactionType)

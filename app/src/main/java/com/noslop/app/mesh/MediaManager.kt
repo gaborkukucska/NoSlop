@@ -23,8 +23,8 @@ object MediaManager {
     // Dynamic Chunk Sizing Bounds tuned for Tor (fewer sockets, larger payloads)
     const val MIN_CHUNK_SIZE = 128 * 1024
     const val MAX_CHUNK_SIZE = 1024 * 1024
-    const val DOWNLOAD_TIMEOUT_MS = 300000L // 5 minutes
-    private const val MAX_CONCURRENCY = 2
+    const val DOWNLOAD_TIMEOUT_MS = 90000L // 90 seconds (generous for Tor, avoids dead time)
+    private const val MAX_CONCURRENCY = 4
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var repository: NoSlopRepository? = null
@@ -74,9 +74,9 @@ object MediaManager {
         val retryQueue = LinkedBlockingQueue<Pair<Long, Int>>() // <offset, length>
 
         // AIMD State for chunk size and concurrency
-        var currentChunkSize = 128 * 1024 // Start with 128KB
-        var currentConcurrency = 1.0 // Start with 1 inflight chunk
-        var ssthresh = 2.0 // threshold for concurrency
+        var currentChunkSize = 256 * 1024 // Start with 256KB for better Tor circuit payload efficiency
+        var currentConcurrency = 2.0 // Start with 2 inflight chunks to pipeline over circuit latency
+        var ssthresh = 8.0 // Slow-start threshold for concurrency
         var consecutiveTimeouts = 0
         var lastAttemptAt = 0L
         var savedPeerOnion: String? = null // Remembered for fallback during recovery
@@ -536,7 +536,7 @@ object MediaManager {
                         dl.consecutiveTimeouts++
                     }
                     
-                    if (dl.consecutiveTimeouts >= 3 && dl.status == ActiveDownload.Status.ACTIVE) {
+                    if (dl.consecutiveTimeouts >= 6 && dl.status == ActiveDownload.Status.ACTIVE) {
                         Logger.warn(TAG, "Media ${dl.metadata.id}: send failures. Recovering.")
                         val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
                         if (isTemp) {
@@ -544,10 +544,12 @@ object MediaManager {
                             dl.consecutiveTimeouts = 0
                             // Will be retried on next loop
                         } else {
+                            val originalPeer = dl.peerOnion
                             dl.peerOnion = null
                             dl.status = ActiveDownload.Status.RECOVERING
                             resetDownloadTracking(dl)
                             dl.lastAttemptAt = System.currentTimeMillis()
+                            dl.savedPeerOnion = originalPeer
                             attemptMeshRecovery(dl)
                         }
                     }
@@ -609,20 +611,20 @@ object MediaManager {
             updateProgress(dl.metadata.id, 50) // Indeterminate proxy streaming
         }
 
-        Logger.debug(TAG, "Media ${dl.metadata.id}: Chunk written at $offset. Contiguous: ${dl.contiguousBytes}/${dl.totalBytes}. Window: ${dl.currentChunkSize/1024}KB")
+        Logger.debug(TAG, "Media ${dl.metadata.id}: Chunk written at $offset. Contiguous: ${dl.contiguousBytes}/${dl.totalBytes}. Window: ${dl.currentChunkSize/1024}KB, Concurrency: ${dl.currentConcurrency}")
 
         if (shouldFinish) {
             finishDownload(dl)
         } else {
             // AIMD Additive Increase on success
             synchronized(dl) {
-                dl.currentChunkSize = Math.min(MAX_CHUNK_SIZE, dl.currentChunkSize + 16 * 1024)
+                dl.currentChunkSize = Math.min(MAX_CHUNK_SIZE, dl.currentChunkSize + 32 * 1024)
                 if (dl.currentConcurrency < dl.ssthresh) {
                     dl.currentConcurrency += 1.0 // Slow start
                 } else {
                     dl.currentConcurrency += 1.0 / Math.floor(dl.currentConcurrency) // Congestion avoidance
                 }
-                dl.currentConcurrency = Math.min(2.0, dl.currentConcurrency) // Max 2 concurrent requests over Tor
+                dl.currentConcurrency = Math.min(4.0, dl.currentConcurrency) // Max 4 concurrent requests over Tor
             }
             requestNextChunks(dl)
         }

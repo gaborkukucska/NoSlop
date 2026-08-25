@@ -2170,6 +2170,7 @@ fun toggleAggregator() {
     }
 
     fun reactToChat(messageId: String, reactionType: String, recipientPubB64: String) { viewModelScope.launch { repository.reactToChat(messageId, reactionType, recipientPubB64) } }
+    fun reactToGroupChat(messageId: String, reactionType: String, groupId: String) { viewModelScope.launch { repository.reactToGroupChat(messageId, reactionType, groupId) } }
     fun reactToComment(commentId: String, reactionType: String) {
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToComment(commentId, reactionType) }
         else viewModelScope.launch { repository.reactToComment(commentId, reactionType) }
@@ -2188,6 +2189,26 @@ fun toggleAggregator() {
             val peer = repository.peerDao.getPeerByPublicKey(senderPub)
             if (peer != null) repository.rejectConnectionRequest(peer)
             else { repository.deletePeer(senderPub); repository.clearIncomingRequest() }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun acceptGroupInviteFromNotification(notifId: String, targetRoute: String?) {
+        viewModelScope.launch {
+            val groupId = targetRoute?.substringAfter("group_invite/")
+            if (!groupId.isNullOrBlank()) {
+                repository.acceptGroupInvite(groupId)
+            }
+            repository.deleteNotification(notifId)
+        }
+    }
+
+    fun declineGroupInviteFromNotification(notifId: String, targetRoute: String?) {
+        viewModelScope.launch {
+            val groupId = targetRoute?.substringAfter("group_invite/")
+            if (!groupId.isNullOrBlank()) {
+                repository.declineGroupInvite(groupId)
+            }
             repository.deleteNotification(notifId)
         }
     }

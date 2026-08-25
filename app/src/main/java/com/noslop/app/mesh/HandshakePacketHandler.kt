@@ -513,25 +513,66 @@ class HandshakePacketHandler(
             return false
         }
 
-        // An existing group's admin may never be reassigned by an inbound packet.
         val existing = db.groupChatDao().getGroupChatById(invite.groupId)
-        if (existing != null && existing.adminPublicKeyB64 != invite.adminPublicKeyB64) {
-            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: admin key does not match the stored group")
-            return false
+        if (existing != null) {
+            if (existing.adminPublicKeyB64 != invite.adminPublicKeyB64) {
+                Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: admin key does not match the stored group")
+                return false
+            }
+            // Already joined
+            return true
         }
 
-        val membersJson = com.google.gson.Gson().toJson(invite.members)
-        val group = GroupChat(
-            groupId = invite.groupId,
-            title = invite.title,
-            adminPublicKeyB64 = invite.adminPublicKeyB64,
-            membersJson = membersJson,
-            createdAt = invite.timestamp,
-            description = invite.description,
-            avatarB64 = invite.avatarB64
+        // If creator is us, insert directly
+        val isMyGroup = invite.adminPublicKeyB64 == myKeys?.publicKeyB64 || invite.adminPublicKeyB64 == burnable?.publicKeyB64
+        if (isMyGroup) {
+            val membersJson = com.google.gson.Gson().toJson(invite.members)
+            val group = GroupChat(
+                groupId = invite.groupId,
+                title = invite.title,
+                adminPublicKeyB64 = invite.adminPublicKeyB64,
+                membersJson = membersJson,
+                createdAt = invite.timestamp,
+                description = invite.description,
+                avatarB64 = invite.avatarB64
+            )
+            db.groupChatDao().insertGroupChat(group)
+            Logger.info(TAG, "Joined own group chat '${invite.title}' (${invite.groupId})")
+            return true
+        }
+
+        // Store pending invite payload for Accept/Decline flow
+        val jsonPayload = com.google.gson.Gson().toJson(invite)
+        db.appSettingDao().insertSetting(AppSetting("pending_group_invite_${invite.groupId}", jsonPayload))
+
+        val adminPeer = peerDao.getPeerByPublicKey(invite.adminPublicKeyB64)
+        val adminName = adminPeer?.handle ?: "A contact"
+        val title = com.noslop.app.util.LanguageManager.translate("Group Chat Invite")
+        val body = com.noslop.app.util.LanguageManager.translate("{author} invited you to join '{group}'")
+            .replace("{author}", adminName)
+            .replace("{group}", invite.title)
+        val route = "group_invite/${invite.groupId}"
+
+        notificationDao.insertNotification(
+            NotificationItem(
+                id = UUID.randomUUID().toString(),
+                type = "GROUP_INVITE",
+                title = title,
+                body = body,
+                targetRoute = route,
+                iconType = "group",
+                senderPub = invite.adminPublicKeyB64
+            )
         )
-        db.groupChatDao().insertGroupChat(group)
-        Logger.info(TAG, "Joined group chat '${invite.title}' (${invite.groupId}) via invite")
+
+        com.noslop.app.util.NotificationHelper.showNotification(
+            context = repo.context,
+            title = title,
+            message = body,
+            deepLinkRoute = route
+        )
+
+        Logger.info(TAG, "Received group invite for '${invite.title}' (${invite.groupId}) - created pending notification")
         return true
     }
 

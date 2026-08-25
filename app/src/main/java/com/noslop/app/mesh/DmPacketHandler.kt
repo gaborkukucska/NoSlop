@@ -117,11 +117,19 @@ class DmPacketHandler(
             messageDao.insertMessage(msg)
             repo.triggerDmSync()
             
-            val title = com.noslop.app.util.LanguageManager.translate("New Direct Message")
+            val group = if (groupId != null) db.groupChatDao().getGroupChatById(groupId) else null
             val anon = com.noslop.app.util.LanguageManager.translate("Anonymous")
-            val msgBody = com.noslop.app.util.LanguageManager.translate("Message from {author}")
-                .replace("{author}", peer?.handle ?: anon)
-            val route = "chat/${packet.senderId}"
+            val title = if (groupId != null) com.noslop.app.util.LanguageManager.translate("New Group Message") else com.noslop.app.util.LanguageManager.translate("New Direct Message")
+            val msgBody = if (groupId != null) {
+                com.noslop.app.util.LanguageManager.translate("Message from {author} in {group}")
+                    .replace("{author}", peer?.handle ?: anon)
+                    .replace("{group}", group?.title ?: "Group")
+            } else {
+                com.noslop.app.util.LanguageManager.translate("Message from {author}")
+                    .replace("{author}", peer?.handle ?: anon)
+            }
+            val route = if (groupId != null) "group_chat/$groupId" else "chat/${packet.senderId}"
+            val icon = if (groupId != null) "group" else "dm"
             
             notificationDao.insertNotification(
                 NotificationItem(
@@ -130,7 +138,7 @@ class DmPacketHandler(
                     title = title,
                     body = msgBody,
                     targetRoute = route,
-                    iconType = "dm",
+                    iconType = icon,
                     senderPub = packet.senderId
                 )
             )

@@ -1037,6 +1037,65 @@ class MeshSocialRepository(
         true
     }
 
+    suspend fun reactToGroupChat(messageId: String, reactionType: String, groupId: String): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return@withContext false
+        val reactionId = "${messageId}_${myKeys.publicKeyB64}_$reactionType"
+        val existingReaction = chatReactionDao.getReactionById(reactionId)
+        val action = if (existingReaction != null) "remove" else "add"
+        val timestamp = System.currentTimeMillis()
+        
+        val payloadToSign = "$messageId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+        val reactionPayload = com.noslop.app.mesh.ChatReactionPayload(
+            messageId = messageId,
+            reactionType = reactionType,
+            authorId = myKeys.publicKeyB64,
+            timestamp = timestamp,
+            signature = signature,
+            action = action
+        )
+
+        if (action == "remove") {
+            chatReactionDao.deleteReactionById(reactionId)
+        } else {
+            val localReaction = ChatReaction(
+                id = reactionId,
+                messageId = messageId,
+                authorPublicKeyB64 = myKeys.publicKeyB64,
+                reactionType = reactionType,
+                timestamp = timestamp,
+                signature = signature
+            )
+            chatReactionDao.insertReaction(localReaction)
+        }
+
+        val memberPubs: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        for (memberPub in memberPubs) {
+            if (memberPub == myKeys.publicKeyB64) continue
+            val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
+            if (peer.onionAddress.isNotBlank()) {
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = UUID.randomUUID().toString(),
+                    hops = 3,
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = memberPub,
+                    type = "CHAT_REACTION",
+                    payload = com.google.gson.Gson().toJsonTree(reactionPayload),
+                    signature = signature
+                )
+                repositoryScope.launch {
+                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                }
+            }
+        }
+        true
+    }
+
     suspend fun reactToComment(commentId: String, reactionType: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
         val userProfile = getUserProfile()
