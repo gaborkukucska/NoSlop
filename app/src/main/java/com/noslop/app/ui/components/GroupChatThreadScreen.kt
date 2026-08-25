@@ -239,6 +239,9 @@ fun GroupChatThreadScreen(
                 viewModel.deleteGroupChat(group.groupId)
                 onBack()
             },
+            onResendInvites = {
+                viewModel.resendGroupInvites(group.groupId)
+            },
             onDismiss = { showSettingsModal = false }
         )
     }

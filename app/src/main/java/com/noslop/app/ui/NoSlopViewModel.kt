@@ -1814,6 +1814,12 @@ fun toggleAggregator() {
         }
     }
 
+    fun resendGroupInvites(groupId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.resendGroupInvites(groupId)
+        }
+    }
+
 
     fun deleteDirectMessages(messageIds: List<String>, peerPubB64: String) {
         viewModelScope.launch { repository.deleteDirectMessages(messageIds, peerPubB64) }

@@ -72,7 +72,7 @@ class MeshSocialRepository(
         return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
     }
 
-    private fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
+    fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
         repositoryScope.launch {
             val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
             val hasHub = !hubStatus.isNullOrBlank()

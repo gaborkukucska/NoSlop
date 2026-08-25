@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -114,6 +115,7 @@ fun GroupSettingsModal(
     onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>) -> Unit,
     onLeaveGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
+    onResendInvites: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -284,9 +286,19 @@ fun GroupSettingsModal(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Members (${membersList.size})".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    if (isAdmin || allowInvites) {
-                        IconButton(onClick = { showAddMemberDialog = true }) {
-                            Icon(Icons.Default.PersonAdd, contentDescription = "Add Member".tr, tint = AccentGreen)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isAdmin && onResendInvites != null) {
+                            IconButton(onClick = {
+                                onResendInvites()
+                                android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Invites re-sent to all members"), android.widget.Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Resend Invites".tr, tint = AccentGreen, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        if (isAdmin || allowInvites) {
+                            IconButton(onClick = { showAddMemberDialog = true }) {
+                                Icon(Icons.Default.PersonAdd, contentDescription = "Add Member".tr, tint = AccentGreen)
+                            }
                         }
                     }
                 }

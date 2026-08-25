@@ -428,6 +428,9 @@ interface GroupChatDao {
     @Query("SELECT * FROM group_chats ORDER BY createdAt DESC")
     fun getAllGroupChats(): Flow<List<GroupChat>>
 
+    @Query("SELECT * FROM group_chats ORDER BY createdAt DESC")
+    suspend fun getAllGroupChatsList(): List<GroupChat>
+
     @Query("SELECT * FROM group_chats WHERE groupId = :groupId LIMIT 1")
     suspend fun getGroupChatById(groupId: String): GroupChat?
 

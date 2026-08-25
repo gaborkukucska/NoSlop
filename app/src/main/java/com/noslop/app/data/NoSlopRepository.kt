@@ -120,6 +120,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val incomingRequestFlow = meshSocialRepository.incomingRequestFlow
     val acceptedHandshakeFlow = meshSocialRepository.acceptedHandshakeFlow
 
+    fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        meshSocialRepository.dispatchPacket(onionAddress, packet)
+    }
+
         // --- Hub API Client ---
 
     suspend fun pushPacketToHub(packet: com.noslop.app.mesh.NetworkPacket): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -709,7 +713,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             payload = com.google.gson.Gson().toJsonTree(invitePayload)
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
-        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members")
+
+        // Send targeted GROUP_INVITE packet to every member so dispatchPacket spools retries if they are currently offline
+        for (memberPub in allMembers) {
+            if (memberPub == myKeys.publicKeyB64) continue
+            val memberPacket = packet.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                targetUserId = memberPub
+            )
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+        Logger.info("REPOSITORY", "Created group chat '$title' ($groupId) with ${allMembers.size} members and dispatched targeted invites")
     }
 
     suspend fun acceptGroupInvite(groupId: String) {
@@ -883,6 +899,18 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
+        // Send targeted GROUP_UPDATE packets to all group members to ensure retries if offline
+        for (memberPub in newMembers) {
+            if (memberPub == myKeys.publicKeyB64) continue
+            val memberPacket = packet.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                targetUserId = memberPub
+            )
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+
         // If we removed ourselves from the group, delete the group locally
         // (the broadcast only reaches other nodes — we never process our own packet)
         if (removedMembers.contains(myKeys.publicKeyB64)) {
@@ -977,6 +1005,48 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             com.noslop.app.mesh.GossipService.broadcast(packet)
             Logger.info("REPOSITORY", "Left group $groupId: broadcasted removal of ${finalRemoved.size} key(s) and deleted locally")
         }
+    }
+
+    suspend fun resendGroupInvites(groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val members = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        val timestamp = group.createdAt
+        val payloadToSign = "${group.groupId}|${group.title}|${group.adminPublicKeyB64}|$timestamp"
+        val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+            groupId = group.groupId,
+            title = group.title,
+            adminPublicKeyB64 = group.adminPublicKeyB64,
+            members = members,
+            avatarB64 = group.avatarB64,
+            description = group.description,
+            timestamp = timestamp,
+            signature = signature
+        )
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = myKeys.publicKeyB64,
+            type = "GROUP_INVITE",
+            payload = com.google.gson.Gson().toJsonTree(invitePayload)
+        )
+
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+
+        for (memberPub in members) {
+            if (memberPub == myKeys.publicKeyB64) continue
+            val memberPacket = packet.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                targetUserId = memberPub
+            )
+            val peer = db.peerDao().getPeerByPublicKey(memberPub)
+            val onion = peer?.onionAddress ?: ""
+            meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+        Logger.info("REPOSITORY", "Re-sent group invites for '${group.title}' ($groupId) to ${members.size} member(s)")
     }
 
     suspend fun requestGroupCatchup(groupId: String) {

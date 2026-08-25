@@ -376,8 +376,50 @@ class HandshakePacketHandler(
             if (cameBackOnline) {
                 refreshDeletionBudgetFor(peer.handle)
             }
+            resendGroupInvitesForPeer(announcePay.authorId, announcePay.onionAddress)
         }
         return true
+    }
+
+    /**
+     * When a peer connects or announces presence, check if they are a member of any local
+     * groups and re-send the GROUP_INVITE packet to them in case their device was offline
+     * when the group was initially created or updated.
+     */
+    private suspend fun resendGroupInvitesForPeer(peerPubKey: String, peerOnion: String) {
+        try {
+            val myKeys = repo.getLocalIdentity() ?: return
+            val groups = db.groupChatDao().getAllGroupChatsList()
+            for (group in groups) {
+                val members = parseMembers(group.membersJson)
+                if (members.contains(peerPubKey)) {
+                    val timestamp = group.createdAt
+                    val payloadToSign = "${group.groupId}|${group.title}|${group.adminPublicKeyB64}|$timestamp"
+                    val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+                    val invitePayload = GroupInvitePayload(
+                        groupId = group.groupId,
+                        title = group.title,
+                        adminPublicKeyB64 = group.adminPublicKeyB64,
+                        members = members,
+                        avatarB64 = group.avatarB64,
+                        description = group.description,
+                        timestamp = timestamp,
+                        signature = signature
+                    )
+                    val packet = NetworkPacket(
+                        id = java.util.UUID.randomUUID().toString(),
+                        senderId = myKeys.publicKeyB64,
+                        targetUserId = peerPubKey,
+                        type = "GROUP_INVITE",
+                        payload = com.google.gson.Gson().toJsonTree(invitePayload)
+                    )
+                    Logger.info(TAG, "Re-sending GROUP_INVITE for '${group.title}' to connected peer $peerPubKey")
+                    repo.dispatchPacket(peerOnion, packet)
+                }
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Could not resend group invites: ${e.message}")
+        }
     }
 
     /**
