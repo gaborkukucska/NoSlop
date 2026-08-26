@@ -1576,4 +1576,64 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun clearChat(peerPubB64: String) {
         meshSocialRepository.clearChat(peerPubB64)
     }
+
+    suspend fun clearGroupChat(groupId: String) {
+        messageDao.deleteGroupMessages(groupId)
+        triggerDmSync()
+    }
+
+    suspend fun deleteGroupMessages(messageIds: List<String>, groupId: String) {
+        val myKeys = getLocalIdentity() ?: return
+        val group = db.groupChatDao().getGroupChatById(groupId) ?: return
+        val isAdmin = group.adminPublicKeyB64 == myKeys.publicKeyB64
+
+        val memberPubs: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+
+        for (messageId in messageIds) {
+            val msg = messageDao.getMessageById(messageId) ?: continue
+            val canDelete = msg.senderPub == myKeys.publicKeyB64 || isAdmin
+
+            if (!canDelete) {
+                Logger.info("REPOSITORY", "Skipping delete of message $messageId: not owner and not admin")
+                continue
+            }
+
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = "$messageId|${myKeys.publicKeyB64}|$timestamp"
+            val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+
+            val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
+                messageId = messageId,
+                authorId = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature,
+                groupId = groupId
+            )
+
+            // Delete locally
+            messageDao.deleteMessageById(messageId)
+
+            // Broadcast to all group members
+            for (memberPub in memberPubs) {
+                if (memberPub == myKeys.publicKeyB64) continue
+                val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
+                if (peer.onionAddress.isNotBlank()) {
+                    val packet = com.noslop.app.mesh.NetworkPacket(
+                        id = "del_${messageId}_${memberPub}",
+                        hops = 3,
+                        senderId = myKeys.publicKeyB64,
+                        targetUserId = memberPub,
+                        type = "DELETE_MESSAGE",
+                        payload = com.google.gson.Gson().toJsonTree(deletePay),
+                        signature = signature
+                    )
+                    meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
+                }
+            }
+            kotlinx.coroutines.delay(150L)
+        }
+        triggerDmSync()
+    }
 }

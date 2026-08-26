@@ -1829,6 +1829,14 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.clearChat(peerPubB64) }
     }
 
+    fun clearGroupChat(groupId: String) {
+        viewModelScope.launch { repository.clearGroupChat(groupId) }
+    }
+
+    fun deleteGroupMessages(messageIds: List<String>, groupId: String) {
+        viewModelScope.launch { repository.deleteGroupMessages(messageIds, groupId) }
+    }
+
     fun sendDirectMessage(recipientPubB64: String, messageText: String, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
         if (messageText.isBlank() && mediaMetadata == null) return
         viewModelScope.launch { 

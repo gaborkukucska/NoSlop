@@ -174,12 +174,33 @@ class DmPacketHandler(
         val payloadToVerify = "${deletePay.messageId}|${deletePay.authorId}|${deletePay.timestamp}"
         if (!CryptoService.verify(payloadToVerify, signature, deletePay.authorId)) return false
 
-        // Only the sender of the message can delete it across the mesh
-        if (deletePay.authorId != packet.senderId) return false
+        val groupId = deletePay.groupId
+        if (groupId != null) {
+            // Group delete: author must be message sender OR group admin
+            val group = db.groupChatDao().getGroupChatById(groupId)
+            if (group == null) {
+                Logger.warn(TAG, "Ignoring DELETE_MESSAGE for unknown group $groupId")
+                return false
+            }
+            val isAdmin = deletePay.authorId == group.adminPublicKeyB64
+            val msg = messageDao.getMessageById(deletePay.messageId)
+            if (msg == null) return true // Already deleted
 
-        // Locally delete the message where id and sender match
-        messageDao.deleteMessageByIdAndSender(deletePay.messageId, deletePay.authorId)
-        Logger.info(TAG, "Deleted E2EE message ${deletePay.messageId} by request of sender ${deletePay.authorId}")
+            val isOwnMessage = deletePay.authorId == msg.senderPub
+            if (!isOwnMessage && !isAdmin) {
+                Logger.warn(TAG, "Rejected DELETE_MESSAGE ${deletePay.messageId}: not author or admin")
+                return false
+            }
+
+            messageDao.deleteMessageById(deletePay.messageId)
+            Logger.info(TAG, "Deleted group message ${deletePay.messageId} in $groupId by ${if (isAdmin) "admin" else "author"}")
+        } else {
+            // DM delete: only the sender of the message can delete it
+            if (deletePay.authorId != packet.senderId) return false
+            messageDao.deleteMessageByIdAndSender(deletePay.messageId, deletePay.authorId)
+            Logger.info(TAG, "Deleted E2EE message ${deletePay.messageId} by request of sender ${deletePay.authorId}")
+        }
+
         repo.triggerDmSync()
         return true
     }

@@ -245,7 +245,8 @@ data class DeleteMessagePayload(
     @SerializedName("message_id") val messageId: String,
     @SerializedName("author_id") val authorId: String,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    @SerializedName("group_id") val groupId: String? = null
 )
 
 data class FollowPayload(

@@ -309,6 +309,9 @@ fun GroupChatThreadScreen(
         return
     }
 
+    val isAdmin = localKeys != null && group.adminPublicKeyB64 == localKeys.publicKeyB64
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // Top Header (Normal Mode vs Selection Mode)
         if (isSelectionMode) {
@@ -320,10 +323,17 @@ fun GroupChatThreadScreen(
                     Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
                 }
                 Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                // Select All button: members select own messages, admin selects all
                 IconButton(onClick = {
-                    viewModel.deleteDirectMessages(selectedMessageIds.toList(), group.groupId)
-                    selectedMessageIds = emptySet()
+                    selectedMessageIds = if (isAdmin) {
+                        messages.map { it.id }.toSet()
+                    } else {
+                        messages.filter { it.senderPub == localKeys?.publicKeyB64 }.map { it.id }.toSet()
+                    }
                 }) {
+                    Icon(Icons.Default.SelectAll, contentDescription = "Select All".tr, tint = AccentGreen)
+                }
+                IconButton(onClick = { showDeleteConfirm = true }) {
                     Icon(Icons.Default.Delete, contentDescription = "Delete".tr, tint = DestructiveRed)
                 }
             }
@@ -374,11 +384,11 @@ fun GroupChatThreadScreen(
                 onDismissRequest = { showClearConfirm = false },
                 containerColor = SurfaceDark,
                 title = { Text("Clear Chat?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
-                text = { Text("This will delete all messages in this group chat locally.".tr, color = TextLight) },
+                text = { Text("This will delete all messages in this group chat locally. Messages will not be removed for other members.".tr, color = TextLight) },
                 confirmButton = {
                     Button(
                         onClick = {
-                            viewModel.clearChat(group.groupId)
+                            viewModel.clearGroupChat(group.groupId)
                             showClearConfirm = false
                             onBack()
                         },
@@ -391,6 +401,28 @@ fun GroupChatThreadScreen(
             )
         }
 
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                containerColor = SurfaceDark,
+                title = { Text("Delete Messages?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                text = { Text("${selectedMessageIds.size} message(s) will be permanently deleted for all group members.".tr, color = TextLight) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteGroupMessages(selectedMessageIds.toList(), group.groupId)
+                            selectedMessageIds = emptySet()
+                            showDeleteConfirm = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                    ) { Text("Delete".tr, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel".tr, color = TextMuted) }
+                }
+            )
+        }
+
         // Messages List
         val listState = rememberLazyListState()
         LaunchedEffect(messages.size) {
@@ -398,6 +430,8 @@ fun GroupChatThreadScreen(
                 listState.animateScrollToItem(messages.size - 1)
             }
         }
+
+        val memberHandlesMap = remember(group.memberHandlesJson) { group.getMemberHandles() }
 
         LazyColumn(
             state = listState,
@@ -408,8 +442,15 @@ fun GroupChatThreadScreen(
             items(messages) { msg ->
                 val isMyMessage = msg.senderPub == localKeys?.publicKeyB64
                 val senderPeer = allPeers.find { it.publicKeyB64 == msg.senderPub }
-                val senderName = senderPeer?.handle ?: msg.senderPub.take(8) + "..."
+                val handleFromGroup = memberHandlesMap[msg.senderPub]
+                val senderName = when {
+                    senderPeer != null -> senderPeer.handle
+                    !handleFromGroup.isNullOrBlank() -> handleFromGroup
+                    else -> msg.senderPub.take(8) + "..."
+                }
                 val isSelected = selectedMessageIds.contains(msg.id)
+                // Members can only select their own messages; admin can select any
+                val canSelect = isMyMessage || isAdmin
 
                 val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
                 var showReactionPicker by remember { mutableStateOf(false) }
@@ -423,13 +464,13 @@ fun GroupChatThreadScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color.Transparent)
-                        .pointerInput(Unit) {
+                        .pointerInput(canSelect) {
                             detectTapGestures(
                                 onLongPress = {
-                                    if (!isSelectionMode) selectedMessageIds = selectedMessageIds + msg.id
+                                    if (!isSelectionMode && canSelect) selectedMessageIds = selectedMessageIds + msg.id
                                 },
                                 onTap = {
-                                    if (isSelectionMode) {
+                                    if (isSelectionMode && canSelect) {
                                         if (isSelected) selectedMessageIds = selectedMessageIds - msg.id
                                         else selectedMessageIds = selectedMessageIds + msg.id
                                     }
@@ -440,7 +481,7 @@ fun GroupChatThreadScreen(
                     contentAlignment = if (isMyMessage) Alignment.CenterEnd else Alignment.CenterStart
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isSelectionMode && !isMyMessage) {
+                        if (isSelectionMode && !isMyMessage && canSelect) {
                             Checkbox(
                                 checked = isSelected,
                                 onCheckedChange = null,

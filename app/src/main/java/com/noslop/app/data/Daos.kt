@@ -205,6 +205,12 @@ interface MessageDao {
 
     @Query("DELETE FROM chat_messages WHERE chatWithPeerPub = :peerPub")
     suspend fun deleteMessagesWithPeer(peerPub: String)
+
+    @Query("DELETE FROM chat_messages WHERE chatWithPeerPub = :groupId")
+    suspend fun deleteGroupMessages(groupId: String)
+
+    @Query("DELETE FROM chat_messages WHERE id = :id")
+    suspend fun deleteMessageById(id: String)
 }
 
 @Dao
