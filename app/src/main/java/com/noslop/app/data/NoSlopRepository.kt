@@ -694,6 +694,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(group)
 
+        val myHandle = getLocalHandle() ?: "Me"
+        val memberHandlesMap = allMembers.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) pub to peer.handle
+            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else null
+        }.toMap()
+
         val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
@@ -703,6 +711,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             members = allMembers,
             avatarB64 = avatarB64,
             description = description,
+            memberHandles = memberHandlesMap,
             timestamp = timestamp,
             signature = signature
         )
@@ -878,6 +887,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
+        val myHandle = getLocalHandle() ?: "Me"
+        val memberHandlesMap = newMembers.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) pub to peer.handle
+            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else null
+        }.toMap()
+
         val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
@@ -887,6 +904,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             description = description,
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
+            memberHandles = memberHandlesMap,
             timestamp = timestamp,
             signature = signature
         )
@@ -1014,6 +1032,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
+        val myHandle = getLocalHandle() ?: "Me"
+        val memberHandlesMap = members.mapNotNull { pub ->
+            val peer = db.peerDao().getPeerByPublicKey(pub)
+            if (peer != null) pub to peer.handle
+            else if (pub == myKeys.publicKeyB64) pub to myHandle
+            else null
+        }.toMap()
+
         val timestamp = group.createdAt
         val payloadToSign = "${group.groupId}|${group.title}|${group.adminPublicKeyB64}|$timestamp"
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
@@ -1024,6 +1050,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             members = members,
             avatarB64 = group.avatarB64,
             description = group.description,
+            memberHandles = memberHandlesMap,
             timestamp = timestamp,
             signature = signature
         )

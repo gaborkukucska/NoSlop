@@ -112,6 +112,7 @@ fun GroupSettingsModal(
     group: GroupChat,
     allPeers: List<Peer>,
     myPubKey: String?,
+    myHandle: String? = null,
     onUpdateGroup: (title: String, description: String?, avatarB64: String?, allowInvites: Boolean, allowSelfRemove: Boolean, members: List<String>) -> Unit,
     onLeaveGroup: () -> Unit,
     onDeleteGroup: () -> Unit,
@@ -305,8 +306,13 @@ fun GroupSettingsModal(
 
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     membersList.forEach { memberPub ->
+                        val isMe = memberPub == myPubKey
                         val peer = allPeers.find { it.publicKeyB64 == memberPub }
-                        val name = peer?.handle ?: (memberPub.take(8) + "...")
+                        val name = when {
+                            isMe -> (myHandle?.takeIf { it.isNotBlank() } ?: "You") + " (You)"
+                            peer != null -> peer.handle
+                            else -> memberPub.take(8) + "..."
+                        }
                         val isMemberAdmin = memberPub == group.adminPublicKeyB64
 
                         Row(

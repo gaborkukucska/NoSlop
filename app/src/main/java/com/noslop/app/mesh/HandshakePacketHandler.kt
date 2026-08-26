@@ -524,6 +524,29 @@ class HandshakePacketHandler(
         com.google.gson.Gson().fromJson(membersJson, Array<String>::class.java).toMutableList()
     } catch (e: Exception) { mutableListOf() }
 
+    private suspend fun cacheMemberHandles(handles: Map<String, String>?) {
+        if (handles.isNullOrEmpty()) return
+        for ((pub, handle) in handles) {
+            if (pub.isBlank() || handle.isBlank()) continue
+            val existing = peerDao.getPeerByPublicKey(pub)
+            if (existing == null) {
+                val tripcode = try {
+                    CryptoService.deriveTripcode(Base64.decode(pub, Base64.DEFAULT))
+                } catch (e: Exception) { "" }
+                peerDao.insertPeer(
+                    Peer(
+                        publicKeyB64 = pub,
+                        handle = handle,
+                        tripcode = tripcode,
+                        onionAddress = "",
+                        isTrusted = false,
+                        isTemporary = true
+                    )
+                )
+            }
+        }
+    }
+
     private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
         val title = update.title ?: existing.title
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
@@ -583,6 +606,8 @@ class HandshakePacketHandler(
             Logger.info(TAG, "Joined own group chat '${invite.title}' (${invite.groupId})")
             return true
         }
+
+        cacheMemberHandles(invite.memberHandles)
 
         // Store pending invite payload for Accept/Decline flow
         val jsonPayload = com.google.gson.Gson().toJson(invite)

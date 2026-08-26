@@ -223,11 +223,14 @@ fun GroupChatThreadScreen(
         )
     }
 
+    val localHandle by viewModel.localHandle.collectAsState()
+
     if (showSettingsModal) {
         GroupSettingsModal(
             group = group,
             allPeers = allPeers,
             myPubKey = localKeys?.publicKeyB64,
+            myHandle = localHandle,
             onUpdateGroup = { title, desc, avatarB64, allowInviting, allowSelfRemove, members ->
                 viewModel.updateGroupChat(group.groupId, title, desc, avatarB64, allowInviting, allowSelfRemove, members)
             },
@@ -506,7 +509,9 @@ fun GroupChatThreadScreen(
                                                         if (saved) android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Saved to Downloads"), android.widget.Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                        if (meta != null) viewModel.startMediaDownload(meta, senderPeer?.onionAddress)
+                                                        val onionToUse = senderPeer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                            ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                        if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
                                                     }
                                                 }.padding(12.dp),
                                                 contentAlignment = Alignment.Center
@@ -536,7 +541,19 @@ fun GroupChatThreadScreen(
                                                         val url = mid.removePrefix("noslop-gif://")
                                                         if (url.startsWith("data:image/gif;base64,")) android.util.Base64.decode(url.substringAfter("base64,"), android.util.Base64.DEFAULT) else url
                                                     } else if (localFile != null) localFile else null
-                                                    coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
+
+                                                    val gifImageLoader = remember {
+                                                        coil.ImageLoader.Builder(context)
+                                                            .components {
+                                                                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                                                                    add(coil.decode.ImageDecoderDecoder.Factory())
+                                                                }
+                                                                add(coil.decode.GifDecoder.Factory())
+                                                            }
+                                                            .build()
+                                                    }
+
+                                                    coil.compose.AsyncImage(model = gifModel, imageLoader = gifImageLoader, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
                                                 } else if (!isVideo && localFile != null) {
                                                     coil.compose.AsyncImage(model = localFile, contentDescription = "Media".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                                 } else if (isVideo) {
@@ -553,7 +570,9 @@ fun GroupChatThreadScreen(
                                             Box(
                                                 modifier = Modifier.fillMaxWidth().height(100.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
                                                     val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                    if (meta != null) viewModel.startMediaDownload(meta, senderPeer?.onionAddress)
+                                                    val onionToUse = senderPeer?.onionAddress?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                        ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                    if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
                                                 },
                                                 contentAlignment = Alignment.Center
                                             ) {

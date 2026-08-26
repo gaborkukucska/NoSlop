@@ -339,7 +339,11 @@ object MediaManager {
     }
 
     suspend fun startDownload(metadata: MediaMetadata, rawPeerOnion: String?) {
-        val peerOnion = if (rawPeerOnion != null && rawPeerOnion.endsWith(".onion")) rawPeerOnion else null
+        val peerOnion = when {
+            rawPeerOnion != null && rawPeerOnion.endsWith(".onion") -> rawPeerOnion
+            metadata.originNode != null && metadata.originNode.endsWith(".onion") -> metadata.originNode
+            else -> null
+        }
         if (activeDownloads.containsKey(metadata.id)) {
             val dl = activeDownloads[metadata.id]!!
             if (dl.peerOnion == null && peerOnion != null) {

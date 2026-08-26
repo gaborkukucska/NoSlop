@@ -263,6 +263,7 @@ data class GroupInvitePayload(
     val members: List<String>,
     @SerializedName("avatar_b64") val avatarB64: String? = null,
     @SerializedName("description") val description: String? = null,
+    @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -274,6 +275,7 @@ data class GroupUpdatePayload(
     @SerializedName("description") val description: String? = null,
     @SerializedName("added_members") val addedMembers: List<String>? = null,
     @SerializedName("removed_members") val removedMembers: List<String>? = null,
+    @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
     val timestamp: Long,
     val signature: String
 )

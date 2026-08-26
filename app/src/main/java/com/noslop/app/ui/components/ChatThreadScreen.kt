@@ -487,7 +487,9 @@ fun ChatThreadScreen(
                                                         else android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Failed to save file"), android.widget.Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                        if (meta != null) viewModel.startMediaDownload(meta, peer.onionAddress)
+                                                        val onionToUse = peer.onionAddress.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                            ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                        if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
                                                     }
                                                 }.padding(16.dp),
                                                 contentAlignment = Alignment.Center
@@ -529,7 +531,19 @@ fun ChatThreadScreen(
                                                         val res = com.noslop.app.ui.resolveMediaUrl(resolvedUrl, context)
                                                         if (res?.startsWith("file://") == true) java.io.File(res.removePrefix("file://")) else res
                                                     }
-                                                    coil.compose.AsyncImage(model = gifModel, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
+
+                                                    val gifImageLoader = remember {
+                                                        coil.ImageLoader.Builder(context)
+                                                            .components {
+                                                                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                                                                    add(coil.decode.ImageDecoderDecoder.Factory())
+                                                                }
+                                                                add(coil.decode.GifDecoder.Factory())
+                                                            }
+                                                            .build()
+                                                    }
+
+                                                    coil.compose.AsyncImage(model = gifModel, imageLoader = gifImageLoader, contentDescription = "GIF".tr, contentScale = androidx.compose.ui.layout.ContentScale.Fit, modifier = Modifier.fillMaxSize())
                                                 } else if (meta?.thumbnailB64 != null && isVideo) {
                                                     val decoded = android.util.Base64.decode(meta.thumbnailB64, android.util.Base64.DEFAULT)
                                                     coil.compose.AsyncImage(model = decoded, contentDescription = "Video Thumbnail".tr, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -554,7 +568,9 @@ fun ChatThreadScreen(
                                             Box(
                                                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth().height(120.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
                                                     val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
-                                                    if (meta != null) viewModel.startMediaDownload(meta, peer.onionAddress)
+                                                    val onionToUse = peer.onionAddress.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                        ?: meta?.originNode?.takeIf { it.isNotBlank() && it.endsWith(".onion") }
+                                                    if (meta != null) viewModel.startMediaDownload(meta, onionToUse)
                                                 },
                                                 contentAlignment = Alignment.Center
                                             ) {
