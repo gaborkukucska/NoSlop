@@ -304,13 +304,17 @@ fun GroupSettingsModal(
                     }
                 }
 
+                val memberHandlesMap = remember(group.memberHandlesJson) { group.getMemberHandles() }
+
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     membersList.forEach { memberPub ->
                         val isMe = memberPub == myPubKey
                         val peer = allPeers.find { it.publicKeyB64 == memberPub }
+                        val handleFromGroup = memberHandlesMap[memberPub]
                         val name = when {
                             isMe -> (myHandle?.takeIf { it.isNotBlank() } ?: "You") + " (You)"
                             peer != null -> peer.handle
+                            !handleFromGroup.isNullOrBlank() -> handleFromGroup
                             else -> memberPub.take(8) + "..."
                         }
                         val isMemberAdmin = memberPub == group.adminPublicKeyB64

@@ -524,36 +524,6 @@ class HandshakePacketHandler(
         com.google.gson.Gson().fromJson(membersJson, Array<String>::class.java).toMutableList()
     } catch (e: Exception) { mutableListOf() }
 
-    private suspend fun cacheMemberHandles(handles: Map<String, String>?) {
-        if (handles.isNullOrEmpty()) return
-        val myKeys = repo.getLocalIdentity()
-        val myPub = myKeys?.publicKeyB64 ?: ""
-        val burnablePub = repo.getBurnableIdentity()?.publicKeyB64 ?: ""
-
-        for ((pub, handle) in handles) {
-            if (pub.isBlank() || handle.isBlank()) continue
-            if (pub == myPub || pub == burnablePub) continue
-
-            val existing = peerDao.getPeerByPublicKey(pub)
-            if (existing == null) {
-                val tripcode = try {
-                    CryptoService.deriveTripcode(Base64.decode(pub, Base64.DEFAULT))
-                } catch (e: Exception) { "" }
-                peerDao.insertPeer(
-                    Peer(
-                        publicKeyB64 = pub,
-                        handle = handle,
-                        tripcode = tripcode,
-                        onionAddress = "",
-                        isTrusted = false,
-                        isTemporary = true,
-                        isDiscoverable = true
-                    )
-                )
-            }
-        }
-    }
-
     private fun resolveUpdateSigner(update: GroupUpdatePayload, existing: GroupChat, members: List<String>): String? {
         val title = update.title ?: existing.title
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
@@ -600,6 +570,7 @@ class HandshakePacketHandler(
         val isMyGroup = invite.adminPublicKeyB64 == myKeys?.publicKeyB64 || invite.adminPublicKeyB64 == burnable?.publicKeyB64
         if (isMyGroup) {
             val membersJson = com.google.gson.Gson().toJson(invite.members)
+            val memberHandlesJson = com.google.gson.Gson().toJson(invite.memberHandles ?: emptyMap<String, String>())
             val group = GroupChat(
                 groupId = invite.groupId,
                 title = invite.title,
@@ -607,14 +578,13 @@ class HandshakePacketHandler(
                 membersJson = membersJson,
                 createdAt = invite.timestamp,
                 description = invite.description,
-                avatarB64 = invite.avatarB64
+                avatarB64 = invite.avatarB64,
+                memberHandlesJson = memberHandlesJson
             )
             db.groupChatDao().insertGroupChat(group)
             Logger.info(TAG, "Joined own group chat '${invite.title}' (${invite.groupId})")
             return true
         }
-
-        cacheMemberHandles(invite.memberHandles)
 
         // Store pending invite payload for Accept/Decline flow
         val jsonPayload = com.google.gson.Gson().toJson(invite)
@@ -701,11 +671,15 @@ class HandshakePacketHandler(
         currentMembers.removeAll(removed.toSet())
         val updatedTitle = update.title ?: existing.title
 
+        val handlesMap = existing.getMemberHandles().toMutableMap()
+        update.memberHandles?.let { handlesMap.putAll(it) }
+
         val updatedGroup = existing.copy(
             title = updatedTitle,
             description = update.description ?: existing.description,
             avatarB64 = update.avatarB64 ?: existing.avatarB64,
-            membersJson = com.google.gson.Gson().toJson(currentMembers.distinct())
+            membersJson = com.google.gson.Gson().toJson(currentMembers.distinct()),
+            memberHandlesJson = com.google.gson.Gson().toJson(handlesMap)
         )
         // --- NOSLOP_GROUP_DELTA_V1 ---
         // If this update removed us, drop the group locally rather than leaving
@@ -719,7 +693,6 @@ class HandshakePacketHandler(
             return true
         }
 
-        cacheMemberHandles(update.memberHandles)
         db.groupChatDao().insertGroupChat(updatedGroup)
         Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId}) by ${if (isAdmin) "admin" else "member"}")
         return true
