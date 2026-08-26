@@ -222,7 +222,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
             val groupChats by viewModel.groupChats.collectAsState()
-            val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable }
+            val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable && it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
 

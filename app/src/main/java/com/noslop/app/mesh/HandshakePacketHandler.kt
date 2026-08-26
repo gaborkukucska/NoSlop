@@ -526,8 +526,14 @@ class HandshakePacketHandler(
 
     private suspend fun cacheMemberHandles(handles: Map<String, String>?) {
         if (handles.isNullOrEmpty()) return
+        val myKeys = repo.getLocalIdentity()
+        val myPub = myKeys?.publicKeyB64 ?: ""
+        val burnablePub = repo.getBurnableIdentity()?.publicKeyB64 ?: ""
+
         for ((pub, handle) in handles) {
             if (pub.isBlank() || handle.isBlank()) continue
+            if (pub == myPub || pub == burnablePub) continue
+
             val existing = peerDao.getPeerByPublicKey(pub)
             if (existing == null) {
                 val tripcode = try {
@@ -540,7 +546,8 @@ class HandshakePacketHandler(
                         tripcode = tripcode,
                         onionAddress = "",
                         isTrusted = false,
-                        isTemporary = true
+                        isTemporary = true,
+                        isDiscoverable = true
                     )
                 )
             }
@@ -712,6 +719,7 @@ class HandshakePacketHandler(
             return true
         }
 
+        cacheMemberHandles(update.memberHandles)
         db.groupChatDao().insertGroupChat(updatedGroup)
         Logger.info(TAG, "Updated group chat '${updatedGroup.title}' (${update.groupId}) by ${if (isAdmin) "admin" else "member"}")
         return true
