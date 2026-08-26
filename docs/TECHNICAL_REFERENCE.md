@@ -260,6 +260,35 @@ exchange. There is no forward secrecy and no ratchet, so compromise of one
 long-term private key retroactively decrypts that pair's entire history.
 Group messages inherit this, once per member.
 
+### 3.5.2 Group Message Deletion
+
+`DELETE_MESSAGE` packets carry an optional `group_id` field. When present,
+the handler runs group-specific authorization:
+
+```
+if groupId present:
+    verify signature against deletePay.authorId
+    existing = getGroupChatById(groupId) or reject
+    if authorId == message.senderPub:  # author deleting own message
+        delete message
+    elif authorId == existing.adminPublicKeyB64:  # admin deleting any message
+        delete message
+    else:
+        reject
+else:
+    # DM path: only the original sender can delete
+    if authorId != packet.senderId: reject
+    deleteMessageByIdAndSender(messageId, authorId)
+```
+
+The sender broadcasts the `DELETE_MESSAGE` packet to every group member
+individually (same fan-out pattern as `sendGroupMessage`), not via gossip
+broadcast — ensuring only group members receive deletion instructions.
+
+`clearGroupChat()` is a local-only operation: it deletes all messages in a
+group thread from the device's database without sending any packets. This
+is the "Clear Chat" action in the group menu.
+
 ### 3.6 Tor Hidden Service Key Expansion
 
 `getRawEd25519Seed(privKeyB64)` converts the app's PKCS#8 Ed25519 private key

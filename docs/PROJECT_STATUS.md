@@ -1,5 +1,46 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-26) — Group Chat: Message Deletion, Privacy & Post-Creation Invites
+
+### 1. Group Message Deletion (`NOSLOP_GROUP_DELETE_V1`)
+
+*   **Group-aware `DELETE_MESSAGE` packets**: Extended `DeleteMessagePayload` in [Packets.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/Packets.kt) with an optional `group_id` field. When present, `handleDeleteMessage` in [DmPacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/DmPacketHandler.kt) verifies the deleter is either the original message author or the group admin before removing the message. DM deletes (no `groupId`) retain the existing "only sender can delete" rule.
+*   **`deleteGroupMessages()` in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt)**: New function that validates permission (owner or admin), deletes locally via `messageDao.deleteMessageById()`, then broadcasts a signed `DELETE_MESSAGE` packet to every group member with the `groupId` attached.
+*   **Admin privilege**: The group admin can delete any member's message. Regular members can only delete their own messages. Permission is enforced both at the sending side (`deleteGroupMessages`) and the receiving side (`handleDeleteMessage`).
+*   **DAO additions in [Daos.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/Daos.kt)**: Added `deleteGroupMessages(groupId)` (bulk local delete by `chatWithPeerPub`) and `deleteMessageById(id)` (single message delete without sender constraint, needed for admin deletes).
+
+### 2. Clear Group Chat (Local-Only)
+
+*   **`clearGroupChat()` in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt)**: New function that clears all messages in a group chat locally without broadcasting any delete packets to other members. Previously, "Clear Chat" in groups called the DM-specific `clearChat(groupId)` which tried to look up the groupId as a peer in `peerDao`, silently returned `null`, and did nothing.
+*   **UI wiring in [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt)**: The "Clear Chat" confirm dialog now calls `viewModel.clearGroupChat()` and shows an updated message clarifying that messages will not be removed for other members.
+
+### 3. Select All & Selection Permissions in Group Chat UI
+
+*   **Select All button**: Added a `SelectAll` icon button in the selection mode header bar of [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt). For regular members, it selects only the user's own messages; for the admin, it selects all messages.
+*   **Permission-based selection**: Regular members can only long-press or tap-select their own messages. The admin can select any message. Checkbox indicators only appear for other users' messages when the viewer is the admin.
+*   **Delete confirmation dialog**: A confirmation dialog now appears before deleting selected messages, showing the count and warning that deletion is permanent for all group members.
+
+### 4. Group Member Privacy & Ghost Peer Prevention
+
+*   **`memberHandlesJson` column**: Added to [GroupChat.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/GroupChat.kt) to store member display names as a serialized JSON map (pubKey → handle). This eliminates the need for `peerDao` lookups for group member metadata, which was causing group members who are not directly connected to appear as ghost "Pending Request" entries in the DMs page.
+*   **`MIGRATION_11_12`** in [NoSlopDatabase.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopDatabase.kt): Adds the `memberHandlesJson` column and purges any existing ghost peer entries from the database on upgrade.
+*   **Removed `cacheMemberHandles()`** from [HandshakePacketHandler.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/mesh/HandshakePacketHandler.kt): This function previously inserted group members into `peerDao`, which leaked unconnected members' onion addresses as DM pending requests — a privacy violation.
+*   **GroupSettingsModal name resolution** in [GroupSettingsModal.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupSettingsModal.kt): Updated to resolve member display names from `group.getMemberHandles()` instead of `peerDao`, ensuring non-connected members show their actual handle rather than a truncated public key.
+*   **Chat thread sender names** in [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt): Message sender names now fall back to `memberHandlesMap` when a peer is not in `peerDao`, so messages from non-directly-connected group members show proper display names.
+
+### 5. Post-Creation Member Invites (`NOSLOP_GROUP_ADD_INVITE_V1`)
+
+*   **Bug fix in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt) `updateGroupChat()`**: When a member was added to an existing group, only a `GROUP_UPDATE` packet was sent. The newly added member didn't have the group yet, so `handleGroupUpdate` (which requires `getGroupChatById() != null`) silently dropped the update and the member never received an invite.
+*   **Fix**: `updateGroupChat()` now sends `GROUP_INVITE` packets (not `GROUP_UPDATE`) to each newly added member, giving them the full group metadata (title, description, avatar, member list, admin key) so they can accept/join via the standard invite flow. Existing members continue to receive `GROUP_UPDATE` packets as before.
+
+### 6. Diagnostic Logging for Group Message Sending
+
+*   **Enhanced logging in `sendGroupMessage()`** in [NoSlopRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/NoSlopRepository.kt): Added detailed per-member logging that reports: member count, peers not found in `peerDao`, peers with no onion address, encryption failures, and final dispatch count (e.g., `sendGroupMessage: dispatched to 2/3 member(s)`). Previously, all failures were silent `continue` statements with no logging.
+
+### Known Issues Under Investigation
+
+*   **User A (RFCT217QD6K) Tor outbound failures**: All three outbound Tor connections from User A's device are failing with "SOCKS: Host unreachable", causing all peers to enter cooldown. Messages are inserted locally but never reach recipients. This is a Tor connectivity issue on the device, not a code bug. The new `sendGroupMessage` logging will confirm the exact failure point on the next test.
+
 ## Completed Changes (2026-08-23) — Media Downloads, Feed Controls & UI Polish
 
 ### 1. Un-paired Public Mesh Media Downloads & Return Routing

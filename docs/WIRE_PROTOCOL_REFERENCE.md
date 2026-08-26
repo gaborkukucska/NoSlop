@@ -89,7 +89,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | `PostPacketHandler` | `POST`, `EDIT_POST`, `DELETE_POST` |
 | `CommentPacketHandler` | `COMMENT` |
 | `ReactionPacketHandler` | `REACTION`, `VOTE`, `COMMENT_VOTE`, `CHAT_REACTION`, `COMMENT_REACTION` |
-| `DmPacketHandler` | `MESSAGE` |
+| `DmPacketHandler` | `MESSAGE`, `DELETE_MESSAGE` |
 | `HandshakePacketHandler` | `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `CONNECTION_REJECTED`, `ANNOUNCE_PEER`, `IDENTITY_UPDATE`, `USER_EXIT` |
 | `MediaPacketHandler` | `MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_RECOVERY_FOUND` |
 
@@ -120,6 +120,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 23 | `GROUP_DELETE` | `GroupDeletePayload` | `groupId\|delete\|adminPublicKeyB64\|timestamp` | `HandshakePacketHandler.handleGroupDelete` | `groupChatDao.deleteGroupChat` — admin only, signature-verified |
 | 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
 | 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
+| 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
 
 Notes:
 
@@ -453,6 +454,25 @@ signer is recovered and what each role is permitted to change.
 Blank `message_id` is rejected. Neither of these two types is signed, so
 neither should be treated as evidence of anything.
 
+### DELETE_MESSAGE
+**Type:** `DELETE_MESSAGE` · class `DeleteMessagePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `message_id` | String | ID of the message to delete |
+| `author_id` | String | Public key of the user requesting deletion |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `messageId\|authorId\|timestamp` |
+| `group_id` | String? | Optional. When present, enables group-mode authorization: the deleter may be either the message's original author or the group admin. When absent, only the message's original sender may delete it (DM mode). |
+
+**DM mode** (`group_id` absent): `authorId` must equal `packet.senderId` and
+the message is deleted via `deleteMessageByIdAndSender`.
+
+**Group mode** (`group_id` present): the handler loads the group, checks
+that `authorId` is either the message's `senderPub` (author deleting own
+message) or the group's `adminPublicKeyB64` (admin purging any message).
+The message is deleted via `deleteMessageById` (no sender constraint).
+
 ---
 
 ## 4. Inventory-Based Sync (`INVENTORY_SYNC_REQUEST`)
@@ -635,6 +655,7 @@ and still accurate.
 | `GROUP_INVITE` | `groupId\|title\|adminPublicKeyB64\|timestamp` |
 | `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+| `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64

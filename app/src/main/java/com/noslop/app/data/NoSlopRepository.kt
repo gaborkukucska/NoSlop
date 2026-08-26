@@ -821,34 +821,45 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
+        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, localEcho=$msgId")
+
+        var sentCount = 0
         for (memberPub in memberPubs) {
             if (memberPub == myKeys.publicKeyB64) continue
-            val peer = peerDao.getPeerByPublicKey(memberPub) ?: continue
-            if (peer.onionAddress.isNotBlank()) {
-                val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
-                // --- NOSLOP_GROUP_DM_V1 ---
-                // encryptDM expects the X25519 key. This used to pass
-                // myKeys.privateKeyB64 (Ed25519); decodeX25519PrivateKey threw,
-                // encryptDM caught it and returned Pair("", ""), and every group
-                // message went out empty with no error surfaced anywhere.
-                val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
-                if (ciphertext.isBlank() || nonce.isBlank()) {
-                    Logger.error("REPOSITORY", "Group message encryption failed for a member -- not sending")
-                    continue
-                }
-                // groupId has to ride on the payload or the receiver has no way
-                // to route this into the group thread.
-                val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
-                val packet = com.noslop.app.mesh.NetworkPacket(
-                    id = java.util.UUID.randomUUID().toString(),
-                    senderId = myKeys.publicKeyB64,
-                    targetUserId = memberPub,
-                    type = "MESSAGE",
-                    payload = com.google.gson.Gson().toJsonTree(msgPayload)
-                )
-                meshTransport.sendPacket(peer.onionAddress, packet = packet)
+            val peer = peerDao.getPeerByPublicKey(memberPub)
+            if (peer == null) {
+                Logger.warn("REPOSITORY", "sendGroupMessage: skipping member ${memberPub.take(12)}... (not in peerDao)")
+                continue
             }
+            if (peer.onionAddress.isBlank()) {
+                Logger.warn("REPOSITORY", "sendGroupMessage: skipping member ${memberPub.take(12)}... (no onion address)")
+                continue
+            }
+            val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
+            // --- NOSLOP_GROUP_DM_V1 ---
+            // encryptDM expects the X25519 key. This used to pass
+            // myKeys.privateKeyB64 (Ed25519); decodeX25519PrivateKey threw,
+            // encryptDM caught it and returned Pair("", ""), and every group
+            // message went out empty with no error surfaced anywhere.
+            val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
+            if (ciphertext.isBlank() || nonce.isBlank()) {
+                Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
+                continue
+            }
+            // groupId has to ride on the payload or the receiver has no way
+            // to route this into the group thread.
+            val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                senderId = myKeys.publicKeyB64,
+                targetUserId = memberPub,
+                type = "MESSAGE",
+                payload = com.google.gson.Gson().toJsonTree(msgPayload)
+            )
+            meshTransport.sendPacket(peer.onionAddress, packet = packet)
+            sentCount++
         }
+        Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $sentCount/${memberPubs.size - 1} member(s)")
     }
 
     suspend fun updateGroupChat(
@@ -922,9 +933,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         com.noslop.app.mesh.GossipService.broadcast(packet)
 
-        // Send targeted GROUP_UPDATE packets to all group members to ensure retries if offline
+        // Send targeted GROUP_UPDATE packets to existing members to ensure retries if offline
         for (memberPub in newMembers) {
             if (memberPub == myKeys.publicKeyB64) continue
+            if (addedMembers.contains(memberPub)) continue // New members get a GROUP_INVITE below
             val memberPacket = packet.copy(
                 id = java.util.UUID.randomUUID().toString(),
                 targetUserId = memberPub
@@ -932,6 +944,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val peer = db.peerDao().getPeerByPublicKey(memberPub)
             val onion = peer?.onionAddress ?: ""
             meshSocialRepository.dispatchPacket(onion, memberPacket)
+        }
+
+        // Newly added members don't have the group yet, so they need a full
+        // GROUP_INVITE (not GROUP_UPDATE which requires the group to exist).
+        if (addedMembers.isNotEmpty()) {
+            val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
+                groupId = groupId,
+                title = title,
+                adminPublicKeyB64 = existing.adminPublicKeyB64,
+                members = newMembers,
+                avatarB64 = avatarB64,
+                description = description,
+                memberHandles = memberHandlesMap,
+                timestamp = timestamp,
+                signature = signature
+            )
+            for (addedPub in addedMembers) {
+                if (addedPub == myKeys.publicKeyB64) continue
+                val invitePacket = com.noslop.app.mesh.NetworkPacket(
+                    id = "group_invite_${groupId}_${addedPub}",
+                    senderId = myKeys.publicKeyB64,
+                    targetUserId = addedPub,
+                    type = "GROUP_INVITE",
+                    payload = com.google.gson.Gson().toJsonTree(invitePayload)
+                )
+                val peer = db.peerDao().getPeerByPublicKey(addedPub)
+                val onion = peer?.onionAddress ?: ""
+                meshSocialRepository.dispatchPacket(onion, invitePacket)
+                Logger.info("REPOSITORY", "Sent GROUP_INVITE for $groupId to newly added member ${addedPub.take(8)}...")
+            }
         }
 
         // If we removed ourselves from the group, delete the group locally
