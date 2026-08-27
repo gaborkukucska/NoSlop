@@ -58,15 +58,60 @@ fun AndroidGifTextField(
                         }
                         
                         val uri = inputContentInfo.contentUri
-                        val mime = inputContentInfo.description.getMimeType(0) ?: ""
+                        val description = inputContentInfo.description
+                        val mimes = mutableListOf<String>()
+                        for (i in 0 until description.mimeTypeCount) {
+                            description.getMimeType(i)?.let { mimes.add(it.lowercase()) }
+                        }
+                        val crType = context.contentResolver.getType(uri)?.lowercase()
+                        if (crType != null) mimes.add(crType)
+                        val uriPath = uri.toString().lowercase()
+
+                        var isGif = mimes.any { it.contains("gif") } || uriPath.contains(".gif")
+                        var isPng = mimes.any { it.contains("png") } || uriPath.contains(".png")
+                        var isMp4 = mimes.any { it.contains("video") || it.contains("mp4") } || uriPath.contains(".mp4")
+                        var isJpg = mimes.any { it.contains("jpeg") || it.contains("jpg") } || uriPath.contains(".jpg") || uriPath.contains(".jpeg")
+
+                        // Magic bytes fallback check
+                        if (!isGif && !isPng && !isMp4 && !isJpg) {
+                            try {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    val header = ByteArray(8)
+                                    val read = input.read(header, 0, 8)
+                                    if (read >= 3 && header[0] == 'G'.code.toByte() && header[1] == 'I'.code.toByte() && header[2] == 'F'.code.toByte()) {
+                                        isGif = true
+                                    } else if (read >= 4 && header[0] == 0x89.toByte() && header[1] == 'P'.code.toByte() && header[2] == 'N'.code.toByte() && header[3] == 'G'.code.toByte()) {
+                                        isPng = true
+                                    } else if (read >= 3 && header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && header[2] == 0xFF.toByte()) {
+                                        isJpg = true
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Logger.error("GIF_INPUT", "Failed magic bytes check: ${e.message}")
+                            }
+                        }
+
+                        // Also verify magic bytes if ambiguous to prevent false non-GIF categorization
+                        if (!isGif) {
+                            try {
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    val header = ByteArray(3)
+                                    val read = input.read(header, 0, 3)
+                                    if (read >= 3 && header[0] == 'G'.code.toByte() && header[1] == 'I'.code.toByte() && header[2] == 'F'.code.toByte()) {
+                                        isGif = true
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+
                         val ext = when {
-                            mime.contains("gif") -> ".gif"
-                            mime.contains("png") -> ".png"
-                            mime.contains("video") -> ".mp4"
-                            mime.contains("jpeg") || mime.contains("jpg") -> ".jpg"
+                            isGif -> ".gif"
+                            isPng -> ".png"
+                            isMp4 -> ".mp4"
+                            isJpg -> ".jpg"
                             else -> ".bin"
                         }
-                        
+
                         try {
                             val tempFile = File(context.cacheDir, "gboard_attach_${System.currentTimeMillis()}$ext")
                             context.contentResolver.openInputStream(uri)?.use { input ->

@@ -131,9 +131,10 @@ fun ChatThreadScreen(
 
     suspend fun buildMediaMetadata(file: java.io.File): MediaMetadata {
         val ext = file.extension.lowercase()
-        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+        val isGif = ext == "gif" || file.name.endsWith(".gif", ignoreCase = true)
+        val mimeType = if (isGif) "image/gif" else (android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
         val type = when {
-            mimeType.startsWith("image") -> "image"
+            isGif || mimeType.startsWith("image") -> "image"
             mimeType.startsWith("video") -> "video"
             mimeType.startsWith("audio") -> "audio"
             else -> "file"
@@ -160,7 +161,7 @@ fun ChatThreadScreen(
                 }
             }
         }
-        else if (type == "image" && file.length() > 500 * 1024) {
+        else if (type == "image" && !isGif && file.length() > 500 * 1024) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 compressionProgress = 0
             }
@@ -272,6 +273,8 @@ fun ChatThreadScreen(
         return
     }
 
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
     Column(modifier = Modifier.fillMaxSize().background(PrimaryBlack).imePadding()) {
         // Header
         if (isSelectionMode) {
@@ -282,9 +285,9 @@ fun ChatThreadScreen(
                 IconButton(onClick = { selectedMessageIds = emptySet() }) { Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight) }
                 Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { 
-                    viewModel.deleteDirectMessages(selectedMessageIds.toList(), peer.publicKeyB64)
-                    selectedMessageIds = emptySet()
-                }) { Icon(Icons.Default.Delete, contentDescription = "Delete".tr, tint = DestructiveRed) }
+                    selectedMessageIds = messages.filter { it.senderPub != peer.publicKeyB64 }.map { it.id }.toSet()
+                }) { Icon(Icons.Default.SelectAll, contentDescription = "Select All".tr, tint = AccentGreen) }
+                IconButton(onClick = { showDeleteConfirm = true }) { Icon(Icons.Default.Delete, contentDescription = "Delete".tr, tint = DestructiveRed) }
             }
         } else {
             Row(
@@ -352,6 +355,28 @@ fun ChatThreadScreen(
             }
         }
 
+        if (showDeleteConfirm) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                containerColor = SurfaceDark,
+                title = { Text("Delete Messages?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                text = { Text("${selectedMessageIds.size} message(s) will be permanently deleted for both participants.".tr, color = TextLight) },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.deleteDirectMessages(selectedMessageIds.toList(), peer.publicKeyB64)
+                            selectedMessageIds = emptySet()
+                            showDeleteConfirm = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                    ) { Text("Delete".tr, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel".tr, color = TextMuted) }
+                }
+            )
+        }
+
         if (peer.isTemporary) {
             Box(modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(8.dp), contentAlignment = Alignment.Center) {
                 Button(
@@ -381,6 +406,7 @@ fun ChatThreadScreen(
             items(messages, key = { it.id }) { msg ->
                 val isSelf = msg.senderPub != peer.publicKeyB64
                 val isSelected = selectedMessageIds.contains(msg.id)
+                val canSelect = isSelf
 
                 val (decryptedText, parsedMediaMetadata) = remember(msg.ciphertext, localKeys, burnableKeys) {
                     var text = msg.ciphertext
@@ -402,17 +428,22 @@ fun ChatThreadScreen(
                 val reactions by viewModel.getReactionsForMessage(msg.id).collectAsState(initial = emptyList())
                 var showReactionPicker by remember { mutableStateOf(false) }
 
+                val currentIsSelectionMode by rememberUpdatedState(isSelectionMode)
+                val currentIsSelected by rememberUpdatedState(isSelected)
+                val currentCanSelect by rememberUpdatedState(canSelect)
+
                 Box(
                     modifier = Modifier.fillMaxWidth()
                         .background(if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color.Transparent)
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onLongPress = {
-                                    if (!isSelectionMode) selectedMessageIds += msg.id
+                                    if (!currentIsSelectionMode && currentCanSelect) selectedMessageIds = selectedMessageIds + msg.id
                                 },
                                 onTap = {
-                                    if (isSelectionMode) {
-                                        if (isSelected) selectedMessageIds -= msg.id else selectedMessageIds += msg.id
+                                    if (currentIsSelectionMode && currentCanSelect) {
+                                        if (currentIsSelected) selectedMessageIds = selectedMessageIds - msg.id
+                                        else selectedMessageIds = selectedMessageIds + msg.id
                                     }
                                 }
                             )

@@ -419,7 +419,16 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     .fillMaxSize()
                     .then(
                         if (selectedTab == 0) Modifier
-                        else Modifier.alpha(0f)
+                        else Modifier
+                            .alpha(0f)
+                            .pointerInput(selectedTab) {
+                                awaitPointerEventScope {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
                     )
                     // Landscape tap interceptor: tap to show/hide UI
                     .then(

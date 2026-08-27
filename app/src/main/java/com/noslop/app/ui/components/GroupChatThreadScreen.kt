@@ -142,9 +142,10 @@ fun GroupChatThreadScreen(
 
     suspend fun buildMediaMetadata(file: java.io.File): MediaMetadata {
         val ext = file.extension.lowercase()
-        val mimeType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+        val isGif = ext == "gif" || file.name.endsWith(".gif", ignoreCase = true)
+        val mimeType = if (isGif) "image/gif" else (android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
         val type = when {
-            mimeType.startsWith("image") -> "image"
+            isGif || mimeType.startsWith("image") -> "image"
             mimeType.startsWith("video") -> "video"
             mimeType.startsWith("audio") -> "audio"
             else -> "file"
@@ -170,7 +171,7 @@ fun GroupChatThreadScreen(
                     }
                 }
             }
-        } else if (type == "image" && file.length() > 500 * 1024) {
+        } else if (type == "image" && !isGif && file.length() > 500 * 1024) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 compressionProgress = 0
             }
@@ -460,18 +461,22 @@ fun GroupChatThreadScreen(
                     msg.mediaId?.let { com.noslop.app.mesh.MediaManager.getMetadataSync(it) }
                 }
 
+                val currentIsSelectionMode by rememberUpdatedState(isSelectionMode)
+                val currentIsSelected by rememberUpdatedState(isSelected)
+                val currentCanSelect by rememberUpdatedState(canSelect)
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(if (isSelected) AccentGreen.copy(alpha = 0.2f) else Color.Transparent)
-                        .pointerInput(canSelect) {
+                        .pointerInput(Unit) {
                             detectTapGestures(
                                 onLongPress = {
-                                    if (!isSelectionMode && canSelect) selectedMessageIds = selectedMessageIds + msg.id
+                                    if (!currentIsSelectionMode && currentCanSelect) selectedMessageIds = selectedMessageIds + msg.id
                                 },
                                 onTap = {
-                                    if (isSelectionMode && canSelect) {
-                                        if (isSelected) selectedMessageIds = selectedMessageIds - msg.id
+                                    if (currentIsSelectionMode && currentCanSelect) {
+                                        if (currentIsSelected) selectedMessageIds = selectedMessageIds - msg.id
                                         else selectedMessageIds = selectedMessageIds + msg.id
                                     }
                                 }
