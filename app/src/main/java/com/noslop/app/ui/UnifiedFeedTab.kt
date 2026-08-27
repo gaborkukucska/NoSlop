@@ -1396,6 +1396,7 @@ fun UnifiedFeedTab(
         var showPublicWarning by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
         var isProcessingAttachment by remember { mutableStateOf(false) }
+        var isPreparingAttachment by remember { mutableStateOf(false) }
         var compressionProgress by remember { mutableStateOf<Int?>(null) }
         var attachedFile by remember { mutableStateOf<java.io.File?>(null) }
         val contextWrapper = LocalContext.current
@@ -1427,6 +1428,7 @@ fun UnifiedFeedTab(
                             if (nameIndex != -1) originalName = cursor.getString(nameIndex)
                         }
                     }
+                    isPreparingAttachment = true
                     coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         try {
                             var finalName = originalName
@@ -1441,9 +1443,13 @@ fun UnifiedFeedTab(
                             contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 attachedFile = tempFile
+                                isPreparingAttachment = false
                             }
                         } catch (e: Exception) { 
                             Logger.error("MAIN", "Failed to copy attached file", e.message)
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                isPreparingAttachment = false
+                            }
                         }
                     }
                 } catch (e: Exception) { Logger.error("MAIN", "Failed to setup attached file", e.message) }
@@ -1534,11 +1540,12 @@ fun UnifiedFeedTab(
         }
 
         if (!showCamera) {
+            val isBusy = isProcessingAttachment || isPreparingAttachment
             AlertDialog(
-                onDismissRequest = { if (!isProcessingAttachment) handleDismiss() },
+                onDismissRequest = { if (!isBusy) handleDismiss() },
                 properties = androidx.compose.ui.window.DialogProperties(
-                    dismissOnClickOutside = !isProcessingAttachment,
-                    dismissOnBackPress = !isProcessingAttachment
+                    dismissOnClickOutside = !isBusy,
+                    dismissOnBackPress = !isBusy
                 ),
                 containerColor = SurfaceDark,
                 title = { Text("Broadcast to Mesh".tr, color = TextLight, fontWeight = FontWeight.Bold) },
@@ -1549,13 +1556,20 @@ fun UnifiedFeedTab(
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = AccentGreen, unfocusedBorderColor = BorderSubtle, focusedTextColor = TextLight, unfocusedTextColor = TextLight),
                             modifier = Modifier.fillMaxWidth().height(120.dp)
                         )
-                        if (attachedFile != null) {
+                        if (isPreparingAttachment) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentGreen, strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Attaching media...".tr, color = TextLight, fontSize = 12.sp)
+                            }
+                        } else if (attachedFile != null) {
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                IconButton(onClick = { if (!isProcessingAttachment) attachedFile = null }, enabled = !isProcessingAttachment) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = if (isProcessingAttachment) TextMuted else DestructiveRed) }
+                                IconButton(onClick = { if (!isBusy) attachedFile = null }, enabled = !isBusy) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = if (isBusy) TextMuted else DestructiveRed) }
                             }
                         }
 
@@ -1583,8 +1597,8 @@ fun UnifiedFeedTab(
                                 val hasCamera = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 val hasAudio = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 if (hasCamera && hasAudio) showCamera = true else permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
-                            }, enabled = !isProcessingAttachment) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo".tr, tint = if (isProcessingAttachment) TextMuted else AccentGreen) }
-                            IconButton(onClick = { filePickerLauncher.launch("*/*") }, enabled = !isProcessingAttachment) { Icon(Icons.Default.Add, contentDescription = "File".tr, tint = if (isProcessingAttachment) TextMuted else AccentGreen) }
+                            }, enabled = !isBusy) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo".tr, tint = if (isBusy) TextMuted else AccentGreen) }
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }, enabled = !isBusy) { Icon(Icons.Default.Add, contentDescription = "File".tr, tint = if (isBusy) TextMuted else AccentGreen) }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Privacy".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
@@ -1593,7 +1607,7 @@ fun UnifiedFeedTab(
                                 FilterChip(
                                     selected = selectedPrivacy == priv, 
                                     onClick = { 
-                                        if (!isProcessingAttachment) {
+                                        if (!isBusy) {
                                             if (priv == "public" && selectedPrivacy != "public") {
                                                 showPublicWarning = true
                                             } else {
@@ -1601,7 +1615,7 @@ fun UnifiedFeedTab(
                                             }
                                         }
                                     }, 
-                                    enabled = !isProcessingAttachment,
+                                    enabled = !isBusy,
                                     label = { Text(priv.replaceFirstChar { it.uppercase() }) }, 
                                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
                                 )
@@ -1727,7 +1741,7 @@ fun UnifiedFeedTab(
                                 }
                             }
                         },
-                        enabled = !isProcessingAttachment && (postContent.isNotBlank() || attachedFile != null || sharedItem != null), colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        enabled = !isBusy && (postContent.isNotBlank() || attachedFile != null || sharedItem != null), colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) { 
                         val processingText = if (isProcessingAttachment) {
                             if (compressionProgress != null) "Compressing... $compressionProgress%".tr else "Processing...".tr
@@ -1737,7 +1751,7 @@ fun UnifiedFeedTab(
                         Text(processingText, fontWeight = FontWeight.Bold) 
                     }
                 },
-                dismissButton = { TextButton(onClick = handleDismiss, enabled = !isProcessingAttachment) { Text("Cancel".tr, color = if (isProcessingAttachment) TextMuted else TextMuted) } }
+                dismissButton = { TextButton(onClick = handleDismiss, enabled = !isBusy) { Text("Cancel".tr, color = if (isBusy) TextMuted else TextMuted) } }
             )
         }
     }
