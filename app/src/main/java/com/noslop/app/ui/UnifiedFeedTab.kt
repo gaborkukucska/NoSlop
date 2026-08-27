@@ -82,6 +82,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.platform.LocalConfiguration
 
 @Composable
@@ -424,7 +425,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                             .pointerInput(selectedTab) {
                                 awaitPointerEventScope {
                                     while (true) {
-                                        val event = awaitPointerEvent()
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
                                         event.changes.forEach { it.consume() }
                                     }
                                 }
@@ -966,7 +967,7 @@ fun UnifiedFeedTab(
         ) {
             // Notifications Icon (Top Left)
             IconButton(
-                onClick = { onTabChange(4) },
+                onClick = { if (isActiveTab) onTabChange(4) },
                 modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
             ) {
                 BadgedBox(
@@ -998,8 +999,10 @@ fun UnifiedFeedTab(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(if (!isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
-                                    filterMode = "Live Feed"
-                                    viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                    if (isActiveTab) {
+                                        filterMode = "Live Feed"
+                                        viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                    }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
                         ) {
@@ -1017,8 +1020,10 @@ fun UnifiedFeedTab(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(if (isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
-                                    filterMode = "Mesh"
-                                    viewModel.syncFilterMode("Mesh", forceRefresh = true)
+                                    if (isActiveTab) {
+                                        filterMode = "Mesh"
+                                        viewModel.syncFilterMode("Mesh", forceRefresh = true)
+                                    }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
                         ) {
@@ -1049,7 +1054,7 @@ fun UnifiedFeedTab(
                         modifier = Modifier
                             .clip(RoundedCornerShape(20.dp))
                             .background(SurfaceDark.copy(alpha = 0.75f))
-                            .clickable { showSearchModal = true }
+                            .clickable { if (isActiveTab) showSearchModal = true }
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1062,13 +1067,15 @@ fun UnifiedFeedTab(
                                 modifier = Modifier
                                     .size(14.dp)
                                     .clickable {
-                                        filterMode = "Live Feed"
-                                        searchQuery = ""
-                                        if (searchResultsActive) {
-                                            searchResultsActive = false
-                                            viewModel.clearSearchAndRestoreFeed()
-                                        } else {
-                                            viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                        if (isActiveTab) {
+                                            filterMode = "Live Feed"
+                                            searchQuery = ""
+                                            if (searchResultsActive) {
+                                                searchResultsActive = false
+                                                viewModel.clearSearchAndRestoreFeed()
+                                            } else {
+                                                viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                            }
                                         }
                                     }
                             )
@@ -1078,7 +1085,7 @@ fun UnifiedFeedTab(
                 }
 
                 IconButton(
-                    onClick = { showSearchModal = true },
+                    onClick = { if (isActiveTab) showSearchModal = true },
                     modifier = Modifier.size(40.dp).background(SurfaceDark.copy(alpha = 0.6f), RoundedCornerShape(50))
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Search & Filter".tr, tint = TextLight.copy(alpha = 0.85f), modifier = Modifier.size(22.dp))
@@ -1088,7 +1095,7 @@ fun UnifiedFeedTab(
     }
 
     // ─── Search & Filter Modal ───
-    if (showSearchModal) {
+    if (showSearchModal && isActiveTab) {
         var localSearchQuery by remember { mutableStateOf(searchQuery) }
         var localFilterMode by remember { mutableStateOf(filterMode) }
         val localInterests by viewModel.selectedInterests.collectAsState()

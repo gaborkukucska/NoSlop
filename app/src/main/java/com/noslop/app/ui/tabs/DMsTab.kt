@@ -97,7 +97,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         viewModel.selectGroupChat(null)
     }
 
-    Box(modifier = Modifier.fillMaxSize().onGloballyPositioned { tabCoordinates = it }) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures { } }
+            .onGloballyPositioned { tabCoordinates = it }
+    ) {
     if (selectedPeerPub != null) {
         // Individual thread screen
         val recipientPeer = peers.find { it.publicKeyB64 == selectedPeerPub }
