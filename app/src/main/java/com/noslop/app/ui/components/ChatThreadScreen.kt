@@ -143,7 +143,8 @@ fun ChatThreadScreen(
         var finalFile = file
         
         if (type == "video" && file.length() > 20 * 1024 * 1024) {
-            val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}")
+            val tempDir = context.externalCacheDir ?: context.cacheDir
+            val compressedFile = java.io.File(tempDir, "compressed_${file.name}")
             val quality = viewModel.mediaSettings.value.videoQuality
                                 com.noslop.app.media.VideoCompressor.compressVideo(context, android.net.Uri.fromFile(file), compressedFile, quality).collect { state ->
                 when(state) {

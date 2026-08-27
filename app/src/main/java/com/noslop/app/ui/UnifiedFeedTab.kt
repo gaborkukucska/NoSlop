@@ -1427,7 +1427,6 @@ fun UnifiedFeedTab(
                             if (nameIndex != -1) originalName = cursor.getString(nameIndex)
                         }
                     }
-                    isProcessingAttachment = true
                     coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         try {
                             var finalName = originalName
@@ -1437,15 +1436,14 @@ fun UnifiedFeedTab(
                                 finalName = (finalName ?: "mesh_attach_${System.currentTimeMillis()}") + extension
                             }
                             val safeName = finalName.replace(" ", "_")
-                            val tempFile = java.io.File(contextWrapper.cacheDir, safeName)
+                            val tempDir = contextWrapper.externalCacheDir ?: contextWrapper.cacheDir
+                            val tempFile = java.io.File(tempDir, safeName)
                             contentResolver.openInputStream(uri)?.use { input -> tempFile.outputStream().use { output -> input.copyTo(output) } }
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                 attachedFile = tempFile
-                                isProcessingAttachment = false
                             }
                         } catch (e: Exception) { 
                             Logger.error("MAIN", "Failed to copy attached file", e.message)
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { isProcessingAttachment = false }
                         }
                     }
                 } catch (e: Exception) { Logger.error("MAIN", "Failed to setup attached file", e.message) }
@@ -1537,7 +1535,12 @@ fun UnifiedFeedTab(
 
         if (!showCamera) {
             AlertDialog(
-                onDismissRequest = handleDismiss, containerColor = SurfaceDark,
+                onDismissRequest = { if (!isProcessingAttachment) handleDismiss() },
+                properties = androidx.compose.ui.window.DialogProperties(
+                    dismissOnClickOutside = !isProcessingAttachment,
+                    dismissOnBackPress = !isProcessingAttachment
+                ),
+                containerColor = SurfaceDark,
                 title = { Text("Broadcast to Mesh".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
@@ -1552,7 +1555,7 @@ fun UnifiedFeedTab(
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                                IconButton(onClick = { attachedFile = null }) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = DestructiveRed) }
+                                IconButton(onClick = { if (!isProcessingAttachment) attachedFile = null }, enabled = !isProcessingAttachment) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = if (isProcessingAttachment) TextMuted else DestructiveRed) }
                             }
                         }
 
@@ -1580,8 +1583,8 @@ fun UnifiedFeedTab(
                                 val hasCamera = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 val hasAudio = ContextCompat.checkSelfPermission(contextWrapper, Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
                                 if (hasCamera && hasAudio) showCamera = true else permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO))
-                            }) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo".tr, tint = AccentGreen) }
-                            IconButton(onClick = { filePickerLauncher.launch("*/*") }) { Icon(Icons.Default.Add, contentDescription = "File".tr, tint = AccentGreen) }
+                            }, enabled = !isProcessingAttachment) { Icon(Icons.Default.CameraAlt, contentDescription = "Photo".tr, tint = if (isProcessingAttachment) TextMuted else AccentGreen) }
+                            IconButton(onClick = { filePickerLauncher.launch("*/*") }, enabled = !isProcessingAttachment) { Icon(Icons.Default.Add, contentDescription = "File".tr, tint = if (isProcessingAttachment) TextMuted else AccentGreen) }
                         }
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Privacy".tr, color = TextMuted, style = MaterialTheme.typography.labelSmall)
@@ -1590,12 +1593,15 @@ fun UnifiedFeedTab(
                                 FilterChip(
                                     selected = selectedPrivacy == priv, 
                                     onClick = { 
-                                        if (priv == "public" && selectedPrivacy != "public") {
-                                            showPublicWarning = true
-                                        } else {
-                                            selectedPrivacy = priv
+                                        if (!isProcessingAttachment) {
+                                            if (priv == "public" && selectedPrivacy != "public") {
+                                                showPublicWarning = true
+                                            } else {
+                                                selectedPrivacy = priv
+                                            }
                                         }
                                     }, 
+                                    enabled = !isProcessingAttachment,
                                     label = { Text(priv.replaceFirstChar { it.uppercase() }) }, 
                                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
                                 )
@@ -1621,8 +1627,9 @@ fun UnifiedFeedTab(
                                     var finalFile = file
                                     val videoQuality = viewModel.mediaSettings.value.videoQuality
                                     val imageQuality = viewModel.mediaSettings.value.imageQuality
+                                    val tempDir = contextWrapper.externalCacheDir ?: contextWrapper.cacheDir
                                     if (type == "video" && file.length() > 20 * 1024 * 1024) {
-                                        val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}")
+                                        val compressedFile = java.io.File(tempDir, "compressed_${file.name}")
                                         com.noslop.app.media.VideoCompressor.compressVideo(contextWrapper, android.net.Uri.fromFile(file), compressedFile, videoQuality).collect { state ->
                                             when(state) {
                                                 is com.noslop.app.media.VideoCompressor.CompressState.Progress -> {
@@ -1668,7 +1675,7 @@ fun UnifiedFeedTab(
                                                     android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
                                                 } else bitmap
                                                 
-                                                val compressedFile = java.io.File(contextWrapper.cacheDir, "compressed_${file.name}.jpg")
+                                                val compressedFile = java.io.File(tempDir, "compressed_${file.name}.jpg")
                                                 val out = java.io.FileOutputStream(compressedFile)
                                                 scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, compressQuality, out)
                                                 out.close()
@@ -1683,18 +1690,18 @@ fun UnifiedFeedTab(
                                     }
                                     
                                     val id = "post_${finalFile.name}"
-                                    com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id)
-                                    val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(finalFile, type)
+                                    val copiedFile = com.noslop.app.mesh.MediaManager.copyFileToMediaDirectory(finalFile, type, id) ?: finalFile
+                                    val thumbnail = com.noslop.app.mesh.MediaManager.generateTinyThumbnail(copiedFile, type)
                                     com.noslop.app.mesh.MediaMetadata(
                                         id = id, 
                                         type = type, 
                                         mimeType = mimeType, 
-                                        size = finalFile.length(), 
-                                        chunkCount = (finalFile.length() / (256 * 1024)).toInt() + 1, 
+                                        size = copiedFile.length(), 
+                                        chunkCount = (copiedFile.length() / (256 * 1024)).toInt() + 1, 
                                         originNode = viewModel.localKeys.value?.onionAddress, 
                                         ownerId = viewModel.localKeys.value?.publicKeyB64, 
                                         thumbnailB64 = thumbnail,
-                                        filename = finalFile.name
+                                        filename = copiedFile.name
                                     )
                                 }
                                 
@@ -1730,7 +1737,7 @@ fun UnifiedFeedTab(
                         Text(processingText, fontWeight = FontWeight.Bold) 
                     }
                 },
-                dismissButton = { TextButton(onClick = handleDismiss) { Text("Cancel".tr, color = TextMuted) } }
+                dismissButton = { TextButton(onClick = handleDismiss, enabled = !isProcessingAttachment) { Text("Cancel".tr, color = if (isProcessingAttachment) TextMuted else TextMuted) } }
             )
         }
     }
