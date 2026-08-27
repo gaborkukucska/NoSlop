@@ -112,6 +112,25 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
         // Start media HTTP-to-Tor proxy service
         com.noslop.app.mesh.MediaProxyService.start()
 
+        // Start embedded Tor daemon early on app start for existing onboarded users
+        repositoryScope.launch {
+            if (repository.isOnboardingComplete()) {
+                val identity = repository.getLocalIdentity()
+                val burnableIdentity = repository.getBurnableIdentity()
+                val hubStatus = repository.getAppSetting("hub_deployment_status")
+                com.noslop.app.tor.TorService.skipHiddenServiceRegistration = !hubStatus.isNullOrBlank()
+                val fgEnabled = repository.getAppSetting("foreground_service_enabled") == "true"
+                if (fgEnabled && hubStatus.isNullOrBlank()) {
+                    com.noslop.app.mesh.NoSlopForegroundService.start(this@NoSlopApp)
+                }
+                com.noslop.app.tor.TorService.startTor(
+                    this@NoSlopApp,
+                    identity?.privateKeyB64,
+                    burnableIdentity?.privateKeyB64
+                )
+            }
+        }
+
         repository.meshTransport.startListening()
         repositoryScope.launch {
             val identity = repository.getLocalIdentity()
@@ -122,7 +141,7 @@ class NoSlopApp : Application(), Configuration.Provider, ImageLoaderFactory {
                     identity.publicKeyB64,
                     getMeshFilterSettings = { repository.getMeshFilterSettings() },
                     checkEntityExists = { type, id -> repository.checkEntityExistsLocally(type, id) },
-            checkIsLocalUser = { pub -> repository.isLocalUser(pub) }
+                    checkIsLocalUser = { pub -> repository.isLocalUser(pub) }
                 )
                 repository.startPresenceHeartbeat()
             }

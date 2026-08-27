@@ -250,32 +250,22 @@ object TorService {
 
             // Unified self-healing bootstrap loop
             bootstrapJob = scope.launch {
-                // FIX: Wait for SOCKS5 proxy to be reachable with 60s timeout
                 val proxyReady = waitForProxy(timeoutSeconds = 60)
                 if (proxyReady) {
-                    _torState.value = TorState.PROXY_READY
-                    
-                    // Continually check for circuit availability via Tor check.
-                    for (attempt in 1..10) {
-                        if (_torState.value == TorState.READY) break
-                        
-                        val (isTor, _) = checkTorConnection()
-                        if (isTor) {
-                            if (_torState.value != TorState.READY) {
-                                Logger.info(TAG, "Self-healing bootstrap: Connectivity verified. Moving to READY.")
-                                _torState.value = TorState.READY
-                                triggerRegistration()
+                    Logger.info(TAG, "Tor SOCKS5 proxy is operational on $PROXY_HOST:$SOCKS_PORT. Promoting state to READY.")
+                    _torState.value = TorState.READY
+                    triggerRegistration()
+
+                    // Asynchronously check connectivity in background without blocking network work
+                    scope.launch {
+                        for (attempt in 1..5) {
+                            val (isTor, _) = checkTorConnection()
+                            if (isTor) {
+                                Logger.info(TAG, "Background Tor connectivity check verified isTor=true.")
+                                break
                             }
-                            break
+                            delay(3000)
                         }
-                        delay(3000)
-                    }
-                    
-                    // If SOCKS proxy port is listening and proxy is accepting, promote to READY
-                    if (_torState.value != TorState.READY) {
-                        Logger.info(TAG, "Tor SOCKS5 proxy is operational on $PROXY_HOST:$SOCKS_PORT. Promoting state to READY.")
-                        _torState.value = TorState.READY
-                        triggerRegistration()
                     }
                 } else {
                     Logger.warn(TAG, "Tor proxy failed to start on $PROXY_HOST:$SOCKS_PORT.")

@@ -48,45 +48,52 @@ class MainActivity : ComponentActivity() {
                     LaunchedEffect(Unit) {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
+                            
+                            // 1. Ensure Tor network is ready if clearnet over Tor is enabled
+                            try {
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(15000L)
+                            } catch (_: Exception) {}
+
                             var firstPreloadUrl: String? = null
                             
-                            // 1. Wait up to 4 seconds for the feed to populate
+                            // 2. Wait up to 5 seconds for the feed to populate / restore
                             try {
-                                kotlinx.coroutines.withTimeout(4000) {
+                                kotlinx.coroutines.withTimeout(5000) {
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
-                                            val firstItem = items.first { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
-                                            val rawUrl = when(firstItem) {
-                                                is com.noslop.app.ui.UnifiedItem.Feed -> {
-                                                    firstItem.item.mediaUrl ?: firstItem.item.url
+                                            val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
+                                            if (nonTutItems.isNotEmpty()) {
+                                                val targetItem = nonTutItems.firstOrNull()
+                                                val rawUrl = when(targetItem) {
+                                                    is com.noslop.app.ui.UnifiedItem.Feed -> {
+                                                        targetItem.item.mediaUrl ?: targetItem.item.url
+                                                    }
+                                                    is com.noslop.app.ui.UnifiedItem.Mesh -> {
+                                                        targetItem.post.mediaUrl ?: targetItem.post.clearnetUrl
+                                                    }
+                                                    else -> null
                                                 }
-                                                is com.noslop.app.ui.UnifiedItem.Mesh -> {
-                                                    firstItem.post.mediaUrl ?: firstItem.post.clearnetUrl
+                                                
+                                                firstPreloadUrl = if (rawUrl?.startsWith("noslop://") == true) {
+                                                    val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
+                                                    val id = rawUrl.substringAfterLast("/")
+                                                    "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
+                                                } else {
+                                                    rawUrl
                                                 }
-                                                is com.noslop.app.ui.UnifiedItem.Tutorial -> null
+                                                throw java.util.concurrent.CancellationException("Feed Loaded")
                                             }
-                                            
-                                            // Safely resolve local mesh media proxies natively to avoid import issues
-                                            firstPreloadUrl = if (rawUrl?.startsWith("noslop://") == true) {
-                                                val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
-                                                val id = rawUrl.substringAfterLast("/")
-                                                "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
-                                            } else {
-                                                rawUrl
-                                            }
-                                            throw java.util.concurrent.CancellationException("Feed Loaded")
                                         }
                                     }
                                 }
                             } catch (e: Exception) {
-                                // Caught timeout or our deliberate success cancellation
+                                // Caught timeout or deliberate success cancellation
                             }
                             
-                            // 2. If the first item is media, aggressively pre-warm and wait for it before dropping the splash screen!
+                            // 3. Pre-warm target slide media and wait for it before dropping the splash screen
                             if (firstPreloadUrl != null) {
                                 try {
-                                    kotlinx.coroutines.withTimeout(6000) {
-                                        com.noslop.app.net.HttpClientProvider.awaitNetworkReady(3000L)
+                                    kotlinx.coroutines.withTimeout(5000) {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
                                         com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
                                     }
@@ -95,7 +102,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             
-                            // 3. Ensure we've shown the splash for at least 1.8s for the aesthetic
+                            // 4. Ensure we've shown the splash for at least 1.8s for smooth transition
                             val elapsed = System.currentTimeMillis() - startTime
                             if (elapsed < 1800) {
                                 kotlinx.coroutines.delay(1800 - elapsed)
@@ -107,7 +114,14 @@ class MainActivity : ComponentActivity() {
 
                     if (showSplash) {
                         val buildStatus by viewModel.feedBuildStatus.collectAsState()
-                        com.noslop.app.ui.SplashScreen(statusMessage = buildStatus)
+                        val useTor by viewModel.useTorForClearnet.collectAsState()
+                        val torState by com.noslop.app.tor.TorService.torState.collectAsState()
+                        val statusMsg = when {
+                            useTor && torState == com.noslop.app.tor.TorState.STARTING -> "Bootstrapping Tor SOCKS proxy...".tr
+                            buildStatus.isNotBlank() -> buildStatus
+                            else -> ""
+                        }
+                        com.noslop.app.ui.SplashScreen(statusMessage = statusMsg)
                     } else {
                         val prefs = applicationContext.getSharedPreferences("noslop_system", android.content.Context.MODE_PRIVATE)
                         var showRestoreHubPrompt by rememberSaveable { mutableStateOf(prefs.getBoolean("prompt_hub_after_restore", false)) }

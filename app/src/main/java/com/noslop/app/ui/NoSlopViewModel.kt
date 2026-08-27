@@ -173,8 +173,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             viewModelScope.launch {
                 val itemsToSave = cachedDefaultFeed.takeLast(100)
                 val ids = itemsToSave.map { it.id }.joinToString(",")
+                val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
                 repository.putAppSetting("saved_feed_list", ids)
                 repository.putAppSetting("saved_feed_active_id", itemId)
+                repository.putAppSetting("saved_feed_date", todayStr)
             }
         }
     }
@@ -526,8 +528,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 if (_unifiedFeed.value.isEmpty()) {
                     val savedIdsStr = repository.getAppSetting("saved_feed_list")
                     val savedActiveId = repository.getAppSetting("saved_feed_active_id")
+                    val savedDate = repository.getAppSetting("saved_feed_date")
+                    val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+                    val isSameDay = (savedDate == todayStr)
                     
-                    if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                    if (!savedIdsStr.isNullOrEmpty() && isSameDay && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         val idList = savedIdsStr.split(",")
                         val hiddenIds = cachedViewedIds + cachedExcludedIds
                         val restoredFeed = idList.mapNotNull { id ->
@@ -551,6 +556,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                                     _restoreScrollPositionEvent.emit(savedActiveId)
                                 }
                             }
+                        } else if (feeds.isEmpty() && meshes.isEmpty()) {
+                            // Room DB emission on cold start is still initial empty emission; wait for DB data
                         } else {
                             loadMoreFeedItems()
                         }

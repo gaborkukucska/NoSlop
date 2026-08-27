@@ -29,6 +29,11 @@ object PublicApiService {
         activeApiSourceIds: List<String>,
         language: String = "en"
     ): List<FeedItem> = supervisorScope {
+        if (!com.noslop.app.net.HttpClientProvider.awaitNetworkReady(60_000L)) {
+            Logger.warn(TAG, "Tor not ready — skipping category fetch for $category")
+            return@supervisorScope emptyList()
+        }
+
         val query = if (userKeywords.isNotEmpty()) userKeywords.joinToString(" ") else category
         val deferredItems = mutableListOf<kotlinx.coroutines.Deferred<List<FeedItem>>>()
 
