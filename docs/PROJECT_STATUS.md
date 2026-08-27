@@ -1,5 +1,31 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-27) — DM Chat Parity, Keyboard GIF Animations, Broadcast Modal & Video Media Fixes
+
+### 1. DM Chat Feature Parity & Deselection Fixes
+* **Peer Message Selection Restrictions**: Updated [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) to block selection of peer messages (`canSelect = isSelf`). Users can now only select and delete their own messages in DM threads.
+* **Single-Message Selection/Deselection**: Wrapped gesture state (`isSelectionMode`, `isSelected`, `canSelect`) in `rememberUpdatedState` inside pointer input handlers in both [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt). Tapping a selected message now properly deselects it in both single and multi-message selection modes.
+* **Select All Button**: Added a `SelectAll` icon button to the DM selection header bar.
+* **Deletion Warning Popup**: Added `showDeleteConfirm` `AlertDialog` warning popup before executing message deletion in DM chat threads.
+
+### 2. Gboard & Device Keyboard GIF Animation Support
+* **Multi-stage MIME & Format Detection**: Updated [AndroidGifTextField.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/AndroidGifTextField.kt) to inspect `InputContentInfo.description` MIME list, `ContentResolver.getType(uri)`, URI path string, and magic header bytes (`0x47 0x49 0x46` -> `GIF87a`/`GIF89a`). Ensures keyboard GIF insertion on devices such as `RFCT217QD6K` always retains `.gif` extension.
+* **Bypass Downsampling**: Updated `buildMediaMetadata` in [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt) and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt) to check `if (type == "image" && !isGif && file.length() > 500 * 1024)`, preventing GIF animation downsampling into static JPEGs.
+
+### 3. Touch Event Pass-Through & Top Header Interception
+* **`PointerEventPass.Initial` Interceptor**: Updated parent pointer input blocker in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt). When `selectedTab != 0` (`alpha(0f)`), pointer events are intercepted and consumed during `PointerEventPass.Initial` (parent-to-child pass), preventing top-left Notifications and top-right Search & Filter `IconButton`s from receiving hit-testing miss-taps.
+* **`isActiveTab` Guards**: Added explicit `isActiveTab` checks on top bar controls and search modal triggers in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt).
+* **Active Surface Capture**: Added background gesture capture (`pointerInput`) to [DMsTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/tabs/DMsTab.kt) root container to consume unhandled taps on empty space.
+
+### 4. Broadcast to Mesh Modal Dismissal & Single-Phase Video Compression
+* **Modal Dismissal Protection**: Added `DialogProperties(dismissOnClickOutside = !isBusy, dismissOnBackPress = !isBusy)` and updated `onDismissRequest` in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt) to block accidental modal closing while media attachment stream copying or video compression is active.
+* **Inline Media Attachment Progress**: Added `isPreparingAttachment` state and inline progress indicator (`CircularProgressIndicator()` + `"Attaching media..."`) inside the modal attachment area during URI stream copying.
+* **Single-Phase Compression**: Clicking `"Sign & Gossip"` runs video compression once with percentage indicator (`"Compressing... X%"`).
+
+### 5. Video Broadcast Fix (`externalCacheDir` Storage Resolution)
+* **Root Cause Identified via Logcat (`5203d52ef47493c5`)**: Large video files (> 20 MB) compressed into internal `/data/user/0/com.noslop.app/cache` exceeded Android's internal app cache quota. System service `installd` purged the compressed file from internal cache before `MediaManager.copyFileToMediaDirectory` could copy it to permanent `DIRECTORY_MOVIES/NoSlop` storage, causing local feed posts to fail with "Tap to Download Video".
+* **Fix**: Updated `compressedFile` destination in [UnifiedFeedTab.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt), [ChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/ChatThreadScreen.kt), and [GroupChatThreadScreen.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/GroupChatThreadScreen.kt) to use `context.externalCacheDir ?: context.cacheDir`. External cache directory is exempt from Android `installd` internal storage quota purging, ensuring files are preserved for post creation and local playback.
+
 ## Completed Changes (2026-08-26) — Group Chat: Message Deletion, Privacy & Post-Creation Invites
 
 ### 1. Group Message Deletion (`NOSLOP_GROUP_DELETE_V1`)

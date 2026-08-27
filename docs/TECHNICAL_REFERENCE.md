@@ -590,6 +590,13 @@ based on a `type` prefix match (`"image"`, `"video"`, `"audio"`, else
 Downloads). Falls back to `context.filesDir` if external storage is
 unavailable.
 
+**Temporary Processing Cache.** Media compression and stream copy buffers created
+prior to post creation use `context.externalCacheDir ?: context.cacheDir`. Writing
+large temporary files (> 20 MB) directly to internal `context.cacheDir` causes
+Android's `installd` daemon to purge them during active operations when internal storage
+quotas are reached. `externalCacheDir` is exempt from `installd` internal quota purging,
+ensuring compressed media persists long enough to be moved to permanent `NoSlop` media directories.
+
 ### 6.3 Auto-Download Policy (`MediaManager.checkAndAutoDownload`)
 
 Gated by `MediaSettings` (JSON in `app_settings["media_settings"]`):
