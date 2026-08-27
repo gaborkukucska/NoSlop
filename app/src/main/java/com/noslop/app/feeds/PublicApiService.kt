@@ -121,9 +121,9 @@ object PublicApiService {
                 "Music" -> {
                     val isDefaultMusic = query.isBlank() || query.equals("Music", ignoreCase = true)
                     val audioQuery = if (isDefaultMusic) "music" else query
+                    fetchAsync("api-jamendo-music") { JamendoApiClient.searchTracks(audioQuery) }
                     fetchAsync("api-openverse-audio") { OpenverseApiClient.searchAudio(audioQuery) }
                     fetchAsync("api-podcast-trending") { PodcastIndexClient.searchEpisodes(audioQuery, apiKeyRepo, language = language) }
-                    fetchAsync("api-yt-search") { YouTubeInternalClient.searchVideos("$audioQuery music", recentOnly = true) }
                     fetchAsync("api-archive-audio") { 
                         if (isDefaultMusic) InternetArchiveClient.getPopularAudio() else InternetArchiveClient.searchAudio(query)
                     }

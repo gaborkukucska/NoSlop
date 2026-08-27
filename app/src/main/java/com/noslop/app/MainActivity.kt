@@ -63,7 +63,8 @@ class MainActivity : ComponentActivity() {
                                         if (items.isNotEmpty()) {
                                             val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
                                             if (nonTutItems.isNotEmpty()) {
-                                                val targetItem = nonTutItems.firstOrNull()
+                                                val savedActiveId = com.noslop.app.NoSlopApp.repository.getAppSetting("saved_feed_active_id")
+                                                val targetItem = nonTutItems.find { it.id == savedActiveId } ?: nonTutItems.firstOrNull()
                                                 val rawUrl = when(targetItem) {
                                                     is com.noslop.app.ui.UnifiedItem.Feed -> {
                                                         targetItem.item.mediaUrl ?: targetItem.item.url

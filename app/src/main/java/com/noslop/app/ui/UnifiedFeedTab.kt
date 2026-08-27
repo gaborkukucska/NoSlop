@@ -807,31 +807,25 @@ fun UnifiedFeedTab(
             }
         }
 
-        // 2. Scan forwards to preload upcoming videos, skipping non-media slides
+        // 2. Scan forwards to preload upcoming slides near the viewport
         var preloadedForwardCount = 0
-        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 15)) {
+        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 10)) {
             val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
             if (preloadData != null) {
                 val (rawUrl, forcedUrl) = preloadData
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
-                    val pageWhenQueued = pagerState.currentPage
+                    val targetIndex = i
+                    val delayMs = if (preloadedForwardCount == 0) 0L else preloadedForwardCount * 500L
                     preloadScope.launch { 
-                        // Delay progressive preloads to give foreground video bandwidth priority
-                        kotlinx.coroutines.delay((preloadedForwardCount + 1) * 1500L)
-                        // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
-                        // If the user has swiped on while this was pending, the
-                        // item is no longer near the viewport. Warming it now
-                        // spends bandwidth the visible video needs and the
-                        // player gets evicted before it ever reaches READY.
-                        if (pagerState.currentPage != pageWhenQueued) {
-                            return@launch
+                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
+                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
                         }
-                        com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
                     }
                 }
                 preloadedForwardCount++
-                if (preloadedForwardCount >= 2) break // Keep up to 2 forward videos warm
+                if (preloadedForwardCount >= 2) break // Keep up to 2 forward slides warm
             }
         }
     }

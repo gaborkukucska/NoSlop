@@ -36,9 +36,25 @@ object JamendoApiClient {
                 .header("X-Proxy-Secret", PROXY_SECRET)
                 .build()
 
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                Logger.warn(TAG, "Jamendo returned ${response.code}")
+            var response: okhttp3.Response? = null
+            try {
+                response = client.newCall(request).execute()
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Jamendo proxy request threw exception: ${e.message}")
+            }
+
+            if (response == null || !response.isSuccessful) {
+                val directReq = Request.Builder().url(url).build()
+                try {
+                    response = client.newCall(directReq).execute()
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Jamendo direct request failed: ${e.message}")
+                    return emptyList()
+                }
+            }
+
+            if (response == null || !response.isSuccessful) {
+                Logger.warn(TAG, "Jamendo returned ${response?.code}")
                 return emptyList()
             }
 

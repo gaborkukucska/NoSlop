@@ -534,7 +534,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     
                     if (!savedIdsStr.isNullOrEmpty() && isSameDay && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         val idList = savedIdsStr.split(",")
-                        val hiddenIds = cachedViewedIds + cachedExcludedIds
+                        // Only exclude explicitly banned/deleted items, NOT viewed history,
+                        // so the user is placed right back where they left off on same-day restart.
+                        val hiddenIds = cachedExcludedIds
                         val restoredFeed = idList.mapNotNull { id ->
                             if (id in hiddenIds) return@mapNotNull null
                             val feed = feeds.find { it.id == id }
@@ -550,8 +552,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             savedFeedItemId = savedActiveId
                             sessionLoadedIds.addAll(restoredFeed.map { it.id })
                             
+                            val activeIdx = if (savedActiveId != null) restoredFeed.indexOfFirst { it.id == savedActiveId } else 0
+                            val startIdx = if (activeIdx >= 0) activeIdx else 0
+                            val appCtx = getApplication<Application>()
+                            viewModelScope.launch(Dispatchers.IO) {
+                                for (i in startIdx..minOf(startIdx + 2, restoredFeed.size - 1)) {
+                                    val item = restoredFeed[i]
+                                    val rawUrl = when(item) {
+                                        is UnifiedItem.Feed -> item.item.mediaUrl ?: item.item.url
+                                        is UnifiedItem.Mesh -> item.post.mediaUrl ?: item.post.clearnetUrl
+                                        else -> null
+                                    }
+                                    if (rawUrl != null) {
+                                        PreloadManager.preWarm(appCtx, rawUrl)
+                                    }
+                                }
+                            }
+
                             viewModelScope.launch {
-                                kotlinx.coroutines.delay(150)
+                                kotlinx.coroutines.delay(100)
                                 if (savedActiveId != null) {
                                     _restoreScrollPositionEvent.emit(savedActiveId)
                                 }
@@ -1153,8 +1172,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val targetT = Math.max(if (mixSettings.articleEnabled) 1 else 0, Math.round(needed * ((mixSettings.articlePercent * normalize) / 100f)))
         val targetM = Math.max(if (mixSettings.meshEnabled) 1 else 0, Math.round(needed * ((mixSettings.meshPercent * normalize) / 100f)))
 
-        // Group by author to prevent clumping. If author is null, fallback to sourceId
-        val diverseKey = { it: FeedItem -> it.author ?: it.sourceId }
+        // Group by author to prevent clumping. If author is null or blank, fallback to unique item ID
+        val diverseKey = { it: FeedItem -> if (!it.author.isNullOrBlank()) it.author!! else it.id }
 
         // --- NOSLOP_FEED_VARIETY_V1 ---
         // One item per creator per pass, so a channel that published four
@@ -1512,6 +1531,7 @@ fun toggleAggregator() {
                 savedFeedItemId = null
                 repository.putAppSetting("saved_feed_list", "")
                 repository.putAppSetting("saved_feed_active_id", "")
+                repository.putAppSetting("saved_feed_date", "")
                 refreshExclusionCaches()
                 _unifiedFeed.value = emptyList()
                 cachedDefaultFeed = emptyList()

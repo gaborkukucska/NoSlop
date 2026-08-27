@@ -221,59 +221,51 @@ class FeedRepository(
         val explicitApiSources = activeSources.filter { it.feedType == "api" }
         val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
 
-        // Limited parallel dispatcher
-        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(4)
+        // Limited parallel dispatcher over Tor to avoid socket/bandwidth saturation
+        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2)
 
-        // --- Phase 1: Ramp-Up (Fast diverse fetch) ---
+        // --- Phase 1: Ramp-Up (Fast initial fetch) ---
         val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
 
         val firstRss = rssSources.firstOrNull()
         if (firstRss != null) {
             rssSources.remove(firstRss)
             rampUpJobs.add(async(dispatcher) { 
-                _feedBuildStatus.value = "Fetching RSS feeds (1/${rssSources.size + 1})..."
+                _feedBuildStatus.value = "Preparing your feed..."
                 fetchRssSource(firstRss, allNegative) 
             })
         }
 
-        val priorityCats = listOf("Video Platforms", "Music", "Photography").mapNotNull { cat -> activeCategories.find { it == cat } }
-        val firstApiCat = priorityCats.firstOrNull() ?: activeCategories.firstOrNull()
-        if (firstApiCat != null) {
-            activeCategories.remove(firstApiCat)
+        val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
+        for (cat in priorityCats) {
+            activeCategories.remove(cat)
             rampUpJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Searching $firstApiCat content..."
-                fetchApiCategory(firstApiCat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
+                _feedBuildStatus.value = "Preparing your feed..."
+                fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
             })
         }
 
-        // Wait for Ramp-Up to finish so UI is populated
+        // Wait for Ramp-Up to finish so initial UI content is populated
         kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
+        _feedBuildStatus.value = ""
 
-        // --- Phase 2: Background Sync ---
+        // --- Phase 2: Background Sync (low concurrency to keep Tor circuit responsive for UI) ---
         val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()
 
-        var rssIndex = 1
         for (source in rssSources) {
             backgroundJobs.add(async(dispatcher) { 
-                _feedBuildStatus.value = "Syncing RSS sources... ($rssIndex/${rssSources.size})"
-                rssIndex++
                 fetchRssSource(source, allNegative) 
             })
         }
 
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Fetching $category videos & articles..."
                 fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
             })
         }
 
         // --- Phase 3: Creator Specific API searches ---
-        // We pick 5 random creators per sync to avoid massive API spikes
         val sampledCreators = creatorKeywordList.shuffled().take(5)
-        if (sampledCreators.isNotEmpty()) {
-            _feedBuildStatus.value = "Finding your creators..."
-        }
         for (creator in sampledCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
@@ -283,11 +275,7 @@ class FeedRepository(
         }
 
         kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
-        
-        _feedBuildStatus.value = "Applying your filters..."
         Logger.info(TAG, "Feed synchronization completed.")
-        kotlinx.coroutines.delay(200)
-        _feedBuildStatus.value = ""
     }
 
     private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {
@@ -334,10 +322,10 @@ class FeedRepository(
 
             if (category == "Music") {
                 val genres = preferencesRepository.getSelectedMusicGenres()
-                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                if (genres.isNotEmpty()) keywords.add(0, genres.random())
             } else if (category == "Video Platforms") {
                 val genres = preferencesRepository.getSelectedVideoGenres()
-                if (genres.isNotEmpty()) keywords.add(0, genres.joinToString(" "))
+                if (genres.isNotEmpty()) keywords.add(0, genres.random())
             }
 
             var categoryApiSourceIds = explicitApiSources.filter { it.category == category }.map { it.id }
