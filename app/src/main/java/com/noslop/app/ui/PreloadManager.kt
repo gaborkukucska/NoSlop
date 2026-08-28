@@ -298,12 +298,12 @@ object PreloadManager {
             preloadedPlayers.remove(cacheKey)?.player?.release()
         }
 
-        val sent = preloadQueue.trySend(PreloadTask(context, rawUrl, resolvedUrl, expiresAtMs, deferred))
-        if (sent.isFailure) {
-            Logger.warn("PRELOAD", "Failed to enqueue preload task for $rawUrl: ${sent.exceptionOrNull()?.message}")
+        try {
+            doWarmUp(context, rawUrl, resolvedUrl, expiresAtMs)
+        } catch (e: Exception) {
+            Logger.error("PRELOAD", "Error warming up player for $rawUrl: ${e.message}")
+        } finally {
             finish(rawUrl, deferred)
-        } else {
-            Logger.info("PRELOAD", "Successfully enqueued preload task for $rawUrl")
         }
     }
 
@@ -454,6 +454,53 @@ object PreloadManager {
         preloadedPlayers.remove(cacheKey)
         Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey")
         return entry.player
+    }
+
+    /**
+     * Suspends until the pre-warmed ExoPlayer for [rawUrl] reaches STATE_READY
+     * (or times out / hits error). Guarantees that when this function returns,
+     * the player is primed and ready to render instantly without buffering.
+     */
+    suspend fun awaitReady(rawUrl: String, timeoutMs: Long = 8_000L) {
+        val cacheKey = cacheKeyFor(rawUrl)
+        val entry = preloadedPlayers[cacheKey] ?: run {
+            Logger.info("PRELOAD", "awaitReady: no player cached for $cacheKey")
+            return
+        }
+        val player = entry.player
+        if (player.playbackState == androidx.media3.common.Player.STATE_READY) {
+            Logger.info("PRELOAD", "awaitReady: player is already in STATE_READY for $cacheKey")
+            return
+        }
+
+        Logger.info("PRELOAD", "awaitReady: waiting up to ${timeoutMs}ms for STATE_READY on $cacheKey (current state: ${player.playbackState})")
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                val listener = object : androidx.media3.common.Player.Listener {
+                    override fun onPlaybackStateChanged(playbackState: Int) {
+                        if (playbackState == androidx.media3.common.Player.STATE_READY || playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                            if (cont.isActive) {
+                                player.removeListener(this)
+                                Logger.info("PRELOAD", "awaitReady: ExoPlayer reached STATE_READY for $cacheKey")
+                                cont.resumeWith(Result.success(Unit))
+                            }
+                        }
+                    }
+
+                    override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                        if (cont.isActive) {
+                            player.removeListener(this)
+                            Logger.warn("PRELOAD", "awaitReady: ExoPlayer error for $cacheKey: ${error.message}")
+                            cont.resumeWith(Result.success(Unit))
+                        }
+                    }
+                }
+                player.addListener(listener)
+                cont.invokeOnCancellation {
+                    player.removeListener(listener)
+                }
+            }
+        }
     }
 
     /**

@@ -48,12 +48,14 @@ class MainActivity : ComponentActivity() {
                 if (isOnboarded) {
                     // Remember the splash screen state across configuration changes
                     var showSplash by rememberSaveable { mutableStateOf(!didJustFinishOnboarding) }
+                    var splashStatusMessage by remember { mutableStateOf(com.noslop.app.util.LanguageManager.translate("Initializing NoSlop...")) }
 
                     LaunchedEffect(Unit) {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
                             
                             // 1. Ensure Tor network is ready if clearnet over Tor is enabled
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
                                 com.noslop.app.net.HttpClientProvider.awaitNetworkReady(15000L)
                             } catch (_: Exception) {}
@@ -62,6 +64,7 @@ class MainActivity : ComponentActivity() {
                             var secondPreloadUrl: String? = null
                             
                             // 2. Wait up to 5 seconds for the feed to populate / restore
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Loading feed items...")
                             try {
                                 kotlinx.coroutines.withTimeout(5000) {
                                     viewModel.unifiedFeed.collect { items ->
@@ -101,14 +104,16 @@ class MainActivity : ComponentActivity() {
                             
                             // 3. Pre-warm Slide 1 & Slide 2 media before dropping the splash screen
                             if (firstPreloadUrl != null || secondPreloadUrl != null) {
+                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Pre-buffering Slide 1 & 2 media...")
                                 try {
-                                    kotlinx.coroutines.withTimeout(5000) {
+                                    kotlinx.coroutines.withTimeout(8000) {
                                         kotlinx.coroutines.coroutineScope {
                                             val jobs = mutableListOf<kotlinx.coroutines.Job>()
                                             firstPreloadUrl?.let { url ->
                                                 jobs.add(launch {
                                                     com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
                                                     com.noslop.app.ui.PreloadManager.waitForPreload(url)
+                                                    com.noslop.app.ui.PreloadManager.awaitReady(url, 8000L)
                                                 })
                                             }
                                             secondPreloadUrl?.let { url ->
@@ -124,6 +129,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                             
+                            splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
                             // 4. Ensure we've shown the splash for at least 1.8s for smooth transition
                             val elapsed = System.currentTimeMillis() - startTime
                             if (elapsed < 1800) {
@@ -136,12 +142,10 @@ class MainActivity : ComponentActivity() {
 
                     if (showSplash) {
                         val buildStatus by viewModel.feedBuildStatus.collectAsState()
-                        val useTor by viewModel.useTorForClearnet.collectAsState()
-                        val torState by com.noslop.app.tor.TorService.torState.collectAsState()
                         val statusMsg = when {
-                            useTor && torState == com.noslop.app.tor.TorState.STARTING -> "Bootstrapping Tor SOCKS proxy...".tr
                             buildStatus.isNotBlank() -> buildStatus
-                            else -> ""
+                            splashStatusMessage.isNotBlank() -> splashStatusMessage
+                            else -> "Initializing NoSlop...".tr
                         }
                         com.noslop.app.ui.SplashScreen(statusMessage = statusMsg)
                     } else {
