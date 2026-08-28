@@ -22,8 +22,8 @@ android {
         applicationId = "com.noslop.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 43
-        versionName = "0.4.3-alpha"
+        versionCode = 44
+        versionName = "0.4.4-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
