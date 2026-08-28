@@ -115,7 +115,7 @@ fun CreatorStudioTab(
                     color = AccentGreen.copy(alpha = 0.2f)
                 ) {
                     Text(
-                        "AI Queue: ${queuedItems.size}".tr,
+                        "AI Queue: {count}".tr.replace("{count}", queuedItems.size.toString()),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         fontSize = 11.sp,
                         color = AccentGreen,
@@ -157,7 +157,7 @@ fun CreatorStudioTab(
                         item = item,
                         onPublish = { publishedItem ->
                             queuedItems = queuedItems.filter { it.id != publishedItem.id }
-                            android.widget.Toast.makeText(context, "Published '${publishedItem.title}' to Mesh!", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Published '{title}' to Mesh!").replace("{title}", publishedItem.title), android.widget.Toast.LENGTH_SHORT).show()
                         },
                         onDiscard = { discardedId ->
                             queuedItems = queuedItems.filter { it.id != discardedId }

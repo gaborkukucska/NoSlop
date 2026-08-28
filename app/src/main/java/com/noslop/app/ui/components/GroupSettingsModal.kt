@@ -286,7 +286,7 @@ fun GroupSettingsModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Members (${membersList.size})".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("Members ({count})".tr.replace("{count}", membersList.size.toString()), color = TextLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isAdmin && onResendInvites != null) {
                             IconButton(onClick = {

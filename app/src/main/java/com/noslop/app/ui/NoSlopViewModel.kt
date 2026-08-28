@@ -2367,14 +2367,14 @@ fun clearLogFile() { Logger.clearLog() }
                         if (responseCode == 401) {
                             android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate: Identity mismatch."), android.widget.Toast.LENGTH_LONG).show()
                         } else {
-                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate with Hub (HTTP $responseCode)."), android.widget.Toast.LENGTH_LONG).show()
+                            android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Failed to authenticate with Hub (HTTP {code}).").replace("{code}", responseCode.toString()), android.widget.Toast.LENGTH_LONG).show()
                         }
                     }
                 }
             } catch (e: Exception) {
                 Logger.error("QR_LOGIN", "Exception during QR login: ${e.message}")
                 withContext(Dispatchers.Main) {
-                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Error during Hub authentication: ${e.message}"), android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(getApplication(), com.noslop.app.util.LanguageManager.translate("Error during Hub authentication: {error}").replace("{error}", e.message ?: ""), android.widget.Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -2439,11 +2439,11 @@ fun clearLogFile() { Logger.clearLog() }
                     } else if (code == 401) {
                         onResult(false, com.noslop.app.util.LanguageManager.translate("Identity mismatch. This Hub is owned by another user."))
                     } else {
-                        onResult(false, com.noslop.app.util.LanguageManager.translate("Verification failed (HTTP $code)"))
+                        onResult(false, com.noslop.app.util.LanguageManager.translate("Verification failed (HTTP {code})").replace("{code}", code.toString()))
                     }
                 }
             } catch (e: Exception) {
-                withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Connection error: ${e.message}")) }
+                withContext(Dispatchers.Main) { onResult(false, com.noslop.app.util.LanguageManager.translate("Connection error: {error}").replace("{error}", e.message ?: "")) }
             }
         }
     }

@@ -1159,13 +1159,13 @@ private fun ExoVideoPlayer(
                         player = exoPlayer
                         useController = false
                         useArtwork = false
-                        resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = if (isLandscape) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
                 update = { view ->
                     val temp = videoSizeState
                     view.player = exoPlayer
-                    view.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    view.resizeMode = if (isLandscape) androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM else androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     if (temp.width > 0 && temp.height > 0) {
                         view.requestLayout()
                     }

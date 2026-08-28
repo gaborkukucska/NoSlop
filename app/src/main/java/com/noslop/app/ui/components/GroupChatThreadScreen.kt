@@ -324,7 +324,7 @@ fun GroupChatThreadScreen(
                 IconButton(onClick = { selectedMessageIds = emptySet() }) {
                     Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight)
                 }
-                Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(text = "{count} Selected".tr.replace("{count}", selectedMessageIds.size.toString()), color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 // Select All button: members select own messages, admin selects all
                 IconButton(onClick = {
                     selectedMessageIds = if (isAdmin) {
@@ -351,7 +351,7 @@ fun GroupChatThreadScreen(
                 Spacer(modifier = Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = group.title, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = TextLight, fontSize = 16.sp)
-                    Text(text = "$memberCount members • Decentralized Group Session".tr, style = MaterialTheme.typography.labelSmall, color = AccentGreen)
+                    Text(text = "{count} members • Decentralized Group Session".tr.replace("{count}", memberCount.toString()), style = MaterialTheme.typography.labelSmall, color = AccentGreen)
                 }
                 Box {
                     IconButton(onClick = { showMenu = true }) {
@@ -408,7 +408,7 @@ fun GroupChatThreadScreen(
                 onDismissRequest = { showDeleteConfirm = false },
                 containerColor = SurfaceDark,
                 title = { Text("Delete Messages?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
-                text = { Text("${selectedMessageIds.size} message(s) will be permanently deleted for all group members.".tr, color = TextLight) },
+                text = { Text("{count} message(s) will be permanently deleted for all group members.".tr.replace("{count}", selectedMessageIds.size.toString()), color = TextLight) },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -706,7 +706,7 @@ fun GroupChatThreadScreen(
             ) {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Attached: ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Text("${"Attached:".tr} ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
                 Icon(Icons.Default.Close, contentDescription = "Remove attachment".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { attachedFile = null })
             }
         }
@@ -733,7 +733,7 @@ fun GroupChatThreadScreen(
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentGreen, strokeWidth = 2.dp)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    if (compressionProgress != null && compressionProgress!! > 0) "Compressing... ${compressionProgress}%".tr else "Processing media...".tr,
+                    if (compressionProgress != null && compressionProgress!! > 0) "Compressing... {progress}%".tr.replace("{progress}", compressionProgress.toString()) else "Processing media...".tr,
                     color = TextLight, style = MaterialTheme.typography.labelSmall
                 )
             }

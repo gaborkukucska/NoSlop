@@ -270,7 +270,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     val memberCount = try {
                                         com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).size
                                     } catch (e: Exception) { 1 }
-                                    Text("$memberCount members".tr, color = TextMuted, fontSize = 12.sp)
+                                    Text("{count} members".tr.replace("{count}", memberCount.toString()), color = TextMuted, fontSize = 12.sp)
                                 }
                                 Box(
                                     modifier = Modifier.background(AccentGreen.copy(alpha = 0.15f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
@@ -361,7 +361,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             OutlinedTextField(
                                 value = folderName,
                                 onValueChange = { folderName = it },
-                                label = { Text(if (existingFolders.isNotEmpty()) "New Folder Name" else "Folder Name", color = TextMuted) },
+                                label = { Text(if (existingFolders.isNotEmpty()) "New Folder Name".tr else "Folder Name".tr, color = TextMuted) },
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedTextColor = TextLight,
                                     unfocusedTextColor = TextLight
@@ -431,7 +431,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 if (!peer.fundMeLink.isNullOrBlank()) {
                                     Spacer(modifier = Modifier.height(4.dp))
-                                    Text("Support: ${peer.fundMeLink}", color = TextLight, fontSize = 12.sp)
+                                    Text("${"Support:".tr} ${peer.fundMeLink}", color = TextLight, fontSize = 12.sp)
                                 }
                             }
 
@@ -692,9 +692,9 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         }
 
         if (dmStep == 0) {
-            TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID", onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID".tr, onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 2) {
-            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer\n(Optional: scan Gabby's QR from gallery to connect with the dev)", onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer\n(Optional: scan Gabby's QR from gallery to connect with the dev)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
         }
 
         // Render dialogs

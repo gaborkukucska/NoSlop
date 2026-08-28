@@ -114,7 +114,7 @@ fun QRScanScreen(
                         
                         if (sessionId.isNotBlank() && ip.isNotBlank()) {
                             viewModel?.handleQrLogin(sessionId, ip)
-                            Toast.makeText(context, "Authenticating with Hub...", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Authenticating with Hub..."), Toast.LENGTH_SHORT).show()
                             onDismiss()
                             return@LaunchedEffect
                         }
@@ -128,12 +128,12 @@ fun QRScanScreen(
                     parsedPeer = peer
                     showConfirmDialog = true
                 } else {
-                    Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Invalid QR Code format"), Toast.LENGTH_SHORT).show()
                     scannedRawData = null
                 }
             } catch (e: Exception) {
                 Logger.warn("QR_SCAN", "Scanned raw data is not a valid peer payload: $raw")
-                Toast.makeText(context, "Invalid QR Code format", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Invalid QR Code format"), Toast.LENGTH_SHORT).show()
                 scannedRawData = null
             }
         }

@@ -118,7 +118,9 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text("Update Available".tr, fontWeight = FontWeight.Bold, color = TextLight)
                                         Text(
-                                            "Version ".tr + "${updateInfo!!.latestVersion} " + "is out (you have ".tr + "${updateInfo!!.currentVersion}).",
+                                            "Version {latest} is out (you have {current}).".tr
+                                                .replace("{latest}", updateInfo!!.latestVersion)
+                                                .replace("{current}", updateInfo!!.currentVersion),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = TextLight
                                         )
@@ -687,7 +689,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
                                 
                                 Text(
-                                    text = "Max File Size: ".tr + "${mediaSettings.maxFileSizeMB} MB",
+                                    text = "Max File Size: {size} MB".tr.replace("{size}", mediaSettings.maxFileSizeMB.toString()),
                                     color = TextLight,
                                     fontSize = 14.sp
                                 )

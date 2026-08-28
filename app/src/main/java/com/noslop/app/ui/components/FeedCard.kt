@@ -262,7 +262,10 @@ fun FullScreenFeedCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomStart)
-                    .graphicsLayer { translationY = bottomSlideOffset }
+                    .graphicsLayer { 
+                        translationY = bottomSlideOffset 
+                        alpha = if (bottomSlideOffset > 0f) (1f - (bottomSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
+                    }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
@@ -391,7 +394,10 @@ fun FullScreenFeedCard(
                 isFlagged = isSoftBlocked,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .graphicsLayer { translationX = rightSlideOffset }
+                    .graphicsLayer { 
+                        translationX = rightSlideOffset 
+                        alpha = if (rightSlideOffset > 0f) (1f - (rightSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
+                    }
             )
 
             ContentHealthOverlay(
@@ -512,7 +518,7 @@ fun FullScreenMeshCardV2(
                                         if (progressState != null) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             LinearProgressIndicator(progress = { progressState / 100f }, color = AccentGreen)
-                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading $progressState%", color = TextLight, fontSize = 12.sp)
+                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading {progress}%".tr.replace("{progress}", progressState.toString()), color = TextLight, fontSize = 12.sp)
                                         } else {
                                             Text("Tap to Download Video".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }
@@ -574,7 +580,7 @@ fun FullScreenMeshCardV2(
                                         if (progressState != null) {
                                             Spacer(modifier = Modifier.height(8.dp))
                                             LinearProgressIndicator(progress = { progressState / 100f }, color = AccentGreen)
-                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading $progressState%", color = TextLight, fontSize = 12.sp)
+                                            Text(if (progressState == 0) "Starting Download...".tr else "Downloading {progress}%".tr.replace("{progress}", progressState.toString()), color = TextLight, fontSize = 12.sp)
                                         } else {
                                             Text("Tap to Download Audio".tr, color = TextLight, fontWeight = FontWeight.Bold)
                                         }
@@ -729,7 +735,10 @@ fun FullScreenMeshCardV2(
                 modifier = Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomStart)
-                    .graphicsLayer { translationY = bottomSlideOffset }
+                    .graphicsLayer { 
+                        translationY = bottomSlideOffset 
+                        alpha = if (bottomSlideOffset > 0f) (1f - (bottomSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
+                    }
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
@@ -1008,7 +1017,10 @@ fun FullScreenMeshCardV2(
                 onDelete = if (post.authorPublicKeyB64 == myPubKey) { { showDeleteConfirm = true } } else null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
-                    .graphicsLayer { translationX = rightSlideOffset }
+                    .graphicsLayer { 
+                        translationX = rightSlideOffset 
+                        alpha = if (rightSlideOffset > 0f) (1f - (rightSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
+                    }
             )
 
             ContentHealthOverlay(

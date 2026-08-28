@@ -41,7 +41,7 @@ object UpdateManager {
     fun startDownload(context: Context, url: String, version: String, force: Boolean = false) {
         if (!force && !canInstallPackages(context)) {
             Logger.warn(TAG, "Install permission not granted, requesting it from user")
-            Toast.makeText(context, "Please allow NoSlop to install updates, then try again", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, LanguageManager.translate("Please allow NoSlop to install updates, then try again"), Toast.LENGTH_LONG).show()
             requestInstallPermission(context)
             return
         }
@@ -49,7 +49,7 @@ object UpdateManager {
         val fileName = "NoSlop_$version.apk"
         val destFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
 
-        Toast.makeText(context, "Downloading update...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
         Logger.info(TAG, "Starting native URL connection download for $url")
 
         CoroutineScope(Dispatchers.IO).launch {
@@ -75,7 +75,7 @@ object UpdateManager {
                 if (responseCode != 200) {
                     Logger.error(TAG, "Download failed with HTTP $responseCode")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Download failed: HTTP $responseCode", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, LanguageManager.translate("Download failed: HTTP {code}").replace("{code}", responseCode.toString()), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -84,7 +84,7 @@ object UpdateManager {
                 if (contentType.contains("text/html")) {
                     Logger.error(TAG, "Server returned HTML instead of an APK. Is the release private/draft?")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Download error: Server returned a webpage (Release might be private/draft)", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, LanguageManager.translate("Download error: Server returned a webpage (Release might be private/draft)"), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
@@ -109,7 +109,7 @@ object UpdateManager {
                             if (now - lastToastTime > 3000) {
                                 val mb = totalBytesRead / (1024 * 1024)
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, "Downloading update: ${mb}MB...", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, LanguageManager.translate("Downloading update: {mb}MB...").replace("{mb}", mb.toString()), Toast.LENGTH_SHORT).show()
                                 }
                                 lastToastTime = now
                             }
@@ -122,21 +122,21 @@ object UpdateManager {
                 if (totalBytesRead < 2 * 1024 * 1024) { 
                     Logger.error(TAG, "File too small ($totalBytesRead bytes), probably corrupted.")
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "Download corrupted (file too small). Try again.", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, LanguageManager.translate("Download corrupted (file too small). Try again."), Toast.LENGTH_LONG).show()
                     }
                     destFile.delete()
                     return@launch
                 }
 
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Download complete! Launching installer...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, LanguageManager.translate("Download complete! Launching installer..."), Toast.LENGTH_SHORT).show()
                     launchInstaller(context, destFile)
                 }
 
             } catch (e: Exception) {
                 Logger.error(TAG, "Exception during download: ${e.message}")
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "Download failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, LanguageManager.translate("Download failed: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -159,7 +159,7 @@ object UpdateManager {
             Logger.info(TAG, "Package installer launched successfully")
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to launch installer: ${e.message}")
-            Toast.makeText(context, "Failed to open installer: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, LanguageManager.translate("Failed to open installer: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
         }
     }
 

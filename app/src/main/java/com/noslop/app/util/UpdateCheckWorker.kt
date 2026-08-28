@@ -22,8 +22,8 @@ class UpdateCheckWorker(ctx: Context, params: WorkerParameters) : CoroutineWorke
             if (info != null && updateChecker.shouldNotifyNow()) {
                 NotificationHelper.showOngoingUpdateNotification(
                     context = applicationContext,
-                    title = "NoSlop update available",
-                    message = "Version ${info.latestVersion} is available. Tap to start the update.",
+                    title = LanguageManager.translate("NoSlop update available"),
+                    message = LanguageManager.translate("Version {version} is available. Tap to start the update.").replace("{version}", info.latestVersion),
                     downloadUrl = info.downloadUrl,
                     version = info.latestVersion
                 )

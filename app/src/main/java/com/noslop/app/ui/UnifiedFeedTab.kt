@@ -223,22 +223,30 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         }
     }
 
+    // Auto-hide system status bar & navigation bar in landscape mode on Feed tab
+    com.noslop.app.ui.components.rememberAutoFullscreenOnLandscape(enabled = isLandscape && selectedTab == 0)
+
     // Animation values for slide transitions
     val landscapeHidden = isLandscape && selectedTab == 0 && !uiVisible
     val bottomSlide by animateFloatAsState(
-        targetValue = if (landscapeHidden) 300f else 0f,
+        targetValue = if (landscapeHidden) 1200f else 0f,
         animationSpec = tween(durationMillis = 350),
         label = "bottomSlide"
     )
     val topSlide by animateFloatAsState(
-        targetValue = if (landscapeHidden) -200f else 0f,
+        targetValue = if (landscapeHidden) -1200f else 0f,
         animationSpec = tween(durationMillis = 350),
         label = "topSlide"
     )
     val rightSlide by animateFloatAsState(
-        targetValue = if (landscapeHidden) 300f else 0f,
+        targetValue = if (landscapeHidden) 1200f else 0f,
         animationSpec = tween(durationMillis = 350),
         label = "rightSlide"
+    )
+    val uiAlpha by animateFloatAsState(
+        targetValue = if (landscapeHidden) 0f else 1f,
+        animationSpec = tween(durationMillis = 300),
+        label = "uiAlpha"
     )
 
     LaunchedEffect(initialRoute) {
@@ -288,7 +296,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                     modifier = Modifier
                         .size(56.dp)
                         .offset(y = 58.dp)
-                        .graphicsLayer { translationY = bottomSlide }
+                        .graphicsLayer { 
+                            translationY = bottomSlide 
+                            alpha = uiAlpha
+                        }
                 ) {
                     Icon(Icons.Default.Add, contentDescription = "Compose Mesh Post".tr)
                 }
@@ -300,7 +311,10 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             NavigationBar(
                 containerColor = SurfaceDark,
                 tonalElevation = 8.dp,
-                modifier = Modifier.graphicsLayer { translationY = bottomSlide }
+                modifier = Modifier.graphicsLayer { 
+                    translationY = bottomSlide 
+                    alpha = uiAlpha
+                }
             ) {
                 NavigationBarItem(
                     selected = selectedTab == 0,
@@ -955,7 +969,10 @@ fun UnifiedFeedTab(
                 .align(Alignment.TopCenter)
                 .padding(top = 12.dp, start = 12.dp, end = 12.dp)
                 .zIndex(10f)
-                .graphicsLayer { translationY = topSlideOffset },
+                .graphicsLayer { 
+                    translationY = topSlideOffset 
+                    alpha = if (topSlideOffset < 0f) (1f - (kotlin.math.abs(topSlideOffset) / 300f)).coerceIn(0f, 1f) else 1f
+                },
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1738,7 +1755,7 @@ fun UnifiedFeedTab(
                         enabled = !isBusy && (postContent.isNotBlank() || attachedFile != null || sharedItem != null), colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) { 
                         val processingText = if (isProcessingAttachment) {
-                            if (compressionProgress != null) "Compressing... $compressionProgress%".tr else "Processing...".tr
+                            if (compressionProgress != null) "Compressing... {progress}%".tr.replace("{progress}", compressionProgress.toString()) else "Processing...".tr
                         } else {
                             "Sign & Gossip".tr
                         }

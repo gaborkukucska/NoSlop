@@ -284,7 +284,7 @@ fun ChatThreadScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = { selectedMessageIds = emptySet() }) { Icon(Icons.Default.Close, contentDescription = "Cancel".tr, tint = TextLight) }
-                Text(text = "${selectedMessageIds.size} Selected", color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(text = "{count} Selected".tr.replace("{count}", selectedMessageIds.size.toString()), color = TextLight, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { 
                     selectedMessageIds = messages.filter { it.senderPub != peer.publicKeyB64 }.map { it.id }.toSet()
                 }) { Icon(Icons.Default.SelectAll, contentDescription = "Select All".tr, tint = AccentGreen) }
@@ -304,7 +304,7 @@ fun ChatThreadScreen(
                         if (peer.isTemporary) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Box(modifier = Modifier.background(DestructiveRed.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 2.dp)) {
-                                Text("Temporary", color = DestructiveRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Temporary".tr, color = DestructiveRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -361,7 +361,7 @@ fun ChatThreadScreen(
                 onDismissRequest = { showDeleteConfirm = false },
                 containerColor = SurfaceDark,
                 title = { Text("Delete Messages?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
-                text = { Text("${selectedMessageIds.size} message(s) will be permanently deleted for both participants.".tr, color = TextLight) },
+                text = { Text("{count} message(s) will be permanently deleted for both participants.".tr.replace("{count}", selectedMessageIds.size.toString()), color = TextLight) },
                 confirmButton = {
                     Button(
                         onClick = {
@@ -686,7 +686,7 @@ fun ChatThreadScreen(
             ) {
                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Attached: ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                Text("${"Attached:".tr} ${attachedFile!!.name}", color = TextLight, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
                 Icon(Icons.Default.Close, contentDescription = "Remove attachment".tr, tint = TextMuted, modifier = Modifier.size(16.dp).clickable { attachedFile = null })
             }
         }
@@ -713,7 +713,7 @@ fun ChatThreadScreen(
                 CircularProgressIndicator(modifier = Modifier.size(16.dp), color = AccentGreen, strokeWidth = 2.dp)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    if (compressionProgress != null && compressionProgress!! > 0) "Compressing... ${compressionProgress}%".tr else "Processing media...".tr,
+                    if (compressionProgress != null && compressionProgress!! > 0) "Compressing... {progress}%".tr.replace("{progress}", compressionProgress.toString()) else "Processing media...".tr,
                     color = TextLight, style = MaterialTheme.typography.labelSmall
                 )
             }

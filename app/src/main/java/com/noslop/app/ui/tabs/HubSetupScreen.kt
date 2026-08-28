@@ -221,7 +221,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                         }
                     } else {
                         Column {
-                            Text("Enter the SSH credentials for your Hub to pull the latest code and recompile.", color = TextMuted, fontSize = 14.sp)
+                            Text("Enter the SSH credentials for your Hub to pull the latest code and recompile.".tr, color = TextMuted, fontSize = 14.sp)
                             Spacer(modifier = Modifier.height(16.dp))
                             OutlinedTextField(
                                 value = sshUser,
