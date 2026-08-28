@@ -206,7 +206,11 @@ class FeedRepository(
             return@withContext
         }
 
-        _feedBuildStatus.value = "Loading your preferences..."
+        if (feedDao.getItemCount() > 0) {
+            _feedBuildStatus.value = ""
+        } else {
+            _feedBuildStatus.value = "Preparing your feed..."
+        }
 
         // Load preferences
         val userNegative = preferencesRepository.getUserNegativeKeywords().map { it.lowercase() }
@@ -221,60 +225,42 @@ class FeedRepository(
         val explicitApiSources = activeSources.filter { it.feedType == "api" }
         val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
 
-        // Limited parallel dispatcher over Tor to avoid socket/bandwidth saturation
-        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2)
+        // --- Staggered Background Sync Pipeline ---
+        // Insert a 2s initial delay so Slide 1 & Slide 2 media resolution/pre-warming has priority bandwidth
+        kotlinx.coroutines.delay(2000L)
 
-        // --- Phase 1: Ramp-Up (Fast initial fetch) ---
-        val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
-
-        val firstRss = rssSources.firstOrNull()
-        if (firstRss != null) {
-            rssSources.remove(firstRss)
-            rampUpJobs.add(async(dispatcher) { 
-                _feedBuildStatus.value = "Preparing your feed..."
-                fetchRssSource(firstRss, allNegative) 
-            })
-        }
-
-        val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
-        for (cat in priorityCats) {
-            activeCategories.remove(cat)
-            rampUpJobs.add(async(dispatcher) {
-                _feedBuildStatus.value = "Preparing your feed..."
-                fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
-            })
-        }
-
-        // Wait for Ramp-Up to finish so initial UI content is populated
-        kotlinx.coroutines.awaitAll(*rampUpJobs.toTypedArray())
-        _feedBuildStatus.value = ""
-
-        // --- Phase 2: Background Sync (low concurrency to keep Tor circuit responsive for UI) ---
-        val backgroundJobs = mutableListOf<kotlinx.coroutines.Deferred<Any>>()
-
+        // Fetch RSS sources sequentially with a 1.5s stagger delay
         for (source in rssSources) {
-            backgroundJobs.add(async(dispatcher) { 
-                fetchRssSource(source, allNegative) 
-            })
+            try {
+                fetchRssSource(source, allNegative)
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
+            }
+            kotlinx.coroutines.delay(1500L)
         }
 
+        // Fetch API categories sequentially with a 1.5s stagger delay
         for (category in activeCategories) {
-            backgroundJobs.add(async(dispatcher) {
+            try {
                 fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
-            })
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
+            }
+            kotlinx.coroutines.delay(1500L)
         }
 
-        // --- Phase 3: Creator Specific API searches ---
-        val sampledCreators = creatorKeywordList.shuffled().take(5)
+        // Creator specific API searches (staggered)
+        val sampledCreators = creatorKeywordList.shuffled().take(3)
         for (creator in sampledCreators) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
-                    searchCustomFeed(creator, null)
-                } catch(e: Exception) { Logger.error(TAG, "Creator sync failed", e.message) }
-            })
+            try {
+                searchCustomFeed(creator, null)
+                kotlinx.coroutines.delay(1500L)
+            } catch(e: Exception) {
+                Logger.error(TAG, "Creator sync failed", e.message)
+            }
         }
 
-        kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
+        _feedBuildStatus.value = ""
         Logger.info(TAG, "Feed synchronization completed.")
     }
 

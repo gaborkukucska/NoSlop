@@ -21,6 +21,9 @@ interface FeedDao {
     @Delete
     suspend fun deleteSource(source: FeedSource)
 
+    @Query("SELECT COUNT(*) FROM feed_items")
+    suspend fun getItemCount(): Int
+
     @Query("SELECT * FROM feed_items ORDER BY publishedAt DESC")
     fun getAllItems(): Flow<List<FeedItem>>
 

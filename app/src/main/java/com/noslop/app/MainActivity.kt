@@ -9,6 +9,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.ViewModelProvider
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import com.noslop.app.ui.MainScreen
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
@@ -99,19 +103,21 @@ class MainActivity : ComponentActivity() {
                             if (firstPreloadUrl != null || secondPreloadUrl != null) {
                                 try {
                                     kotlinx.coroutines.withTimeout(5000) {
-                                        val jobs = mutableListOf<kotlinx.coroutines.Job>()
-                                        firstPreloadUrl?.let { url ->
-                                            jobs.add(launch {
-                                                com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
-                                                com.noslop.app.ui.PreloadManager.waitForPreload(url)
-                                            })
+                                        kotlinx.coroutines.coroutineScope {
+                                            val jobs = mutableListOf<kotlinx.coroutines.Job>()
+                                            firstPreloadUrl?.let { url ->
+                                                jobs.add(launch {
+                                                    com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                                    com.noslop.app.ui.PreloadManager.waitForPreload(url)
+                                                })
+                                            }
+                                            secondPreloadUrl?.let { url ->
+                                                jobs.add(launch {
+                                                    com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                                })
+                                            }
+                                            kotlinx.coroutines.joinAll(*jobs.toTypedArray())
                                         }
-                                        secondPreloadUrl?.let { url ->
-                                            jobs.add(launch {
-                                                com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
-                                            })
-                                        }
-                                        jobs.joinAll()
                                     }
                                 } catch (e: Exception) {
                                     // Timeout on preload

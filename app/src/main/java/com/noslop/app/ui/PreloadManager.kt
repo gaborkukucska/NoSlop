@@ -268,7 +268,7 @@ object PreloadManager {
             for (task in preloadQueue) {
                 try {
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl, task.expiresAtMs)
-                    kotlinx.coroutines.delay(500L) // Stagger to prevent UI stutter and network spikes
+                    kotlinx.coroutines.delay(2000L) // Stagger to prevent network socket contention with active video
                 } catch (e: Exception) {
                     Logger.error("PRELOAD", "Error in background warmUp for ${task.rawUrl}: ${e.message}")
                 } finally {

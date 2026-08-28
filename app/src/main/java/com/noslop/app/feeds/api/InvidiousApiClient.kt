@@ -62,9 +62,9 @@ object InvidiousApiClient {
             )
             // Longer than the direct client: a Tor circuit takes real time to
             // build. Still bounded so a dead instance cannot hold a racer open.
-            .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
@@ -388,7 +388,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "resolveStreamUrl($videoId)",
             instances = healthy,
-            deadlineMs = System.currentTimeMillis() + 45_000L,
+            deadlineMs = System.currentTimeMillis() + 15_000L,
             urlFor = { "$it/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats" },
             parse = { instance, body -> pickStreamUrl(videoId, instance, body) }
         )
