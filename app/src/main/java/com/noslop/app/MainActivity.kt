@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                             } catch (_: Exception) {}
 
                             var firstPreloadUrl: String? = null
+                            var secondPreloadUrl: String? = null
                             
                             // 2. Wait up to 5 seconds for the feed to populate / restore
                             try {
@@ -65,23 +66,26 @@ class MainActivity : ComponentActivity() {
                                             if (nonTutItems.isNotEmpty()) {
                                                 val savedActiveId = com.noslop.app.NoSlopApp.repository.getAppSetting("saved_feed_active_id")
                                                 val targetItem = nonTutItems.find { it.id == savedActiveId } ?: nonTutItems.firstOrNull()
-                                                val rawUrl = when(targetItem) {
-                                                    is com.noslop.app.ui.UnifiedItem.Feed -> {
-                                                        targetItem.item.mediaUrl ?: targetItem.item.url
+                                                val targetIndex = nonTutItems.indexOf(targetItem)
+                                                val secondItem = nonTutItems.getOrNull(if (targetIndex >= 0) targetIndex + 1 else 1)
+
+                                                fun extractUrl(item: com.noslop.app.ui.UnifiedItem?): String? {
+                                                    val rawUrl = when(item) {
+                                                        is com.noslop.app.ui.UnifiedItem.Feed -> item.item.mediaUrl ?: item.item.url
+                                                        is com.noslop.app.ui.UnifiedItem.Mesh -> item.post.mediaUrl ?: item.post.clearnetUrl
+                                                        else -> null
                                                     }
-                                                    is com.noslop.app.ui.UnifiedItem.Mesh -> {
-                                                        targetItem.post.mediaUrl ?: targetItem.post.clearnetUrl
+                                                    return if (rawUrl?.startsWith("noslop://") == true) {
+                                                        val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
+                                                        val id = rawUrl.substringAfterLast("/")
+                                                        "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
+                                                    } else {
+                                                        rawUrl
                                                     }
-                                                    else -> null
                                                 }
-                                                
-                                                firstPreloadUrl = if (rawUrl?.startsWith("noslop://") == true) {
-                                                    val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
-                                                    val id = rawUrl.substringAfterLast("/")
-                                                    "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
-                                                } else {
-                                                    rawUrl
-                                                }
+
+                                                firstPreloadUrl = extractUrl(targetItem)
+                                                secondPreloadUrl = extractUrl(secondItem)
                                                 throw java.util.concurrent.CancellationException("Feed Loaded")
                                             }
                                         }
@@ -91,12 +95,23 @@ class MainActivity : ComponentActivity() {
                                 // Caught timeout or deliberate success cancellation
                             }
                             
-                            // 3. Pre-warm target slide media and wait for it before dropping the splash screen
-                            if (firstPreloadUrl != null) {
+                            // 3. Pre-warm Slide 1 & Slide 2 media before dropping the splash screen
+                            if (firstPreloadUrl != null || secondPreloadUrl != null) {
                                 try {
                                     kotlinx.coroutines.withTimeout(5000) {
-                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
-                                        com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
+                                        val jobs = mutableListOf<kotlinx.coroutines.Job>()
+                                        firstPreloadUrl?.let { url ->
+                                            jobs.add(launch {
+                                                com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                                com.noslop.app.ui.PreloadManager.waitForPreload(url)
+                                            })
+                                        }
+                                        secondPreloadUrl?.let { url ->
+                                            jobs.add(launch {
+                                                com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                            })
+                                        }
+                                        jobs.joinAll()
                                     }
                                 } catch (e: Exception) {
                                     // Timeout on preload
