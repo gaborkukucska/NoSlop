@@ -528,9 +528,16 @@ fun VideoPlayer(
     // retry count, so a fresh video could start with forceRefresh already on
     // and its auto-retry budget already spent.
     var retryTrigger by remember(url) { mutableStateOf(0) }
-    var source by remember(url) { mutableStateOf<VideoSource?>(null) }
-    var isVideoReady by remember(url) { mutableStateOf(false) }
     val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
+    val initialSource = remember(url, mediaSettings.videoQuality) {
+        val q = mediaSettings.videoQuality.ifBlank { "medium" }
+        val exactKey = "$url||$q"
+        sourceCache[exactKey]?.takeIf { it.expiresAtMs > System.currentTimeMillis() }?.source
+            ?: sourceCache.entries.find { it.key.startsWith("$url||") && it.value.expiresAtMs > System.currentTimeMillis() }?.value?.source
+    }
+
+    var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }
+    var isVideoReady by remember(url) { mutableStateOf(initialSource != null) }
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     val isActiveOrNext = isVisible || isNextSlide
@@ -896,9 +903,13 @@ private fun ExoVideoPlayer(
                 playWhenReady = isVisible
                 
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
-                if (resumeMs > 0L) {
+                if (resumeMs > 0L && Math.abs(currentPosition - resumeMs) > 1000L) {
                     Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $rawUrl")
                     seekTo(resumeMs)
+                }
+
+                if (playbackState == androidx.media3.common.Player.STATE_READY) {
+                    onReady()
                 }
 
                 addListener(object : androidx.media3.common.Player.Listener {
@@ -1310,6 +1321,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                         }
                     }.apply {
                         webViewRef = this
+                        setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                         layoutParams = android.view.ViewGroup.LayoutParams(
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT

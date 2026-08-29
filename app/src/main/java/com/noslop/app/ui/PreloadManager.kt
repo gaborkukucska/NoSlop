@@ -279,7 +279,7 @@ object PreloadManager {
     }
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    private fun warmUp(
+    private suspend fun warmUp(
         context: Context,
         resolvedUrl: String,
         rawUrl: String,
@@ -308,15 +308,15 @@ object PreloadManager {
     }
 
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    private fun doWarmUp(context: Context, rawUrl: String, resolvedUrl: String, expiresAtMs: Long) {
+    private suspend fun doWarmUp(context: Context, rawUrl: String, resolvedUrl: String, expiresAtMs: Long) = kotlinx.coroutines.withContext(Dispatchers.Main) {
         if (cancelledTasks.remove(rawUrl)) {
             Logger.info("PRELOAD", "Skipping doWarmUp for $rawUrl because it was claimed prematurely by UI.")
-            return
+            return@withContext
         }
         // The task may have queued behind a 1.5s stagger delay; re-check.
         if (expiresAtMs - System.currentTimeMillis() < MIN_USEFUL_TTL_MS) {
             Logger.info("PRELOAD", "Dropping queued preload for $rawUrl — URL expired while queued")
-            return
+            return@withContext
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
 
@@ -340,7 +340,7 @@ object PreloadManager {
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
-        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+        val quality = com.noslop.app.NoSlopApp.repository.getAppSetting("video_quality_mode") ?: "medium"
 
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)
@@ -370,6 +370,11 @@ object PreloadManager {
         val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
 
         player.setMediaItem(mediaItem)
+        val resumeMs = com.noslop.app.ui.components.PlaybackPositionStore.resumePositionFor(rawUrl)
+        if (resumeMs > 0L) {
+            Logger.info("PRELOAD", "Pre-buffering video at saved resume position ${resumeMs}ms for: $rawUrl")
+            player.seekTo(resumeMs)
+        }
         player.prepare()
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE

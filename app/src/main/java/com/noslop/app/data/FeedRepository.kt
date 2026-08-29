@@ -226,27 +226,29 @@ class FeedRepository(
         val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
 
         // --- Staggered Background Sync Pipeline ---
-        // Insert a 2s initial delay so Slide 1 & Slide 2 media resolution/pre-warming has priority bandwidth
-        kotlinx.coroutines.delay(2000L)
+        // If cached items exist in DB, defer background sync by 10s so Slide 1 video pre-buffering and initial playback has 100% network bandwidth priority.
+        val hasCachedItems = (feedDao.getItemCount() > 0)
+        val initialDelayMs = if (hasCachedItems) 10000L else 1000L
+        kotlinx.coroutines.delay(initialDelayMs)
 
-        // Fetch RSS sources sequentially with a 1.5s stagger delay
+        // Fetch RSS sources sequentially with a 3.0s stagger delay
         for (source in rssSources) {
             try {
                 fetchRssSource(source, allNegative)
             } catch (e: Exception) {
                 Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
             }
-            kotlinx.coroutines.delay(1500L)
+            kotlinx.coroutines.delay(3000L)
         }
 
-        // Fetch API categories sequentially with a 1.5s stagger delay
+        // Fetch API categories sequentially with a 3.0s stagger delay
         for (category in activeCategories) {
             try {
                 fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
             } catch (e: Exception) {
                 Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
             }
-            kotlinx.coroutines.delay(1500L)
+            kotlinx.coroutines.delay(3000L)
         }
 
         // Creator specific API searches (staggered)

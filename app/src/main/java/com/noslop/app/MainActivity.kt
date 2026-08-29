@@ -102,27 +102,14 @@ class MainActivity : ComponentActivity() {
                                 // Caught timeout or deliberate success cancellation
                             }
                             
-                            // 3. Pre-warm Slide 1 & Slide 2 media before dropping the splash screen
-                            if (firstPreloadUrl != null || secondPreloadUrl != null) {
-                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Pre-buffering Slide 1 & 2 media...")
+                            // 3. Pre-warm Slide 1 media with 100% priority before dropping splash screen
+                            if (firstPreloadUrl != null) {
+                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Preparing first video...")
                                 try {
-                                    kotlinx.coroutines.withTimeout(8000) {
-                                        kotlinx.coroutines.coroutineScope {
-                                            val jobs = mutableListOf<kotlinx.coroutines.Job>()
-                                            firstPreloadUrl?.let { url ->
-                                                jobs.add(launch {
-                                                    com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
-                                                    com.noslop.app.ui.PreloadManager.waitForPreload(url)
-                                                    com.noslop.app.ui.PreloadManager.awaitReady(url, 8000L)
-                                                })
-                                            }
-                                            secondPreloadUrl?.let { url ->
-                                                jobs.add(launch {
-                                                    com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
-                                                })
-                                            }
-                                            kotlinx.coroutines.joinAll(*jobs.toTypedArray())
-                                        }
+                                    kotlinx.coroutines.withTimeout(6000) {
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
+                                        com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
+                                        com.noslop.app.ui.PreloadManager.awaitReady(firstPreloadUrl!!, 6000L)
                                     }
                                 } catch (e: Exception) {
                                     // Timeout on preload
@@ -137,6 +124,14 @@ class MainActivity : ComponentActivity() {
                             }
                             
                             showSplash = false
+
+                            // 5. Pre-warm Slide 2 asynchronously in the background after splash dismissal
+                            secondPreloadUrl?.let { url ->
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    kotlinx.coroutines.delay(2000L)
+                                    com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
+                                }
+                            }
                         }
                     }
 
