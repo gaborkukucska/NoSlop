@@ -1,5 +1,32 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-30) — Privacy & Security Hardening Implementation
+
+### 1. Authenticated Backup Encryption (`BackupManager.kt`)
+* **`AES-256-GCM` Export Format**: Upgraded `exportData` from `AES-256-CBC` to `AES-256-GCM` with a 4-byte `"NSG1"` magic header and 12-byte random IV.
+* **Dual GCM/CBC Import Compatibility**: `importData` inspects the first 4 bytes of incoming backup files; if `"NSG1"` is present, it uses `AES-256-GCM` authenticated decryption, while retaining full backward compatibility for legacy `AES-256-CBC` backup archives.
+
+### 2. API Proxy Security & Tor Safeguards (`YouTubeInternalClient.kt`, `JamendoApiClient.kt`, `RedditApiClient.kt`)
+* **Dynamic HMAC Request Signing**: Implemented `applyProxyAuthHeaders()` generating dynamic `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`) headers across API clients.
+* **Tor Circuit Rotation on Rate Limiting**: On HTTP 403 / 429 rate limit responses over Tor, `YouTubeInternalClient` triggers `TorService.requestNewCircuit()` (`SIGNAL NEWNYM`).
+* **Strict Tor IP Routing**: Confirmed `activeClearnetClient` enforces Tor SOCKS routing when `useTorForClearnet = true`.
+
+### 3. Release Integrity & SHA-256 Checksum Validation (`UpdateManager.kt`)
+* **Cryptographic Integrity**: `startDownload` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file integrity before installation.
+
+### 4. Fallback Key Storage Hardening (`IdentityRepository.kt`)
+* **AES-GCM Fallback Key Storage**: Encrypted private keys and mnemonics in memory with `AES-256-GCM` (`secureFallbackWrite` / `secureFallbackRead`) before writing to `noslop_identity_fallback` `SharedPreferences`, avoiding unencrypted plaintext storage on disk when hardware Keystore fails.
+
+### 5. Mesh Transport & Peer Failure Cooldown (`GossipService.kt`, `MeshTransport.kt`, `TorService.kt`)
+* **Exponential Cooldown Backoff**: Added exponential backoff (`30s * 2^(failures - 3)`, up to 1 hour) to `isPeerInCooldown()` in `GossipService.kt`, preventing offline/stale onion peers from continuously saturating Tor circuits.
+* **Non-blocking Discoverability Traffic**: Included `ANNOUNCE_DISCOVERABLE` in `isBackground` handling in `MeshTransport.kt`.
+* **Tor Readiness Check Timeout**: Increased `checkTorConnection()` connect/read timeouts from 15s to 30s in `TorService.kt`.
+
+### 6. Truncated Technical Address UI (`PeerItem.kt`, `QRScanScreen.kt`)
+* Truncated displayed onion addresses and public key technical strings down to clean 8-character fragments (`take(8)` + `...`), prioritizing human-readable `@handle.tripcode` identifiers.
+
+---
+
 ## Completed Changes (2026-08-30) — Legacy Android App Codebase Audit & Privacy/Security Evaluation
 
 ### 1. Comprehensive Framework & Legacy Android Codebase Audit

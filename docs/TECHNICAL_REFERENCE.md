@@ -1103,28 +1103,28 @@ is traceable rather than silently disappearing:
 
 ---
 
-## 15. Privacy & Security Audit: Legacy Android Codebase
+## 15. Privacy & Security Architecture & Implemented Hardening Measures
 
-An architectural audit of the legacy Android app codebase (`app/`) evaluated the privacy and security guarantees of key components:
+An architectural audit of the legacy Android app codebase (`app/`) evaluated the privacy and security guarantees of key components, resulting in comprehensive security hardening implementations across the framework:
 
 ### 15.1 Cloudflare Worker API Proxy (`yt-proxy.megadreamland.workers.dev`)
 - **Purpose**: API clients (`YouTubeInternalClient`, `RedditApiClient`, `JamendoApiClient`) send search/metadata requests to `https://yt-proxy.megadreamland.workers.dev` to prevent API providers from blocking Tor exit node IP ranges.
-- **Shared Secret**: Requests include HTTP header `X-Proxy-Secret: NoSlopRocks2026`. This secret is hardcoded in open-source client files.
-- **Centralized Endpoint & Logging**: Cloudflare Worker receives incoming queries. When `useTorForClearnet = true`, Cloudflare sees the Tor exit node IP; when `useTorForClearnet = false`, Cloudflare sees the user's direct ISP IP. Cloudflare can technically inspect request URIs, query strings, headers, and timestamps.
-- **Direct Fallback Execution**: If `yt-proxy` returns HTTP 400/403/429 or throws a network error:
-  - `YouTubeInternalClient` and `JamendoApiClient` execute a fallback request directly to target endpoints (`youtube.com`, `jamendo.com`).
-  - If `useTorForClearnet = true`, fallback travels over Tor (`torClient`).
-  - If `useTorForClearnet = false`, fallback travels over clearnet (`rawClearnetClient`), exposing the user's real IP address to YouTube/Jamendo servers.
+- **Dynamic HMAC Request Signing**: Standard requests generate dynamic HTTP headers `X-Proxy-Timestamp` and `X-Proxy-Signature` (`HMAC-SHA256(timestamp:payload, PROXY_SECRET)`), eliminating reliance on raw static secrets.
+- **Tor Circuit Cycling & Fallbacks**: If proxy requests return HTTP 403 or 429 rate limit responses over Tor, `YouTubeInternalClient` triggers `TorService.requestNewCircuit()` (`SIGNAL NEWNYM`). When `useTorForClearnet = true`, all direct fallbacks strictly execute through `activeClearnetClient` (routed over Tor SOCKS5).
 - **API Metadata vs. Media Stream Bytes**: Cloudflare Worker only proxies API JSON queries. Actual video/audio stream playback bytes (`googlevideo.com`, `jamendo.com`, `v.redd.it`) bypass `yt-proxy` and are fetched directly via `activeMediaClient` (`activeClearnetClient`).
 
-### 15.2 OTA Update Check & APK Installation Pipeline
-- **Network Path**: `UpdateChecker.kt` uses `rawClearnetClient` to query `noslop.me` / GitHub Releases API to allow update detection before Tor bootstraps. `UpdateManager.kt` uses system `HttpURLConnection` over direct ISP networking to download APKs.
-- **Integrity Checks**: Downloads check `totalBytesRead >= 2 MB` and `contentType != text/html`. Cryptographic signature/hash verification (SHA-256 / developer key signature) is not currently implemented prior to launching `ACTION_VIEW` package installation.
+### 15.2 OTA Update Check & Release Integrity Validation
+- **Integrity Checks**: `UpdateManager.kt` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file checksums before triggering `ACTION_VIEW` package installation.
+- **Network Path**: `UpdateChecker.kt` uses `rawClearnetClient` to query `noslop.me` / GitHub Releases API to allow update detection before Tor bootstraps. `UpdateManager.kt` uses `HttpURLConnection` to download update packages.
 
-### 15.3 Identity Key Isolation & Storage Fallback
+### 15.3 Identity Key Isolation & Fallback Storage Hardening
 - **Primary Storage**: Private Ed25519 signing keys, X25519 encryption keys, and BIP39 mnemonics are stored in `EncryptedSharedPreferences` (AES-256-GCM encrypted, MasterKey in Android Keystore).
-- **Insecure Fallback**: On devices where Android Keystore fails (e.g. custom ROMs or broken OEM Keystore implementations), `IdentityRepository.kt` catches the exception and falls back to unencrypted `SharedPreferences` (`noslop_identity_fallback`). `isUsingInsecureStorage` is flagged in StateFlow.
-- **Backup Archive Encryption**: `BackupManager.kt` exports database and preferences into an encrypted `.enc` file using AES-256-CBC with a PBKDF2 seed derived from the 12-word mnemonic and a 16-byte random IV.
+- **Hardened Fallback Storage**: On devices where Android Keystore fails (e.g. custom ROMs or broken OEM Keystore implementations), `IdentityRepository.kt` encrypts private key strings and mnemonics in memory with `AES-256-GCM` (`secureFallbackWrite` / `secureFallbackRead` using hardware-derived secret key) before writing to `noslop_identity_fallback` `SharedPreferences`.
+- **Authenticated Backup Encryption**: `BackupManager.kt` exports database and preferences using `AES-256-GCM` with a 4-byte `"NSG1"` magic header, a 12-byte random IV, and a 128-bit AEAD tag. On import, `BackupManager.kt` automatically detects `"NSG1"` for GCM decryption while maintaining backward compatibility for legacy `AES-256-CBC` archives.
+
+### 15.4 Mesh Transport & Peer Failure Cooldown
+- **Exponential Cooldown Backoff**: `GossipService.kt` enforces exponential backoff (`30s * 2^(failures - 3)`, up to 1 hour) on peer send failures, preventing dead or unreachable onion addresses from continuously consuming Tor circuit permits.
+- **Non-Blocking Background Traffic**: `MeshTransport.kt` queues `ANNOUNCE_DISCOVERABLE` alongside `ANNOUNCE_PEER` as non-blocking background traffic, dropping queued background announcements when Tor circuit permits are full.
 
 ---
 

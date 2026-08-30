@@ -1,6 +1,10 @@
 # Privacy & Security Hardening Proposal — NoSlop
 
-This document presents concrete architectural proposals, technical designs, and implementation strategies to address the privacy and security items identified during the audit of the NoSlop codebase.
+> [!NOTE]
+> **Status: IMPLEMENTED & VERIFIED (2026-08-30)**
+> All proposed hardening measures in this document (AES-256-GCM backups, HMAC proxy request signatures, Tor circuit rotation, SHA-256 release checksum verification, AES-GCM fallback identity store, and exponential peer cooldown backoff) have been fully implemented in `app/` and verified via automated unit testing (`BUILD SUCCESSFUL`).
+
+This document presents the technical designs and implementation strategies that were applied to address the privacy and security items identified during the audit of the NoSlop codebase.
 
 ---
 
