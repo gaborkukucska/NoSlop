@@ -58,3 +58,7 @@
 #    Wildcard covers UpdateInfo, ContentJson, HeroBlock, and the worker/checker
 #    classes themselves so nothing in this package is touched by Gson reflection.
 -keep class com.noslop.app.util.** { *; }
+
+# 7. Feeds and Network packages (Fixes R8 minification crashes in Release builds)
+-keep class com.noslop.app.feeds.** { *; }
+-keep class com.noslop.app.net.** { *; }

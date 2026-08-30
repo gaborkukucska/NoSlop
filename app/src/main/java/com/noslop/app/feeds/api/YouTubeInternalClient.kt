@@ -355,6 +355,14 @@ object YouTubeInternalClient {
     }
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        if (isTor) {
+            // Over Tor, InnerTube endpoints hit Cloudflare 403s / LOGIN_REQUIRED exit blocks.
+            // Fast-track directly to InvidiousApiClient over Tor .onion instances for instant, reliable stream resolution.
+            val invidiousStream = InvidiousApiClient.resolveStreamUrl(videoId)
+            if (invidiousStream != null) return@withContext invidiousStream
+        }
+
         // ANDROID is the most reliable client — always try it first.
         // WEB_EMBED was removed: YouTube deprecated that client name (always returns 400).
         val clients = listOf(

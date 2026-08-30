@@ -140,6 +140,11 @@ data class AnnounceDiscoverablePayload(
     val signature: String
 )
 
+data class AnnounceInvidiousInstancePayload(
+    @SerializedName("instance_url") val instanceUrl: String,
+    val timestamp: Long
+)
+
 data class SubscribePayload(
     @SerializedName("creator_id") val creatorId: String,
     @SerializedName("subscriber_id") val subscriberId: String,
@@ -456,6 +461,10 @@ data class NetworkPacket(
 
     fun getAnnounceDiscoverablePayload(): AnnounceDiscoverablePayload? = if (type == "ANNOUNCE_DISCOVERABLE" && payload != null) {
         Gson().fromJson(payload, AnnounceDiscoverablePayload::class.java)
+    } else null
+
+    fun getAnnounceInvidiousInstancePayload(): AnnounceInvidiousInstancePayload? = if (type == "ANNOUNCE_INVIDIOUS_INSTANCE" && payload != null) {
+        Gson().fromJson(payload, AnnounceInvidiousInstancePayload::class.java)
     } else null
 
     fun getSubscribePayload(): SubscribePayload? = if (type == "SUBSCRIBE" && payload != null) {

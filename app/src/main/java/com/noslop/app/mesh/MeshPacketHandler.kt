@@ -75,6 +75,7 @@ class MeshPacketHandler(
             "CONNECTION_REJECTED" -> handshake.handleConnectionRejected(packet)
             "ANNOUNCE_PEER" -> handshake.handleAnnouncePeer(packet)
             "ANNOUNCE_DISCOVERABLE" -> handshake.handleAnnounceDiscoverable(packet)
+            "ANNOUNCE_INVIDIOUS_INSTANCE" -> handshake.handleAnnounceInvidiousInstance(packet)
             "SUBSCRIBE" -> handshake.handleSubscribe(packet)
             "CHAT_REACTION" -> reaction.handleChatReaction(packet)
             "COMMENT_REACTION" -> reaction.handleCommentReaction(packet)

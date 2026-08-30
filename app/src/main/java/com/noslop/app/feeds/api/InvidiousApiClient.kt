@@ -52,39 +52,31 @@ object InvidiousApiClient {
             .build()
     }
 
-    private val probeClientTor: okhttp3.OkHttpClient by lazy {
-        okhttp3.OkHttpClient.Builder()
-            .addInterceptor { chain ->
-                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
-                    throw java.io.IOException("Tor is disconnected — blocking Invidious probe over Tor for privacy")
-                }
-                chain.proceed(chain.request())
-            }
-            .proxy(
-                java.net.Proxy(
-                    java.net.Proxy.Type.SOCKS,
-                    java.net.InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)
-                )
-            )
-            // Longer than the direct client: a Tor circuit takes real time to
-            // build. Still bounded so a dead instance cannot hold a racer open.
-            .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
-            .build()
-    }
+    private val probeClientTor: okhttp3.OkHttpClient
+        get() = com.noslop.app.net.HttpClientProvider.torClient
 
     private val probeClient: okhttp3.OkHttpClient
         get() = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) probeClientTor else probeClientDirect
 
     // Hardcoded fallback instances (known-good as of July 2026)
     private val FALLBACK_INSTANCES = listOf(
+        "http://inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion",
+        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion",
         "https://invidious.projectsegfau.lt",
         "https://yewtu.be",
         "https://vid.puffyan.us",
         "https://invidious.fdn.fr",
         "https://invidious.perennialte.ch"
     )
+
+    // Instances discovered via the Mesh Gossip network
+    private val gossipedInstances = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun addGossipedInstance(url: String) {
+        if (gossipedInstances.add(url)) {
+            Logger.info(TAG, "Added new gossiped instance to dynamic rotation: $url")
+        }
+    }
 
     // Cached dynamic instances
     @Volatile private var cachedInstances: List<String>? = null
@@ -161,8 +153,14 @@ object InvidiousApiClient {
         parse: (String, String) -> T?
     ): T? = withContext(Dispatchers.IO) {
         try {
+            val targetUrl = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && url.startsWith("http://") && url.contains(".onion")) {
+                val httpsUrl = url.replaceFirst("http://", "https://")
+                if (!httpsUrl.contains(".onion:")) {
+                    httpsUrl.replace(".onion/", ".onion:80/")
+                } else httpsUrl
+            } else url
             val request = Request.Builder()
-                .url(url)
+                .url(targetUrl)
                 .header("User-Agent", BROWSER_USER_AGENT)
                 .build()
             probeClient.newCall(request).awaitResponse().use { response ->
@@ -178,7 +176,10 @@ object InvidiousApiClient {
                     Logger.warn(TAG, "$label: $instance returned an unusable payload: ${e.message}")
                     null
                 }
-                if (parsed != null) markInstanceOk(instance)
+                if (parsed != null) {
+                    markInstanceOk(instance)
+                    maybeGossipInstance(instance)
+                }
                 return@withContext parsed
             }
         } catch (e: CancellationException) {
@@ -253,18 +254,33 @@ object InvidiousApiClient {
      * a blocking registry fetch on a cache miss, which has no business running
      * on whatever thread happened to call in.
      */
+    fun resetCooldowns() {
+        instanceFailureTime.clear()
+        Logger.info(TAG, "Instance cooldowns reset")
+    }
+
     private suspend fun healthyInstances(): List<String> = withContext(Dispatchers.IO) {
         val all = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        
+        // Ensure FALLBACK_INSTANCES and gossipedInstances are always merged so we don't starve Tor users
+        // if getInstances() successfully returned a cached list of purely HTTPS instances.
+        val combined = (all + FALLBACK_INSTANCES + gossipedInstances).distinct()
+
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         val usable = if (isTor) {
-            val onions = all.filter { it.endsWith(".onion") }
-            val https = all.filter { !it.endsWith(".onion") }
+            val onions = combined.filter { it.contains(".onion") }
+            val https = combined.filter { !it.contains(".onion") }
             onions + https
         } else {
-            all.filter { !it.endsWith(".onion") }
+            combined.filter { !it.contains(".onion") }
         }
-        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
-        finalUsable.filter { !isInstanceCoolingDown(it) }
+        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: combined.filter { if (isTor) true else !it.contains(".onion") }
+        val nonCooling = finalUsable.filter { !isInstanceCoolingDown(it) }
+        if (nonCooling.isNotEmpty()) nonCooling else {
+            Logger.warn(TAG, "All Invidious instances are cooling down! Resetting cooldowns to retry.")
+            instanceFailureTime.clear()
+            finalUsable
+        }
     }
 
     /** Parse a body that is expected to be a bare JSON array; null if it isn't. */
@@ -339,8 +355,8 @@ object InvidiousApiClient {
             }
 
             if (liveInstances.isNotEmpty()) {
-                val https = liveInstances.filter { !it.endsWith(".onion") }.take(15)
-                val onions = liveInstances.filter { it.endsWith(".onion") }.take(15)
+                val https = liveInstances.filter { !it.contains(".onion") }.take(15)
+                val onions = liveInstances.filter { it.contains(".onion") }.take(15)
                 val result = onions + https
                 cachedInstances = result
                 cacheTimestamp = now
@@ -368,15 +384,16 @@ object InvidiousApiClient {
      */
     fun getPrimaryInstance(): String {
         val instances = cachedInstances ?: FALLBACK_INSTANCES
+        val combined = (instances + FALLBACK_INSTANCES + gossipedInstances).distinct()
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         val usable = if (isTor) {
-            val onions = instances.filter { it.endsWith(".onion") }
-            val https = instances.filter { !it.endsWith(".onion") }
+            val onions = combined.filter { it.contains(".onion") }
+            val https = combined.filter { !it.contains(".onion") }
             onions + https
         } else {
-            instances.filter { !it.endsWith(".onion") }
+            combined.filter { !it.contains(".onion") }
         }
-        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: combined.filter { if (isTor) true else !it.contains(".onion") }
         return finalUsable.firstOrNull { !isInstanceCoolingDown(it) } ?: finalUsable.first()
     }
 
@@ -605,5 +622,36 @@ object InvidiousApiClient {
             }
         }
         return items
+    }
+
+    private var lastGossipTime = 0L
+
+    private fun maybeGossipInstance(url: String) {
+        val now = System.currentTimeMillis()
+        // Simple rate limiting: gossip at most once every hour
+        if (now - lastGossipTime < 3600_000L) return
+        
+        // Don't gossip the hardcoded fallbacks
+        if (FALLBACK_INSTANCES.contains(url)) return
+        
+        lastGossipTime = now
+        
+        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            try {
+                val pubKey = com.noslop.app.NoSlopApp.repository.getLocalIdentity()?.publicKeyB64 ?: return@launch
+                val payload = com.noslop.app.mesh.AnnounceInvidiousInstancePayload(url, System.currentTimeMillis())
+                val packet = com.noslop.app.mesh.NetworkPacket(
+                    id = java.util.UUID.randomUUID().toString(),
+                    senderId = pubKey,
+                    targetUserId = "ALL",
+                    type = "ANNOUNCE_INVIDIOUS_INSTANCE",
+                    payload = com.google.gson.Gson().toJsonTree(payload)
+                )
+                com.noslop.app.mesh.GossipService.broadcast(packet)
+                Logger.info(TAG, "Gossiped Invidious instance to mesh: $url")
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Failed to gossip instance: ${e.message}")
+            }
+        }
     }
 }

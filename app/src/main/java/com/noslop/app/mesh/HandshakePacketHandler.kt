@@ -446,6 +446,27 @@ class HandshakePacketHandler(
         return CryptoService.verify(payloadToVerify, subscribePay.signature, subscribePay.subscriberId)
     }
 
+    suspend fun handleAnnounceInvidiousInstance(packet: NetworkPacket): Boolean {
+        val announcePay = packet.getAnnounceInvidiousInstancePayload() ?: return false
+        val url = announcePay.instanceUrl
+
+        // Basic validation: must be HTTP or HTTPS and not an obvious junk string.
+        if (!url.startsWith("http://") && !url.startsWith("https://")) {
+            Logger.warn(TAG, "Rejecting invalid Invidious instance URL: $url")
+            return false
+        }
+        
+        // Anti-spam: Ignore packets that are completely out of date
+        val now = System.currentTimeMillis()
+        if (Math.abs(now - announcePay.timestamp) > 24 * 3600_000L) {
+            return false
+        }
+
+        Logger.info(TAG, "Discovered Invidious instance via gossip: $url")
+        com.noslop.app.feeds.api.InvidiousApiClient.addGossipedInstance(url)
+        return true
+    }
+
     suspend fun handleIdentityUpdate(packet: NetworkPacket): Boolean {
         val identityPay = packet.getIdentityUpdatePayload() ?: return false
         var payloadToVerify = "${identityPay.userId}|${identityPay.handle}|${identityPay.timestamp}"
