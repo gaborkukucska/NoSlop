@@ -713,7 +713,16 @@ fun UnifiedFeedTab(
         }
     }
 
-    val pagerState = rememberPagerState { unifiedItems.size }
+    val initialActiveIndex = remember(unifiedItems) {
+        val savedActiveId = viewModel.currentSavedFeedItemId
+        if (!savedActiveId.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
+            val idx = unifiedItems.indexOfFirst { it.id == savedActiveId }
+            if (idx >= 0) idx else 0
+        } else {
+            0
+        }
+    }
+    val pagerState = rememberPagerState(initialPage = initialActiveIndex) { unifiedItems.size }
     val preloadScope = rememberCoroutineScope()
 
     // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
@@ -830,7 +839,7 @@ fun UnifiedFeedTab(
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
                     val targetIndex = i
-                    val delayMs = if (preloadedForwardCount == 0) 0L else preloadedForwardCount * 500L
+                    val delayMs = 2000L + (preloadedForwardCount * 1500L)
                     preloadScope.launch { 
                         if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
                         if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {

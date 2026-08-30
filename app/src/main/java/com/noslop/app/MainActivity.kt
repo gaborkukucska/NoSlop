@@ -63,10 +63,10 @@ class MainActivity : ComponentActivity() {
                             var firstPreloadUrl: String? = null
                             var secondPreloadUrl: String? = null
                             
-                            // 2. Wait up to 5 seconds for the feed to populate / restore
+                            // 2. Wait up to 3 seconds for the feed to populate / restore
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Loading feed items...")
                             try {
-                                kotlinx.coroutines.withTimeout(5000) {
+                                kotlinx.coroutines.withTimeout(3000) {
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
                                             val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
@@ -109,7 +109,6 @@ class MainActivity : ComponentActivity() {
                                     kotlinx.coroutines.withTimeout(6000) {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
                                         com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
-                                        com.noslop.app.ui.PreloadManager.awaitReady(firstPreloadUrl!!, 6000L)
                                     }
                                 } catch (e: Exception) {
                                     // Timeout on preload

@@ -537,7 +537,7 @@ fun VideoPlayer(
     }
 
     var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }
-    var isVideoReady by remember(url) { mutableStateOf(initialSource != null) }
+    var isVideoReady by remember(url) { mutableStateOf(false) }
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     val isActiveOrNext = isVisible || isNextSlide

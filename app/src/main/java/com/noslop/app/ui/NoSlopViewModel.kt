@@ -152,13 +152,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var cachedDefaultFeed = listOf<UnifiedItem>()
     private var isSearchModeActive = false
     private var savedFeedItemId: String? = null
+    val currentSavedFeedItemId: String? get() = savedFeedItemId
     private val sessionLoadedIds = mutableSetOf<String>()
     private var lastSearchResultIds = emptySet<String>()
     private val allSearchResultItemIds = mutableSetOf<String>()
     private var searchExhaustedCount = 0
 
     fun saveFeedPosition(itemId: String) {
-        if (_isRefreshingFeeds.value) return
         if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
             savedFeedItemId = itemId
             
@@ -528,11 +528,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 if (_unifiedFeed.value.isEmpty()) {
                     val savedIdsStr = repository.getAppSetting("saved_feed_list")
                     val savedActiveId = repository.getAppSetting("saved_feed_active_id")
-                    val savedDate = repository.getAppSetting("saved_feed_date")
-                    val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
-                    val isSameDay = (savedDate == todayStr)
-                    
-                    if (!savedIdsStr.isNullOrEmpty() && isSameDay && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                    if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                         val idList = savedIdsStr.split(",")
                         // Only exclude explicitly banned/deleted items, NOT viewed history,
                         // so the user is placed right back where they left off on same-day restart.
@@ -553,21 +549,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             sessionLoadedIds.addAll(restoredFeed.map { it.id })
                             
                             val activeIdx = if (savedActiveId != null) restoredFeed.indexOfFirst { it.id == savedActiveId } else 0
-                            val startIdx = if (activeIdx >= 0) activeIdx else 0
-                            val appCtx = getApplication<Application>()
-                            viewModelScope.launch(Dispatchers.IO) {
-                                for (i in startIdx..minOf(startIdx + 2, restoredFeed.size - 1)) {
-                                    val item = restoredFeed[i]
-                                    val rawUrl = when(item) {
-                                        is UnifiedItem.Feed -> item.item.mediaUrl ?: item.item.url
-                                        is UnifiedItem.Mesh -> item.post.mediaUrl ?: item.post.clearnetUrl
-                                        else -> null
-                                    }
-                                    if (rawUrl != null) {
-                                        PreloadManager.preWarm(appCtx, rawUrl)
-                                    }
-                                }
-                            }
 
                             viewModelScope.launch {
                                 kotlinx.coroutines.delay(100)
