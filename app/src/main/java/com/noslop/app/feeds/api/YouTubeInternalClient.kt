@@ -1,3 +1,4 @@
+// FILE: app/src/main/java/com/noslop/app/feeds/api/YouTubeInternalClient.kt
 package com.noslop.app.feeds.api
 
 import com.google.gson.Gson
@@ -20,16 +21,11 @@ object YouTubeInternalClient {
 
     /** NOSLOP_FEED_RECENCY_V1 — sentinel: the source gave us no usable date. */
     const val UNKNOWN_PUBLISH_DATE = 0L
-    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev" // User's Cloudflare Worker
+    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev"
     private const val PROXY_SECRET = "NoSlopRocks2026"
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
 
     // --- NOSLOP_YT_COLDSTART_V1 ---
-    // The Cloudflare worker throttles under load: the logs show repeated
-    // "Proxy blocked (403)" that increase as a browsing session goes on. Each
-    // one costs a full wasted round trip before the direct fallback runs.
-    // Once it starts refusing, skip it for a while and go straight to
-    // youtube.com — the fallback that was already working anyway.
     private const val PROXY_COOLDOWN_MS = 5 * 60 * 1000L
 
     @Volatile
@@ -93,7 +89,6 @@ object YouTubeInternalClient {
         try {
             val payload = buildPayload(query)
             if (recentOnly) {
-                // Protobuf: field 2 (upload_date), varint 5 (this_year) → base64 "EgIIBQ=="
                 payload.addProperty("params", "EgIIBQ==")
             }
             val payloadStr = payload.toString()
@@ -114,7 +109,6 @@ object YouTubeInternalClient {
             }
             
             if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
-                // If we got rate limited over Tor, request a fresh Tor exit circuit
                 if ((response?.code == 429 || response?.code == 403) && com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
                     Logger.info(TAG, "Proxy returned HTTP ${response.code} over Tor — requesting new Tor circuit")
                     com.noslop.app.tor.TorService.requestNewCircuit()
@@ -320,12 +314,29 @@ object YouTubeInternalClient {
         clientNode.addProperty("hl", "en")
         clientNode.addProperty("gl", "US")
         clientNode.addProperty("utcOffsetMinutes", -240)
-        if (clientNameStr.startsWith("ANDROID")) {
-            clientNode.addProperty("androidSdkVersion", 34)
+
+        if (clientNameStr.contains("EMBEDDED")) {
+            clientNode.addProperty("clientScreen", "EMBED")
+            val thirdParty = JsonObject()
+            thirdParty.addProperty("embedUrl", "https://www.youtube.com/")
+            context.add("thirdParty", thirdParty)
+        } else if (clientNameStr == "ANDROID") {
+            clientNode.addProperty("androidSdkVersion", 30)
+            clientNode.addProperty("osName", "Android")
+            clientNode.addProperty("osVersion", "11")
+            payload.addProperty("params", "2AMB")
         }
+
         context.add("client", clientNode)
         payload.add("context", context)
         payload.addProperty("videoId", videoId)
+
+        val playbackContext = JsonObject()
+        val contentPlaybackContext = JsonObject()
+        contentPlaybackContext.addProperty("html5Preference", "HTML5_PREF_WANTS")
+        playbackContext.add("contentPlaybackContext", contentPlaybackContext)
+        payload.add("playbackContext", playbackContext)
+
         payload.addProperty("racyCheckOk", true)
         payload.addProperty("contentCheckOk", true)
         return payload
@@ -333,57 +344,58 @@ object YouTubeInternalClient {
 
     private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
-        
-        // HLS is great for 'high' quality because it's adaptive, but let's check formats first
+
+        // 1. Prefer muxed progressive formats (video + audio together)
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
-            val sortedFormats = formats.map { it.asJsonObject }.sortedBy { it.get("bitrate")?.asInt ?: 0 }
-            val chosenFormat = when (quality) {
-                "low" -> sortedFormats.first()
-                "medium" -> sortedFormats[sortedFormats.size / 2]
-                else -> sortedFormats.last() // Usually 720p with audio
+            val valid = formats.map { it.asJsonObject }.filter { it.has("url") && !it.get("url").asString.isNullOrBlank() }
+            if (valid.isNotEmpty()) {
+                val sortedFormats = valid.sortedBy { it.get("bitrate")?.asInt ?: 0 }
+                val chosenFormat = when (quality) {
+                    "low" -> sortedFormats.first()
+                    "medium" -> sortedFormats[sortedFormats.size / 2]
+                    else -> sortedFormats.last()
+                }
+                val url = chosenFormat.get("url")?.asString
+                if (!url.isNullOrBlank()) return url
             }
-            val url = chosenFormat.get("url")?.asString
-            if (url != null) return url
         }
-        
-        // Fallback to HLS if no muxed formats are available
+
+        // 2. Fallback to adaptive video-only stream or HLS manifest
         val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        if (hlsUrl != null) return hlsUrl
-        
+        if (!hlsUrl.isNullOrBlank()) return hlsUrl
+
+        val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
+        if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
+            val valid = adaptiveFormats.map { it.asJsonObject }.filter {
+                val url = it.get("url")?.asString
+                url != null && !url.contains("signature=") && !url.contains("&sig=")
+            }
+            val best = valid.maxByOrNull { it.get("bitrate")?.asInt ?: 0 }
+            val bestUrl = best?.get("url")?.asString
+            if (!bestUrl.isNullOrBlank()) return bestUrl
+        }
+
         return null
     }
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        if (isTor) {
-            // Over Tor, InnerTube endpoints hit Cloudflare 403s / LOGIN_REQUIRED exit blocks.
-            // Fast-track directly to InvidiousApiClient over Tor .onion instances for instant, reliable stream resolution.
-            val invidiousStream = InvidiousApiClient.resolveStreamUrl(videoId)
-            if (invidiousStream != null) return@withContext invidiousStream
-        }
 
-        // ANDROID is the most reliable client — always try it first.
-        // WEB_EMBED was removed: YouTube deprecated that client name (always returns 400).
+        // Robust InnerTube embedded/mobile clients
         val clients = listOf(
-            Pair("ANDROID", "21.02.35") to "com.google.android.youtube/21.02.35 (Linux; U; Android 14; en_US) gzip"
+            Pair("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0") to "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15",
+            Pair("WEB_EMBEDDED_PLAYER", "2.20240910.03.00") to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Pair("ANDROID", "19.34.42") to "com.google.android.youtube/19.34.42 (Linux; U; Android 11) gzip"
         )
         
         for ((clientInfo, userAgent) in clients) {
             try {
                 val (cName, cVer) = clientInfo
                 val payload = buildPlayerPayload(videoId, cName, cVer)
-                
-                // All clients get signatureTimestamp to bypass PoToken/LOGIN_REQUIRED
-                val playbackContext = JsonObject()
-                val contentPlaybackContext = JsonObject()
-                contentPlaybackContext.addProperty("signatureTimestamp", (System.currentTimeMillis() / 1000 - 86400).toInt())
-                playbackContext.add("contentPlaybackContext", contentPlaybackContext)
-                payload.add("playbackContext", playbackContext)
-                
                 val payloadStr = payload.toString()
                 val requestBody = payloadStr.toRequestBody(jsonMediaType)
-                // --- NOSLOP_YT_COLDSTART_V1 ---
+
                 val usingProxy = !proxyIsCoolingDown()
                 val requestBuilder = Request.Builder()
                     .url(playerEndpoint())
@@ -394,21 +406,12 @@ object YouTubeInternalClient {
                     applyProxyAuthHeaders(requestBuilder, payloadStr)
                 }
 
-                // CRITICAL: Only send Origin and Referer for web-based clients.
-                // If we send web headers while masquerading as an Android/iOS native app,
-                // YouTube WAF detects the spoof and immediately returns 400 Bad Request.
                 if (!cName.startsWith("ANDROID") && !cName.startsWith("IOS")) {
                     requestBuilder.header("Origin", "https://www.youtube.com")
                     requestBuilder.header("Referer", "https://www.youtube.com/")
                 }
 
                 var response = client.newCall(requestBuilder.build()).execute()
-                // --- NOSLOP_YT_COLDSTART_V1 ---
-                // Only retry direct if we actually went through the proxy. When
-                // the breaker is open we are already talking to youtube.com, and
-                // a 400 from YouTube itself is a real answer about the video
-                // (LOGIN_REQUIRED / FAILED_PRECONDITION), not a proxy problem —
-                // retrying the identical request would just double the latency.
                 if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
                     notePlayerProxyBlocked(response.code)
                     val directReqBuilder = requestBuilder
@@ -461,19 +464,12 @@ object YouTubeInternalClient {
      * NOSLOP_FEED_RECENCY_V1
      *
      * Returns 0L for "the source did not tell us", NOT the current time.
-     *
-     * Stamping an undated video with System.currentTimeMillis() made it the
-     * newest thing in the database, so it sorted to the very top of a feed
-     * ordered by publishedAt descending. Videos with no readable
-     * publishedTimeText (live streams, premieres, some shorts, and any locale
-     * whose unit words are missing from the `when` below) are exactly the ones
-     * most likely to be old — so the bug reliably promoted stale content.
      */
     private fun parseRelativeTime(publishedTimeText: String?): Long {
         if (publishedTimeText == null) return UNKNOWN_PUBLISH_DATE
         val now = System.currentTimeMillis()
         try {
-            val match = Regex("(\\d+)").find(publishedTimeText)
+            val match = Regex("([0-9]+)").find(publishedTimeText)
             if (match != null) {
                 val amount = match.groupValues[1].toLongOrNull() ?: return now
                 val t = publishedTimeText.lowercase()
@@ -481,10 +477,10 @@ object YouTubeInternalClient {
                     t.contains("sec") || t.contains("seg") -> 1000L
                     t.contains("min") -> 60_000L
                     t.contains("hour") || t.contains("hor") || t.contains("heur") || t.contains("stund") -> 3_600_000L
-                    t.contains("day") || t.contains("día") || t.contains("dia") || t.contains("jour") || t.contains("tag") || t.contains("dni") || t.contains("gün") -> 86_400_000L
+                    t.contains("day") || t.contains("dia") || t.contains("jour") || t.contains("tag") || t.contains("dni") -> 86_400_000L
                     t.contains("week") || t.contains("seman") || t.contains("semain") || t.contains("woch") || t.contains("tydz") || t.contains("hafta") -> 604_800_000L
                     t.contains("month") || t.contains("mes") || t.contains("mois") || t.contains("monat") || t.contains("miesi") || t.contains("ay") -> 2_592_000_000L
-                    t.contains("year") || t.contains("año") || t.contains("ano") || t.contains("ans") || t.contains("jahr") || t.contains("rok") || t.contains("lat") || t.contains("yıl") -> 31_536_000_000L
+                    t.contains("year") || t.contains("ano") || t.contains("ans") || t.contains("jahr") || t.contains("rok") || t.contains("lat") -> 31_536_000_000L
                     else -> 0L
                 }
                 if (multiplier > 0) {

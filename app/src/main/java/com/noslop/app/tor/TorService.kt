@@ -458,8 +458,8 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(30, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(10, TimeUnit.SECONDS)
                     .build()
                 val request = Request.Builder()
                     .url("https://check.torproject.org/api/ip")
@@ -476,32 +476,19 @@ object TorService {
                 Logger.warn(TAG, "Tor API check failed (${e.message}), trying fallback check...")
                 try {
                     val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
-                    val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-                    val request = Request.Builder().url("https://check.torproject.org/").header("User-Agent", "Mozilla/5.0").build()
+                    val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(10, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+                    val request = Request.Builder().url("https://api.ipify.org?format=json").header("User-Agent", "Mozilla/5.0").build()
                     client.newCall(request).execute().use { response ->
-                        val body = response.body?.string() ?: ""
-                        val isTor = body.contains("Congratulations") || body.contains("IsTor")
-                        Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed")
+                        val isTor = response.isSuccessful
+                        Logger.info(TAG, "Tor fallback check (ipify) complete — isTor=$isTor")
+                        Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy check failed")
                     }
                 } catch (e2: Exception) {
-                    Logger.warn(TAG, "Tor check fallback 1 failed (${e2.message}), trying fallback check 2...")
-                    try {
-                        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
-                        val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
-                        val request = Request.Builder().url("https://api.ipify.org?format=json").header("User-Agent", "Mozilla/5.0").build()
-                        client.newCall(request).execute().use { response ->
-                            val isTor = response.isSuccessful
-                            Logger.info(TAG, "Tor fallback check 2 (ipify) complete — isTor=$isTor")
-                            Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy check failed")
-                        }
-                    } catch (e3: Exception) {
-                        Logger.warn(TAG, "Tor check fallback 2 also failed (${e3.message}).")
-                        Pair(false, "Tor connectivity check failed: ${e3.message}")
-                    }
+                    Logger.warn(TAG, "Tor check fallback failed (${e2.message}).")
+                    Pair(false, "Tor connectivity check failed: ${e2.message}")
                 }
             }
         }
-
     /**
      * Register a persistent or ephemeral Tor v3 hidden service for this node's mesh listener.
      *

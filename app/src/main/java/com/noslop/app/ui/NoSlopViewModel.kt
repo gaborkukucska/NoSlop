@@ -463,8 +463,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             TorService.torState.collect { state ->
                 if (state == TorState.READY || state == TorState.PROXY_READY) {
                     retryCount = 0
+                    if (!_torReadyState.value.first) {
+                        _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                    }
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {
+                    _torReadyState.value = Pair(false, "Tor daemon failed")
                     if (retryCount < 3) {
                         retryCount++
                         com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor with forceRestart (attempt $retryCount/3)...")

@@ -153,14 +153,8 @@ object InvidiousApiClient {
         parse: (String, String) -> T?
     ): T? = withContext(Dispatchers.IO) {
         try {
-            val targetUrl = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && url.startsWith("http://") && url.contains(".onion")) {
-                val httpsUrl = url.replaceFirst("http://", "https://")
-                if (!httpsUrl.contains(".onion:")) {
-                    httpsUrl.replace(".onion/", ".onion:80/")
-                } else httpsUrl
-            } else url
             val request = Request.Builder()
-                .url(targetUrl)
+                .url(url)
                 .header("User-Agent", BROWSER_USER_AGENT)
                 .build()
             probeClient.newCall(request).awaitResponse().use { response ->
@@ -261,32 +255,31 @@ object InvidiousApiClient {
 
     private suspend fun healthyInstances(): List<String> = withContext(Dispatchers.IO) {
         val all = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
-        
-        // Ensure FALLBACK_INSTANCES and gossipedInstances are always merged so we don't starve Tor users
-        // if getInstances() successfully returned a cached list of purely HTTPS instances.
         val combined = (all + FALLBACK_INSTANCES + gossipedInstances).distinct()
 
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         val usable = if (isTor) {
-            val onions = combined.filter { it.contains(".onion") }
-            val https = combined.filter { !it.contains(".onion") }
-            onions + https
+            // Include both https and onion instances, filtering out currently cooling down instances
+            combined
         } else {
             combined.filter { !it.contains(".onion") }
         }
-        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: combined.filter { if (isTor) true else !it.contains(".onion") }
-        val nonCooling = finalUsable.filter { !isInstanceCoolingDown(it) }
+        val nonCooling = usable.filter { !isInstanceCoolingDown(it) }
         if (nonCooling.isNotEmpty()) nonCooling else {
             Logger.warn(TAG, "All Invidious instances are cooling down! Resetting cooldowns to retry.")
             instanceFailureTime.clear()
-            finalUsable
+            usable
         }
     }
 
     /** Parse a body that is expected to be a bare JSON array; null if it isn't. */
     private fun jsonArrayOrNull(body: String): JsonArray? {
-        val root = com.google.gson.JsonParser.parseString(body)
-        return if (root.isJsonArray) root.asJsonArray else null
+        return try {
+            val root = com.google.gson.JsonParser.parseString(body)
+            if (root.isJsonArray) root.asJsonArray else null
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
@@ -431,14 +424,22 @@ object InvidiousApiClient {
             label = "resolveStreamUrl($videoId)",
             instances = healthy,
             deadlineMs = System.currentTimeMillis() + 15_000L,
-            urlFor = { "$it/api/v1/videos/$videoId?fields=formatStreams,adaptiveFormats" },
+            urlFor = { "$it/api/v1/videos/$videoId" },
             parse = { instance, body -> pickStreamUrl(videoId, instance, body) }
         )
     }
 
-    /** Stream selection, unchanged: prefer muxed, fall back to adaptive video. */
+    /** Stream selection: safely parse JSON object and prefer muxed, fall back to adaptive video. */
     private fun pickStreamUrl(videoId: String, instance: String, body: String): String? {
-        val root = gson.fromJson(body, JsonObject::class.java) ?: return null
+        val root = try {
+            val el = com.google.gson.JsonParser.parseString(body)
+            if (el.isJsonObject) el.asJsonObject else null
+        } catch (_: Exception) { null } ?: return null
+
+        if (root.has("error")) {
+            Logger.warn(TAG, "Instance $instance returned error for $videoId: ${root.get("error")?.asString}")
+            return null
+        }
 
         // --- Prefer muxed (audio+video) streams ---
         val formatStreams = root.getAsJsonArray("formatStreams")

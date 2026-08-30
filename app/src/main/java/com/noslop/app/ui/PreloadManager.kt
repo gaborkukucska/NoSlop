@@ -322,7 +322,7 @@ object PreloadManager {
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
 
-        val quality = com.noslop.app.NoSlopApp.repository.getAppSetting("video_quality_mode") ?: "medium"
+        val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality.ifBlank { "medium" }
 
         val player = ExoPlayer.Builder(context)
             .setMediaSourceFactory(mediaSourceFactory)

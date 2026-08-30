@@ -92,15 +92,40 @@ object RedditApiClient {
             applyProxyAuthHeaders(reqBuilder, proxiedUrl)
             val request = reqBuilder.build()
 
-            val response = client.newCall(request).execute()
+            var response: okhttp3.Response? = null
+            try {
+                response = client.newCall(request).execute()
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Reddit proxy request threw exception: ${e.message}")
+            }
+
+            if (response == null || !response.isSuccessful || response.code == 403 || response.code == 429) {
+                response?.close()
+                val directReq = Request.Builder()
+                    .url(url)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .build()
+                try {
+                    response = client.newCall(directReq).execute()
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Reddit direct request failed: ${e.message}")
+                    return emptyList()
+                }
+            }
+
             val body = response.use { res ->
                 if (!res.isSuccessful) {
-                    Logger.warn(TAG, "Reddit API returned ${res.code} for $proxiedUrl")
+                    Logger.warn(TAG, "Reddit API returned ${res.code} for $url")
                     return emptyList()
                 }
                 res.body?.string()
             } ?: return emptyList()
-            val root = gson.fromJson(body, JsonObject::class.java)
+
+            val rootEl = try {
+                com.google.gson.JsonParser.parseString(body)
+            } catch (_: Exception) { null }
+
+            val root = if (rootEl != null && rootEl.isJsonObject) rootEl.asJsonObject else return emptyList()
             val children = root.getAsJsonObject("data")
                 ?.getAsJsonArray("children") ?: return emptyList()
 

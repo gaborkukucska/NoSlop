@@ -54,19 +54,19 @@ class MainActivity : ComponentActivity() {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
                             
-                            // 1. Brief non-blocking check for Tor readiness (2s max)
+                            // 1. Wait for Tor readiness if clearnet over Tor is enabled (up to 10s, non-blocking once ready)
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
-                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(2000L)
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(10000L)
                             } catch (_: Exception) {}
 
                             var firstPreloadUrl: String? = null
                             var secondPreloadUrl: String? = null
                             
-                            // 2. Brief non-blocking check for initial feed items (1s max)
+                            // 2. Brief check for initial feed items (up to 3s)
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Loading feed items...")
                             try {
-                                kotlinx.coroutines.withTimeout(1000L) {
+                                kotlinx.coroutines.withTimeout(3000L) {
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
                                             val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
@@ -77,12 +77,19 @@ class MainActivity : ComponentActivity() {
                                                 val secondItem = nonTutItems.getOrNull(if (targetIndex >= 0) targetIndex + 1 else 1)
 
                                                 fun extractUrl(item: com.noslop.app.ui.UnifiedItem?): String? {
-                                                    val rawUrl = when(item) {
-                                                        is com.noslop.app.ui.UnifiedItem.Feed -> item.item.mediaUrl ?: item.item.url
-                                                        is com.noslop.app.ui.UnifiedItem.Mesh -> item.post.mediaUrl ?: item.post.clearnetUrl
-                                                        else -> null
+                                                    val (rawUrl, isPlayable) = when(item) {
+                                                        is com.noslop.app.ui.UnifiedItem.Feed -> {
+                                                            val isMedia = item.item.mediaType == "video" || item.item.mediaType == "audio" || (item.item.mediaUrl?.contains("youtube") == true || item.item.url?.contains("youtube") == true)
+                                                            Pair(item.item.mediaUrl ?: item.item.url, isMedia)
+                                                        }
+                                                        is com.noslop.app.ui.UnifiedItem.Mesh -> {
+                                                            val isMedia = item.post.mediaType == "video" || item.post.mediaType == "audio" || item.post.clearnetMediaType == "video" || item.post.clearnetMediaType == "audio"
+                                                            Pair(item.post.mediaUrl ?: item.post.clearnetUrl, isMedia)
+                                                        }
+                                                        else -> Pair(null, false)
                                                     }
-                                                    return if (rawUrl?.startsWith("noslop://") == true) {
+                                                    if (!isPlayable || rawUrl.isNullOrBlank()) return null
+                                                    return if (rawUrl.startsWith("noslop://")) {
                                                         val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
                                                         val id = rawUrl.substringAfterLast("/")
                                                         "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"

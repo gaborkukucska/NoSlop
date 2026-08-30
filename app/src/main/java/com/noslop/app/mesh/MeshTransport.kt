@@ -24,9 +24,9 @@ class MeshTransport(
     private var isRunning = false
 
     @Volatile private var listening = false
-    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(24) // Limit concurrent Tor circuits (increased for highly parallel media transfers)
+    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(4) // Limit concurrent Tor circuits so mesh pings don't starve media/feeds
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
-    private val MAX_SIMULTANEOUS_CONNECTIONS = 32
+    private val MAX_SIMULTANEOUS_CONNECTIONS = 16
 
     fun isListening(): Boolean = listening
 
@@ -181,15 +181,9 @@ class MeshTransport(
             // Fresh v3 onion descriptors can take up to 45 seconds to fetch from HSDirs.
             // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
             val isCritical = isCriticalPacket
-            val maxAttempts = if (isCritical) 3 else 2
-            // --- NOSLOP_TOR_STARVATION_V1 ---
-            // 60s is kept for critical packets because a fresh v3 onion
-            // descriptor really can take ~45s to fetch from the HSDirs (see the
-            // comment above). But applying it to ALL traffic meant one dead
-            // peer held a circuit slot for 122s per send, and with only 24
-            // slots the pool never recovered — starving video resolution and
-            // every clearnet fetch sharing the same Tor daemon.
-            val connectTimeout = if (isCritical) 60000 else 25000
+            val maxAttempts = if (isCritical) 2 else 1
+            // Fast-fail offline onion destinations so Tor SOCKS proxy remains available for media
+            val connectTimeout = if (isCritical) 15000 else 10000
             for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
                 try {

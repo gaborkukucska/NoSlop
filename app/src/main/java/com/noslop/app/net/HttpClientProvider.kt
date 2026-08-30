@@ -196,94 +196,6 @@ object HttpClientProvider {
         chain.proceed(chain.request())
     }
 
-    private object DummySslSession : javax.net.ssl.SSLSession {
-        override fun getId(): ByteArray = byteArrayOf()
-        override fun getSessionContext(): javax.net.ssl.SSLSessionContext? = null
-        override fun getCreationTime(): Long = System.currentTimeMillis()
-        override fun getLastAccessedTime(): Long = System.currentTimeMillis()
-        override fun invalidate() {}
-        override fun isValid(): Boolean = true
-        override fun putValue(name: String?, value: Any?) {}
-        override fun getValue(name: String?): Any? = null
-        override fun removeValue(name: String?) {}
-        override fun getValueNames(): Array<String> = emptyArray()
-        override fun getPeerCertificates(): Array<java.security.cert.Certificate> = emptyArray()
-        override fun getLocalCertificates(): Array<java.security.cert.Certificate> = emptyArray()
-        override fun getPeerCertificateChain(): Array<javax.security.cert.X509Certificate> = emptyArray()
-        override fun getPeerPrincipal(): java.security.Principal? = null
-        override fun getLocalPrincipal(): java.security.Principal? = null
-        override fun getCipherSuite(): String = "SSL_NULL_WITH_NULL_NULL"
-        override fun getProtocol(): String = "NONE"
-        override fun getPeerHost(): String = ""
-        override fun getPeerPort(): Int = 0
-        override fun getPacketBufferSize(): Int = 32768
-        override fun getApplicationBufferSize(): Int = 32768
-    }
-
-    private class PassthroughSSLSocket(private val delegate: java.net.Socket) : javax.net.ssl.SSLSocket() {
-        override fun getInputStream(): java.io.InputStream = delegate.getInputStream()
-        override fun getOutputStream(): java.io.OutputStream = delegate.getOutputStream()
-        override fun close() = delegate.close()
-        override fun isClosed(): Boolean = delegate.isClosed()
-        override fun isConnected(): Boolean = delegate.isConnected()
-        override fun isBound(): Boolean = delegate.isBound()
-        override fun getInetAddress(): java.net.InetAddress? = delegate.inetAddress
-        override fun getPort(): Int = delegate.port
-        override fun getLocalAddress(): java.net.InetAddress? = delegate.localAddress
-        override fun getLocalPort(): Int = delegate.localPort
-        override fun setSoTimeout(timeout: Int) { delegate.soTimeout = timeout }
-        override fun getSoTimeout(): Int = delegate.soTimeout
-        override fun setTcpNoDelay(on: Boolean) { delegate.tcpNoDelay = on }
-        override fun getTcpNoDelay(): Boolean = delegate.tcpNoDelay
-
-        override fun startHandshake() {}
-        override fun getSession(): javax.net.ssl.SSLSession = DummySslSession
-        override fun getSupportedCipherSuites(): Array<String> = emptyArray()
-        override fun getEnabledCipherSuites(): Array<String> = emptyArray()
-        override fun setEnabledCipherSuites(suites: Array<out String>?) {}
-        override fun getSupportedProtocols(): Array<String> = emptyArray()
-        override fun getEnabledProtocols(): Array<String> = emptyArray()
-        override fun setEnabledProtocols(protocols: Array<out String>?) {}
-        override fun setUseClientMode(mode: Boolean) {}
-        override fun getUseClientMode(): Boolean = true
-        override fun setNeedClientAuth(need: Boolean) {}
-        override fun getNeedClientAuth(): Boolean = false
-        override fun setWantClientAuth(want: Boolean) {}
-        override fun getWantClientAuth(): Boolean = false
-        override fun setEnableSessionCreation(flag: Boolean) {}
-        override fun getEnableSessionCreation(): Boolean = false
-        override fun addHandshakeCompletedListener(listener: javax.net.ssl.HandshakeCompletedListener?) {}
-        override fun removeHandshakeCompletedListener(listener: javax.net.ssl.HandshakeCompletedListener?) {}
-    }
-
-    private class PassthroughSslSocketFactory : javax.net.ssl.SSLSocketFactory() {
-        override fun getDefaultCipherSuites(): Array<String> = emptyArray()
-        override fun getSupportedCipherSuites(): Array<String> = emptyArray()
-        override fun createSocket(s: java.net.Socket, host: String, port: Int, autoClose: Boolean): java.net.Socket = PassthroughSSLSocket(s)
-        override fun createSocket(host: String, port: Int): java.net.Socket = PassthroughSSLSocket(java.net.Socket(host, port))
-        override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): java.net.Socket = PassthroughSSLSocket(java.net.Socket(host, port))
-        override fun createSocket(host: InetAddress, port: Int): java.net.Socket = PassthroughSSLSocket(java.net.Socket(host, port))
-        override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): java.net.Socket = PassthroughSSLSocket(java.net.Socket(address, port))
-    }
-
-    private val dummyTrustManager = object : javax.net.ssl.X509TrustManager {
-        override fun checkClientTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-        override fun checkServerTrusted(chain: Array<out java.security.cert.X509Certificate>?, authType: String?) {}
-        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = emptyArray()
-    }
-
-    private val onionSchemeInterceptor = okhttp3.Interceptor { chain ->
-        val req = chain.request()
-        val url = req.url
-        val newReq = if (url.scheme == "http" && url.host.endsWith(".onion")) {
-            val portToUse = if (url.port == 80 || url.port == -1) 80 else url.port
-            req.newBuilder()
-                .url(url.newBuilder().scheme("https").port(portToUse).build())
-                .build()
-        } else req
-        chain.proceed(newReq)
-    }
-
     /**
      * Tor SOCKS5 proxy client.  Used by MeshTransport and any route that should
      * go through Tor.  No custom DNS needed — the SOCKS proxy resolves hostnames
@@ -297,10 +209,7 @@ object HttpClientProvider {
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
             .addInterceptor(torGuardInterceptor)
-            .addInterceptor(onionSchemeInterceptor)
             .addInterceptor(userAgentInterceptor)
-            .sslSocketFactory(PassthroughSslSocketFactory(), dummyTrustManager)
-            .hostnameVerifier { _, _ -> true }
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
             .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s

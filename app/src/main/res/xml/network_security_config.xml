@@ -7,8 +7,7 @@
         </trust-anchors>
     </base-config>
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion</domain>
-        <domain includeSubdomains="true">nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion</domain>
+        <domain includeSubdomains="true">onion</domain>
         <domain includeSubdomains="true">127.0.0.1</domain>
         <domain includeSubdomains="true">localhost</domain>
     </domain-config>

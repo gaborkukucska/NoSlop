@@ -528,6 +528,7 @@ fun VideoPlayer(
     thumbnailB64: String? = null,
     stableKey: String? = null
 ) {
+    if (url.isBlank()) return
     val context = LocalContext.current
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
