@@ -1,5 +1,14 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-30) — Legacy Android App Codebase Audit & Privacy/Security Evaluation
+
+### 1. Comprehensive Framework & Legacy Android Codebase Audit
+* **Dual-Track Codebase State**: Verified legacy Android app (`app/`) architecture alongside Kotlin Multiplatform target (`mvp/`). Documented core network separation (`net/HttpClientProvider.kt`), Tor daemon SOCKS5/ControlPort integration (`tor/TorService.kt`), and database persistence (`data/`).
+* **Cloudflare Worker API Proxy Evaluation**: Analyzed the Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) used in `YouTubeInternalClient.kt`, `RedditApiClient.kt`, and `JamendoApiClient.kt`. Evaluated proxy secret usage (`PROXY_SECRET = "NoSlopRocks2026"`), central endpoint logging considerations, and direct fallback execution paths (`youtube.com` / `jamendo.com`). Clarified that actual video/audio stream playback bytes bypass `yt-proxy` and are fetched directly via `activeMediaClient`.
+* **OTA Update & APK Pipeline Audit**: Evaluated update check mechanics in `UpdateChecker.kt` (clearnet fetch via `rawClearnetClient` to `noslop.me` / GitHub API before Tor bootstrap) and APK installation downloads in `UpdateManager.kt` (`HttpURLConnection`). Documented the lack of pre-install cryptographic signature verification (SHA-256 / developer key).
+* **Identity Key Storage & Backup Evaluation**: Audited `IdentityRepository.kt` (`EncryptedSharedPreferences` with Android Keystore primary storage, fallback to unencrypted `SharedPreferences` when Keystore fails) and `BackupManager.kt` (AES-256-CBC zip archive encryption derived from 12-word mnemonic).
+* **Documentation Synchronization**: Updated [TECHNICAL_REFERENCE.md](file:///home/tom/NoSlop/docs/TECHNICAL_REFERENCE.md), [PRIVACY_POLICY.md](file:///home/tom/NoSlop/docs/PRIVACY_POLICY.md), and [README.md](file:///home/tom/NoSlop/README.md) to accurately align technical claims with empirical codebase behavior.
+
 ## Completed Changes (2026-08-30) — App Startup & Video Preloading Optimizations
 
 ### 1. Unblocked Splash Screen Startup Flow

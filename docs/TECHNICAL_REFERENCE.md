@@ -711,11 +711,11 @@ compression of large files.
 ### 7.1 HTTP Client Separation (`net/HttpClientProvider.kt`)
 
 Per the `01-clearnet-aggregator.md` architecture proposal (now implemented):
-- `rawClearnetClient: OkHttpClient` — no proxy, used for direct network fetches avoiding Tor. Configured with a cascading DNS (System -> Cloudflare DoH -> Google DoH) to avoid DNS resolution failures.
-- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used exclusively by `MeshTransport` and `MediaProxyService`'s mesh-fetch path.
-- `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet", otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
+- `rawClearnetClient: OkHttpClient` — no proxy, used for direct network fetches avoiding Tor (such as background update checks). Configured with a cascading DNS (System -> Cloudflare DoH -> Google DoH) to avoid DNS resolution failures.
+- `torClient: OkHttpClient` — SOCKS5 proxy `127.0.0.1:TOR_SOCKS_PORT` (9050 for release, 9052 for debug), used by `MeshTransport` and mesh data paths.
+- `activeClearnetClient: OkHttpClient` — dynamic proxy client. Returns `torClient` if the user has enabled "Use Tor for Clearnet" (default: true), otherwise returns `rawClearnetClient`. Used by `FeedParser` and `feeds/api/*Client` classes.
 
-*Note:* Because some API providers (YouTube, Reddit, Jamendo) actively block Tor exit nodes, these specific clients route their requests through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) when using `activeClearnetClient`. This successfully bypasses the Tor blocks while preserving the user's anonymity.
+*Note on Cloudflare Worker API Proxy:* Because API providers (YouTube, Reddit, Jamendo) actively block Tor exit nodes, requests from `YouTubeInternalClient`, `RedditApiClient`, and `JamendoApiClient` are routed through a Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`) when utilizing `activeClearnetClient`. This bypasses IP blocks over Tor. For details on proxy secret usage, direct fallback behavior, and media stream byte separation, see §15.
 
 ### 7.2 Source Library (`SourceLibrary.kt`)
 
@@ -1103,6 +1103,31 @@ is traceable rather than silently disappearing:
 
 ---
 
+## 15. Privacy & Security Audit: Legacy Android Codebase
+
+An architectural audit of the legacy Android app codebase (`app/`) evaluated the privacy and security guarantees of key components:
+
+### 15.1 Cloudflare Worker API Proxy (`yt-proxy.megadreamland.workers.dev`)
+- **Purpose**: API clients (`YouTubeInternalClient`, `RedditApiClient`, `JamendoApiClient`) send search/metadata requests to `https://yt-proxy.megadreamland.workers.dev` to prevent API providers from blocking Tor exit node IP ranges.
+- **Shared Secret**: Requests include HTTP header `X-Proxy-Secret: NoSlopRocks2026`. This secret is hardcoded in open-source client files.
+- **Centralized Endpoint & Logging**: Cloudflare Worker receives incoming queries. When `useTorForClearnet = true`, Cloudflare sees the Tor exit node IP; when `useTorForClearnet = false`, Cloudflare sees the user's direct ISP IP. Cloudflare can technically inspect request URIs, query strings, headers, and timestamps.
+- **Direct Fallback Execution**: If `yt-proxy` returns HTTP 400/403/429 or throws a network error:
+  - `YouTubeInternalClient` and `JamendoApiClient` execute a fallback request directly to target endpoints (`youtube.com`, `jamendo.com`).
+  - If `useTorForClearnet = true`, fallback travels over Tor (`torClient`).
+  - If `useTorForClearnet = false`, fallback travels over clearnet (`rawClearnetClient`), exposing the user's real IP address to YouTube/Jamendo servers.
+- **API Metadata vs. Media Stream Bytes**: Cloudflare Worker only proxies API JSON queries. Actual video/audio stream playback bytes (`googlevideo.com`, `jamendo.com`, `v.redd.it`) bypass `yt-proxy` and are fetched directly via `activeMediaClient` (`activeClearnetClient`).
+
+### 15.2 OTA Update Check & APK Installation Pipeline
+- **Network Path**: `UpdateChecker.kt` uses `rawClearnetClient` to query `noslop.me` / GitHub Releases API to allow update detection before Tor bootstraps. `UpdateManager.kt` uses system `HttpURLConnection` over direct ISP networking to download APKs.
+- **Integrity Checks**: Downloads check `totalBytesRead >= 2 MB` and `contentType != text/html`. Cryptographic signature/hash verification (SHA-256 / developer key signature) is not currently implemented prior to launching `ACTION_VIEW` package installation.
+
+### 15.3 Identity Key Isolation & Storage Fallback
+- **Primary Storage**: Private Ed25519 signing keys, X25519 encryption keys, and BIP39 mnemonics are stored in `EncryptedSharedPreferences` (AES-256-GCM encrypted, MasterKey in Android Keystore).
+- **Insecure Fallback**: On devices where Android Keystore fails (e.g. custom ROMs or broken OEM Keystore implementations), `IdentityRepository.kt` catches the exception and falls back to unencrypted `SharedPreferences` (`noslop_identity_fallback`). `isUsingInsecureStorage` is flagged in StateFlow.
+- **Backup Archive Encryption**: `BackupManager.kt` exports database and preferences into an encrypted `.enc` file using AES-256-CBC with a PBKDF2 seed derived from the 12-word mnemonic and a 16-byte random IV.
+
+---
+
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
 the complete, authoritative wire-protocol detail (packet catalog, payload
 JSON shapes, signed-string formats) that supersedes §4/§5 here ·
@@ -1110,3 +1135,4 @@ JSON shapes, signed-string formats) that supersedes §4/§5 here ·
 [PROJECT_STATUS.md](PROJECT_STATUS.md) for the milestone-by-milestone change
 log · [HUB_INTEGRATION_PLAN.md](HUB_INTEGRATION_PLAN.md) for §13's planned
 HUB-client transition in full detail.
+
