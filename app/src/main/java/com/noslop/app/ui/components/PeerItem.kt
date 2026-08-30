@@ -345,7 +345,7 @@ private fun ContactCardDialog(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = peer.onionAddress.take(24) + "...",
+                        text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
                         color = TextLight.copy(alpha = 0.7f),
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,

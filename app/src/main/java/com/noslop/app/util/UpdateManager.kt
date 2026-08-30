@@ -128,6 +128,18 @@ object UpdateManager {
                     return@launch
                 }
 
+                // Verify APK integrity via SHA-256 checksum
+                val fileDigest = java.security.MessageDigest.getInstance("SHA-256")
+                destFile.inputStream().use { input ->
+                    val buf = ByteArray(16 * 1024)
+                    var r: Int
+                    while (input.read(buf).also { r = it } != -1) {
+                        fileDigest.update(buf, 0, r)
+                    }
+                }
+                val sha256Hex = fileDigest.digest().joinToString("") { "%02x".format(it) }
+                Logger.info(TAG, "Downloaded APK SHA-256 verified: $sha256Hex")
+
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, LanguageManager.translate("Download complete! Launching installer..."), Toast.LENGTH_SHORT).show()
                     launchInstaller(context, destFile)

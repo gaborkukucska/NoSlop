@@ -101,30 +101,34 @@ object BackupManager {
                 }
             }
 
-            // Encrypt the zip
+            // Encrypt the zip using authenticated AES-256-GCM
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            val iv = ByteArray(16)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            val iv = ByteArray(12) // Standard 12-byte GCM IV
             SecureRandom().nextBytes(iv)
-            cipher.init(Cipher.ENCRYPT_MODE, key, IvParameterSpec(iv))
+            val gcmSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
+            cipher.init(Cipher.ENCRYPT_MODE, key, gcmSpec)
+
+            val magicHeader = "NSG1".toByteArray(Charsets.UTF_8)
 
             FileInputStream(tempZip).use { input ->
                 targetStream.use { output ->
-                    output.write(iv) // Prepend IV
+                    output.write(magicHeader) // 4-byte header identifying AES-GCM
+                    output.write(iv)          // 12-byte IV
                     val buffer = ByteArray(8192)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
                         val encrypted = cipher.update(buffer, 0, read)
-                        if (encrypted != null) output.write(encrypted)
+                        if (encrypted != null && encrypted.isNotEmpty()) output.write(encrypted)
                     }
                     val final = cipher.doFinal()
-                    if (final != null) output.write(final)
+                    if (final != null && final.isNotEmpty()) output.write(final)
                 }
             }
             
             tempZip.delete()
-            Logger.info(TAG, "Export completed to OutputStream")
+            Logger.info(TAG, "Export completed to OutputStream using AES-256-GCM")
             true
         } catch (e: Exception) {
             Logger.error(TAG, "Export failed: ${e.message}")
@@ -137,24 +141,42 @@ object BackupManager {
         return try {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")
-            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
-            
+
+            // Read header bytes to check for AES-GCM magic ("NSG1") vs legacy AES-CBC
+            val rawBytes = sourceStream.readBytes()
+            if (rawBytes.size < 16) {
+                Logger.error(TAG, "Import failed: Backup file too small (${rawBytes.size} bytes)")
+                return false
+            }
+
+            val isGcm = rawBytes[0] == 'N'.code.toByte() &&
+                        rawBytes[1] == 'S'.code.toByte() &&
+                        rawBytes[2] == 'G'.code.toByte() &&
+                        rawBytes[3] == '1'.code.toByte()
+
             val tempZip = File(context.cacheDir, "noslop_restore.zip")
-            sourceStream.use { input ->
-                val iv = ByteArray(16)
-                input.read(iv)
+
+            if (isGcm) {
+                Logger.info(TAG, "Decrypting authenticated AES-256-GCM backup archive...")
+                val iv = rawBytes.copyOfRange(4, 16)
+                val ciphertext = rawBytes.copyOfRange(16, rawBytes.size)
+
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+                val gcmSpec = javax.crypto.spec.GCMParameterSpec(128, iv)
+                cipher.init(Cipher.DECRYPT_MODE, key, gcmSpec)
+
+                val decrypted = cipher.doFinal(ciphertext)
+                FileOutputStream(tempZip).use { it.write(decrypted) }
+            } else {
+                Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive...")
+                val iv = rawBytes.copyOfRange(0, 16)
+                val ciphertext = rawBytes.copyOfRange(16, rawBytes.size)
+
+                val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(iv))
-                
-                FileOutputStream(tempZip).use { output ->
-                    val buffer = ByteArray(8192)
-                    var read: Int
-                    while (input.read(buffer).also { read = it } != -1) {
-                        val decrypted = cipher.update(buffer, 0, read)
-                        if (decrypted != null) output.write(decrypted)
-                    }
-                    val final = cipher.doFinal()
-                    if (final != null) output.write(final)
-                }
+
+                val decrypted = cipher.doFinal(ciphertext)
+                FileOutputStream(tempZip).use { it.write(decrypted) }
             }
 
             // Unzip and restore

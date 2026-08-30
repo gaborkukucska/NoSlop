@@ -21,6 +21,21 @@ object JamendoApiClient {
     private const val PROXY_SECRET = "NoSlopRocks2026"
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+    private fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
+        val timestamp = (System.currentTimeMillis() / 1000).toString()
+        val signatureInput = "$timestamp:$payloadStr"
+        val hmacSig = try {
+            val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
+            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            sha256HMAC.init(secretKey)
+            val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
+            hash.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) { "" }
+
+        builder.header("X-Proxy-Secret", PROXY_SECRET)
+        builder.header("X-Proxy-Timestamp", timestamp)
+        builder.header("X-Proxy-Signature", hmacSig)
+    }
 
     suspend fun searchTracks(tags: String, sourceId: String = "api-jamendo-music"): List<FeedItem> {
         return try {
@@ -31,10 +46,9 @@ object JamendoApiClient {
             val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
             
             val proxiedUrl = url.replace("https://api.jamendo.com", "$PROXY_URL/jamendo")
-            val request = Request.Builder()
-                .url(proxiedUrl)
-                .header("X-Proxy-Secret", PROXY_SECRET)
-                .build()
+            val reqBuilder = Request.Builder().url(proxiedUrl)
+            applyProxyAuthHeaders(reqBuilder, proxiedUrl)
+            val request = reqBuilder.build()
 
             var response: okhttp3.Response? = null
             try {

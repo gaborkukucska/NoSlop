@@ -58,19 +58,26 @@ object GossipService {
     }
 
     /**
-     * Check if a peer is currently in cooldown due to repeated failures
+     * Check if a peer is currently in cooldown due to repeated failures.
+     * Uses exponential backoff (from 30s up to 1 hour) based on failure count
+     * so unreachable peers don't continuously burn Tor circuits.
      */
     fun isPeerInCooldown(peerOnionAddress: String): Boolean {
         val (count, lastFailureTime) = peerSendFailures[peerOnionAddress] ?: return false
         val now = System.currentTimeMillis()
         
-        // Check if we're still within the cooldown period after reaching threshold
-        if (count >= PEER_FAILURE_THRESHOLD && now - lastFailureTime < PEER_COOLDOWN_MS) {
-            return true
+        if (count >= PEER_FAILURE_THRESHOLD) {
+            // Exponential backoff: 30s * 2^(count - 3), capped at 1 hour (3600s)
+            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(7)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(3600_000L)
+            
+            if (now - lastFailureTime < cooldownMs) {
+                return true
+            }
         }
         
-        // Clean up old entries
-        if (now - lastFailureTime > PEER_FAILURE_WINDOW_MS + PEER_COOLDOWN_MS) {
+        // Clean up old entries if inactive for more than 2 hours
+        if (now - lastFailureTime > 2 * 3600_000L) {
             peerSendFailures.remove(peerOnionAddress)
         }
         

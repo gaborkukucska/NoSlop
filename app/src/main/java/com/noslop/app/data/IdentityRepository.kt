@@ -38,17 +38,55 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
         }
     } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to plaintext: ${e.message}")
+        Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to AES-GCM encrypted SharedPreferences: ${e.message}")
         isUsingInsecureStorage.value = true
         context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
     }
 
+    private val fallbackSecretKey: javax.crypto.SecretKey by lazy {
+        val deviceId = try {
+            android.provider.Settings.Secure.getString(context.contentResolver, android.provider.Settings.Secure.ANDROID_ID) ?: "noslop_fallback_salt"
+        } catch (_: Exception) { "noslop_fallback_salt" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val keyBytes = digest.digest(("NoSlopSecureSalt_$deviceId").toByteArray(Charsets.UTF_8))
+        javax.crypto.spec.SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun secureFallbackWrite(value: String): String {
+        return if (isUsingInsecureStorage.value) {
+            try {
+                val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+                val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
+                cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, fallbackSecretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+                val encrypted = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+                val payload = iv + encrypted
+                "ENC_GCM:" + android.util.Base64.encodeToString(payload, android.util.Base64.NO_WRAP)
+            } catch (e: Exception) { value }
+        } else {
+            value
+        }
+    }
+
+    private fun secureFallbackRead(stored: String?): String? {
+        if (stored == null) return null
+        if (!stored.startsWith("ENC_GCM:")) return stored
+        return try {
+            val payload = android.util.Base64.decode(stored.removePrefix("ENC_GCM:"), android.util.Base64.DEFAULT)
+            val iv = payload.copyOfRange(0, 12)
+            val ciphertext = payload.copyOfRange(12, payload.size)
+            val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, fallbackSecretKey, javax.crypto.spec.GCMParameterSpec(128, iv))
+            val decrypted = cipher.doFinal(ciphertext)
+            String(decrypted, Charsets.UTF_8)
+        } catch (e: Exception) { stored }
+    }
+
     suspend fun saveIdentity(handle: String, keys: CryptoService.IdentityKeys, mnemonic: String) {
-        // Private keys -> SharedPreferences
+        // Private keys -> SharedPreferences (encrypted via ESP or fallback AES-GCM)
         prefs.edit()
-            .putString("ed25519_private_key", keys.privateKeyB64)
-            .putString("enc_private_key", keys.encPrivateKeyB64)
-            .putString("mnemonic", mnemonic)
+            .putString("ed25519_private_key", secureFallbackWrite(keys.privateKeyB64))
+            .putString("enc_private_key", secureFallbackWrite(keys.encPrivateKeyB64))
+            .putString("mnemonic", secureFallbackWrite(mnemonic))
             // Also persist public identity data in ESP so it survives DB resets
             .putString("pub_ed25519", keys.publicKeyB64)
             .putString("pub_enc", keys.encPublicKeyB64)
@@ -82,8 +120,11 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         val onion = appSettingDao.getSetting("local_onion")
         val displayName = appSettingDao.getSetting("local_display_name")
 
-        val privEd = prefs.getString("ed25519_private_key", null) ?: return null
-        val privEnc = prefs.getString("enc_private_key", null) ?: return null
+        val rawPrivEd = prefs.getString("ed25519_private_key", null) ?: return null
+        val rawPrivEnc = prefs.getString("enc_private_key", null) ?: return null
+
+        val privEd = secureFallbackRead(rawPrivEd) ?: return null
+        val privEnc = secureFallbackRead(rawPrivEnc) ?: return null
 
         // If Room data was wiped by a destructive migration but ESP has identity, recover
         if (pubEd == null || pubEnc == null || tripcode == null || onion == null || displayName == null) {
@@ -130,7 +171,7 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         )
     }
 
-    suspend fun getMnemonic(): String? = prefs.getString("mnemonic", null)
+    suspend fun getMnemonic(): String? = secureFallbackRead(prefs.getString("mnemonic", null))
 
     suspend fun logout() {
         // We don't necessarily clear the prefs, but we can set a flag that the session is locked

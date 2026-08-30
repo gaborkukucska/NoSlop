@@ -69,6 +69,22 @@ object YouTubeInternalClient {
         return payload
     }
 
+    private fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
+        val timestamp = (System.currentTimeMillis() / 1000).toString()
+        val signatureInput = "$timestamp:$payloadStr"
+        val hmacSig = try {
+            val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
+            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            sha256HMAC.init(secretKey)
+            val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
+            hash.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) { "" }
+
+        builder.header("X-Proxy-Secret", PROXY_SECRET)
+        builder.header("X-Proxy-Timestamp", timestamp)
+        builder.header("X-Proxy-Signature", hmacSig)
+    }
+
     /**
      * @param recentOnly When true, restricts results to videos uploaded this year
      *   using YouTube's protobuf search filter param (field 2 = upload_date, value 5 = year).
@@ -80,13 +96,15 @@ object YouTubeInternalClient {
                 // Protobuf: field 2 (upload_date), varint 5 (this_year) → base64 "EgIIBQ=="
                 payload.addProperty("params", "EgIIBQ==")
             }
-            val requestBody = payload.toString().toRequestBody(jsonMediaType)
+            val payloadStr = payload.toString()
+            val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                .header("X-Proxy-Secret", PROXY_SECRET)
                 .post(requestBody)
-                .build()
+
+            applyProxyAuthHeaders(reqBuilder, payloadStr)
+            val request = reqBuilder.build()
 
             var response: okhttp3.Response? = null
             try {
@@ -96,9 +114,17 @@ object YouTubeInternalClient {
             }
             
             if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
+                // If we got rate limited over Tor, request a fresh Tor exit circuit
+                if ((response?.code == 429 || response?.code == 403) && com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    Logger.info(TAG, "Proxy returned HTTP ${response.code} over Tor — requesting new Tor circuit")
+                    com.noslop.app.tor.TorService.requestNewCircuit()
+                }
+
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
+                    .removeHeader("X-Proxy-Timestamp")
+                    .removeHeader("X-Proxy-Signature")
                     .header("Origin", "https://www.youtube.com")
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -205,13 +231,14 @@ object YouTubeInternalClient {
         try {
             val payload = buildPayload(query)
             payload.addProperty("params", "EgIQAg==") 
-            
-            val requestBody = payload.toString().toRequestBody(jsonMediaType)
-            val request = Request.Builder()
+            val payloadStr = payload.toString()
+            val requestBody = payloadStr.toRequestBody(jsonMediaType)
+            val requestBuilder = Request.Builder()
                 .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                .header("X-Proxy-Secret", PROXY_SECRET)
                 .post(requestBody)
-                .build()
+
+            applyProxyAuthHeaders(requestBuilder, payloadStr)
+            val request = requestBuilder.build()
 
             var response: okhttp3.Response? = null
             try {
@@ -224,6 +251,8 @@ object YouTubeInternalClient {
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
+                    .removeHeader("X-Proxy-Timestamp")
+                    .removeHeader("X-Proxy-Signature")
                     .header("Origin", "https://www.youtube.com")
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -344,7 +373,8 @@ object YouTubeInternalClient {
                 playbackContext.add("contentPlaybackContext", contentPlaybackContext)
                 payload.add("playbackContext", playbackContext)
                 
-                val requestBody = payload.toString().toRequestBody(jsonMediaType)
+                val payloadStr = payload.toString()
+                val requestBody = payloadStr.toRequestBody(jsonMediaType)
                 // --- NOSLOP_YT_COLDSTART_V1 ---
                 val usingProxy = !proxyIsCoolingDown()
                 val requestBuilder = Request.Builder()
@@ -353,7 +383,7 @@ object YouTubeInternalClient {
                     .header("User-Agent", userAgent)
                     .post(requestBody)
                 if (usingProxy) {
-                    requestBuilder.header("X-Proxy-Secret", PROXY_SECRET)
+                    applyProxyAuthHeaders(requestBuilder, payloadStr)
                 }
 
                 // CRITICAL: Only send Origin and Referer for web-based clients.
@@ -376,6 +406,8 @@ object YouTubeInternalClient {
                     val directReqBuilder = requestBuilder
                         .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
                         .removeHeader("X-Proxy-Secret")
+                        .removeHeader("X-Proxy-Timestamp")
+                        .removeHeader("X-Proxy-Signature")
                         
                     response.close()
                     response = client.newCall(directReqBuilder.build()).execute()

@@ -128,7 +128,7 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST"
+        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST" || packet.type == "ANNOUNCE_DISCOVERABLE"
         val isCriticalPacket = packet.type == "CONNECTION_REQUEST" ||
             packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE" ||
             packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" ||

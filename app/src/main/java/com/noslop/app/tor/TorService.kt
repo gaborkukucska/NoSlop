@@ -458,8 +458,8 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(15, TimeUnit.SECONDS)
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
                     .build()
                 val request = Request.Builder()
                     .url("https://check.torproject.org/api/ip")
@@ -476,7 +476,7 @@ object TorService {
                 Logger.warn(TAG, "Tor API check failed (${e.message}), trying fallback check...")
                 try {
                     val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
-                    val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(15, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+                    val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
                     val request = Request.Builder().url("https://check.torproject.org/").header("User-Agent", "Mozilla/5.0").build()
                     client.newCall(request).execute().use { response ->
                         val body = response.body?.string() ?: ""

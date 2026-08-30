@@ -66,14 +66,31 @@ object RedditApiClient {
         return items.take(25)
     }
 
+    private fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
+        val timestamp = (System.currentTimeMillis() / 1000).toString()
+        val signatureInput = "$timestamp:$payloadStr"
+        val hmacSig = try {
+            val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
+            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
+            sha256HMAC.init(secretKey)
+            val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
+            hash.joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) { "" }
+
+        builder.header("X-Proxy-Secret", PROXY_SECRET)
+        builder.header("X-Proxy-Timestamp", timestamp)
+        builder.header("X-Proxy-Signature", hmacSig)
+    }
+
     private fun fetchAndParse(url: String, sourceId: String): List<FeedItem> {
         return try {
             val proxiedUrl = url.replace("https://www.reddit.com", "$PROXY_URL/reddit")
-            val request = Request.Builder()
+            val reqBuilder = Request.Builder()
                 .url(proxiedUrl)
-                .header("X-Proxy-Secret", PROXY_SECRET)
                 .header("User-Agent", "android:com.noslop.app:v0.3.7 (by /u/NoSlopApp)")
-                .build()
+            
+            applyProxyAuthHeaders(reqBuilder, proxiedUrl)
+            val request = reqBuilder.build()
 
             val response = client.newCall(request).execute()
             val body = response.use { res ->

@@ -365,10 +365,10 @@ fun QRScanScreen(
                                 Text("Handle: ${peer.handle}", color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 16.sp)
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text("ONION ADDRESS:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                Text(peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
+                                Text(if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(12.dp))
                                 Text("PUBLIC KEY:".tr, color = TextMuted, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                Text(peer.publicKey.take(24) + "...", color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+                                Text(if (peer.publicKey.length > 8) peer.publicKey.take(8) + "..." else peer.publicKey, color = TextLight, fontFamily = FontFamily.Monospace, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text("Sending a request will notify the peer. If they accept, you will establish a secure E2EE mesh connection.".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted, modifier = Modifier.padding(top = 12.dp))
                             }

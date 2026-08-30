@@ -49,6 +49,7 @@ class FakeFeedDao : FeedDao {
     override suspend fun deleteYouTubeItems() {}
     override suspend fun clearUnsavedItems() {}
     override suspend fun clearApiSources() {}
+    override suspend fun getItemCount(): Int = 0
 }
 
 /** Fake [ViewedHistoryDao] preserving insert-IGNORE semantics, count, and oldest-first pruning. */
@@ -196,12 +197,15 @@ class FakeMessageDao : MessageDao {
         }
     }
     override suspend fun deleteMessagesWithPeer(peerPub: String) { messages.removeAll { it.chatWithPeerPub == peerPub } }
+    override suspend fun deleteGroupMessages(groupId: String) { messages.removeAll { it.chatWithPeerPub == groupId } }
+    override suspend fun deleteMessageById(id: String) { messages.removeAll { it.id == id } }
 }
 
 /** Fake [GroupChatDao] for group chat unit testing. */
 class FakeGroupChatDao : GroupChatDao {
     private val groups = linkedMapOf<String, GroupChat>()
     override fun getAllGroupChats(): Flow<List<GroupChat>> = flowOf(groups.values.toList())
+    override suspend fun getAllGroupChatsList(): List<GroupChat> = groups.values.toList()
     override suspend fun getGroupChatById(groupId: String): GroupChat? = groups[groupId]
     override suspend fun insertGroupChat(groupChat: GroupChat) { groups[groupChat.groupId] = groupChat }
     override suspend fun deleteGroupChat(groupId: String) { groups.remove(groupId) }
