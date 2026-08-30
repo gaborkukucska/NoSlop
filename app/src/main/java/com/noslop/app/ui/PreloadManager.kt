@@ -63,9 +63,9 @@ object PreloadManager {
         } catch (_: Exception) { "high" }
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         return when (vQuality) {
-            "low" -> if (overTor) 12L * 1024 * 1024 else 25L * 1024 * 1024
-            "medium" -> if (overTor) 30L * 1024 * 1024 else 50L * 1024 * 1024
-            else -> if (overTor) 40L * 1024 * 1024 else MAX_PREBUFFER_BYTES
+            "low" -> if (overTor) 50L * 1024 * 1024 else 25L * 1024 * 1024
+            "medium" -> if (overTor) 100L * 1024 * 1024 else 50L * 1024 * 1024
+            else -> if (overTor) 150L * 1024 * 1024 else MAX_PREBUFFER_BYTES
         }
     }
 

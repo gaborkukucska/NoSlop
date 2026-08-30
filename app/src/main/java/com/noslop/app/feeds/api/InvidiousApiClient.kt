@@ -54,6 +54,12 @@ object InvidiousApiClient {
 
     private val probeClientTor: okhttp3.OkHttpClient by lazy {
         okhttp3.OkHttpClient.Builder()
+            .addInterceptor { chain ->
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet && com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
+                    throw java.io.IOException("Tor is disconnected — blocking Invidious probe over Tor for privacy")
+                }
+                chain.proceed(chain.request())
+            }
             .proxy(
                 java.net.Proxy(
                     java.net.Proxy.Type.SOCKS,
@@ -62,9 +68,9 @@ object InvidiousApiClient {
             )
             // Longer than the direct client: a Tor circuit takes real time to
             // build. Still bounded so a dead instance cannot hold a racer open.
-            .connectTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
-            .readTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
-            .writeTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(20, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
@@ -249,7 +255,16 @@ object InvidiousApiClient {
      */
     private suspend fun healthyInstances(): List<String> = withContext(Dispatchers.IO) {
         val all = getInstances().takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
-        all.filter { !isInstanceCoolingDown(it) }
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        val usable = if (isTor) {
+            val onions = all.filter { it.endsWith(".onion") }
+            val https = all.filter { !it.endsWith(".onion") }
+            onions + https
+        } else {
+            all.filter { !it.endsWith(".onion") }
+        }
+        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        finalUsable.filter { !isInstanceCoolingDown(it) }
     }
 
     /** Parse a body that is expected to be a bare JSON array; null if it isn't. */
@@ -303,7 +318,7 @@ object InvidiousApiClient {
                     val pair = element.asJsonArray
                     val details = pair[1].asJsonObject
                     val type = details.get("type")?.asString ?: continue
-                    if (type != "https") continue
+                    if (type != "https" && type != "onion") continue
 
                     val uri = details.get("uri")?.asString ?: continue
                     val apiEnabled = try { details.get("api")?.asBoolean ?: false } catch (_: Exception) { false }
@@ -324,7 +339,9 @@ object InvidiousApiClient {
             }
 
             if (liveInstances.isNotEmpty()) {
-                val result = liveInstances.take(12)
+                val https = liveInstances.filter { !it.endsWith(".onion") }.take(15)
+                val onions = liveInstances.filter { it.endsWith(".onion") }.take(15)
+                val result = onions + https
                 cachedInstances = result
                 cacheTimestamp = now
                 Logger.info(TAG, "Fetched ${result.size} live Invidious instances from registry")
@@ -351,8 +368,16 @@ object InvidiousApiClient {
      */
     fun getPrimaryInstance(): String {
         val instances = cachedInstances ?: FALLBACK_INSTANCES
-        return instances.firstOrNull { !isInstanceCoolingDown(it) }
-            ?: FALLBACK_INSTANCES.first()
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        val usable = if (isTor) {
+            val onions = instances.filter { it.endsWith(".onion") }
+            val https = instances.filter { !it.endsWith(".onion") }
+            onions + https
+        } else {
+            instances.filter { !it.endsWith(".onion") }
+        }
+        val finalUsable = usable.takeIf { it.isNotEmpty() } ?: FALLBACK_INSTANCES
+        return finalUsable.firstOrNull { !isInstanceCoolingDown(it) } ?: finalUsable.first()
     }
 
     /**

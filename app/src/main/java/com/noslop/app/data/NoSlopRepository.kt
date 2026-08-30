@@ -152,7 +152,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val isLegacy = hubStatus == "Active (Legacy Connection)"
         val lanIp = if (isLegacy) null else hubStatus.substringAfter("Active at ").trim()
         
-        if (lanIp != null) {
+        val isPrivateLan = lanIp != null && (lanIp == "127.0.0.1" || lanIp == "localhost" || lanIp.startsWith("192.168.") || lanIp.startsWith("10.") || (lanIp.startsWith("172.") && (lanIp.substringAfter("172.").substringBefore(".").toIntOrNull() ?: 0) in 16..31))
+        
+        if (isPrivateLan && lanIp != null) {
             try {
                 val url = "http://$lanIp:8080/api/invoke"
                 val payload = JSONObject().apply { put("cmd", cmd); put("args", args) }.toString()

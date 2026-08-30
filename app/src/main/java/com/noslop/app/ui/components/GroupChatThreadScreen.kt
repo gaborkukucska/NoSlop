@@ -591,6 +591,7 @@ fun GroupChatThreadScreen(
 
                                                     val gifImageLoader = remember {
                                                         coil.ImageLoader.Builder(context)
+                                                            .okHttpClient { com.noslop.app.net.HttpClientProvider.activeClearnetClient }
                                                             .components {
                                                                 if (android.os.Build.VERSION.SDK_INT >= 28) {
                                                                     add(coil.decode.ImageDecoderDecoder.Factory())

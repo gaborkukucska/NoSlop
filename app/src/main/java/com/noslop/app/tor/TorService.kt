@@ -484,8 +484,20 @@ object TorService {
                         Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed")
                     }
                 } catch (e2: Exception) {
-                    Logger.warn(TAG, "Tor check fallback also failed: ${e2.message}")
-                    Pair(false, "Proxy check error: ${e2.message}")
+                    Logger.warn(TAG, "Tor check fallback 1 failed (${e2.message}), trying fallback check 2...")
+                    try {
+                        val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
+                        val client = OkHttpClient.Builder().proxy(proxy).connectTimeout(30, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+                        val request = Request.Builder().url("https://api.ipify.org?format=json").header("User-Agent", "Mozilla/5.0").build()
+                        client.newCall(request).execute().use { response ->
+                            val isTor = response.isSuccessful
+                            Logger.info(TAG, "Tor fallback check 2 (ipify) complete — isTor=$isTor")
+                            Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy check failed")
+                        }
+                    } catch (e3: Exception) {
+                        Logger.warn(TAG, "Tor check fallback 2 also failed (${e3.message}).")
+                        Pair(false, "Tor connectivity check failed: ${e3.message}")
+                    }
                 }
             }
         }

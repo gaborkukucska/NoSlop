@@ -1127,6 +1127,12 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 - **Exponential Cooldown Backoff**: `GossipService.kt` enforces exponential backoff (`30s * 2^(failures - 3)`, up to 1 hour) on peer send failures, preventing dead or unreachable onion addresses from continuously consuming Tor circuit permits.
 - **Non-Blocking Background Traffic**: `MeshTransport.kt` queues `ANNOUNCE_DISCOVERABLE` alongside `ANNOUNCE_PEER` as non-blocking background traffic, dropping queued background announcements when Tor circuit permits are full.
 
+### 15.5 Strict Tor Isolation & Zero Clearnet Fallback Policy
+- **Tor Guard Interceptor**: When `useTorForClearnet = true`, `HttpClientProvider.torClient` and `InvidiousApiClient.probeClientTor` enforce a `torGuardInterceptor`. If `TorService.torState.value != TorState.READY` (Tor is disconnected/starting/failed), all outbound HTTP/HTTPS requests throw an immediate `IOException`, preventing any packet transmission or unproxied socket initialization when Tor is offline.
+- **WebView Embed Prohibition**: When `useTorForClearnet = true`, `VideoPlayer.kt` strictly blocks `VideoSource.Embed` (WebView players for YouTube/Vimeo/Archive.org). Android system `WebView` bypasses OkHttp/SOCKS proxies, so embeds are converted to `VideoSource.Unavailable` to prevent direct IP leaks to content platforms.
+- **Coil Image Loader Isolation**: All Coil `ImageLoader` instances (app-wide and custom GIF loaders in `ChatThreadScreen.kt` and `GroupChatThreadScreen.kt`) configure `.okHttpClient { HttpClientProvider.activeClearnetClient }`, ensuring thumbnail and image traffic follows Tor routing and strict Tor guard interceptors.
+- **Verified Private LAN Guard**: In `NoSlopRepository.kt`, unproxied `rawClearnetClient` is strictly restricted to verified RFC1918 private IPv4 LAN addresses (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`, `127.0.0.1`). Any attempt to connect to non-private WAN IP addresses via `rawClearnetClient` is rejected.
+
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for

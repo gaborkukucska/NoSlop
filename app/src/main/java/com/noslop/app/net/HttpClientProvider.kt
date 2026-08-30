@@ -188,6 +188,14 @@ object HttpClientProvider {
             .build()
     }
 
+    private val torGuardInterceptor = okhttp3.Interceptor { chain ->
+        if (useTorForClearnet && com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
+            Logger.warn(TAG, "Tor is disconnected — blocking outbound request over Tor for privacy: ${chain.request().url}")
+            throw java.io.IOException("Tor is disconnected — blocking outbound request over Tor for privacy")
+        }
+        chain.proceed(chain.request())
+    }
+
     /**
      * Tor SOCKS5 proxy client.  Used by MeshTransport and any route that should
      * go through Tor.  No custom DNS needed — the SOCKS proxy resolves hostnames
@@ -200,6 +208,7 @@ object HttpClientProvider {
         }
         OkHttpClient.Builder()
             .dispatcher(dispatcher)
+            .addInterceptor(torGuardInterceptor)
             .addInterceptor(userAgentInterceptor)
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
             .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability

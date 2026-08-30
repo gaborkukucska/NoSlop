@@ -195,6 +195,11 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
 private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = withContext(Dispatchers.IO) {
     if (rawUrl.isBlank()) return@withContext VideoSource.Unavailable
 
+    if (HttpClientProvider.useTorForClearnet && !HttpClientProvider.isNetworkReady && !rawUrl.startsWith("file://") && !rawUrl.contains("127.0.0.1") && !rawUrl.contains("localhost")) {
+        Logger.warn("VIDEO_RESOLVE", "Tor is disconnected and Clearnet over Tor is ENABLED. Refusing stream resolution for privacy: $rawUrl")
+        return@withContext VideoSource.Unavailable
+    }
+
     if ((rawUrl.contains("127.0.0.1") || rawUrl.contains("localhost")) && 
         rawUrl.substringAfter("id=", "").substringBefore("&").isBlank()) {
         Logger.warn("VIDEO_RESOLVE", "Caught invalid local proxy URL with blank ID: $rawUrl")
@@ -269,13 +274,19 @@ private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = wi
         else -> VideoSource.Unavailable
     }
 
-    if (result is VideoSource.Embed && !com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.enableWebViewEmbeds) {
-        val embedUrl = (result as VideoSource.Embed).url
-        val isYouTubeEmbed = embedUrl.contains("youtube") || embedUrl.contains("youtu.be")
-        val isVimeoEmbed = embedUrl.contains("vimeo.com")
-        if (!isYouTubeEmbed && !isVimeoEmbed) {
-            Logger.info("VIDEO_RESOLVE", "WebView Embeds disabled, marking $rawUrl as Unavailable")
+    if (result is VideoSource.Embed) {
+        if (HttpClientProvider.useTorForClearnet) {
+            Logger.warn("VIDEO_RESOLVE", "Clearnet over Tor is ENABLED. WebView embeds bypass Tor and are strictly blocked: $rawUrl")
             return@withContext VideoSource.Unavailable
+        }
+        if (!com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.enableWebViewEmbeds) {
+            val embedUrl = (result as VideoSource.Embed).url
+            val isYouTubeEmbed = embedUrl.contains("youtube") || embedUrl.contains("youtu.be")
+            val isVimeoEmbed = embedUrl.contains("vimeo.com")
+            if (!isYouTubeEmbed && !isVimeoEmbed) {
+                Logger.info("VIDEO_RESOLVE", "WebView Embeds disabled, marking $rawUrl as Unavailable")
+                return@withContext VideoSource.Unavailable
+            }
         }
     }
     
