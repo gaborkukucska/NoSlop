@@ -276,6 +276,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             val hasHub = !hubDeploymentStatus.isNullOrBlank()
                             
                             val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
+                            val isAutoUpdateEnabled by viewModel.isAutoUpdateEnabled.collectAsState()
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -292,6 +293,33 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 Switch(
                                     checked = useTorForClearnet,
                                     onCheckedChange = { viewModel.setUseTorForClearnet(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Automatic Update Checks".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Check for new software releases over your selected network route.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = isAutoUpdateEnabled,
+                                    onCheckedChange = { viewModel.setAutoUpdateEnabled(it) },
                                     colors = SwitchDefaults.colors(
                                         checkedThumbColor = PrimaryBlack,
                                         checkedTrackColor = AccentGreen,

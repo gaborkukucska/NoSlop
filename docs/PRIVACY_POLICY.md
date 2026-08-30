@@ -37,7 +37,7 @@ If you use the Tor routing option, your traffic is routed through the Tor networ
 NoSlop displays content from third-party sources (RSS/Atom feeds, public APIs).
 - **API Proxy**: To bypass IP blocks on Tor exit nodes, search and metadata requests for YouTube, Reddit, and Jamendo pass through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`). When "Route clearnet through Tor" is enabled (default), these requests arrive at the proxy over Tor; when disabled, requests reach the proxy via your direct ISP connection.
 - **Media Streaming**: Video and audio media bytes (e.g. `googlevideo.com`, `jamendo.com`) are streamed directly from source content delivery networks (CDNs).
-- **Update Checks**: In-app OTA update checks against `noslop.me` / GitHub Releases API and APK downloads execute over direct clearnet connections to ensure app installation functionality prior to Tor bootstrapping.
+- **Update Checks**: In-app OTA update checks against `noslop.me` / GitHub Releases API and APK downloads execute through your selected network route (routed over Tor when "Route Clearnet via Tor" is enabled, after Tor bootstraps). Users can also turn off automatic update checks altogether in Settings.
 
 ### Camera (QR scanning)
 

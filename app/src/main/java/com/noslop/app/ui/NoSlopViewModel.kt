@@ -287,6 +287,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch { repository.setUseTorForClearnet(enabled) }
     }
 
+    val isAutoUpdateEnabled: StateFlow<Boolean> = repository.isAutoUpdateEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
+    fun setAutoUpdateEnabled(enabled: Boolean) {
+        viewModelScope.launch { repository.setAutoUpdateEnabled(enabled) }
+    }
+
     val isSendOnEnterEnabled: StateFlow<Boolean> = repository.isSendOnEnterEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -435,6 +442,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.initForegroundServiceSetting()
             repository.initSendOnEnterSetting()
             repository.initTorForClearnetSetting()
+            repository.initAutoUpdateSetting()
         }
 
         viewModelScope.launch {

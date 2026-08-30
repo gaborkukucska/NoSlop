@@ -129,6 +129,9 @@ object HttpClientProvider {
     @Volatile
     var useTorForClearnet: Boolean = true
 
+    @Volatile
+    var isAutoUpdateEnabled: Boolean = true
+
     val activeClearnetClient: OkHttpClient
         get() = if (useTorForClearnet) torClient else rawClearnetClient
 

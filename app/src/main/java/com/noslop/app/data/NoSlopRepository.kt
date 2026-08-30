@@ -89,6 +89,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val notificationSettingsFlow = settingsRepository.notificationSettingsFlow
     val isForegroundServiceEnabled = settingsRepository.isForegroundServiceEnabled
     val useTorForClearnet: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.useTorForClearnet
+    val isAutoUpdateEnabled: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.isAutoUpdateEnabled
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
     val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
     val feedMixSettingsFlow = settingsRepository.feedMixSettingsFlow
@@ -1341,8 +1342,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun initSendOnEnterSetting() = settingsRepository.initSendOnEnterSetting()
     suspend fun initTorForClearnetSetting() = settingsRepository.initTorForClearnetSetting()
+    suspend fun initAutoUpdateSetting() = settingsRepository.initAutoUpdateSetting()
 
     suspend fun setUseTorForClearnet(enabled: Boolean) = settingsRepository.setUseTorForClearnet(enabled)
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) = settingsRepository.setAutoUpdateEnabled(enabled)
     suspend fun setSendOnEnterEnabled(enabled: Boolean) =
         settingsRepository.setSendOnEnterEnabled(enabled)
 

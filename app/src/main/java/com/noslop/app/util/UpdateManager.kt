@@ -54,64 +54,69 @@ object UpdateManager {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                if (destFile.exists()) destFile.delete()
-
-                var connection = URL(url).openConnection() as HttpURLConnection
-                connection.connectTimeout = 15000
-                connection.readTimeout = 60000
-                connection.instanceFollowRedirects = true
-
-                var redirectCount = 0
-                while (connection.responseCode / 100 == 3 && redirectCount < 5) {
-                    val newUrl = connection.getHeaderField("Location") ?: break
-                    Logger.info(TAG, "Following redirect to $newUrl")
-                    connection = URL(newUrl).openConnection() as HttpURLConnection
-                    connection.connectTimeout = 15000
-                    connection.readTimeout = 60000
-                    redirectCount++
+                if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                    Logger.info(TAG, "Waiting for Tor bootstrap before downloading update...")
+                    val ready = com.noslop.app.net.HttpClientProvider.awaitNetworkReady(15_000L)
+                    if (!ready) {
+                        Logger.warn(TAG, "Tor not ready — cancelling update download")
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, LanguageManager.translate("Tor network not ready. Download cancelled."), Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
+                    }
                 }
 
-                val responseCode = connection.responseCode
-                if (responseCode != 200) {
-                    Logger.error(TAG, "Download failed with HTTP $responseCode")
+                if (destFile.exists()) destFile.delete()
+
+                val request = okhttp3.Request.Builder().url(url).build()
+                val response = com.noslop.app.net.HttpClientProvider.activeClearnetClient.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    Logger.error(TAG, "Download failed with HTTP $code")
+                    response.close()
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, LanguageManager.translate("Download failed: HTTP {code}").replace("{code}", responseCode.toString()), Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, LanguageManager.translate("Download failed: HTTP {code}").replace("{code}", code.toString()), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
 
-                val contentType = connection.contentType ?: ""
+                val body = response.body
+                val contentType = body?.contentType()?.toString() ?: ""
                 if (contentType.contains("text/html")) {
                     Logger.error(TAG, "Server returned HTML instead of an APK. Is the release private/draft?")
+                    response.close()
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, LanguageManager.translate("Download error: Server returned a webpage (Release might be private/draft)"), Toast.LENGTH_LONG).show()
                     }
                     return@launch
                 }
 
-                val contentLength = connection.contentLength
+                val contentLength = body?.contentLength() ?: -1L
                 Logger.info(TAG, "Download started. Expected size: $contentLength bytes")
 
-                val inputStream = connection.inputStream
+                val inputStream = body?.byteStream()
                 val outputStream = FileOutputStream(destFile)
                 val buffer = ByteArray(16 * 1024)
                 var bytesRead: Int
                 var totalBytesRead = 0L
                 var lastToastTime = System.currentTimeMillis()
 
-                inputStream.use { input ->
-                    outputStream.use { output ->
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            totalBytesRead += bytesRead
-                            
-                            val now = System.currentTimeMillis()
-                            if (now - lastToastTime > 3000) {
-                                val mb = totalBytesRead / (1024 * 1024)
-                                withContext(Dispatchers.Main) {
-                                    Toast.makeText(context, LanguageManager.translate("Downloading update: {mb}MB...").replace("{mb}", mb.toString()), Toast.LENGTH_SHORT).show()
+                response.use {
+                    inputStream?.use { input ->
+                        outputStream.use { output ->
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                totalBytesRead += bytesRead
+                                
+                                val now = System.currentTimeMillis()
+                                if (now - lastToastTime > 3000) {
+                                    val mb = totalBytesRead / (1024 * 1024)
+                                    withContext(Dispatchers.Main) {
+                                        Toast.makeText(context, LanguageManager.translate("Downloading update: {mb}MB...").replace("{mb}", mb.toString()), Toast.LENGTH_SHORT).show()
+                                    }
+                                    lastToastTime = now
                                 }
-                                lastToastTime = now
                             }
                         }
                     }

@@ -37,6 +37,22 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
         com.noslop.app.net.HttpClientProvider.useTorForClearnet = enabled
     }
 
+    private val _isAutoUpdateEnabled = MutableStateFlow(true)
+    val isAutoUpdateEnabled: StateFlow<Boolean> = _isAutoUpdateEnabled.asStateFlow()
+
+    suspend fun initAutoUpdateSetting() = withContext(Dispatchers.IO) {
+        val setting = appSettingDao.getSetting("auto_update_enabled")
+        val isEnabled = setting == null || setting == "true" // true by default
+        _isAutoUpdateEnabled.value = isEnabled
+        com.noslop.app.net.HttpClientProvider.isAutoUpdateEnabled = isEnabled
+    }
+
+    suspend fun setAutoUpdateEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("auto_update_enabled", enabled.toString()))
+        _isAutoUpdateEnabled.value = enabled
+        com.noslop.app.net.HttpClientProvider.isAutoUpdateEnabled = enabled
+    }
+
 
     private val _mediaSettingsFlow = MutableStateFlow(MediaSettings())
     /** Current media settings; updated by [getMediaSettings] and [updateMediaSettings]. */

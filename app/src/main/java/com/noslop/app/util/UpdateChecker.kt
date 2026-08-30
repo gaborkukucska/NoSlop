@@ -76,6 +76,20 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
      * a stale banner). Safe to call repeatedly; network/parse errors are swallowed and logged.
      */
     suspend fun checkForUpdate(): UpdateInfo? = withContext(Dispatchers.IO) {
+        if (!HttpClientProvider.isAutoUpdateEnabled) {
+            Logger.info(TAG, "Automatic update checks are disabled in settings.")
+            return@withContext null
+        }
+
+        if (HttpClientProvider.useTorForClearnet) {
+            Logger.info(TAG, "Waiting for Tor bootstrap before checking for updates...")
+            val ready = HttpClientProvider.awaitNetworkReady(15_000L)
+            if (!ready) {
+                Logger.warn(TAG, "Tor not ready — skipping update check to avoid IP leaks")
+                return@withContext null
+            }
+        }
+
         try {
             var apkUrl: String? = null
             var latestVersion: String? = null
@@ -83,8 +97,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
             // 1. Try official website
             try {
                 val request = Request.Builder().url(Constants.UPDATE_CHECK_URL).build()
-                // MUST use rawClearnetClient so update checks don't fail if Tor is not bootstrapped yet
-                val body = HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
+                val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                     if (response.isSuccessful) response.body?.string() else null
                 }
                 if (body != null) {
@@ -101,7 +114,7 @@ class UpdateChecker(private val appSettingDao: AppSettingDao) {
                 Logger.info(TAG, "Falling back to GitHub API for update check...")
                 try {
                     val request = Request.Builder().url("https://api.github.com/repos/gaborkukucska/NoSlop/releases/latest").build()
-                    val body = HttpClientProvider.rawClearnetClient.newCall(request).execute().use { response ->
+                    val body = HttpClientProvider.activeClearnetClient.newCall(request).execute().use { response ->
                         if (response.isSuccessful) response.body?.string() else null
                     }
                     if (body != null) {

@@ -1115,7 +1115,8 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 
 ### 15.2 OTA Update Check & Release Integrity Validation
 - **Integrity Checks**: `UpdateManager.kt` computes the full SHA-256 digest of the downloaded APK before calling `launchInstaller()`, verifying file checksums before triggering `ACTION_VIEW` package installation.
-- **Network Path**: `UpdateChecker.kt` uses `rawClearnetClient` to query `noslop.me` / GitHub Releases API to allow update detection before Tor bootstraps. `UpdateManager.kt` uses `HttpURLConnection` to download update packages.
+- **Network Path & Tor Routing**: `UpdateChecker.kt` and `UpdateManager.kt` use `HttpClientProvider.activeClearnetClient` (routed over Tor SOCKS5 when "Route Clearnet via Tor" is enabled, after waiting for Tor bootstrap).
+- **User Toggle**: An "Automatic Update Checks" switch in Settings allows users to completely disable automatic update checking.
 
 ### 15.3 Identity Key Isolation & Fallback Storage Hardening
 - **Primary Storage**: Private Ed25519 signing keys, X25519 encryption keys, and BIP39 mnemonics are stored in `EncryptedSharedPreferences` (AES-256-GCM encrypted, MasterKey in Android Keystore).
