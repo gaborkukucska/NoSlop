@@ -1,5 +1,22 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-30) — App Startup & Video Preloading Optimizations
+
+### 1. Unblocked Splash Screen Startup Flow
+* **Removed Blocking Preload Wait**: Removed `PreloadManager.awaitReady(..., 6000L)` call from [MainActivity.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/MainActivity.kt). This previous block held up the splash screen for up to 6 seconds waiting for ExoPlayer to buffer on the main coroutine context, causing startup hangs.
+* **Reduced Feed Timeout**: Decreased initial feed population wait timeout from 5000ms to 3000ms in [MainActivity.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/MainActivity.kt) for a snappier splash screen transition while background preloading handles media.
+
+### 2. Preload Queue Stagger & Bandwidth Saturation Prevention
+* **Restored Preload Queue Stagger**: Re-enabled `preloadQueue` channel dispatching in [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt). Previously, `preWarm` bypassed the task queue and called `warmUp` directly, causing all background preloads to execute immediately without delay. Now, tasks are processed sequentially with a 2-second stagger (`delay(2000L)`).
+* **Restored Bandwidth & Preload Caps**: Reverted `MAX_PRELOAD` from 4 to 2 and restored strict `MAX_PREBUFFER_BYTES` (80 MB ceiling) in [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt). This prevents background players from saturating device bandwidth and starving the foreground video stream.
+* **Removed `awaitReady` Function**: Removed `awaitReady` from [PreloadManager.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/PreloadManager.kt) to eliminate coroutine lockups associated with player listener callbacks.
+
+### 3. Video Player UI & Loading Feedback
+* **Restored Loading Overlay State**: Reverted `isVideoReady` initialization in [VideoPlayer.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt) from `initialSource != null` back to `false`. This ensures the `VideoLoadingOverlay` spinner is rendered while ExoPlayer buffers the initial video frame instead of displaying a static/frozen thumbnail.
+
+### 4. Feed Sync Phase Optimization
+* **Restored Phase 1 Concurrency**: Reverted `syncFeeds` in [FeedRepository.kt](file:///home/tom/NoSlop/app/src/main/java/com/noslop/app/data/FeedRepository.kt) from a purely sequential delay loop back to two-phase dispatching (Phase 1 parallel Ramp-Up and Phase 2 background sync) using a limited IO dispatcher. Initial feed items populate quickly on startup while full sync completes silently in the background.
+
 ## Completed Changes (2026-08-27) — DM Chat Parity, Keyboard GIF Animations, Broadcast Modal & Video Media Fixes
 
 ### 1. DM Chat Feature Parity & Deselection Fixes
