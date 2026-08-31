@@ -248,23 +248,30 @@ object TorService {
                 return
             }
 
-            // Unified self-healing bootstrap loop
+            // Unified self-healing bootstrap loop: wait for proxy port, then wait for circuit bootstrap
             bootstrapJob = scope.launch {
-                val proxyReady = waitForProxy(timeoutSeconds = 60)
+                val proxyReady = waitForProxy(timeoutSeconds = 30)
                 if (proxyReady) {
-                    Logger.info(TAG, "Tor SOCKS5 proxy is operational on $PROXY_HOST:$SOCKS_PORT. Promoting state to READY.")
-                    _torState.value = TorState.READY
-                    triggerRegistration()
+                    _torState.value = TorState.PROXY_READY
+                    Logger.info(TAG, "Tor SOCKS5 proxy port is open. Awaiting circuit bootstrap...")
 
-                    // Asynchronously check connectivity in background without blocking network work
-                    scope.launch {
-                        for (attempt in 1..5) {
-                            val (isTor, _) = checkTorConnection()
-                            if (isTor) {
-                                Logger.info(TAG, "Background Tor connectivity check verified isTor=true.")
-                                break
-                            }
-                            delay(3000)
+                    val bootstrapped = waitForBootstrap(timeoutSeconds = 30)
+                    if (bootstrapped || _torState.value == TorState.READY) {
+                        if (_torState.value != TorState.READY) {
+                            _torState.value = TorState.READY
+                            Logger.info(TAG, "Tor circuits established. Promoting state to READY.")
+                            triggerRegistration()
+                        }
+                    } else {
+                        // Check if connectivity check passes as fallback
+                        val (isTor, _) = checkTorConnection()
+                        if (isTor) {
+                            _torState.value = TorState.READY
+                            Logger.info(TAG, "Tor connectivity verified. Promoting state to READY.")
+                            triggerRegistration()
+                        } else {
+                            Logger.warn(TAG, "Tor circuits failed to establish within timeout.")
+                            _torState.value = TorState.FAILED
                         }
                     }
                 } else {
@@ -404,6 +411,39 @@ object TorService {
             Logger.error(TAG, "Failed to write torrc: ${e.message}")
         }
     }
+
+    /**
+     * Poll the Tor ControlPort until Tor reports 100% bootstrap progress.
+     */
+    private suspend fun waitForBootstrap(timeoutSeconds: Int = 30): Boolean =
+        withContext(Dispatchers.IO) {
+            for (attempt in 1..timeoutSeconds) {
+                if (_torState.value == TorState.READY) return@withContext true
+                try {
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 1000)
+                        socket.soTimeout = 1500
+                        val writer = java.io.PrintWriter(socket.getOutputStream(), true)
+                        val reader = java.io.BufferedReader(java.io.InputStreamReader(socket.getInputStream()))
+
+                        writer.print("AUTHENTICATE\r\n")
+                        writer.flush()
+                        val auth = reader.readLine()
+                        if (auth != null && auth.startsWith("250")) {
+                            writer.print("GETINFO status/bootstrap-phase\r\n")
+                            writer.flush()
+                            val line = reader.readLine()
+                            if (line != null && line.contains("PROGRESS=100")) {
+                                Logger.info(TAG, "Tor bootstrap reached 100%: $line")
+                                return@withContext true
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                delay(1000)
+            }
+            false
+        }
 
     /**
      * Wait for the ControlPort (9051) to be ready.

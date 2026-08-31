@@ -11,10 +11,11 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.net.URLDecoder
 
 /**
- * Client for YouTube's internal "InnerTube" API (youtubei/v1).
- * Uses a Cloudflare Worker proxy to bypass IP blocks over Tor.
+ * Client for YouTube's internal "InnerTube" API (youtubei/v1) and decentralized stream resolver.
+ * Handles both direct format URLs and signatureCipher format streams.
  */
 object YouTubeInternalClient {
     private const val TAG = "YT_INTERNAL_API"
@@ -58,7 +59,7 @@ object YouTubeInternalClient {
         clientNode.addProperty("clientVersion", CLIENT_VERSION)
         clientNode.addProperty("hl", "en")
         clientNode.addProperty("gl", "US")
-        clientNode.addProperty("utcOffsetMinutes", -240)
+        clientNode.addProperty("utcOffsetMinutes", 0)
         context.add("client", clientNode)
         payload.add("context", context)
         payload.addProperty("query", query)
@@ -96,6 +97,12 @@ object YouTubeInternalClient {
 
             val reqBuilder = Request.Builder()
                 .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                .header("X-YouTube-Client-Name", "1")
+                .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                .header("X-Goog-Api-Format-Version", "2")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                 .post(requestBody)
 
             applyProxyAuthHeaders(reqBuilder, payloadStr)
@@ -119,6 +126,9 @@ object YouTubeInternalClient {
                     .removeHeader("X-Proxy-Secret")
                     .removeHeader("X-Proxy-Timestamp")
                     .removeHeader("X-Proxy-Signature")
+                    .header("X-YouTube-Client-Name", "1")
+                    .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                    .header("X-Goog-Api-Format-Version", "2")
                     .header("Origin", "https://www.youtube.com")
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -229,6 +239,12 @@ object YouTubeInternalClient {
             val requestBody = payloadStr.toRequestBody(jsonMediaType)
             val requestBuilder = Request.Builder()
                 .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                .header("X-YouTube-Client-Name", "1")
+                .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                .header("X-Goog-Api-Format-Version", "2")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
                 .post(requestBody)
 
             applyProxyAuthHeaders(requestBuilder, payloadStr)
@@ -247,6 +263,9 @@ object YouTubeInternalClient {
                     .removeHeader("X-Proxy-Secret")
                     .removeHeader("X-Proxy-Timestamp")
                     .removeHeader("X-Proxy-Signature")
+                    .header("X-YouTube-Client-Name", "1")
+                    .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                    .header("X-Goog-Api-Format-Version", "2")
                     .header("Origin", "https://www.youtube.com")
                     .header("Referer", "https://www.youtube.com/")
                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -304,42 +323,106 @@ object YouTubeInternalClient {
     suspend fun getTrendingVideos(sourceId: String = "api-yt-trending"): List<FeedItem> {
         return searchVideos("trending latest")
     }
+
+    data class InnerTubeClientConfig(
+        val clientName: String,
+        val clientId: String,
+        val clientVersion: String,
+        val userAgent: String
+    )
     
-    private fun buildPlayerPayload(videoId: String, clientNameStr: String, clientVerStr: String): JsonObject {
+    private fun buildPlayerPayload(videoId: String, config: InnerTubeClientConfig): JsonObject {
         val payload = JsonObject()
         val context = JsonObject()
         val clientNode = JsonObject()
-        clientNode.addProperty("clientName", clientNameStr)
-        clientNode.addProperty("clientVersion", clientVerStr)
+        clientNode.addProperty("clientName", config.clientName)
+        clientNode.addProperty("clientVersion", config.clientVersion)
         clientNode.addProperty("hl", "en")
         clientNode.addProperty("gl", "US")
-        clientNode.addProperty("utcOffsetMinutes", -240)
+        clientNode.addProperty("utcOffsetMinutes", 0)
 
-        if (clientNameStr.contains("EMBEDDED")) {
-            clientNode.addProperty("clientScreen", "EMBED")
-            val thirdParty = JsonObject()
-            thirdParty.addProperty("embedUrl", "https://www.youtube.com/")
-            context.add("thirdParty", thirdParty)
-        } else if (clientNameStr == "ANDROID") {
-            clientNode.addProperty("androidSdkVersion", 30)
-            clientNode.addProperty("osName", "Android")
-            clientNode.addProperty("osVersion", "11")
-            payload.addProperty("params", "2AMB")
+        when (config.clientName) {
+            "ANDROID_EMBEDDED_PLAYER" -> {
+                clientNode.addProperty("androidSdkVersion", 30)
+                clientNode.addProperty("osName", "Android")
+                clientNode.addProperty("osVersion", "11")
+                val thirdParty = JsonObject()
+                thirdParty.addProperty("embedUrl", "https://www.youtube.com/")
+                context.add("thirdParty", thirdParty)
+            }
+            "TVHTML5_SIMPLY_EMBEDDED_PLAYER" -> {
+                clientNode.addProperty("clientScreen", "WATCH")
+                val thirdParty = JsonObject()
+                thirdParty.addProperty("embedUrl", "https://www.youtube.com/")
+                context.add("thirdParty", thirdParty)
+            }
+            "ANDROID" -> {
+                clientNode.addProperty("androidSdkVersion", 30)
+                clientNode.addProperty("osName", "Android")
+                clientNode.addProperty("osVersion", "11")
+            }
+            "IOS" -> {
+                clientNode.addProperty("deviceModel", "iPhone16,2")
+                clientNode.addProperty("osName", "iOS")
+                clientNode.addProperty("osVersion", "17.5.1")
+            }
+            "WEB" -> {
+                clientNode.addProperty("clientScreen", "WATCH")
+            }
         }
 
         context.add("client", clientNode)
         payload.add("context", context)
         payload.addProperty("videoId", videoId)
 
-        val playbackContext = JsonObject()
-        val contentPlaybackContext = JsonObject()
-        contentPlaybackContext.addProperty("html5Preference", "HTML5_PREF_WANTS")
-        playbackContext.add("contentPlaybackContext", contentPlaybackContext)
-        payload.add("playbackContext", playbackContext)
+        if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
+            val playbackContext = JsonObject()
+            val contentPlaybackContext = JsonObject()
+            contentPlaybackContext.addProperty("html5Preference", "HTML5_PREF_WANTS")
+            contentPlaybackContext.addProperty("signatureTimestamp", ((System.currentTimeMillis() / 1000) - 86400).toInt())
+            playbackContext.add("contentPlaybackContext", contentPlaybackContext)
+            payload.add("playbackContext", playbackContext)
+        }
 
         payload.addProperty("racyCheckOk", true)
         payload.addProperty("contentCheckOk", true)
         return payload
+    }
+
+    private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
+        val itag = obj.get("itag")?.asInt ?: 18
+
+        // Direct URL format
+        val directUrl = obj.get("url")?.asString
+        if (!directUrl.isNullOrBlank()) {
+            return Pair(directUrl, itag)
+        }
+
+        // signatureCipher / cipher format
+        val cipher = obj.get("signatureCipher")?.asString ?: obj.get("cipher")?.asString
+        if (!cipher.isNullOrBlank()) {
+            try {
+                val params = cipher.split("&").associate {
+                    val parts = it.split("=")
+                    if (parts.size >= 2) parts[0] to URLDecoder.decode(parts[1], "UTF-8") else parts[0] to ""
+                }
+                val rawUrl = params["url"]
+                val sig = params["sig"] ?: params["signature"] ?: params["s"]
+                val sp = params["sp"] ?: "sig"
+                if (!rawUrl.isNullOrBlank()) {
+                    val finalUrl = if (!sig.isNullOrBlank()) {
+                        if (rawUrl.contains("?")) "$rawUrl&$sp=$sig" else "$rawUrl?$sp=$sig"
+                    } else {
+                        rawUrl
+                    }
+                    return Pair(finalUrl, itag)
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Failed to parse signatureCipher: ${e.message}")
+            }
+        }
+
+        return null
     }
 
     private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
@@ -348,16 +431,14 @@ object YouTubeInternalClient {
         // 1. Prefer muxed progressive formats (video + audio together)
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
-            val valid = formats.map { it.asJsonObject }.filter { it.has("url") && !it.get("url").asString.isNullOrBlank() }
+            val valid = formats.mapNotNull { it.asJsonObject?.let { obj -> extractFormatStreamUrl(obj) } }
             if (valid.isNotEmpty()) {
-                val sortedFormats = valid.sortedBy { it.get("bitrate")?.asInt ?: 0 }
-                val chosenFormat = when (quality) {
-                    "low" -> sortedFormats.first()
-                    "medium" -> sortedFormats[sortedFormats.size / 2]
-                    else -> sortedFormats.last()
+                val chosen = when (quality) {
+                    "low" -> valid.firstOrNull { it.second == 18 } ?: valid.first()
+                    "medium" -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.first()
+                    else -> valid.firstOrNull { it.second == 22 } ?: valid.last()
                 }
-                val url = chosenFormat.get("url")?.asString
-                if (!url.isNullOrBlank()) return url
+                return chosen.first
             }
         }
 
@@ -367,32 +448,27 @@ object YouTubeInternalClient {
 
         val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
         if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-            val valid = adaptiveFormats.map { it.asJsonObject }.filter {
-                val url = it.get("url")?.asString
-                url != null && !url.contains("signature=") && !url.contains("&sig=")
+            val valid = adaptiveFormats.mapNotNull { it.asJsonObject?.let { obj -> extractFormatStreamUrl(obj) } }
+            if (valid.isNotEmpty()) {
+                return valid.first().first
             }
-            val best = valid.maxByOrNull { it.get("bitrate")?.asInt ?: 0 }
-            val bestUrl = best?.get("url")?.asString
-            if (!bestUrl.isNullOrBlank()) return bestUrl
         }
 
         return null
     }
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
-        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-
-        // Robust InnerTube embedded/mobile clients
-        val clients = listOf(
-            Pair("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "2.0") to "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15",
-            Pair("WEB_EMBEDDED_PLAYER", "2.20240910.03.00") to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            Pair("ANDROID", "19.34.42") to "com.google.android.youtube/19.34.42 (Linux; U; Android 11) gzip"
+        val configs = listOf(
+            InnerTubeClientConfig("ANDROID_EMBEDDED_PLAYER", "56", "17.36.4", "com.google.android.youtube/17.36.4 (Linux; U; Android 11) gzip"),
+            InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15"),
+            InnerTubeClientConfig("ANDROID", "3", "19.09.37", "com.google.android.youtube/19.09.37 (Linux; U; Android 11; en_US) gzip"),
+            InnerTubeClientConfig("IOS", "5", "19.34.2", "com.google.ios.youtube/19.34.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)"),
+            InnerTubeClientConfig("WEB", "1", CLIENT_VERSION, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
         )
         
-        for ((clientInfo, userAgent) in clients) {
+        for (config in configs) {
             try {
-                val (cName, cVer) = clientInfo
-                val payload = buildPlayerPayload(videoId, cName, cVer)
+                val payload = buildPlayerPayload(videoId, config)
                 val payloadStr = payload.toString()
                 val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
@@ -400,15 +476,19 @@ object YouTubeInternalClient {
                 val requestBuilder = Request.Builder()
                     .url(playerEndpoint())
                     .header("Content-Type", "application/json")
-                    .header("User-Agent", userAgent)
+                    .header("X-YouTube-Client-Name", config.clientId)
+                    .header("X-YouTube-Client-Version", config.clientVersion)
+                    .header("X-Goog-Api-Format-Version", "2")
+                    .header("User-Agent", config.userAgent)
                     .post(requestBody)
-                if (usingProxy) {
-                    applyProxyAuthHeaders(requestBuilder, payloadStr)
-                }
 
-                if (!cName.startsWith("ANDROID") && !cName.startsWith("IOS")) {
+                if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
                     requestBuilder.header("Origin", "https://www.youtube.com")
                     requestBuilder.header("Referer", "https://www.youtube.com/")
+                }
+
+                if (usingProxy) {
+                    applyProxyAuthHeaders(requestBuilder, payloadStr)
                 }
 
                 var response = client.newCall(requestBuilder.build()).execute()
@@ -433,28 +513,28 @@ object YouTubeInternalClient {
                         if (playability == "OK") {
                             val url = extractUrlFromPlayerResponse(root, quality)
                             if (url != null) {
-                                Logger.info(TAG, "Resolved direct video stream using $cName for $videoId")
+                                Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
                                 return@withContext url
                             } else {
-                                Logger.warn(TAG, "No URL found in player response for $cName despite OK status")
+                                Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                             }
                         } else {
-                            Logger.warn(TAG, "Video unplayable for $cName. Status: $playability")
+                            Logger.warn(TAG, "Video unplayable for ${config.clientName}. Status: $playability")
                         }
                     }
                 } else {
-                    Logger.warn(TAG, "Player endpoint failed for $cName with HTTP ${response.code}: ${response.body?.string()?.take(500)}")
+                    Logger.warn(TAG, "Player endpoint failed for ${config.clientName} with HTTP ${response.code}: ${response.body?.string()?.take(500)}")
                 }
                 response.close()
             } catch (e: Exception) {
-                Logger.warn(TAG, "resolveStreamUrl failed for client ${clientInfo.first}: ${e.message}")
+                Logger.warn(TAG, "resolveStreamUrl failed for client ${config.clientName}: ${e.message}")
             }
         }
         
-        // Fallback to Invidious direct stream URL if InnerTube clients fail
-        val invidiousStream = InvidiousApiClient.resolveStreamUrl(videoId)
-        if (invidiousStream != null) {
-            return@withContext invidiousStream
+        // Decentralized Invidious / Piped failover
+        val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
+        if (fallbackStream != null) {
+            return@withContext fallbackStream
         }
 
         return@withContext null

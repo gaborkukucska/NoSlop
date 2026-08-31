@@ -2279,8 +2279,16 @@ fun toggleAggregator() {
         if (_isTorChecking.value) return
         viewModelScope.launch {
             _isTorChecking.value = true
-            try { _torReadyState.value = TorService.checkTorConnection() } 
-            finally { _isTorChecking.value = false }
+            try {
+                val result = TorService.checkTorConnection()
+                if (result.first || TorService.torState.value != TorState.READY) {
+                    _torReadyState.value = result
+                } else {
+                    _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                }
+            } finally {
+                _isTorChecking.value = false
+            }
         }
     }
 

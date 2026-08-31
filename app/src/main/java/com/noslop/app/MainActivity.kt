@@ -121,10 +121,10 @@ class MainActivity : ComponentActivity() {
 
                             // 4. Pre-warm Slide 1 and Slide 2 asynchronously in the background so UI renders immediately
                             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                firstPreloadUrl?.let { url ->
+                                firstPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
                                     try { com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url) } catch (_: Exception) {}
                                 }
-                                secondPreloadUrl?.let { url ->
+                                secondPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
                                     try {
                                         kotlinx.coroutines.delay(1000L)
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
