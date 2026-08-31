@@ -105,7 +105,7 @@ object InvidiousApiClient {
         }
     }
 
-    private const val RACE_WIDTH = 4
+    private const val RACE_WIDTH = 8
 
     private suspend fun okhttp3.Call.awaitResponse(): okhttp3.Response =
         suspendCancellableCoroutine { cont ->
@@ -245,7 +245,7 @@ object InvidiousApiClient {
         val pipedResult = raceInstances(
             label = "resolvePiped($videoId)",
             instances = pipedHealthy,
-            deadlineMs = System.currentTimeMillis() + 10_000L,
+            deadlineMs = System.currentTimeMillis() + 8_000L,
             urlFor = { "$it/streams/$videoId" },
             parse = { _, body -> pickPipedStreamUrl(videoId, body, quality) }
         )
@@ -397,7 +397,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "search '$query'",
             instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 30_000L,
+            deadlineMs = System.currentTimeMillis() + 15_000L,
             urlFor = { "$it/api/v1/search?q=$encodedQuery&type=video&date=month" },
             parse = { _, body ->
                 jsonArrayOrNull(body)
@@ -411,7 +411,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "trending",
             instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 30_000L,
+            deadlineMs = System.currentTimeMillis() + 15_000L,
             urlFor = { "$it/api/v1/trending?type=Video" },
             parse = { _, body ->
                 jsonArrayOrNull(body)
@@ -426,7 +426,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "channel search '$query'",
             instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 20_000L,
+            deadlineMs = System.currentTimeMillis() + 10_000L,
             urlFor = { "$it/api/v1/search?q=$encodedQuery&type=channel" },
             parse = { _, body ->
                 val array = jsonArrayOrNull(body) ?: return@raceInstances null
@@ -451,7 +451,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "channel joined date",
             instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 20_000L,
+            deadlineMs = System.currentTimeMillis() + 10_000L,
             urlFor = { "$it/api/v1/channels/$encoded" },
             parse = { _, body ->
                 val root = com.google.gson.JsonParser.parseString(body).asJsonObject

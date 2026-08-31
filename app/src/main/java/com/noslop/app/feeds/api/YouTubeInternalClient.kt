@@ -342,14 +342,6 @@ object YouTubeInternalClient {
         clientNode.addProperty("utcOffsetMinutes", 0)
 
         when (config.clientName) {
-            "ANDROID_EMBEDDED_PLAYER" -> {
-                clientNode.addProperty("androidSdkVersion", 30)
-                clientNode.addProperty("osName", "Android")
-                clientNode.addProperty("osVersion", "11")
-                val thirdParty = JsonObject()
-                thirdParty.addProperty("embedUrl", "https://www.youtube.com/")
-                context.add("thirdParty", thirdParty)
-            }
             "TVHTML5_SIMPLY_EMBEDDED_PLAYER" -> {
                 clientNode.addProperty("clientScreen", "WATCH")
                 val thirdParty = JsonObject()
@@ -360,9 +352,12 @@ object YouTubeInternalClient {
                 clientNode.addProperty("androidSdkVersion", 30)
                 clientNode.addProperty("osName", "Android")
                 clientNode.addProperty("osVersion", "11")
+                clientNode.addProperty("deviceMake", "Google")
+                clientNode.addProperty("deviceModel", "Pixel 7")
             }
             "IOS" -> {
-                clientNode.addProperty("deviceModel", "iPhone16,2")
+                clientNode.addProperty("deviceMake", "Apple")
+                clientNode.addProperty("deviceModel", "iPhone14,5")
                 clientNode.addProperty("osName", "iOS")
                 clientNode.addProperty("osVersion", "17.5.1")
             }
@@ -375,7 +370,7 @@ object YouTubeInternalClient {
         payload.add("context", context)
         payload.addProperty("videoId", videoId)
 
-        if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
+        if (config.clientName.contains("TV") || config.clientName.contains("WEB")) {
             val playbackContext = JsonObject()
             val contentPlaybackContext = JsonObject()
             contentPlaybackContext.addProperty("html5Preference", "HTML5_PREF_WANTS")
@@ -458,76 +453,93 @@ object YouTubeInternalClient {
     }
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        
         val configs = listOf(
-            InnerTubeClientConfig("ANDROID_EMBEDDED_PLAYER", "56", "17.36.4", "com.google.android.youtube/17.36.4 (Linux; U; Android 11) gzip"),
-            InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15"),
-            InnerTubeClientConfig("ANDROID", "3", "19.09.37", "com.google.android.youtube/19.09.37 (Linux; U; Android 11; en_US) gzip"),
-            InnerTubeClientConfig("IOS", "5", "19.34.2", "com.google.ios.youtube/19.34.2 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)"),
-            InnerTubeClientConfig("WEB", "1", CLIENT_VERSION, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
+            InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
-        for (config in configs) {
-            try {
-                val payload = buildPlayerPayload(videoId, config)
-                val payloadStr = payload.toString()
-                val requestBody = payloadStr.toRequestBody(jsonMediaType)
+        var attempt = 0
+        val maxAttempts = if (isTor) 4 else 1
 
-                val usingProxy = !proxyIsCoolingDown()
-                val requestBuilder = Request.Builder()
-                    .url(playerEndpoint())
-                    .header("Content-Type", "application/json")
-                    .header("X-YouTube-Client-Name", config.clientId)
-                    .header("X-YouTube-Client-Version", config.clientVersion)
-                    .header("X-Goog-Api-Format-Version", "2")
-                    .header("User-Agent", config.userAgent)
-                    .post(requestBody)
+        while (attempt < maxAttempts) {
+            attempt++
+            for (config in configs) {
+                try {
+                    val payload = buildPlayerPayload(videoId, config)
+                    val payloadStr = payload.toString()
+                    val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
-                if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
-                    requestBuilder.header("Origin", "https://www.youtube.com")
-                    requestBuilder.header("Referer", "https://www.youtube.com/")
-                }
+                    val usingProxy = !proxyIsCoolingDown()
+                    val requestBuilder = Request.Builder()
+                        .url(playerEndpoint())
+                        .header("Content-Type", "application/json")
+                        .header("X-YouTube-Client-Name", config.clientId)
+                        .header("X-YouTube-Client-Version", config.clientVersion)
+                        .header("X-Goog-Api-Format-Version", "2")
+                        .header("User-Agent", config.userAgent)
+                        .header("Connection", "close") // Force OkHttp to drop socket so Tor can route new circuits
+                        .post(requestBody)
 
-                if (usingProxy) {
-                    applyProxyAuthHeaders(requestBuilder, payloadStr)
-                }
-
-                var response = client.newCall(requestBuilder.build()).execute()
-                if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
-                    notePlayerProxyBlocked(response.code)
-                    val directReqBuilder = requestBuilder
-                        .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
-                        .removeHeader("X-Proxy-Secret")
-                        .removeHeader("X-Proxy-Timestamp")
-                        .removeHeader("X-Proxy-Signature")
-                        
-                    response.close()
-                    response = client.newCall(directReqBuilder.build()).execute()
-                }
-                
-                if (response.isSuccessful) {
-                    val bodyStr = response.body?.string()
-                    if (!bodyStr.isNullOrBlank()) {
-                        val root = gson.fromJson(bodyStr, JsonObject::class.java)
-                        val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
-                        
-                        if (playability == "OK") {
-                            val url = extractUrlFromPlayerResponse(root, quality)
-                            if (url != null) {
-                                Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
-                                return@withContext url
-                            } else {
-                                Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
-                            }
-                        } else {
-                            Logger.warn(TAG, "Video unplayable for ${config.clientName}. Status: $playability")
-                        }
+                    if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
+                        requestBuilder.header("Origin", "https://www.youtube.com")
+                        requestBuilder.header("Referer", "https://www.youtube.com/")
                     }
-                } else {
-                    Logger.warn(TAG, "Player endpoint failed for ${config.clientName} with HTTP ${response.code}: ${response.body?.string()?.take(500)}")
+
+                    if (usingProxy) {
+                        applyProxyAuthHeaders(requestBuilder, payloadStr)
+                    }
+
+                    var response = client.newCall(requestBuilder.build()).execute()
+                    if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
+                        notePlayerProxyBlocked(response.code)
+                        val directReqBuilder = requestBuilder
+                            .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
+                            .removeHeader("X-Proxy-Secret")
+                            .removeHeader("X-Proxy-Timestamp")
+                            .removeHeader("X-Proxy-Signature")
+                            
+                        response.close()
+                        response = client.newCall(directReqBuilder.build()).execute()
+                    }
+                    
+                    if (response.isSuccessful) {
+                        val bodyStr = response.body?.string()
+                        if (!bodyStr.isNullOrBlank()) {
+                            val root = gson.fromJson(bodyStr, JsonObject::class.java)
+                            val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
+                            
+                            if (playability == "OK") {
+                                val url = extractUrlFromPlayerResponse(root, quality)
+                                if (url != null) {
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
+                                    response.close()
+                                    return@withContext url
+                                } else {
+                                    Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
+                                }
+                            } else if ((playability == "LOGIN_REQUIRED" || playability == "UNPLAYABLE" || playability == "ERROR") && isTor) {
+                                Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Tor exit likely blocked.")
+                                response.close()
+                                if (config == configs.last() && attempt < maxAttempts) {
+                                    Logger.info(TAG, "All clients failed. Rotating Tor circuit to bypass IP block...")
+                                    com.noslop.app.tor.TorService.requestNewCircuit()
+                                    client.connectionPool.evictAll() // Evict stale connections from pool!
+                                    kotlinx.coroutines.delay(2000L) // Give Tor time to build the new circuit
+                                }
+                                continue // Try TVHTML5 before giving up on this attempt!
+                            } else {
+                                Logger.warn(TAG, "Video unplayable for ${config.clientName}. Status: $playability")
+                            }
+                        }
+                    } else {
+                        Logger.warn(TAG, "Player endpoint failed for ${config.clientName} with HTTP ${response.code}")
+                    }
+                    response.close()
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "resolveStreamUrl failed for client ${config.clientName}: ${e.message}")
                 }
-                response.close()
-            } catch (e: Exception) {
-                Logger.warn(TAG, "resolveStreamUrl failed for client ${config.clientName}: ${e.message}")
             }
         }
         

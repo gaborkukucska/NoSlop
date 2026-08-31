@@ -149,7 +149,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
 
     if (!HttpClientProvider.isNetworkReady && rawUrl.startsWith("http")) {
         Logger.info("VIDEO_RESOLVE", "Network not ready, awaiting network before resolving: $rawUrl")
-        HttpClientProvider.awaitNetworkReady(5_000L)
+        HttpClientProvider.awaitNetworkReady(30_000L)
     }
 
     val mutex = resolveMutexes.computeIfAbsent(cacheKey) { kotlinx.coroutines.sync.Mutex() }

@@ -109,9 +109,22 @@ class MainActivity : ComponentActivity() {
                                 // Caught timeout or deliberate success cancellation
                             }
                             
+                            // 3. Pre-warm Slide 1 media before dropping splash screen
+                            if (firstPreloadUrl != null && firstPreloadUrl!!.isNotBlank()) {
+                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Preparing first video...")
+                                try {
+                                    kotlinx.coroutines.withTimeout(15000L) {
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
+                                        com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
+                                    }
+                                } catch (e: Exception) {
+                                    // Timeout on preload
+                                }
+                            }
+                            
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
                             
-                            // 3. Keep splash smooth and snappy (1.2s min delay)
+                            // 4. Keep splash smooth and snappy (1.2s min delay)
                             val elapsed = System.currentTimeMillis() - startTime
                             if (elapsed < 1200L) {
                                 kotlinx.coroutines.delay(1200L - elapsed)
@@ -119,12 +132,9 @@ class MainActivity : ComponentActivity() {
                             
                             showSplash = false
 
-                            // 4. Pre-warm Slide 1 and Slide 2 asynchronously in the background so UI renders immediately
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                                firstPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
-                                    try { com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url) } catch (_: Exception) {}
-                                }
-                                secondPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                            // 5. Pre-warm Slide 2 asynchronously in the background after splash dismissal
+                            secondPreloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                                     try {
                                         kotlinx.coroutines.delay(1000L)
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
