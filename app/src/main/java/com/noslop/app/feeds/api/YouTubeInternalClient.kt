@@ -12,6 +12,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URLDecoder
+import java.util.concurrent.TimeUnit
 
 /**
  * Client for YouTube's internal "InnerTube" API (youtubei/v1) and decentralized stream resolver.
@@ -49,6 +50,21 @@ object YouTubeInternalClient {
     
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+
+    // --- NOSLOP_RESOLVE_BUDGET_V1 ---
+    // A player-endpoint call is a small JSON round trip. Inheriting the shared
+    // client's 60s connect timeout meant a dead network cost a full minute per
+    // client per attempt while holding a resolve permit. callTimeout is the
+    // only one of OkHttp's timeouts that bounds the WHOLE call including
+    // retries and redirects, and unlike a coroutine timeout it actually
+    // interrupts the blocking socket. Shares the parent's connection pool and
+    // dispatcher, so this is not a second client in any meaningful sense.
+    private val playerClient
+        get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+            .newBuilder()
+            .callTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     private fun buildPayload(query: String): JsonObject {
@@ -355,11 +371,30 @@ object YouTubeInternalClient {
                 clientNode.addProperty("deviceMake", "Google")
                 clientNode.addProperty("deviceModel", "Pixel 7")
             }
+            // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
+            // The living-room client. Deliberately no thirdParty/embedUrl node:
+            // this one is not an embedded player, and sending one makes the
+            // endpoint treat it as the embedded variant.
+            "TVHTML5" -> {
+                clientNode.addProperty("clientScreen", "WATCH")
+            }
+            // Quest YouTube app. The device fields are not cosmetic — the
+            // player endpoint rejects the client if they do not describe a real
+            // VR device.
+            "ANDROID_VR" -> {
+                clientNode.addProperty("androidSdkVersion", 32)
+                clientNode.addProperty("osName", "Android")
+                clientNode.addProperty("osVersion", "12")
+                clientNode.addProperty("deviceMake", "Oculus")
+                clientNode.addProperty("deviceModel", "Quest 3")
+            }
             "IOS" -> {
                 clientNode.addProperty("deviceMake", "Apple")
-                clientNode.addProperty("deviceModel", "iPhone14,5")
-                clientNode.addProperty("osName", "iOS")
-                clientNode.addProperty("osVersion", "17.5.1")
+                clientNode.addProperty("deviceModel", "iPhone16,2")
+                // "iPhone", not "iOS" — the real client sends the device family
+                // here and the endpoint checks it.
+                clientNode.addProperty("osName", "iPhone")
+                clientNode.addProperty("osVersion", "18.3.2.22D82")
             }
             "WEB" -> {
                 clientNode.addProperty("clientScreen", "WATCH")
@@ -374,7 +409,15 @@ object YouTubeInternalClient {
             val playbackContext = JsonObject()
             val contentPlaybackContext = JsonObject()
             contentPlaybackContext.addProperty("html5Preference", "HTML5_PREF_WANTS")
-            contentPlaybackContext.addProperty("signatureTimestamp", ((System.currentTimeMillis() / 1000) - 86400).toInt())
+            // --- NOSLOP_SIGTIMESTAMP_V1 ---
+            // This used to send ((currentTimeMillis() / 1000) - 86400), about
+            // 1,788,067,966. signatureTimestamp is NOT a unix time: it is a
+            // small counter near 20,000 published inside YouTube's player
+            // JavaScript, and we have no way to obtain it without executing
+            // that JS. Asserting a value six orders of magnitude wrong is very
+            // likely why TVHTML5 answered ERROR on every request in the 14:31
+            // capture. Omitting the field lets the endpoint pick its own
+            // default, which is strictly better than asserting a false one.
             playbackContext.add("contentPlaybackContext", contentPlaybackContext)
             payload.add("playbackContext", playbackContext)
         }
@@ -383,6 +426,9 @@ object YouTubeInternalClient {
         payload.addProperty("contentCheckOk", true)
         return payload
     }
+
+    // --- NOSLOP_GEO_LOCK_V1 ---
+    private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -402,15 +448,38 @@ object YouTubeInternalClient {
                     if (parts.size >= 2) parts[0] to URLDecoder.decode(parts[1], "UTF-8") else parts[0] to ""
                 }
                 val rawUrl = params["url"]
-                val sig = params["sig"] ?: params["signature"] ?: params["s"]
+                // --- NOSLOP_CIPHER_SANITY_V1 ---
+                // `s` is the ENCRYPTED signature. Appending it as &sig=<s> without
+                // running it through YouTube's player-JS transform produces a URL
+                // that is syntactically perfect and 403s on the first byte range
+                // request. That was being counted as a successful resolve: the slide
+                // got a Direct source, ExoPlayer failed, both auto-retries were spent
+                // re-resolving the exact same dead URL, and the slide died — instead
+                // of falling through to the next InnerTube client and then to the
+                // Invidious/Piped failover, which hand back pre-signed URLs.
+                //
+                // Only an already-plaintext sig/signature is usable here.
+                val plainSig = params["sig"] ?: params["signature"]
+                val encryptedSig = params["s"]
                 val sp = params["sp"] ?: "sig"
                 if (!rawUrl.isNullOrBlank()) {
-                    val finalUrl = if (!sig.isNullOrBlank()) {
-                        if (rawUrl.contains("?")) "$rawUrl&$sp=$sig" else "$rawUrl?$sp=$sig"
-                    } else {
-                        rawUrl
+                    if (!plainSig.isNullOrBlank()) {
+                        val finalUrl =
+                            if (rawUrl.contains("?")) "$rawUrl&$sp=$plainSig"
+                            else "$rawUrl?$sp=$plainSig"
+                        return Pair(finalUrl, itag)
                     }
-                    return Pair(finalUrl, itag)
+                    if (encryptedSig.isNullOrBlank()) {
+                        // No signature demanded at all — the bare URL is playable.
+                        return Pair(rawUrl, itag)
+                    }
+                    Logger.warn(
+                        TAG,
+                        "itag=$itag needs signature deciphering (s=...) which we cannot " +
+                            "perform — skipping this format so the next client or the " +
+                            "Invidious failover gets a chance"
+                    )
+                    return null
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Failed to parse signatureCipher: ${e.message}")
@@ -452,16 +521,131 @@ object YouTubeInternalClient {
         return null
     }
 
-    suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? = withContext(Dispatchers.IO) {
+    // --- NOSLOP_RESOLVE_THROTTLE_V1 ---
+    // PreloadManager warms upcoming slides while VideoPlayer resolves the
+    // visible one, so this used to run ~10 times concurrently, each doing up
+    // to maxAttempts x configs player requests. Eighty near-simultaneous
+    // InnerTube calls leaving one API-proxy egress IP is what flips YouTube
+    // from "OK" into the wall of LOGIN_REQUIRED seen from 13:42:17 onward —
+    // it is rate limiting, not a broken client.
+    //
+    // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
+    // Was 2. "Gave up waiting 20s for a resolve slot" appeared twice in the
+    // 14:31 capture, which is the signal that the gate was starving slides
+    // that could otherwise have resolved. Three is safe now that a resolve no
+    // longer spends 45s losing to the same exit twice over.
+    private val playerResolveGate = kotlinx.coroutines.sync.Semaphore(3)
+
+    // --- NOSLOP_RESOLVE_BUDGET_V1 ---
+    // The gate above is correct while the network works and actively harmful
+    // when it does not. With a 60s connect timeout, one resolve could hold a
+    // permit for maxAttempts x configs x 60s = four minutes, and every later
+    // slide sat in the queue behind it showing nothing. Both the wait and the
+    // work are now bounded: a slide either gets an answer promptly or gets a
+    // clean "no", which the UI can show with a Retry button.
+    private const val RESOLVE_QUEUE_WAIT_MS = 20_000L
+
+    // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
+    // Was 45s, sized for a two-client roster. Five clients need more headroom,
+    // and cutting the budget mid-walk would mean never reaching the
+    // Invidious/Piped failover at the end. Each individual call is still
+    // bounded at 20s by playerClient's callTimeout, and the rotation-aware
+    // early exit means the common failure path is far shorter than this
+    // ceiling.
+    private const val RESOLVE_BUDGET_MS = 60_000L
+
+    suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? {
+        val gotPermit = kotlinx.coroutines.withTimeoutOrNull(RESOLVE_QUEUE_WAIT_MS) {
+            playerResolveGate.acquire()
+            true
+        } ?: false
+
+        if (!gotPermit) {
+            Logger.warn(
+                TAG,
+                "Gave up waiting ${RESOLVE_QUEUE_WAIT_MS / 1000}s for a resolve slot for $videoId — " +
+                    "earlier resolves are still stuck. Reporting unavailable rather than queueing."
+            )
+            return null
+        }
+
+        try {
+            val resolved = kotlinx.coroutines.withTimeoutOrNull(RESOLVE_BUDGET_MS) {
+                resolveStreamUrlInner(videoId, quality)
+            }
+            if (resolved == null) {
+                Logger.warn(
+                    TAG,
+                    "Resolve budget of ${RESOLVE_BUDGET_MS / 1000}s exhausted for $videoId"
+                )
+            }
+            return resolved
+        } finally {
+            playerResolveGate.release()
+        }
+    }
+
+    private suspend fun resolveStreamUrlInner(videoId: String, quality: String): String? = withContext(Dispatchers.IO) {
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+
+        // --- NOSLOP_GEO_LOCK_V1 ---
+        // Holds a URL that resolved fine but is pinned to a country we will not
+        // be fetching from. Used only as a last resort, after the failover.
+        var geoLockedFallback: String? = null
         
+        // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
+        // The 14:31 capture resolved ZERO streams: ANDROID returned
+        // LOGIN_REQUIRED 4/4 and TVHTML5_SIMPLY_EMBEDDED_PLAYER returned ERROR
+        // 4/4. LOGIN_REQUIRED from ANDROID is NOT a blocked exit — the log
+        // line saying so is misleading. It is YouTube's PoToken attestation
+        // gate, which that client now sits behind and which we cannot satisfy
+        // without running BotGuard/DroidGuard.
+        //
+        // Ordered by attestation exposure, least-gated first:
+        //
+        //   TVHTML5     no PO token required at all. Upstream's standard
+        //               answer to "PO Token required" is to use this client.
+        //   ANDROID_VR  no PO token for format 18 specifically, which is the
+        //               only format we ask for (see extractUrlFromPlayerResponse
+        //               — itag 18/22 progressive). Requires one for everything
+        //               else, so do NOT widen the format preference without
+        //               revisiting this.
+        //   IOS         not behind the gate. buildPlayerPayload has always had
+        //               a branch for it that nothing could reach, because IOS
+        //               was never in this list.
+        //   ANDROID     behind the gate NOW, but it succeeded repeatedly in the
+        //               13:40 capture. Enforcement is a rollout, not a switch,
+        //               so it is demoted rather than removed.
+        //   ..._EMBEDDED_PLAYER  the previous fallback, kept last.
+        //
+        // These client versions go stale. yt-dlp's youtube extractor is the
+        // ground truth — it has a community hitting it daily and patched the
+        // August 2026 android_vr break within a day. When video fails wholesale
+        // and the network is demonstrably fine, compare this list against
+        // theirs before doing anything else.
         val configs = listOf(
+            InnerTubeClientConfig(
+                "TVHTML5", "7", "7.20250312.16.00",
+                "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.master.0 (unlike Gecko) Starboard/17"
+            ),
+            InnerTubeClientConfig(
+                "ANDROID_VR", "28", "1.62.27",
+                "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12; GB) gzip"
+            ),
+            InnerTubeClientConfig(
+                "IOS", "5", "20.10.4",
+                "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
+            ),
             InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
         var attempt = 0
-        val maxAttempts = if (isTor) 4 else 1
+        // --- NOSLOP_NEWNYM_COOLDOWN_V1 ---
+        // Was 4. With rotations now gated to one per minute, attempts 3 and 4
+        // could only ever re-ask the same exit that just refused us, while
+        // still spending eight more requests against the shared rate limit.
+        val maxAttempts = if (isTor) 2 else 1
 
         while (attempt < maxAttempts) {
             attempt++
@@ -491,7 +675,7 @@ object YouTubeInternalClient {
                         applyProxyAuthHeaders(requestBuilder, payloadStr)
                     }
 
-                    var response = client.newCall(requestBuilder.build()).execute()
+                    var response = playerClient.newCall(requestBuilder.build()).execute()
                     if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
                         notePlayerProxyBlocked(response.code)
                         val directReqBuilder = requestBuilder
@@ -501,7 +685,7 @@ object YouTubeInternalClient {
                             .removeHeader("X-Proxy-Signature")
                             
                         response.close()
-                        response = client.newCall(directReqBuilder.build()).execute()
+                        response = playerClient.newCall(directReqBuilder.build()).execute()
                     }
                     
                     if (response.isSuccessful) {
@@ -513,6 +697,27 @@ object YouTubeInternalClient {
                             if (playability == "OK") {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
+                                    // --- NOSLOP_GEO_LOCK_V1 ---
+                                    // A `gcr=<cc>` parameter pins the URL to the country of the
+                                    // IP that made THIS player request — the API proxy's egress.
+                                    // The bytes are then fetched over a Tor exit that is almost
+                                    // certainly elsewhere, and googlevideo answers 403. In the
+                                    // 13:40 capture the single hard 403 (t2at-KjlfgQ) was also
+                                    // the single URL carrying gcr=ch; nothing without gcr 403'd.
+                                    // So: keep it aside, try another client first.
+                                    val geoLock = GEO_LOCK_PATTERN.find(url)?.groupValues?.get(1)
+                                    if (geoLock != null && isTor) {
+                                        Logger.warn(
+                                            TAG,
+                                            "${config.clientName} returned a stream for $videoId " +
+                                                "geo-locked to '$geoLock' — it was signed for the API " +
+                                                "proxy's country and will 403 when fetched over a Tor " +
+                                                "exit elsewhere. Trying another route first."
+                                        )
+                                        if (geoLockedFallback == null) geoLockedFallback = url
+                                        response.close()
+                                        continue
+                                    }
                                     Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
                                     response.close()
                                     return@withContext url
@@ -524,9 +729,27 @@ object YouTubeInternalClient {
                                 response.close()
                                 if (config == configs.last() && attempt < maxAttempts) {
                                     Logger.info(TAG, "All clients failed. Rotating Tor circuit to bypass IP block...")
-                                    com.noslop.app.tor.TorService.requestNewCircuit()
-                                    client.connectionPool.evictAll() // Evict stale connections from pool!
-                                    kotlinx.coroutines.delay(2000L) // Give Tor time to build the new circuit
+                                    // --- NOSLOP_ROTATION_AWARE_RETRY_V1 ---
+                                    // The return value used to be discarded. Since the
+                                    // round-2 rate limit this call usually returns false,
+                                    // and retrying every client against the SAME exit
+                                    // reproduces the identical LOGIN_REQUIRED — roughly 20s
+                                    // of guaranteed failure per video, spent holding a
+                                    // resolve permit that other slides are queued behind.
+                                    // If the route did not change there is nothing to
+                                    // retry: go to the failover.
+                                    val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
+                                    if (!rotated) {
+                                        Logger.info(
+                                            TAG,
+                                            "Circuit was not rotated — a retry would hit the same exit. " +
+                                                "Going straight to the Invidious/Piped failover for $videoId."
+                                        )
+                                        attempt = maxAttempts
+                                    } else {
+                                        client.connectionPool.evictAll() // Evict stale connections from pool!
+                                        kotlinx.coroutines.delay(2000L) // Give Tor time to build the new circuit
+                                    }
                                 }
                                 continue // Try TVHTML5 before giving up on this attempt!
                             } else {
@@ -547,6 +770,16 @@ object YouTubeInternalClient {
         val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
         if (fallbackStream != null) {
             return@withContext fallbackStream
+        }
+
+        // --- NOSLOP_GEO_LOCK_V1 ---
+        // Nothing better exists. A geo-locked URL will probably 403, but
+        // "probably" beats a guaranteed Unavailable, and the failure is now
+        // visible to the user with a Retry button rather than hidden behind
+        // the poster.
+        geoLockedFallback?.let {
+            Logger.warn(TAG, "Falling back to the geo-locked stream for $videoId — it may 403")
+            return@withContext it
         }
 
         return@withContext null

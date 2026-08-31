@@ -61,8 +61,56 @@ object TorService {
      * Tor.
      *
      * NEWNYM is rate-limited by Tor itself, so callers should not spam it.
+     *
+     * --- NOSLOP_NEWNYM_COOLDOWN_V1 ---
+     * That instruction was advice, not a guarantee, and the callers did not
+     * follow it: the 13:42 capture shows eighteen rotations in sixty-three
+     * seconds, fired independently by ~10 concurrent stream resolves. NEWNYM
+     * is process-wide — it discards the circuit the visible video is streaming
+     * through, which is precisely why several slides sat at bufPos=0 for
+     * twenty-plus seconds while the resolver "helpfully" rotated underneath
+     * them.
+     *
+     * The gate below is now the guarantee. A rotation is a shared, destructive
+     * resource: one at a time, and not more often than once every
+     * [NEWNYM_MIN_INTERVAL_MS]. A caller that is refused gets `false` and
+     * should treat it as "this route is what you have — try something else",
+     * not as an error.
      */
-    suspend fun requestNewCircuit(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    private val newnymMutex = kotlinx.coroutines.sync.Mutex()
+
+    @Volatile
+    private var lastNewnymAtMs = 0L
+
+    /** Tor's own NEWNYM rate limit is ~10s; a streaming video needs far more
+     *  breathing room than that to rebuild and fill a buffer. */
+    private const val NEWNYM_MIN_INTERVAL_MS = 60_000L
+
+    suspend fun requestNewCircuit(): Boolean {
+        if (!newnymMutex.tryLock()) {
+            Logger.info(TAG, "Skipping NEWNYM — another rotation is already in flight")
+            return false
+        }
+        try {
+            val sinceMs = System.currentTimeMillis() - lastNewnymAtMs
+            if (lastNewnymAtMs != 0L && sinceMs < NEWNYM_MIN_INTERVAL_MS) {
+                Logger.info(
+                    TAG,
+                    "Skipping NEWNYM — rotated ${sinceMs / 1000}s ago, minimum interval is " +
+                        "${NEWNYM_MIN_INTERVAL_MS / 1000}s. Rotating again now would kill the " +
+                        "circuit the current video is streaming on."
+                )
+                return false
+            }
+            val ok = doRequestNewCircuit()
+            if (ok) lastNewnymAtMs = System.currentTimeMillis()
+            return ok
+        } finally {
+            newnymMutex.unlock()
+        }
+    }
+
+    private suspend fun doRequestNewCircuit(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
             val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
             controlSocket.soTimeout = 5000
@@ -140,10 +188,17 @@ object TorService {
             Logger.info(TAG, "Tor daemon status broadcast: $status")
             when (status) {
                 org.torproject.jni.TorService.STATUS_ON -> {
+                    // --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
+                    // STATUS_ON means the daemon PROCESS is up. It says nothing
+                    // about circuits, and the old code's "Circuits built" was a
+                    // claim the app had not earned. Promoting to READY here is
+                    // what let ~40 concurrent requests pile onto a Tor that was
+                    // still bootstrapping; every one then sat on a SOCKS CONNECT
+                    // until it timed out, onion peers included.
                     if (_torState.value != TorState.READY) {
-                        _torState.value = TorState.READY
-                        Logger.info(TAG, "Tor is ON — Circuits built")
-                        triggerRegistration()
+                        _torState.value = TorState.PROXY_READY
+                        Logger.info(TAG, "Tor daemon is ON — confirming circuit bootstrap before use")
+                        confirmBootstrapThenPromote()
                     }
                 }
                 org.torproject.jni.TorService.STATUS_OFF -> {
@@ -255,8 +310,14 @@ object TorService {
                     _torState.value = TorState.PROXY_READY
                     Logger.info(TAG, "Tor SOCKS5 proxy port is open. Awaiting circuit bootstrap...")
 
-                    val bootstrapped = waitForBootstrap(timeoutSeconds = 30)
-                    if (bootstrapped || _torState.value == TorState.READY) {
+                    // --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
+                    // `|| _torState.value == READY` let the unverified ON
+                    // broadcast satisfy this branch too, so neither path ever
+                    // required actual proof. 30s was also too short for a cold
+                    // Tor on mobile, which meant the timeout branch was being
+                    // reached and then papered over.
+                    val bootstrapped = waitForBootstrap(timeoutSeconds = 120)
+                    if (bootstrapped) {
                         if (_torState.value != TorState.READY) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor circuits established. Promoting state to READY.")
@@ -270,7 +331,12 @@ object TorService {
                             Logger.info(TAG, "Tor connectivity verified. Promoting state to READY.")
                             triggerRegistration()
                         } else {
-                            Logger.warn(TAG, "Tor circuits failed to establish within timeout.")
+                            Logger.warn(
+                                TAG,
+                                "Tor circuits failed to establish within timeout. " +
+                                    "Last bootstrap phase: ${lastBootstrapPhase ?: "control port never answered"}"
+                            )
+                            setTorStatusMessage("Tor could not finish connecting. Check the device's network.")
                             _torState.value = TorState.FAILED
                         }
                     }
@@ -415,10 +481,67 @@ object TorService {
     /**
      * Poll the Tor ControlPort until Tor reports 100% bootstrap progress.
      */
-    private suspend fun waitForBootstrap(timeoutSeconds: Int = 30): Boolean =
+    // --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
+    // Last phase string Tor reported, kept so a timeout can say WHERE it got
+    // stuck instead of only that it did.
+    @Volatile
+    private var lastBootstrapPhase: String? = null
+
+    /** Guards against several callers confirming bootstrap at the same time. */
+    private var bootstrapConfirmJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * NOSLOP_BOOTSTRAP_TRUTH_V1
+     *
+     * Called when the daemon reports ON. Confirms with Tor itself that
+     * bootstrap actually finished before anything is allowed to use the proxy.
+     * Falls back to a real end-to-end routing check, which is also proof.
+     */
+    private fun confirmBootstrapThenPromote() {
+        if (bootstrapConfirmJob?.isActive == true) return
+        bootstrapConfirmJob = scope.launch {
+            val bootstrapped = waitForBootstrap(timeoutSeconds = 120)
+            if (bootstrapped) {
+                if (_torState.value != TorState.READY) {
+                    _torState.value = TorState.READY
+                    Logger.info(TAG, "Tor bootstrap confirmed. Promoting state to READY.")
+                    setTorStatusMessage(null)
+                    triggerRegistration()
+                }
+                return@launch
+            }
+            val (isTor, _) = checkTorConnection()
+            if (isTor) {
+                _torState.value = TorState.READY
+                Logger.info(TAG, "Tor routing verified end-to-end. Promoting state to READY.")
+                setTorStatusMessage(null)
+                triggerRegistration()
+            } else {
+                Logger.warn(
+                    TAG,
+                    "Tor daemon is running but bootstrap never completed. " +
+                        "Last phase: ${lastBootstrapPhase ?: "unknown"}"
+                )
+                setTorStatusMessage("Tor is still connecting — no traffic can be sent yet.")
+            }
+        }
+    }
+
+    /**
+     * Poll the Tor ControlPort until Tor reports 100% bootstrap progress.
+     *
+     * --- NOSLOP_BOOTSTRAP_TRUTH_V1 ---
+     * This used to begin with `if (_torState.value == READY) return true`,
+     * which meant that once the (unverified) ON broadcast had flipped READY,
+     * this function returned true on its very next poll without ever asking
+     * Tor a single question. "Tor bootstrap reached 100%" appears in none of
+     * the captured logs for exactly that reason: the real check was never
+     * allowed to run. It asks now.
+     */
+    private suspend fun waitForBootstrap(timeoutSeconds: Int = 120): Boolean =
         withContext(Dispatchers.IO) {
+            var lastLogged: String? = null
             for (attempt in 1..timeoutSeconds) {
-                if (_torState.value == TorState.READY) return@withContext true
                 try {
                     Socket().use { socket ->
                         socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 1000)
@@ -433,15 +556,35 @@ object TorService {
                             writer.print("GETINFO status/bootstrap-phase\r\n")
                             writer.flush()
                             val line = reader.readLine()
-                            if (line != null && line.contains("PROGRESS=100")) {
-                                Logger.info(TAG, "Tor bootstrap reached 100%: $line")
-                                return@withContext true
+                            if (line != null) {
+                                lastBootstrapPhase = line
+                                // Report progress as it moves, not every second.
+                                // A stuck bootstrap is then a single obvious line
+                                // in the log rather than an absence of lines.
+                                val progress = Regex("PROGRESS=(\\d+)").find(line)?.groupValues?.get(1)
+                                if (progress != null && progress != lastLogged) {
+                                    Logger.info(TAG, "Tor bootstrap $progress% | $line")
+                                    lastLogged = progress
+                                }
+                                if (line.contains("PROGRESS=100")) {
+                                    Logger.info(TAG, "Tor bootstrap reached 100%: $line")
+                                    return@withContext true
+                                }
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    if (attempt == 1) {
+                        Logger.debug(TAG, "Bootstrap poll could not reach the control port: ${e.message}")
+                    }
+                }
                 delay(1000)
             }
+            Logger.warn(
+                TAG,
+                "Tor did not reach 100% bootstrap within ${timeoutSeconds}s. " +
+                    "Last phase: ${lastBootstrapPhase ?: "control port never answered"}"
+            )
             false
         }
 
@@ -525,6 +668,16 @@ object TorService {
                     }
                 } catch (e2: Exception) {
                     Logger.warn(TAG, "Tor check fallback failed (${e2.message}).")
+                    // --- NOSLOP_TOR_HEALTH_V1 ---
+                    // Both probes failed, which means the daemon reports circuits
+                    // but nothing they carry is arriving. Every feed, API and mesh
+                    // peer is about to fail the same way. Previously this went only
+                    // to the log and the user was left watching "Preparing your
+                    // feed..." with no idea why — say it instead.
+                    setTorStatusMessage(
+                        "Tor is connected but no traffic is getting through. " +
+                            "Check the device's internet connection."
+                    )
                     Pair(false, "Tor connectivity check failed: ${e2.message}")
                 }
             }

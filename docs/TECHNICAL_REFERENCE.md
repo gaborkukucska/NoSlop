@@ -1135,6 +1135,348 @@ An architectural audit of the legacy Android app codebase (`app/`) evaluated the
 
 ---
 
+## 16. Video Playback Failure Modes
+
+Video playback spans four layers — stream resolution, preloading, ExoPlayer,
+and the poster overlay — and a fault in any of them surfaced identically to
+the user: the slide sat on its thumbnail and never played. The notes below
+record why, so the same symptom is not re-diagnosed from scratch.
+
+### 16.1 Poster overlay occluded the error UI (`NOSLOP_FAILURE_VISIBILITY_V1`)
+
+`VideoPlayer` composes its children into a single `Box`:
+
+| Layer | zIndex | Drawn by |
+|---|---|---|
+| Player / error card | 0 (3 when failed) | `when (source)` branch |
+| Poster thumbnail | 1 | `showThumbnail` block |
+| "Finding stream" / "Buffering" spinner | 2 | `VideoLoadingOverlay` |
+
+`showThumbnail` previously included `source is VideoSource.Unavailable`, and
+`isVideoReady` is never set when playback fails. So on **every** failure path
+the app composed a correct "Video unavailable" card with a working Retry
+button at zIndex 0 and then painted the thumbnail over the top of it. The
+card was reachable by touch but completely invisible.
+
+Additionally, `ExoVideoPlayer` renders its own "Video unavailable / Retry
+Playback" card one level deeper in the tree, where `zIndex` cannot outrank a
+sibling of its parent.
+
+Fixed by:
+- hoisting hard playback failure into the parent via a new `onFailed` callback
+  on `ExoVideoPlayer` (raised from a single `LaunchedEffect(hasError)`),
+- lifting the `ExoVideoPlayer` subtree to `zIndex(3f)` once it has failed, and
+  putting the `Unavailable` card at `zIndex(3f)` directly,
+- keeping the poster as a dimmed backdrop (60% `PrimaryBlack` scrim) rather
+  than an opaque cover, and
+- suppressing the loading spinner once `hasFailed` is true, so it no longer
+  spins for the full 45s `loadingTimedOut` window over a slide that is
+  already known to be dead.
+
+**Any future overlay added to this `Box` must declare a zIndex** or it will
+land underneath the poster.
+
+### 16.2 Un-decipherable signature ciphers (`NOSLOP_CIPHER_SANITY_V1`)
+
+`YouTubeInternalClient.extractFormatStreamUrl()` parses `signatureCipher`
+entries from the InnerTube player response. Those carry either:
+
+- `sig` / `signature` — already plaintext, appendable as-is; or
+- `s` — the **encrypted** signature, which must be transformed by the
+  algorithm embedded in YouTube's player JavaScript before use.
+
+The parser treated `s` as interchangeable with `sig`. The resulting URL is
+syntactically perfect and returns **403 on the first byte-range request**.
+Critically, this counted as a *successful* resolve: the slide received a
+`VideoSource.Direct`, ExoPlayer failed, both `MAX_AUTO_RESOLVE_RETRIES` were
+spent re-resolving the identical dead URL, and the slide gave up — never
+reaching the next InnerTube client or the Invidious/Piped failover, both of
+which return pre-signed URLs.
+
+Formats that only offer `s` are now skipped with a `YT_INTERNAL_API` warning,
+so resolution falls through as designed. NoSlop does not, and should not,
+execute YouTube's player JS to decipher these.
+
+### 16.3 YouTube IFrame embed never started (`NOSLOP_EMBED_AUTOPLAY_V1`)
+
+The embed's `onReady` handler was gated on `window.NoSlop_isVisible`, a
+variable **nothing in the codebase ever assigns**. It was permanently
+`undefined`, so:
+
+1. `playVideo()` never ran (`playerVars.autoplay` is `0`),
+2. `onStateChange` never reached `PLAYING`,
+3. `NoSlopJS.onPlaying()` never fired,
+4. `isVideoReady` stayed `false`, and the poster covered the player forever.
+
+The autoplay decision is now injected as a Kotlin-interpolated JS literal
+(`$shouldAutoplayEmbed`, from `currentIsVisible`), and `onPlaying()` fires as
+soon as the player is *constructed* rather than only once it is playing — so
+if autoplay is refused, the poster still lifts and the user can see and press
+the embedded play button.
+
+Note this path is unreachable while **Route Clearnet via Tor** is on: §15.5
+converts every `VideoSource.Embed` to `Unavailable` to prevent the WebView
+leaking the device IP. With Tor routing enabled, a YouTube video that cannot
+be resolved to a direct stream is correctly surfaced as unavailable (and, per
+§16.1, now visibly so).
+
+### 16.4 The resolver must not sabotage the player
+
+`SIGNAL NEWNYM` is process-wide. It discards **every** circuit, including
+the one ExoPlayer is currently streaming through. A capture on 2026-08-31
+showed eighteen rotations in sixty-three seconds, and every stalled video in
+that window sat at a flat buffer for the whole of it.
+
+The cause was unbounded concurrency meeting unbounded rotation:
+
+- `PreloadManager` warms upcoming slides while `VideoPlayer` resolves the
+  visible one, so `resolveStreamUrl` ran ~10 times at once,
+- each call did up to `maxAttempts` (4) x `configs` (2) = 8 InnerTube player
+  requests, and rotated the Tor circuit between attempts,
+- ~80 near-simultaneous requests from a single API-proxy egress IP pushed
+  YouTube from `OK` into blanket `LOGIN_REQUIRED`, which triggered *more*
+  rotations.
+
+Three constraints now hold, and **new callers must respect them**:
+
+| Constraint | Where | Value |
+|---|---|---|
+| One rotation at a time, process-wide | `TorService.requestNewCircuit` | mutex, non-blocking `tryLock` |
+| Minimum gap between rotations | `TorService.NEWNYM_MIN_INTERVAL_MS` | 60s |
+| Concurrent InnerTube player resolves | `YouTubeInternalClient.playerResolveGate` | 2 |
+
+`requestNewCircuit()` returning `false` is a normal outcome, not an error: it
+means "this route is what you have, try something else". Do not loop on it.
+
+### 16.5 Geo-locked and IP-locked stream URLs (`NOSLOP_GEO_LOCK_V1`)
+
+A resolved `googlevideo.com` URL carries the identity of whoever requested
+it:
+
+- `ip=<addr>` — the address the URL was signed for,
+- `gcr=<cc>` — a country restriction, present when the requesting IP was in
+  a region-restricted context.
+
+NoSlop resolves through the API proxy (so YouTube does not see a Tor exit)
+but fetches the media bytes directly over Tor. Those are different machines
+in different countries, so a signed URL can be refused on fetch. In the
+2026-08-31 capture the only hard 403 was also the only URL carrying `gcr`;
+no URL without `gcr` was refused.
+
+`resolveStreamUrl` now sets a `gcr`-bearing URL aside, tries the remaining
+InnerTube clients and the Invidious/Piped failover first, and only returns
+the geo-locked URL if nothing else resolved. `describeStreamUrl` reports
+`signedFor=` and `geoLock=` so a geo-lock 403 is distinguishable from an
+expired URL in the log.
+
+This is a structural consequence of the privacy design (§15.5) and cannot be
+fixed by routing the media through the proxy — that would hand a third party
+the user's full viewing history. Occasional geo-locked failures are the
+correct trade.
+
+### 16.6 Resume positions must reflect real playback (`NOSLOP_RESUME_POISON_V1`)
+
+`ExoPlayer.currentPosition` returns the **pending seek target** while
+buffering, and `duration` is `C.TIME_UNSET` until the media prepares. The
+old `PlaybackPositionStore.save()` accepted both, so a slide that never
+loaded repeatedly saved its own resume offset — and because the
+near-the-end cleanup is guarded on `durationMs > 0`, an offset near the end
+of a video could never be cleared either. `205swuI0JlY` was pinned at
+891343ms of a 946-second video across every visit.
+
+Two rules now:
+
+- `save()` rejects anything with `durationMs <= 0` — no duration means the
+  player never prepared, so there is no real progress to record.
+- `ExoVideoPlayer` clears the stored position on hard failure when the media
+  never prepared, so a retry starts from zero instead of seeking back into
+  the byte range that was already failing.
+
+### 16.7 Telling "no network" apart from "broken feature"
+
+Before investigating any media failure, check whether *anything* is reaching
+the network. The signature of a dead path is uniform failure across
+destinations that share nothing but Tor:
+
+- `.onion` mesh peers timing out (these use no exit node),
+- `check.torproject.org` failing **both** the primary and fallback probes,
+- unrelated clearnet hosts — RSS feeds, GitHub, archive.org — all timing out
+  at the same interval.
+
+When that pattern is present, no amount of stream-resolution work will help.
+A 2026-08-31 capture showed exactly this while Tor reported `ON` and
+"Circuits built": the SOCKS port accepted connections, but nothing those
+circuits carried arrived.
+
+Two changes make this state cheap and visible rather than a silent four-minute
+hang:
+
+| Change | Where | Effect |
+|---|---|---|
+| Connect timeout 60s → 20s | `HttpClientProvider.torClient` | failures surface in seconds, not minutes |
+| Failed routing probe sets the status message | `TorService` | user is told, instead of watching "Preparing your feed…" |
+
+`readTimeout` deliberately stays at 60s: media streaming over a slow circuit
+needs it, and read time was never what was hanging. And note that the old
+"60s for better mesh reliability" rationale was simply wrong —
+`MeshTransport` opens raw SOCKS sockets and never touches `torClient`.
+
+### 16.8 Resolve concurrency must be bounded at BOTH ends (`NOSLOP_RESOLVE_BUDGET_V1`)
+
+`playerResolveGate` exists to stop the LOGIN_REQUIRED storm described in
+§16.4, and it is correct while the network works. Unbounded, it is actively
+harmful when the network does not: with a 60s connect timeout, one resolve
+held a permit for `maxAttempts` x `configs` x 60s ≈ four minutes, and every
+later slide queued behind it showing nothing at all. Slides that would
+previously have failed in parallel instead sat waiting.
+
+Any future throttle on a user-visible path needs all three of these:
+
+| Bound | Constant | Value |
+|---|---|---|
+| How long a caller waits for a slot | `RESOLVE_QUEUE_WAIT_MS` | 20s, then returns null |
+| How long the work may hold the slot | `RESOLVE_BUDGET_MS` | 45s |
+| How long one HTTP call may take | `playerClient` `callTimeout` | 20s |
+
+`callTimeout` matters specifically: it is the only OkHttp timeout that bounds
+a whole call, and unlike `withTimeout` it actually interrupts the blocking
+socket rather than merely abandoning the coroutine while the thread stays
+stuck.
+
+A bounded refusal is a *better* outcome than a queue. Returning null makes
+the slide show its error card and Retry button (§16.1); queueing makes it
+show nothing.
+
+### 16.9 Tor readiness must be proven, never assumed (`NOSLOP_BOOTSTRAP_TRUTH_V1`)
+
+`org.torproject.jni.TorService` broadcasts `STATUS_ON` when the daemon
+**process** is running. It carries no information about circuits.
+`torStatusReceiver` used to treat it as proof, set `TorState.READY`, and log
+"Tor is ON — Circuits built" — a claim the code had not earned. On
+2026-08-31 that happened eleven seconds after launch, `torGuardInterceptor`
+opened, feed sync dispatched ~40 concurrent requests into a Tor that was
+still bootstrapping, and every one of them blocked on a SOCKS CONNECT until
+the connect timeout. Onion peers failed alongside clearnet, which is correct
+— they need working circuits too — and that uniformity is what made it look
+like a dead device network.
+
+The correct check already existed and had never run. `waitForBootstrap()`
+began with:
+
+    if (_torState.value == TorState.READY) return@withContext true
+
+so once the broadcast flipped READY, the next poll short-circuited and
+returned true without asking Tor anything. `"Tor bootstrap reached 100%"`
+appears in none of the captures from that period for exactly that reason.
+
+The rule now:
+
+| Signal | Means | Promotes to |
+|---|---|---|
+| SOCKS port accepts TCP | a process is listening on localhost | `PROXY_READY` |
+| `STATUS_ON` broadcast | daemon process is alive | `PROXY_READY` |
+| `PROGRESS=100` from the control port | circuits are actually built | `READY` |
+| `checkTorConnection()` succeeds | routing works end to end | `READY` |
+
+Only the bottom two are proof. Nothing else may set `READY`, because `READY`
+is what `torGuardInterceptor` and `isNetworkReady` gate every outbound
+request on.
+
+`waitForBootstrap` now logs each change in `PROGRESS=`, so a stalled
+bootstrap is one obvious line rather than an absence of lines, and the last
+phase seen is reported on timeout.
+
+### 16.10 Two installed variants means two Tor daemons
+
+The 2026-08-31 capture had both `com.noslop.app` (SOCKS 9050) and
+`com.noslop.app.debug` (SOCKS 9052) running Tor daemons on the same handset,
+competing for the same guards and network. The debug APK was also stale — it
+logged `Promoting state to READY` on SOCKS-port-open alone (a string no
+longer in the source) and threw
+`java.net.Socket cannot be cast to javax.net.ssl.SSLSocket`, the
+`PassthroughSSLSocket` fault removed in 38931d9.
+
+When collecting logs, uninstall the variant not under test. Two daemons make
+timing measurements meaningless and a stale one will contradict the source
+you are reading.
+
+### 16.11 InnerTube client roster (`NOSLOP_INNERTUBE_CLIENTS_V1`)
+
+`resolveStreamUrl` walks a list of InnerTube client identities until one
+returns a playable response. Which identities are on that list is the single
+biggest determinant of whether video works at all: a 2026-08-31 capture
+resolved **zero** streams because both entries were being refused —
+`LOGIN_REQUIRED` from ANDROID 4/4, `ERROR` from
+TVHTML5_SIMPLY_EMBEDDED_PLAYER 4/4.
+
+Ordered by attestation exposure, least-gated first:
+
+| Client | PO token | Notes |
+|---|---|---|
+| `TVHTML5` | not required | Upstream's standard answer to "PO Token required". No `thirdParty` node — it is not the embedded variant. |
+| `ANDROID_VR` | **format 18 only** | Fine because we only ask for itag 18/22. Requires a token for everything else. |
+| `IOS` | not required | `osName` must be `iPhone`, not `iOS`. |
+| `ANDROID` | **required** | Behind the gate now; succeeded repeatedly hours earlier. Demoted, not removed. |
+| `TVHTML5_SIMPLY_EMBEDDED_PLAYER` | not required | Previous fallback, kept last. |
+
+Three things that are easy to get wrong here:
+
+- **`LOGIN_REQUIRED` does not mean the Tor exit is blocked**, despite what the
+  log line says. It is the attestation gate. A genuinely blocked exit shows up
+  as HTTP errors or timeouts, not as a well-formed playability status.
+- **`signatureTimestamp` is not a unix time.** It is a small counter near
+  20,000 published inside YouTube's player JavaScript. The old code sent
+  `(currentTimeMillis() / 1000) - 86400` — about 1.79 billion — which is very
+  likely why TVHTML5 never once succeeded. NoSlop cannot compute the real
+  value without executing player JS, so the field is omitted.
+- **The `ANDROID_VR` exemption is tied to format 18.** Widening
+  `extractUrlFromPlayerResponse`'s format preference silently invalidates it.
+
+**These versions go stale, and that is expected.** yt-dlp's youtube extractor
+is the ground truth: it has a community hitting it daily and patched an
+August 2026 `android_vr` break within a day of it landing. When video fails
+wholesale and §16.7 shows the network is fine, compare this roster against
+theirs before investigating anything else. The fix is always to add a client
+that is not yet gated, never to try harder against one that is.
+
+A durable escape from the roster treadmill would be generating PO tokens
+on-device (BotGuard in `androidx.javascriptengine`, which has no network
+access of its own, so every HTTP call stays on OkHttp over Tor — unlike a
+WebView, which would bypass it and leak the device IP, cf. §15.5). That
+carries its own privacy cost: a PO token is bound to a session identifier, so
+reusing one across Tor circuits links them together. Not implemented, and not
+to be implemented without deciding that trade deliberately.
+
+### 16.12 Retrying only helps if something changed
+
+`requestNewCircuit()` is rate limited (§16.4) and returns `false` when it
+refuses. Retrying a YouTube resolve after a refused rotation re-asks the
+**same exit** and gets the identical answer — roughly 20s of guaranteed
+failure per video, spent holding a resolve permit that other slides are
+queued behind. `resolveStreamUrl` now checks the return value and goes
+straight to the Invidious/Piped failover when the route did not change.
+
+The general rule for this codebase: **before spending a retry, establish that
+some input to the operation is different from last time.** Same URL, same
+exit, same client identity means the same result.
+
+### 16.13 Diagnosing from logs
+
+Filter on these tags, in this order:
+
+| Tag | Tells you |
+|---|---|
+| `YT_INTERNAL_API` | which InnerTube client answered, and playability status |
+| `VIDEO_RESOLVE` | Direct vs Embed vs Unavailable, and cache expiry re-resolves |
+| `PLAYBACK_DIAG` | `resolved DIRECT/EMBED/UNAVAILABLE`, itag/size/ttl, buffer deltas, first frame |
+| `PRELOAD` | whether a warm player was claimed, rejected as stale, or never built |
+
+A `PLAYBACK_DIAG` `sample` line with `bufPos=0` and `delta=0` means no bytes
+arrived at all (dead URL or blocked Tor exit). A rising `bufPos` with no
+`FIRST FRAME` means the container or codec is at fault, not the network.
+
+---
+
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
 the complete, authoritative wire-protocol detail (packet catalog, payload
 JSON shapes, signed-string formats) that supersedes §4/§5 here ·

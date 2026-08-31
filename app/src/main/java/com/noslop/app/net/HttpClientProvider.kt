@@ -216,9 +216,22 @@ object HttpClientProvider {
             .addInterceptor(torGuardInterceptor)
             .addInterceptor(userAgentInterceptor)
             .proxy(Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", com.noslop.app.BuildConfig.TOR_SOCKS_PORT)))
-            .connectTimeout(60, TimeUnit.SECONDS) // FIX: Bumped to 60s for better mesh reliability
-            .readTimeout(60, TimeUnit.SECONDS)    // FIX: Bumped to 60s
-            .writeTimeout(60, TimeUnit.SECONDS)   // FIX: Bumped to 60s
+            // --- NOSLOP_FAST_FAIL_V1 ---
+            // The 60s connect timeout was justified as "better mesh
+            // reliability", but MeshTransport does not use this client at all —
+            // it opens raw SOCKS sockets with its own 10-15s timeouts. So the
+            // 60s only ever applied to HTTP, where its effect was to turn a
+            // dead network into a four-minute splash screen: in the 13:56
+            // capture every one of ~30 requests burned exactly 60s before
+            // reporting "Connect timed out".
+            //
+            // Establishing a SOCKS connection through an already-bootstrapped
+            // Tor takes seconds; 20s is generous. Read and write stay at 60s —
+            // media streaming over a slow circuit genuinely needs that, and
+            // read time was never the thing hanging.
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
             .build()
     }
 }

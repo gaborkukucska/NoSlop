@@ -72,6 +72,28 @@ internal object PlaybackPositionStore {
         Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore.save() called for $url, pos=$positionMs, duration=$durationMs")
         if (url.isBlank() || positionMs <= 0L) return
 
+        // --- NOSLOP_RESUME_POISON_V1 ---
+        // durationMs is C.TIME_UNSET (Long.MIN_VALUE) until the player has
+        // actually prepared the media, and ExoPlayer's currentPosition returns
+        // the *pending seek target* while buffering. Saving in that state
+        // records a position that was never reached: a slide that failed to
+        // load kept re-saving its own resume offset (205swuI0JlY at 891343ms
+        // of a 946s video, duration=-9223372036854775807), so every future
+        // visit seeked straight back into the byte range that was already
+        // failing. It also slipped past the near-the-end cleanup below, which
+        // is guarded on durationMs > 0.
+        //
+        // Only record progress the player demonstrably reached. Live streams
+        // have no duration and are not resumable anyway.
+        if (durationMs <= 0L) {
+            Logger.debug(
+                "VIDEO_DEBUG",
+                "PlaybackPositionStore: ignored save for '$url' — duration unknown, " +
+                    "media never prepared (pos $positionMs was a pending seek target)"
+            )
+            return
+        }
+
         if (positionMs < MIN_RESUMABLE_MS) {
             Logger.debug("VIDEO_DEBUG", "PlaybackPositionStore: ignored save for '$url' (pos $positionMs < $MIN_RESUMABLE_MS)")
             return // Ignore noisy saves at the very beginning

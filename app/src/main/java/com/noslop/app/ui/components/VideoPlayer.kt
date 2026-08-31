@@ -454,7 +454,16 @@ internal fun describeStreamUrl(url: String): String {
         "ttl=${secs / 60}m"
     } ?: "ttl?"
     val host = try { java.net.URI(url).host ?: "?" } catch (_: Exception) { "?" }
-    return "itag=$itag $sizeText $ttlText host=$host"
+    // --- NOSLOP_GEO_LOCK_V1 ---
+    // `ip` is the address the URL was signed for and `gcr` the country it is
+    // pinned to. When the player request went out through the API proxy but
+    // the bytes come back over Tor, these describe a different machine than
+    // the one fetching — which is what a 403 on a freshly-resolved URL
+    // actually means. Without them in the log a geo-lock 403 and an expired
+    // URL look identical.
+    val signedFor = param("ip") ?: "?"
+    val geoLock = param("gcr")?.let { " geoLock=$it" } ?: ""
+    return "itag=$itag $sizeText $ttlText host=$host signedFor=$signedFor$geoLock"
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -550,6 +559,12 @@ fun VideoPlayer(
 
     var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }
     var isVideoReady by remember(url) { mutableStateOf(false) }
+
+    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+    // Hoisted out of ExoVideoPlayer. The parent owns the poster overlay, so
+    // the parent is the only place that can decide to stop covering the
+    // error screen with it.
+    var directPlaybackFailed by remember(url) { mutableStateOf(false) }
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     val isActiveOrNext = isVisible || isNextSlide
@@ -582,18 +597,37 @@ fun VideoPlayer(
 
             is VideoSource.Direct -> {
                 if (activeVisible) {
-                    ExoVideoPlayer(
-                        url = resolved.url,
-                        rawUrl = stableKey ?: url,
-                        isLandscape = isLandscape,
-                        isVisible = isVisible,
-                        thumbnailUrl = thumbnailUrl,
-                        thumbnailB64 = thumbnailB64,
-                        retryKey = retryTrigger,
-                        canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES,
-                        onRetry = { retryTrigger++ },
-                        onReady = { isVideoReady = true }
-                    )
+                    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+                    // ExoVideoPlayer draws its own "Video unavailable / Retry
+                    // Playback" card, but one level deeper than the poster
+                    // overlay, so zIndex inside it cannot outrank the poster.
+                    // Lifting the whole subtree once it has failed is what puts
+                    // that card back in front of the user.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(if (directPlaybackFailed) 3f else 0f)
+                    ) {
+                        ExoVideoPlayer(
+                            url = resolved.url,
+                            rawUrl = stableKey ?: url,
+                            isLandscape = isLandscape,
+                            isVisible = isVisible,
+                            thumbnailUrl = thumbnailUrl,
+                            thumbnailB64 = thumbnailB64,
+                            retryKey = retryTrigger,
+                            canRetry = retryTrigger < MAX_AUTO_RESOLVE_RETRIES,
+                            onRetry = {
+                                directPlaybackFailed = false
+                                retryTrigger++
+                            },
+                            onReady = {
+                                isVideoReady = true
+                                directPlaybackFailed = false
+                            },
+                            onFailed = { directPlaybackFailed = true }
+                        )
+                    }
                 }
             }
 
@@ -612,7 +646,12 @@ fun VideoPlayer(
             is VideoSource.Unavailable -> {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
+                    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+                    // Poster sits at zIndex(1f) and the loading overlay at
+                    // zIndex(2f); without this the whole error card was
+                    // rendered underneath both and never seen.
                     modifier = Modifier
+                        .zIndex(3f)
                         .background(PrimaryBlack.copy(alpha = 0.7f))
                         .padding(16.dp)
                 ) {
@@ -642,7 +681,13 @@ fun VideoPlayer(
             }
         }
 
-        val showThumbnail = source == null || source is VideoSource.Unavailable || !activeVisible || !isVideoReady
+        // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+        // `source is Unavailable` used to force the poster on, which drew it
+        // on top of the error card the branch above had just composed. A
+        // failed slide now keeps the poster only as a dimmed backdrop, with
+        // the error and its Retry button on top where they belong.
+        val hasFailed = source is VideoSource.Unavailable || directPlaybackFailed
+        val showThumbnail = source == null || !activeVisible || !isVideoReady || hasFailed
         
         val decodedB64 = remember(thumbnailB64) {
             thumbnailB64?.let {
@@ -673,6 +718,16 @@ fun VideoPlayer(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
+                // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+                // Scrim so the error card above reads clearly against a busy
+                // poster instead of fighting it for contrast.
+                if (hasFailed) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(PrimaryBlack.copy(alpha = 0.6f))
+                    )
+                }
             }
         } else if (source == null && thumbnailUrl == null && thumbnailB64 == null && !isVideoReady) {
             Box(modifier = Modifier.fillMaxSize().zIndex(1f)) {
@@ -705,7 +760,9 @@ fun VideoPlayer(
         // activeVisible (current OR next slide, with a 500ms debounce leaving),
         // so gating the overlay more tightly left a window where a video was
         // resolving with no indicator on screen.
-        if (activeVisible && !isVideoReady && !loadingTimedOut && (isResolving || awaitingFirstFrame)) {
+        if (activeVisible && !isVideoReady && !loadingTimedOut && !hasFailed &&
+            (isResolving || awaitingFirstFrame)
+        ) {
             VideoLoadingOverlay(
                 label = if (isResolving) "Finding stream".tr else "Buffering".tr,
                 modifier = Modifier.zIndex(2f)
@@ -786,13 +843,39 @@ private fun ExoVideoPlayer(
     retryKey: Int = 0,
     canRetry: Boolean = true,
     onRetry: () -> Unit,
-    onReady: () -> Unit
+    onReady: () -> Unit,
+    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+    // Raised when the player gives up for good, so the parent can uncover
+    // the error card it draws underneath the poster.
+    onFailed: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var exoPlayer by remember { mutableStateOf<androidx.media3.exoplayer.ExoPlayer?>(null) }
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var isBuffering by remember { mutableStateOf(true) }
+
+    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
+    // One place to notify the parent, rather than duplicating the call at
+    // each of the three `hasError = true` sites below.
+    LaunchedEffect(hasError) {
+        if (!hasError) return@LaunchedEffect
+        // --- NOSLOP_RESUME_POISON_V1 ---
+        // No duration means the media never prepared, so any stored offset for
+        // this item is a seek target that was never reached. Seeking back to it
+        // on the next visit just reproduces the same failure, which is how a
+        // single bad load turned into a permanently broken slide.
+        val preparedDurationMs = try { exoPlayer?.duration ?: 0L } catch (_: Exception) { 0L }
+        if (preparedDurationMs <= 0L) {
+            Logger.info(
+                "VIDEO",
+                "Clearing stale resume position for $rawUrl — media never prepared, so the " +
+                    "stored offset was never actually played"
+            )
+            PlaybackPositionStore.clear(rawUrl)
+        }
+        onFailed()
+    }
 
     LaunchedEffect(isVisible, exoPlayer) {
         exoPlayer?.let { player ->
@@ -824,6 +907,14 @@ private fun ExoVideoPlayer(
         if (!isVisible) return@LaunchedEffect
         var lastBufPos = -1L
         var stalledSamples = 0
+        // --- NOSLOP_STALL_DETECT_V2 ---
+        // The recovery below used to require `bufPos == 0L`, which is only
+        // true for a video starting from the very beginning. Anything that
+        // resumed at a saved offset reports bufPos = that offset forever while
+        // stalled, so the check never fired on exactly the slides that needed
+        // it (205swuI0JlY sat at bufPos=891343, xvjQwQaIYu8 at 2815).
+        // Baseline whatever we started at and measure movement from there.
+        var baselineBufPos = -1L
         while (true) {
             kotlinx.coroutines.delay(2000L)
             val p = exoPlayer ?: continue
@@ -837,6 +928,11 @@ private fun ExoVideoPlayer(
                     return@LaunchedEffect  // healthy; stop sampling
                 }
                 val bufPos = p.bufferedPosition
+                if (baselineBufPos < 0L) baselineBufPos = bufPos
+                // --- NOSLOP_STALL_DETECT_V2 ---
+                // True when not one byte has landed since we started, whatever
+                // position we started from.
+                val noBytesEver = bufPos <= baselineBufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
                 stalledSamples = if (delta <= 0L) stalledSamples + 1 else 0
                 Logger.info(
@@ -856,7 +952,12 @@ private fun ExoVideoPlayer(
 
                 // --- NOSLOP_TOR_CIRCUIT_V1 ---
                 // Zero bytes after 12s for googlevideo URLs over Tor means the exit is likely blocked.
-                if (stalledSamples >= 6 && bufPos == 0L && rawUrl.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
+                // --- NOSLOP_STALL_DETECT_V2 ---
+                // Was `rawUrl.contains("googlevideo")`. rawUrl is the *page*
+                // URL (youtube.com/watch?v=...), so that was never true and
+                // this whole recovery branch was dead code. The resolved
+                // stream URL is `url`.
+                if (stalledSamples >= 6 && noBytesEver && url.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "Zero bytes over Tor after 12s — this exit is likely blocked " +
@@ -878,7 +979,7 @@ private fun ExoVideoPlayer(
                     return@LaunchedEffect
                 }
 
-                if (stalledSamples >= 6 && bufPos == 0L && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
+                if (stalledSamples >= 6 && noBytesEver && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
                         "Still zero bytes after $retryKey circuit changes — giving up on this " +
@@ -1475,6 +1576,10 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                             val videoId = url.substringAfter("/embed/").substringBefore("?")
                             val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
                             val startSeconds = (resumeMs / 1000).toInt()
+                            // --- NOSLOP_EMBED_AUTOPLAY_V1 ---
+                            // Injected as a JS literal. The old code read
+                            // window.NoSlop_isVisible, which nothing ever assigns.
+                            val shouldAutoplayEmbed = if (currentIsVisible) "true" else "false"
                             """
                             <!DOCTYPE html>
                             <html>
@@ -1497,7 +1602,16 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                                       videoId: '$videoId',
                                       playerVars: { 'playsinline': 1, 'autoplay': 0, 'controls': 1, 'fs': 0, 'rel': 0, 'start': $startSeconds },
                                       events: {
-                                        'onReady': function(event) { if (window.NoSlop_isVisible) { event.target.playVideo(); } },
+                                        'onReady': function(event) {
+                                            // --- NOSLOP_EMBED_AUTOPLAY_V1 ---
+                                            // Tell the host the player exists as soon as it is
+                                            // constructed. Previously onPlaying() only fired from
+                                            // the PLAYING state, so if autoplay was refused the
+                                            // poster stayed up forever and the user could not even
+                                            // see the play button underneath it.
+                                            window.NoSlopJS.onPlaying();
+                                            if ($shouldAutoplayEmbed) { event.target.playVideo(); }
+                                        },
                                         'onStateChange': function(event) {
                                           if (event.data == 1) { // PLAYING state
                                               window.NoSlopJS.onPlaying();
