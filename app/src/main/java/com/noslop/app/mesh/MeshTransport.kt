@@ -4,6 +4,7 @@ import com.noslop.app.data.NoSlopRepository
 import com.noslop.app.debug.Logger
 import com.noslop.app.util.Constants
 import kotlinx.coroutines.*
+import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.PrintWriter
@@ -27,6 +28,11 @@ class MeshTransport(
     private val torSemaphore = kotlinx.coroutines.sync.Semaphore(4) // Limit concurrent Tor circuits so mesh pings don't starve media/feeds
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private val MAX_SIMULTANEOUS_CONNECTIONS = 16
+
+    // NOSLOP_FRAME_CAP_V1 — hard ceiling on a single newline-delimited frame.
+    // Generous enough for the largest MEDIA_CHUNK payload, small enough that a
+    // peer cannot buffer the heap away by never sending a newline.
+    private val MAX_PACKET_CHARS = 4 * 1024 * 1024
 
     fun isListening(): Boolean = listening
 
@@ -74,18 +80,41 @@ class MeshTransport(
         Logger.info(TAG, "Incoming TCP connection from $clientIp (active: ${activeConnections.get()})")
         try {
             socket.soTimeout = 30000 // 30-second read timeout
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val packetStr = line ?: break
-                
+
+            // --- NOSLOP_FRAME_CAP_V1 ---
+            // BufferedReader.readLine() has no upper bound. A peer that sends
+            // bytes forever without a newline buffered all of them into heap,
+            // which is a one-connection OOM. Read framed by hand with a cap and
+            // drop the connection when a frame exceeds it.
+            val reader = InputStreamReader(BufferedInputStream(socket.getInputStream()), Charsets.UTF_8)
+            val frame = StringBuilder(8192)
+            while (true) {
+                val ch = reader.read()
+                if (ch == -1) break
+                if (ch == '\r'.code) continue
+                if (ch != '\n'.code) {
+                    if (frame.length >= MAX_PACKET_CHARS) {
+                        Logger.warn(TAG, "Dropping connection from $clientIp: frame exceeded $MAX_PACKET_CHARS chars with no newline")
+                        return@withContext
+                    }
+                    frame.append(ch.toChar())
+                    continue
+                }
+
+                val packetStr = frame.toString().trim()
+                frame.setLength(0)
+                if (packetStr.isEmpty()) continue
+
                 try {
                     Logger.debug(TAG, "Parsing incoming packet (length: ${packetStr.length})")
                     val packet = NetworkPacket.fromJson(packetStr)
-                    Logger.info(TAG, "Received packet over TCP", "type=${packet.type} | sender=${packet.senderId}")
+                    Logger.info(TAG, "Received packet over TCP", "type=${packet.type}")
                     repository.handleIncomingPacket(packet)
                 } catch (e: Exception) {
-                    Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}. Raw packet: $packetStr")
+                    // NOSLOP_NO_RAW_FRAME_LOG_V1 — the raw frame used to be logged
+                    // here. It lands in the user-exportable log file and can carry
+                    // DM ciphertext, nonces and peer public keys.
+                    Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}", "bytes=${packetStr.length}")
                 }
             }
         } catch (e: Exception) {

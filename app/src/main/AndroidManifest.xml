@@ -92,13 +92,6 @@
                       android:value="Maintaining a persistent Tor mesh network daemon for decentralized peer-to-peer communication." />
         </service>
 
-        <receiver android:name=".util.UpdateManager$DownloadReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
-            </intent-filter>
-        </receiver>
-
     </application>
 
 </manifest>

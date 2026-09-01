@@ -23,9 +23,6 @@ build/
 target/
 .gradle/
 
-# Python files
-*.py
-
 # Python caches
 .mypy_cache/
 .pytest_cache/
@@ -74,9 +71,12 @@ htmlcov/
 *.tar.zst
 
 # Other
-*.sh
 test_parse/
-tests/
 local.properties
 *.keystore
 .kotlin/
+
+# Captured device logs — never commit these, they contain onion addresses,
+# peer keys and the full process list of the capturing device.
+tmp_logs/
+*.logcat

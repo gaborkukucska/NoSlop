@@ -1,17 +1,8 @@
-import java.util.Properties
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.devtools.ksp)
-}
-
-// Read GitHub config from local.properties (outside android{} to avoid DSL scope issues)
-val localProps = Properties()
-val localPropsFile = rootProject.file("local.properties")
-if (localPropsFile.exists()) {
-    localPropsFile.reader().use { localProps.load(it) }
 }
 
 android {
@@ -31,18 +22,34 @@ android {
         }
     }
     
+    // NOSLOP_CONDITIONAL_SIGNING_V1
+    // project.property() throws when the property is absent, and signingConfigs is
+    // evaluated during the configuration phase — so a clone without the keystore
+    // properties failed on EVERY task, including assembleDebug and test. Configure
+    // the release signing config only when all four properties are present.
+    val hasReleaseSigning = listOf(
+        "NOSLOP_STORE_FILE", "NOSLOP_STORE_PASSWORD",
+        "NOSLOP_KEY_ALIAS", "NOSLOP_KEY_PASSWORD"
+    ).all { project.hasProperty(it) }
+
     signingConfigs {
-        create("release") {
-            storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
-            storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
-            keyAlias = project.property("NOSLOP_KEY_ALIAS") as String
-            keyPassword = project.property("NOSLOP_KEY_PASSWORD") as String
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(project.property("NOSLOP_STORE_FILE") as String)
+                storePassword = project.property("NOSLOP_STORE_PASSWORD") as String
+                keyAlias = project.property("NOSLOP_KEY_ALIAS") as String
+                keyPassword = project.property("NOSLOP_KEY_PASSWORD") as String
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")  // add this
+            // Unsigned when the keystore properties are absent; assembleRelease then
+            // produces an unsigned APK instead of failing configuration outright.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -153,7 +160,7 @@ dependencies {
     // --- Networking: OkHttp with SOCKS5 proxy support ---
     implementation(libs.okhttp)
     implementation(libs.logging.interceptor)
-    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
+    implementation(libs.okhttp.dnsoverhttps)
     implementation("com.google.code.gson:gson:2.10.1")
 
     // --- Image loading ---
@@ -199,7 +206,11 @@ dependencies {
     implementation(libs.zxing.core)
 
     // --- SSH Client ---
-    implementation("com.jcraft:jsch:0.1.55")
+    // NOSLOP_JSCH_FORK_V1 — com.jcraft:jsch has been unmaintained since 2018 and
+    // supports neither rsa-sha2-* nor ssh-ed25519 host keys, so Hub deployment
+    // failed key exchange against any current OpenSSH server. This fork is a
+    // drop-in replacement and keeps the com.jcraft.jsch package names.
+    implementation("com.github.mwiede:jsch:0.2.17")
 
     // --- Testing ---
     testImplementation(libs.junit)

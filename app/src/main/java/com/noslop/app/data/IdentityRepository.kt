@@ -182,8 +182,15 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
     suspend fun isLocked(): Boolean = appSettingDao.getSetting("session_locked") == "true"
 
     suspend fun unlock(mnemonic: String): Boolean {
-        val savedMnemonic = prefs.getString("mnemonic", null)
-        return if (savedMnemonic == mnemonic) {
+        // NOSLOP_UNLOCK_FALLBACK_V1
+        // The stored value is "ENC_GCM:<base64>" whenever EncryptedSharedPreferences
+        // failed and the AES-GCM fallback store is in use. Reading it raw compared
+        // ciphertext against the user's typed words, so unlock could never succeed
+        // on exactly the devices already running degraded — a permanent lockout.
+        val savedMnemonic = secureFallbackRead(prefs.getString("mnemonic", null))
+        val normalised = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+        val savedNormalised = savedMnemonic?.trim()?.lowercase()?.split(Regex("\\s+"))?.joinToString(" ")
+        return if (savedNormalised != null && savedNormalised == normalised) {
             appSettingDao.insertSetting(AppSetting("session_locked", "false"))
             Logger.info(TAG, "Session unlocked")
             true
@@ -219,11 +226,20 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
     }
 
     /**
-     * Wipe all identity data from both ESP and Room. Used by factory reset.
+     * Wipe all identity data from the encrypted preference store AND the public
+     * mirror of it in Room. Used by factory reset.
      */
     suspend fun clearAll() {
         prefs.edit().clear().apply()
-        Logger.info(TAG, "All identity data cleared from EncryptedSharedPreferences")
+        // NOSLOP_CLEARALL_ROOM_V1 — the docstring claimed Room was cleared too but
+        // nothing did it, so a factory reset left the public identity behind and a
+        // subsequent loadIdentity() saw a half-wiped state.
+        listOf(
+            "local_handle", "local_pub_ed25519", "local_pub_enc",
+            "local_tripcode", "local_onion", "local_display_name",
+            "onboarding_complete", "session_locked"
+        ).forEach { appSettingDao.removeSetting(it) }
+        Logger.info(TAG, "All identity data cleared from encrypted prefs and Room")
     }
 
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {
@@ -231,8 +247,10 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         val burnableIdentity = CryptoService.generateIdentity(burnableHandle)
         
         prefs.edit()
-            .putString("burnable_ed25519_private_key", burnableIdentity.privateKeyB64)
-            .putString("burnable_enc_private_key", burnableIdentity.encPrivateKeyB64)
+            // NOSLOP_BURNABLE_FALLBACK_V1 — these are private keys and must go
+            // through the same fallback encryption as the main identity.
+            .putString("burnable_ed25519_private_key", secureFallbackWrite(burnableIdentity.privateKeyB64))
+            .putString("burnable_enc_private_key", secureFallbackWrite(burnableIdentity.encPrivateKeyB64))
             .putString("burnable_pub_ed25519", burnableIdentity.publicKeyB64)
             .putString("burnable_pub_enc", burnableIdentity.encPublicKeyB64)
             .putString("burnable_tripcode", burnableIdentity.tripcode)
@@ -250,8 +268,8 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
         val tripcode = prefs.getString("burnable_tripcode", null) ?: return null
         val onion = prefs.getString("burnable_onion", null) ?: return null
         val displayName = getHandle() // Bypass cache so old Anon_ usernames are erased dynamically!
-        val privEd = prefs.getString("burnable_ed25519_private_key", null) ?: return null
-        val privEnc = prefs.getString("burnable_enc_private_key", null) ?: return null
+        val privEd = secureFallbackRead(prefs.getString("burnable_ed25519_private_key", null)) ?: return null
+        val privEnc = secureFallbackRead(prefs.getString("burnable_enc_private_key", null)) ?: return null
         
         return CryptoService.IdentityKeys(
             publicKeyB64 = pubEd,
