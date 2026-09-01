@@ -39,7 +39,13 @@ object PreloadManager {
     // 2 items ahead are actively buffered by preWarm(), +1 headroom so the
     // player for the currently-playing item (claimed via claim()) doesn't get
     // evicted before VideoPlayer has a chance to take it.
-    private const val MAX_PRELOAD = 2
+    // --- NOSLOP_EXIT_LOTTERY_V1 ---
+    // Was 2, which left the "+1 headroom" above as fiction: with two items
+    // preloaded ahead, storing the third evicts one immediately. The 19:28
+    // capture shows "Stored preloaded player for l_P-bF8-UgQ" followed by
+    // "Evicting preloaded player for l_P-bF8-UgQ" while that video was the one
+    // on screen. 3 is what the comment already describes.
+    private const val MAX_PRELOAD = 3
 
     // Don't bother buffering a stream that dies before the user can plausibly
     // reach it; VideoPlayer will re-resolve on arrival instead.

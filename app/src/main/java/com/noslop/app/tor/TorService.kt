@@ -86,19 +86,81 @@ object TorService {
      *  breathing room than that to rebuild and fill a buffer. */
     private const val NEWNYM_MIN_INTERVAL_MS = 60_000L
 
+    // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
+    // The 60s gate above was right about the danger and wrong to apply it
+    // unconditionally. Rotating mid-stream caused the round-2 failure;
+    // rotating while nothing is playing costs nothing and is the ONLY remedy
+    // for landing on an exit YouTube has gated, which the 19:28 capture shows
+    // costing a full minute per affected video.
+    //
+    // The discriminator is not elapsed time, it is whether bytes are moving.
+    private const val NEWNYM_IDLE_INTERVAL_MS = 15_000L
+
+    /** How recently the buffer must have advanced to count as "streaming". */
+    private const val MEDIA_ACTIVE_WINDOW_MS = 10_000L
+
+    // --- NOSLOP_COOPERATIVE_ROTATION_V1 ---
+    // A rotation performed by ANYONE moves EVERYONE onto a new exit — NEWNYM
+    // is process-wide. So when three concurrent resolves are all refused by
+    // the same gated exit and all ask to rotate, the two that lose the race
+    // are still on a fresh circuit a moment later. Reporting `false` to them
+    // and letting them read it as "nothing changed, give up" threw away
+    // exactly the retry that would have worked.
+    //
+    // Within this window, "someone else just rotated" is as good as "I
+    // rotated" and the caller should proceed.
+    private const val CIRCUIT_CONSIDERED_FRESH_MS = 30_000L
+
+    @Volatile
+    private var lastMediaProgressAtMs = 0L
+
+    /**
+     * Called from the playback sampler whenever a player's buffer advances.
+     * Cheap by design — a timestamp write, no allocation — because it runs on
+     * every sample of every visible video.
+     */
+    fun noteMediaProgress() {
+        lastMediaProgressAtMs = System.currentTimeMillis()
+    }
+
+    private fun mediaIsStreaming(): Boolean =
+        System.currentTimeMillis() - lastMediaProgressAtMs < MEDIA_ACTIVE_WINDOW_MS
+
     suspend fun requestNewCircuit(): Boolean {
         if (!newnymMutex.tryLock()) {
             Logger.info(TAG, "Skipping NEWNYM — another rotation is already in flight")
             return false
         }
         try {
+            // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
+            val streaming = mediaIsStreaming()
+            val requiredIntervalMs =
+                if (streaming) NEWNYM_MIN_INTERVAL_MS else NEWNYM_IDLE_INTERVAL_MS
             val sinceMs = System.currentTimeMillis() - lastNewnymAtMs
-            if (lastNewnymAtMs != 0L && sinceMs < NEWNYM_MIN_INTERVAL_MS) {
+            if (lastNewnymAtMs != 0L && sinceMs < requiredIntervalMs) {
+                // --- NOSLOP_COOPERATIVE_ROTATION_V1 ---
+                // The caller wants to know whether it is on a fresh exit, not
+                // whether it personally issued the NEWNYM. A rotation seconds
+                // ago — by a sibling resolve refused on the same gated exit —
+                // has already given it one.
+                if (!streaming && sinceMs < CIRCUIT_CONSIDERED_FRESH_MS) {
+                    Logger.info(
+                        TAG,
+                        "Not rotating — another caller rotated ${sinceMs / 1000}s ago, so this " +
+                            "circuit is already fresh. Reporting success so the caller retries " +
+                            "on it instead of giving up."
+                    )
+                    return true
+                }
+                val why = if (streaming) {
+                    "because a video is streaming right now and rotating would kill its circuit."
+                } else {
+                    "even with nothing streaming."
+                }
                 Logger.info(
                     TAG,
                     "Skipping NEWNYM — rotated ${sinceMs / 1000}s ago, minimum interval is " +
-                        "${NEWNYM_MIN_INTERVAL_MS / 1000}s. Rotating again now would kill the " +
-                        "circuit the current video is streaming on."
+                        "${requiredIntervalMs / 1000}s $why"
                 )
                 return false
             }

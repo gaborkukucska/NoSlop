@@ -1447,7 +1447,188 @@ carries its own privacy cost: a PO token is bound to a session identifier, so
 reusing one across Tor circuits links them together. Not implemented, and not
 to be implemented without deciding that trade deliberately.
 
-### 16.12 Retrying only helps if something changed
+### 16.12 Only muxed sources are playable (`NOSLOP_MUXED_ONLY_V1`)
+
+A YouTube player response offers streams in three places, and only two of
+them are usable:
+
+| Source | Contains | Usable |
+|---|---|---|
+| `formats` | video **and** audio in one stream (progressive) | yes |
+| `hlsManifestUrl` | muxed, adaptive bitrate | yes — `media3-exoplayer-hls` is on the classpath |
+| `adaptiveFormats` | video-only **or** audio-only, by definition | **no** |
+
+`extractUrlFromPlayerResponse` used to end with an `adaptiveFormats` branch
+returning `valid.first().first`. That is the highest-bitrate video-only track
+with no audio at all. The branch was unreachable while ANDROID still returned
+progressive formats; the round-5 roster change made it reachable, and it
+immediately produced `itag=299` at **1806MB** with no sound. Every affected
+slide sat at `bufPos=0` indefinitely.
+
+Muxing two streams requires a demuxer NoSlop does not have. A client that
+offers neither progressive formats nor HLS has not given us anything
+playable, and the correct response is to report an unresolved stream so the
+caller falls through to the next client and then to the Invidious/Piped
+failover, which return muxed URLs.
+
+**`itag=18` is the format to expect.** Every working capture in this
+project's history used it: 360p, muxed, small. If a `PLAYBACK_DIAG resolved
+DIRECT` line shows itag 137, 248, 299, 303 or similar, something has
+regressed here — those are DASH video tracks.
+
+### 16.13 Stream size ceiling over Tor (`NOSLOP_TOR_SIZE_CEILING_V1`)
+
+Progressive candidates over 250MB are rejected outright while
+`useTorForClearnet` is on. Three relays deep, a 1.8GB file is not a slow
+download but an impossible one, and accepting it burns the entire resolve
+budget (§16.8) discovering that. The ceiling is checked against
+`contentLength` from the player response, before the URL is ever handed to
+ExoPlayer.
+
+This is a safety net, not the primary defence — §16.12 is. It exists because
+the primary defence had a gap for months without anyone noticing, and a size
+sanity check would have caught it on its own.
+
+### 16.14 The API proxy can be the thing being refused (`NOSLOP_PROXY_ATTESTATION_V1`)
+
+The proxy exists so YouTube does not see a Tor exit IP. As of 2026-08-31 that
+premise has inverted: one Cloudflare egress address serving every NoSlop user
+is a **more** flagged IP than a fresh Tor exit, and YouTube answers it with
+`LOGIN_REQUIRED`.
+
+The 19:11 capture is unambiguous:
+
+| | |
+|---|---|
+| Successful resolves before `Proxy returned 403 — bypassing it for 5m` | **0** |
+| Successful resolves after it | **4** |
+
+and every one of those four was `signedFor` a published Tor exit
+(109.70.100.9, 176.65.148.3, 185.220.101.180, 45.66.35.27) — meaning the
+request had gone direct. The app only found the working path by accident,
+because an unrelated HTTP 403 happened to trip the bypass.
+
+`notePlayerProxyBlocked` only fired on HTTP 403/429/400. `LOGIN_REQUIRED`
+arrives as a successful **HTTP 200** carrying a `playabilityStatus`, so the
+proxy could serve refusals forever without ever being marked bad. A proxied
+`LOGIN_REQUIRED` now re-asks the same client directly over Tor within the
+same iteration and marks the proxy degraded for subsequent videos.
+
+Two consequences worth carrying forward:
+
+- **This also relieves the worker's request ceiling.** Player calls that go
+  direct do not consume the Cloudflare free tier at all.
+- **The `gcr` geo-lock problem in §16.5 largely dissolves on the direct
+  path**, because the IP that requested the URL and the IP fetching the bytes
+  are then the same circuit rather than two different countries.
+
+### 16.15 Rank clients by playable output, not by `OK`
+
+Round 6 ranked the roster by how often each client returned
+`playabilityStatus: OK`, and put IOS first on that basis. It was the wrong
+metric. IOS answers `OK` and then offers *only* `adaptiveFormats`, which
+§16.12 correctly refuses — so an IOS "success" produces nothing playable and
+costs a round trip. Measured by playable muxed URLs, the same capture read:
+
+| Client | Playable URLs |
+|---|---|
+| `ANDROID` | 3 |
+| `TVHTML5` | 1 |
+| `IOS` | 0 (OK, but adaptiveFormats only) |
+
+**When re-ranking from a fresh capture, count `Resolved direct video stream
+using X`.** Never count playability statuses — a client can pass that check
+and still be useless.
+
+### 16.16 The Tor exit lottery (`NOSLOP_EXIT_LOTTERY_V1`)
+
+Resolve durations are bimodal, and that shape is the diagnosis. From the
+2026-08-31 19:28 capture:
+
+| Outcome | Durations |
+|---|---|
+| `DIRECT` | 520ms, 950ms, 1326ms, 3546ms, 3924ms, 3953ms, 4757ms, 5153ms, 5622ms, 8026ms |
+| `UNAVAILABLE` | 30557ms, 34061ms, 40488ms, 41894ms, 49562ms, 55061ms, 56477ms, 60003ms, 64054ms |
+
+Two clusters and nothing in between. There is no case of a later client
+rescuing an earlier refusal: either the **first** client answers within
+seconds, or all five are refused and the full budget is spent proving it.
+
+That is a per-circuit condition, not a per-client or per-video one. All five
+clients ask from the same Tor exit, so when YouTube has gated that exit they
+all get `LOGIN_REQUIRED` together. Every successful resolve in that capture
+was signed for one of a small set of exits.
+
+**Practical rule:** if a capture shows a wide spread of resolve durations
+with nothing in the middle, stop looking at client identities (§16.15) and
+look at the exit. The client roster only explains failures that vary *by
+client*.
+
+`resolveStreamUrl` now stops after `EXIT_BLOCKED_THRESHOLD` (2) refusals in
+one attempt and tries to rotate instead.
+
+### 16.17 Rotation is gated on live media, not on the clock (`NOSLOP_ADAPTIVE_ROTATION_V1`)
+
+§16.4 rate-limited `requestNewCircuit()` to once per 60s after a rotation
+storm destroyed the circuit a visible video was streaming on. That was right
+about the danger and wrong to apply it unconditionally: a fresh exit is the
+*only* remedy for §16.16, and the flat gate was blocking it.
+
+The discriminator is whether bytes are moving, not how much time has passed:
+
+| Condition | Minimum interval |
+|---|---|
+| Buffer advanced within the last 10s | 60s — protect the stream |
+| Nothing streaming | 15s |
+
+`VideoPlayer`'s sampler calls `TorService.noteMediaProgress()` whenever the
+buffer advances. That call is deliberately just a timestamp write, since it
+runs on every sample of every visible video.
+
+**Anything else that streams over Tor for a sustained period should call
+`noteMediaProgress()` too**, or a resolve elsewhere in the app may rotate the
+circuit out from under it.
+
+### 16.18 Rotation is shared, so its result is shared (`NOSLOP_COOPERATIVE_ROTATION_V1`)
+
+`SIGNAL NEWNYM` is process-wide: a rotation by any caller moves **every**
+subsequent connection onto new circuits. The rate limit in §16.4 and §16.17
+therefore has a subtlety that cost a whole round to find.
+
+Three concurrent resolves (the §16.8 gate allows 3) share one exit. When that
+exit is gated they are all refused together and all request a rotation at the
+same instant. One wins; the others are refused by the interval check. Round 8
+had callers read that refusal as "the route did not change" and give up —
+but their sibling had just moved them onto a brand new exit a fraction of a
+second earlier. They were discarding exactly the retry that would have
+worked, which is why round-8 successes took 15-26s where round-7 successes
+took under a second.
+
+**`requestNewCircuit()` answers "are you on a fresh circuit?", not "did you
+perform the rotation?"** Within `CIRCUIT_CONSIDERED_FRESH_MS` (30s) of any
+rotation, and with nothing streaming, it returns `true` without issuing a
+second NEWNYM. Callers should keep treating `true` as "conditions changed,
+retrying is worthwhile".
+
+This does not weaken §16.17: while media is streaming the answer is still a
+flat `false`, because the caller genuinely must not get a new circuit then.
+
+### 16.19 Resolve failures auto-retry once (`NOSLOP_AUTO_RETRY_UNAVAILABLE_V1`)
+
+`retryTrigger` historically advanced only on ExoPlayer *playback* errors, so
+a slide that failed to **resolve** parked on the Retry button and waited for
+a tap. Field reports were that tapping it usually works — which is the app
+asking the user to do by hand what it should do itself, and is explained
+entirely by §16.16: the first resolve lost the exit lottery, and by the time
+a human reacts the circuit has moved on.
+
+`VideoPlayer` now performs one automatic re-resolve ~2.5s after an
+`Unavailable`. The delay is deliberate: long enough for a sibling resolve's
+rotation to land, short enough that the slide is usually still on screen.
+Exactly one attempt — if it fails again the exit is not the problem and the
+button is the honest answer.
+
+### 16.20 Retrying only helps if something changed
 
 `requestNewCircuit()` is rate limited (§16.4) and returns `false` when it
 refuses. Retrying a YouTube resolve after a refused rotation re-asks the
@@ -1460,20 +1641,43 @@ The general rule for this codebase: **before spending a retry, establish that
 some input to the operation is different from last time.** Same URL, same
 exit, same client identity means the same result.
 
-### 16.13 Diagnosing from logs
+### 16.21 Diagnosing from logs
 
-Filter on these tags, in this order:
+Capture unfiltered — `adb logcat -c && adb logcat -v time > noslop.log` — and
+uninstall whichever build variant is not under test (§16.10). Filtering by
+tag hides the Tor daemon's own bootstrap output, which §16.9 needs.
 
-| Tag | Tells you |
+Then work down this list. **The order matters**: each step rules out a class
+of cause, and skipping ahead is how three rounds of this session were spent
+fixing the wrong layer.
+
+| Step | Question | Where to look |
+|---|---|---|
+| 1 | Is anything reaching the network at all? | §16.7 — `.onion` peers *and* clearnet both timing out means no path; stop here |
+| 2 | Did Tor actually finish bootstrapping? | `Tor bootstrap NN%` (§16.9). "Tor is ON" is not proof |
+| 3 | Are resolves succeeding? | count `Resolved direct video stream using X` — **never** playability status (§16.15) |
+| 4 | If not, is it the client or the exit? | wide spread of durations with nothing in the middle = exit lottery (§16.16). Failures that vary *by client* = roster (§16.11) |
+| 5 | Is the proxy the thing being refused? | `signedFor=` on a resolved URL: a Cloudflare address that gets `LOGIN_REQUIRED` is §16.14 |
+| 6 | Did we resolve something unplayable? | itag on `resolved DIRECT`. **18 is what you want.** 137/248/299/303 are DASH video-only (§16.12) |
+| 7 | Resolved but not playing? | `PLAYBACK_DIAG sample` — `delta=0` with a flat `bufPos` means no bytes; rising `bufPos` with no `FIRST FRAME` means container or codec |
+
+Signals worth knowing by sight:
+
+| Line | Means |
 |---|---|
-| `YT_INTERNAL_API` | which InnerTube client answered, and playability status |
-| `VIDEO_RESOLVE` | Direct vs Embed vs Unavailable, and cache expiry re-resolves |
-| `PLAYBACK_DIAG` | `resolved DIRECT/EMBED/UNAVAILABLE`, itag/size/ttl, buffer deltas, first frame |
-| `PRELOAD` | whether a warm player was claimed, rejected as stale, or never built |
+| `N clients refused on the same circuit` | exit lottery lost; a rotation was attempted (§16.16) |
+| `Not rotating — another caller rotated Ns ago` | cooperative rotation working (§16.18) |
+| `Skipping NEWNYM ... because a video is streaming` | §16.17 protecting a live stream — correct, not a problem |
+| `Auto-retrying unavailable resolve` | §16.19 doing what a user would otherwise have to tap |
+| `Gave up waiting 20s for a resolve slot` | the §16.8 gate is too tight for current conditions |
+| `offered only adaptiveFormats` | §16.12 correctly refusing a video-only stream |
+| `Player response ... geoLock=` | §16.5 |
 
-A `PLAYBACK_DIAG` `sample` line with `bufPos=0` and `delta=0` means no bytes
-arrived at all (dead URL or blocked Tor exit). A rising `bufPos` with no
-`FIRST FRAME` means the container or codec is at fault, not the network.
+**Timing figures throughout §16 were captured on a ~0.1 Mbps uplink.** The
+diagnoses do not depend on that — a gated exit refuses you identically on
+fibre — but treat the durations as an upper bound, and be sceptical of any
+conclusion that rests on absolute latency rather than on a ratio or a
+pattern.
 
 ---
 

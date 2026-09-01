@@ -40,6 +40,28 @@ object YouTubeInternalClient {
         Logger.warn(TAG, "Proxy returned $code — bypassing it for ${PROXY_COOLDOWN_MS / 60000}m")
     }
 
+    // --- NOSLOP_PROXY_ATTESTATION_V1 ---
+    // A refusal does not have to be an HTTP error. LOGIN_REQUIRED arrives as a
+    // perfectly successful 200 carrying a playabilityStatus, so the check
+    // above never saw it and the proxy could serve refusals indefinitely
+    // without being marked bad.
+    //
+    // In the 19:11 capture that mattered enormously: ZERO resolves succeeded
+    // before an unrelated 403 happened to trigger the bypass, and all four
+    // that did succeed afterwards were signed for Tor exit IPs — i.e. they had
+    // gone direct. One Cloudflare egress serving every user is now a more
+    // flagged address than a fresh Tor exit, so the proxy has become the cause
+    // of the attestation failures it was built to avoid.
+    private fun notePlayerProxyRefused(clientName: String) {
+        proxyBlockedUntilMs = System.currentTimeMillis() + PROXY_COOLDOWN_MS
+        Logger.warn(
+            TAG,
+            "Proxy returned LOGIN_REQUIRED for $clientName — its egress IP is being " +
+                "attested against. Bypassing it for ${PROXY_COOLDOWN_MS / 60000}m and going " +
+                "direct over Tor."
+        )
+    }
+
     /** Player endpoint, proxied unless the proxy is currently refusing us. */
     private fun playerEndpoint(): String =
         if (proxyIsCoolingDown()) "https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
@@ -430,6 +452,13 @@ object YouTubeInternalClient {
     // --- NOSLOP_GEO_LOCK_V1 ---
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
+    // --- NOSLOP_EXIT_LOTTERY_V1 ---
+    // Two different InnerTube clients refused from the same circuit is not a
+    // coincidence about those two clients: they are asking from the same
+    // address, so it is the exit that is gated. Asking the remaining three
+    // costs ~40s and cannot succeed.
+    private const val EXIT_BLOCKED_THRESHOLD = 2
+
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
 
@@ -489,33 +518,75 @@ object YouTubeInternalClient {
         return null
     }
 
+    // --- NOSLOP_TOR_SIZE_CEILING_V1 ---
+    // Three relays deep, a 1.8GB progressive file is not a slow download, it
+    // is an impossible one — and accepting it burns the entire resolve budget
+    // finding that out. The 16:09 capture handed ExoPlayer 1806MB, 402MB and
+    // 149MB streams in a row, every one of which sat at bufPos=0 forever.
+    private const val TOR_STREAM_SIZE_CEILING_BYTES = 250L * 1024L * 1024L
+
+    private fun exceedsTorSizeCeiling(obj: JsonObject): Boolean {
+        val contentLength = obj.get("contentLength")?.asString?.toLongOrNull() ?: return false
+        return contentLength > TOR_STREAM_SIZE_CEILING_BYTES
+    }
+
     private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null
+        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
 
-        // 1. Prefer muxed progressive formats (video + audio together)
+        // 1. Progressive formats. These are the ONLY entries in a player
+        //    response that carry video and audio in one stream.
         val formats = streamingData.getAsJsonArray("formats")
         if (formats != null && formats.size() > 0) {
-            val valid = formats.mapNotNull { it.asJsonObject?.let { obj -> extractFormatStreamUrl(obj) } }
+            val valid = formats.mapNotNull { element ->
+                val obj = element.asJsonObject ?: return@mapNotNull null
+                if (isTor && exceedsTorSizeCeiling(obj)) return@mapNotNull null
+                extractFormatStreamUrl(obj)
+            }
             if (valid.isNotEmpty()) {
                 val chosen = when (quality) {
                     "low" -> valid.firstOrNull { it.second == 18 } ?: valid.first()
                     "medium" -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.first()
-                    else -> valid.firstOrNull { it.second == 22 } ?: valid.last()
+                    // Prefer 18 over an arbitrary last entry: it is the small,
+                    // Tor-friendly 360p muxed format that every working capture
+                    // in this project has used.
+                    else -> valid.firstOrNull { it.second == 22 } ?: valid.firstOrNull { it.second == 18 } ?: valid.last()
                 }
                 return chosen.first
             }
         }
 
-        // 2. Fallback to adaptive video-only stream or HLS manifest
+        // 2. HLS. Muxed and adaptive-bitrate, which suits a Tor circuit better
+        //    than any fixed-rate progressive file. media3-exoplayer-hls is on
+        //    the classpath, so this plays natively.
         val hlsUrl = streamingData.get("hlsManifestUrl")?.asString
-        if (!hlsUrl.isNullOrBlank()) return hlsUrl
+        if (!hlsUrl.isNullOrBlank()) {
+            Logger.info(TAG, "Using HLS manifest — muxed and adaptive bitrate")
+            return hlsUrl
+        }
 
+        // 3. --- NOSLOP_MUXED_ONLY_V1 ---
+        //    There used to be an adaptiveFormats branch here returning
+        //    valid.first().first. adaptiveFormats entries are video-only or
+        //    audio-only BY DEFINITION — that is what adaptive streaming means —
+        //    so that line handed ExoPlayer a soundless video track, typically
+        //    the highest-bitrate one in the list, and reported it as a resolved
+        //    stream. It was unreachable and harmless while ANDROID still
+        //    returned progressive formats; the round-5 roster made it reachable
+        //    and it immediately produced itag=299 at 1806MB with no audio.
+        //
+        //    Muxing two streams needs a demuxer we do not have. A client that
+        //    offers neither progressive formats nor HLS has not given us
+        //    anything playable, and the honest answer is to say so and let the
+        //    caller try the next client and then the Invidious/Piped failover,
+        //    which return muxed URLs.
         val adaptiveFormats = streamingData.getAsJsonArray("adaptiveFormats")
         if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-            val valid = adaptiveFormats.mapNotNull { it.asJsonObject?.let { obj -> extractFormatStreamUrl(obj) } }
-            if (valid.isNotEmpty()) {
-                return valid.first().first
-            }
+            Logger.warn(
+                TAG,
+                "Player response offered only adaptiveFormats (${adaptiveFormats.size()} entries) — " +
+                    "video-only/audio-only, not playable without muxing. Treating as unresolved."
+            )
         }
 
         return null
@@ -601,29 +672,33 @@ object YouTubeInternalClient {
         // gate, which that client now sits behind and which we cannot satisfy
         // without running BotGuard/DroidGuard.
         //
-        // Ordered by attestation exposure, least-gated first:
+        // --- NOSLOP_CLIENT_RANKING_V1 ---
+        // Ordered by which clients PRODUCED A PLAYABLE MUXED URL. Round 6 put
+        // IOS first because it returned playabilityStatus OK seven times, and
+        // that was the wrong metric: IOS answers OK and then offers only
+        // adaptiveFormats, which §16.12 correctly refuses, so an IOS "success"
+        // yields nothing playable and costs a round trip. In the 19:11 capture
+        // the clients that actually produced itag 18 were:
         //
-        //   TVHTML5     no PO token required at all. Upstream's standard
-        //               answer to "PO Token required" is to use this client.
-        //   ANDROID_VR  no PO token for format 18 specifically, which is the
-        //               only format we ask for (see extractUrlFromPlayerResponse
-        //               — itag 18/22 progressive). Requires one for everything
-        //               else, so do NOT widen the format preference without
-        //               revisiting this.
-        //   IOS         not behind the gate. buildPlayerPayload has always had
-        //               a branch for it that nothing could reach, because IOS
-        //               was never in this list.
-        //   ANDROID     behind the gate NOW, but it succeeded repeatedly in the
-        //               13:40 capture. Enforcement is a rollout, not a switch,
-        //               so it is demoted rather than removed.
-        //   ..._EMBEDDED_PLAYER  the previous fallback, kept last.
+        //   ANDROID   3 playable URLs
+        //   TVHTML5   1 playable URL
+        //   IOS       0 playable URLs (OK, but adaptiveFormats only)
+        //
+        // So IOS drops to last. Keep it and the others: enforcement is a
+        // rollout rather than a switch, and every one of these has worked at
+        // some point across the last four captures.
+        //
+        // When re-ranking from a fresh capture, count
+        // "Resolved direct video stream using X" — NOT playabilityStatus.
         //
         // These client versions go stale. yt-dlp's youtube extractor is the
         // ground truth — it has a community hitting it daily and patched the
         // August 2026 android_vr break within a day. When video fails wholesale
         // and the network is demonstrably fine, compare this list against
-        // theirs before doing anything else.
+        // theirs before doing anything else. Re-check the ordering against a
+        // fresh capture at the same time: which client answers changes.
         val configs = listOf(
+            InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig(
                 "TVHTML5", "7", "7.20250312.16.00",
                 "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.master.0 (unlike Gecko) Starboard/17"
@@ -636,7 +711,6 @@ object YouTubeInternalClient {
                 "IOS", "5", "20.10.4",
                 "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)"
             ),
-            InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
@@ -649,6 +723,10 @@ object YouTubeInternalClient {
 
         while (attempt < maxAttempts) {
             attempt++
+            // --- NOSLOP_EXIT_LOTTERY_V1 ---
+            // Reset per attempt: after a successful rotation we are on a new
+            // exit and it deserves a clean slate.
+            var refusedThisAttempt = 0
             for (config in configs) {
                 try {
                     val payload = buildPlayerPayload(videoId, config)
@@ -676,8 +754,15 @@ object YouTubeInternalClient {
                     }
 
                     var response = playerClient.newCall(requestBuilder.build()).execute()
+                    // --- NOSLOP_PROXY_ATTESTATION_V1 ---
+                    // requestBuilder is mutable and the branch below repoints it at
+                    // youtube.com. Without this flag the LOGIN_REQUIRED handler further
+                    // down would "retry directly" a request that is already direct, and
+                    // blame the proxy for a refusal the proxy had no part in.
+                    var wentDirectAlready = false
                     if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
                         notePlayerProxyBlocked(response.code)
+                        wentDirectAlready = true
                         val directReqBuilder = requestBuilder
                             .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
                             .removeHeader("X-Proxy-Secret")
@@ -725,8 +810,82 @@ object YouTubeInternalClient {
                                     Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                                 }
                             } else if ((playability == "LOGIN_REQUIRED" || playability == "UNPLAYABLE" || playability == "ERROR") && isTor) {
+                                // --- NOSLOP_PROXY_ATTESTATION_V1 ---
+                                // LOGIN_REQUIRED is the attestation gate, not a blocked
+                                // exit — the wording below is kept only because it is
+                                // what existing log-reading habits search for. When the
+                                // refusal came through the proxy, the single most likely
+                                // fix is to ask the same client again WITHOUT it, since
+                                // the proxy's shared egress is the more flagged address.
+                                if (playability == "LOGIN_REQUIRED" && usingProxy && !wentDirectAlready) {
+                                    notePlayerProxyRefused(config.clientName)
+                                    response.close()
+                                    val retryDirect = requestBuilder
+                                        .url("https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false")
+                                        .removeHeader("X-Proxy-Secret")
+                                        .removeHeader("X-Proxy-Timestamp")
+                                        .removeHeader("X-Proxy-Signature")
+                                        .build()
+                                    val directResponse = playerClient.newCall(retryDirect).execute()
+                                    val directBody = if (directResponse.isSuccessful) directResponse.body?.string() else null
+                                    directResponse.close()
+                                    if (!directBody.isNullOrBlank()) {
+                                        val directRoot = gson.fromJson(directBody, JsonObject::class.java)
+                                        val directStatus =
+                                            directRoot.getAsJsonObject("playabilityStatus")?.get("status")?.asString
+                                        if (directStatus == "OK") {
+                                            val directUrl = extractUrlFromPlayerResponse(directRoot, quality)
+                                            if (directUrl != null) {
+                                                Logger.info(
+                                                    TAG,
+                                                    "Resolved direct video stream using ${config.clientName} " +
+                                                        "for $videoId (direct over Tor, proxy refused)"
+                                                )
+                                                return@withContext directUrl
+                                            }
+                                        }
+                                        Logger.warn(
+                                            TAG,
+                                            "Direct-over-Tor retry for ${config.clientName} also returned " +
+                                                "${directStatus ?: "no status"} — this one is genuinely gated."
+                                        )
+                                    }
+                                    continue
+                                }
                                 Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Tor exit likely blocked.")
                                 response.close()
+
+                                // --- NOSLOP_EXIT_LOTTERY_V1 ---
+                                // The 19:28 capture is bimodal: a resolve either succeeds
+                                // on the first client in a few seconds, or every client is
+                                // refused and it burns the full 60s budget. Nothing in
+                                // between, and no case of a later client rescuing an
+                                // earlier refusal. So once two clients have been refused,
+                                // the remaining ones are a guaranteed ~40s of waste.
+                                //
+                                // A different exit is the only thing that can actually
+                                // help, so try for one; if rotation is refused, stop and
+                                // let the failover have the remaining budget.
+                                if (playability == "LOGIN_REQUIRED") {
+                                    refusedThisAttempt++
+                                    if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
+                                        Logger.warn(
+                                            TAG,
+                                            "$refusedThisAttempt clients refused on the same circuit for " +
+                                                "$videoId — this is the exit being gated, not the clients. " +
+                                                "Skipping the remaining ${configs.size - refusedThisAttempt}."
+                                        )
+                                        val rotatedAway = com.noslop.app.tor.TorService.requestNewCircuit()
+                                        if (rotatedAway) {
+                                            client.connectionPool.evictAll()
+                                            kotlinx.coroutines.delay(2000L)
+                                        } else {
+                                            attempt = maxAttempts
+                                        }
+                                        break
+                                    }
+                                }
+
                                 if (config == configs.last() && attempt < maxAttempts) {
                                     Logger.info(TAG, "All clients failed. Rotating Tor circuit to bypass IP block...")
                                     // --- NOSLOP_ROTATION_AWARE_RETRY_V1 ---

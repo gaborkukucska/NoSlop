@@ -585,8 +585,29 @@ fun VideoPlayer(
         val forceRefresh = retryTrigger > 0
         if (forceRefresh) source = null
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
-        source = resolveSource(url, forceRefresh = forceRefresh, context = context)
-        Logger.info("VIDEO", "Resolved source for $url → ${source?.javaClass?.simpleName}")
+        val resolvedSource = resolveSource(url, forceRefresh = forceRefresh, context = context)
+        source = resolvedSource
+        Logger.info("VIDEO", "Resolved source for $url → ${resolvedSource.javaClass.simpleName}")
+
+        // --- NOSLOP_AUTO_RETRY_UNAVAILABLE_V1 ---
+        // retryTrigger only ever advanced on ExoPlayer *playback* errors, so a
+        // slide that failed to RESOLVE just parked on the Retry button and
+        // waited for a tap. In practice that tap usually works, which means
+        // the app was asking the user to do by hand what it should do itself.
+        //
+        // The reason it works is §16.16: the first resolve lost the exit
+        // lottery, and by the time a human reacts the circuit has moved on.
+        // Waiting ~2.5s reproduces that automatically — long enough for a
+        // sibling resolve's rotation to have landed, short enough that the
+        // slide is usually still on screen.
+        //
+        // Only one automatic attempt. If it fails again the exit is not the
+        // problem and the button is the honest answer.
+        if (resolvedSource is VideoSource.Unavailable && retryTrigger == 0 && activeVisible) {
+            kotlinx.coroutines.delay(2500L)
+            Logger.info("VIDEO", "Auto-retrying unavailable resolve for $url on a fresher circuit")
+            retryTrigger++
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -934,6 +955,11 @@ private fun ExoVideoPlayer(
                 // position we started from.
                 val noBytesEver = bufPos <= baselineBufPos
                 val delta = if (lastBufPos < 0) 0L else bufPos - lastBufPos
+                // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
+                // Bytes are arriving, so a Tor circuit rotation right now would
+                // destroy this stream. TorService uses this to decide between
+                // its 60s protective interval and its 15s idle one.
+                if (delta > 0L) com.noslop.app.tor.TorService.noteMediaProgress()
                 stalledSamples = if (delta <= 0L) stalledSamples + 1 else 0
                 Logger.info(
                     PLAYBACK_DIAG_TAG,

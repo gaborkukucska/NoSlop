@@ -1,5 +1,99 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-08-31) — Video Playback: Nine-Round Debugging Session
+
+Started from "some videos only show a thumbnail" and ended up rewriting most
+of the resolve path. Full detail in
+[TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) §16; this is the index.
+
+### Presentation
+
+* **Failure UI was invisible** (`NOSLOP_FAILURE_VISIBILITY_V1`, §16.1). The
+  poster thumbnail draws at `zIndex(1f)`; the "Video unavailable" card and its
+  Retry button drew at 0. Every failure composed a correct error screen and
+  then painted over it. The reported symptom — "it just shows the thumbnail" —
+  *was* this bug, and it had been masking the others.
+
+### Stream resolution
+
+* **Video-only streams were being handed to ExoPlayer**
+  (`NOSLOP_MUXED_ONLY_V1`, §16.12). The `adaptiveFormats` fallback returned
+  the highest-bitrate track in the list — no audio, up to 1.8GB. Removed;
+  only progressive `formats` and HLS are playable.
+* **InnerTube roster rebuilt** (`NOSLOP_INNERTUBE_CLIENTS_V1`, §16.11) from
+  two clients to five, reordered twice as evidence came in. Rank by
+  `Resolved direct video stream using X`, never by playability status (§16.15).
+* **`signatureTimestamp` was ~1.79 billion** (`NOSLOP_SIGTIMESTAMP_V1`). It is
+  a counter near 20,000, not a unix time. Omitted rather than faked.
+* **Encrypted `signatureCipher` treated as plaintext** (`NOSLOP_CIPHER_SANITY_V1`,
+  §16.2) produced well-formed URLs that 403 on the first byte, and counted as
+  successful resolves.
+* **Geo-locked URLs** (`NOSLOP_GEO_LOCK_V1`, §16.5) deferred behind the failover.
+* **250MB ceiling over Tor** (`NOSLOP_TOR_SIZE_CEILING_V1`, §16.13).
+* **The API proxy is now the thing being refused** (`NOSLOP_PROXY_ATTESTATION_V1`,
+  §16.14). One Cloudflare egress serving all users is a more flagged IP than a
+  fresh Tor exit. `LOGIN_REQUIRED` arrives as HTTP 200, so the proxy could
+  serve refusals forever without being marked bad. A proxied refusal now
+  retries direct — which also relieves the worker's request ceiling.
+
+### Tor
+
+* **Readiness was never verified** (`NOSLOP_BOOTSTRAP_TRUTH_V1`, §16.9). The
+  daemon's `STATUS_ON` broadcast set `READY` and logged "Circuits built";
+  `waitForBootstrap()` short-circuited on that same flag and had never once
+  asked Tor anything. ~40 requests were being dispatched into a
+  still-bootstrapping Tor.
+* **Rotation storms** (§16.4): 18 `NEWNYM`s in 63s, destroying the circuit the
+  visible video was streaming on. Now serialized and rate limited.
+* **Rotation gated on live media, not the clock** (`NOSLOP_ADAPTIVE_ROTATION_V1`,
+  §16.17) — 60s while streaming, 15s when idle.
+* **Rotation results are shared** (`NOSLOP_COOPERATIVE_ROTATION_V1`, §16.18).
+  `requestNewCircuit()` answers "are you on a fresh circuit?", not "did you
+  rotate it?" — concurrent resolves were discarding a sibling's rotation.
+* **The exit lottery** (`NOSLOP_EXIT_LOTTERY_V1`, §16.16). All clients share one
+  exit, so a gated exit refuses all five together. Stop after two refusals.
+
+### Robustness
+
+* **Bounded resolve concurrency** (`NOSLOP_RESOLVE_BUDGET_V1`, §16.8) — permit
+  wait, work budget, and per-call `callTimeout`. An earlier unbounded version
+  of this gate turned per-video timeouts into a four-minute queue.
+* **Fast failure on a dead network** (`NOSLOP_FAST_FAIL_V1`, §16.7). Connect
+  timeout 60s → 20s; the old value was justified as mesh reliability, but
+  `MeshTransport` never used that client.
+* **Stall detector was dead code** (`NOSLOP_STALL_DETECT_V2`) — tested the page
+  URL for `googlevideo` and required `bufPos == 0`, so it never fired on a
+  resumed video.
+* **Resume-position poisoning** (`NOSLOP_RESUME_POISON_V1`, §16.6). Positions
+  were saved from the pending seek target while `duration` was `TIME_UNSET`,
+  so a slide that never loaded re-saved its own failing offset forever.
+* **Auto-retry on unavailable resolve** (`NOSLOP_AUTO_RETRY_UNAVAILABLE_V1`,
+  §16.19). `retryTrigger` only advanced on playback errors, so resolve
+  failures parked on the button.
+* **Preload headroom** restored to 3, matching what its own comment described.
+* **YouTube embed never autoplayed** (`NOSLOP_EMBED_AUTOPLAY_V1`, §16.3) —
+  gated on `window.NoSlop_isVisible`, which nothing ever assigned.
+
+### Known Issues Under Investigation
+
+* Mid-playback stalls on thin connections. Preload bandwidth competing with
+  the visible stream is the first suspect; `MAX_PRELOAD = 3` was raised on the
+  assumption bandwidth was not the constraint, and that should be re-checked.
+* InnerTube client identities are a moving target. Track yt-dlp's extractor
+  and diff the roster when video fails wholesale (§16.11).
+* On-device PO token generation (BotGuard via `androidx.javascriptengine`,
+  which has no network of its own so all HTTP stays on OkHttp over Tor) would
+  end the roster treadmill. Not implemented: a PO token is bound to a session
+  identifier, so reusing one across circuits links them. Needs a deliberate
+  decision, not a default.
+
+### Measurement Caveat
+
+All captures in this session came from a device on a **~0.1 Mbps uplink**.
+Server-side findings — `LOGIN_REQUIRED`, the exit lottery, the format bugs —
+are unaffected by that. Absolute timings are not: treat every duration in §16
+as an upper bound.
+
 ## Completed Changes (2026-08-30) — Privacy & Security Hardening Implementation
 
 ### 1. Authenticated Backup Encryption (`BackupManager.kt`)
