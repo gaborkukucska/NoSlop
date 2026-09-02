@@ -1282,10 +1282,6 @@ as an upper bound.
 
 *   **Creator Search Fix**: Moved the `InvidiousApiClient.searchChannels` network call off the Main Thread to `Dispatchers.IO` to prevent silent `NetworkOnMainThreadException` failures. Capped the appended search results to the top 3 matches as intended.
 *   **SD Card Installation Support**: Added `android:installLocation="auto"` to the AndroidManifest to allow the app to be installed or moved to an external SD card on storage-constrained devices.
-## Pending / Future Work
-*   Add more no-auth image and video sources.
-*   Enhance WebView with ad-blocking or reader mode if possible.
-*   Further optimize preloading for diverse media types.
 
 ## Completed Changes (2026-06-19)
 
@@ -1464,9 +1460,7 @@ is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
     what "Gave up waiting 20s for a resolve slot" was. Under Tor: one slide
     ahead, none behind, 8s head start. Clearnet behaviour unchanged.
 
-**Not yet fixed:** resolve and playback still use whatever circuit is current,
-so a rotation between them costs the resolve. SOCKS stream isolation is the real
-answer — see finding #17 in the audit register.
+
 
 ## Consolidated Master Backlog
 
@@ -1518,3 +1512,9 @@ The following tasks have been aggregated from all historical gap analyses, audit
 *   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
 *   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
 *   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
+*   **13. Video playback over Tor lacks stream isolation.** (Resolve and playback use the current circuit; SOCKS stream isolation is needed per audit finding #17).
+
+### 6. General Enhancements (Legacy Status Log)
+*   Add more no-auth image and video sources.
+*   Enhance WebView with ad-blocking or reader mode if possible.
+*   Further optimize preloading for diverse media types.
