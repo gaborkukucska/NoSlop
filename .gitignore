@@ -76,6 +76,7 @@ local.properties
 *.keystore
 .kotlin/
 *.py
+*.sh
 
 # Captured device logs — never commit these, they contain onion addresses,
 # peer keys and the full process list of the capturing device.
