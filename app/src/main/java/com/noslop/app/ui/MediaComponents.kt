@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -95,7 +96,7 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         }
     }
 
-    Box(modifier = modifier.fillMaxSize().background(Color.Black).clickable { showZoom = true }) {
+    Box(modifier = modifier.fillMaxSize().clipToBounds().background(Color.Black).clickable { showZoom = true }) {
         val safeUrl = sanitizeImageUrl(url)
         val safeFallback = sanitizeImageUrl(fallbackUrl)
         val activeUrl = if (isError && safeFallback != null) safeFallback else safeUrl

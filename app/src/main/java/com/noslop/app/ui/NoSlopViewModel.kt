@@ -794,9 +794,19 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         
         val exclusionIds = currentIds + sessionLoadedIds
         
-        // DEDUPLICATION: Prevent articles/videos with the exact same title from reappearing
-        val readTitles = allFeeds.filter { it.isRead || it.id in cachedViewedIds || it.id in cachedExcludedIds }
+        val readOrHiddenIds = cachedViewedIds + cachedExcludedIds + exclusionIds
+        
+        // DEDUPLICATION: Prevent articles/videos with the exact same title or canonical key from reappearing
+        val readOrHiddenFeeds = allFeeds.filter { it.isRead || it.id in readOrHiddenIds }
+        val readTitles = readOrHiddenFeeds
             .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
+            .toSet()
+        val excludedFeedKeys = readOrHiddenFeeds
+            .map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) }
+            .toSet()
+            
+        val excludedMeshKeys = allMeshes.filter { it.id in readOrHiddenIds }
+            .map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
             .toSet()
 
         val isHistoryOrLiked = actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved"
@@ -805,14 +815,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (isHistoryOrLiked) {
                 it.id !in currentIds
             } else {
-                it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles 
+                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
+                it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles && cKey !in excludedFeedKeys
             }
         }
         var unseenMeshes = allMeshes.filter { 
             if (isHistoryOrLiked) {
                 it.id !in currentIds
             } else {
-                it.id !in exclusionIds 
+                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it))
+                it.id !in exclusionIds && cKey !in excludedMeshKeys
             }
         }
 

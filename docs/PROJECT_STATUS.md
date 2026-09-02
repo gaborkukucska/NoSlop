@@ -1,5 +1,11 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-03) — Feed Deduplication and UI Fixes
+
+* **Feed Duplication (Canonical Item Key Filtering)**: Addressed a bug where the same video could be served multiple times if it was loaded from different sources with different database IDs. The `loadMoreFeedItems` logic in `NoSlopViewModel` now proactively tracks `CanonicalItemKey` across all read, viewed, and excluded items in the session to guarantee identical content is never shown twice.
+* **Fullscreen Video Zooming**: Fixed an issue in `VideoPlayer.kt` where `ExoVideoPlayer` aggressively zoomed in and cropped the video when tilted to landscape mode. It now unconditionally uses `RESIZE_MODE_FIT` to keep the entire video fully visible.
+* **Thumbnail Overlap**: Resolved a UI bleeding issue in `MediaComponents.kt` where the blurred background poster for the upcoming slide lacked a boundary clip and would visually cover adjacent items in the feed. A `.clipToBounds()` modifier was added to clamp the blur inside its container.
+
 ## Completed Changes (2026-09-02) — Codebase Audit, Hardening and Fresh-Install Fixes
 
 Started as an audit of `app/` against its own documented claims, and turned
