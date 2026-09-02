@@ -43,9 +43,8 @@ val PRESET_GROUP_AVATARS = listOf("👥", "🚀", "💬", "🔒", "⚡", "🎨",
 
 fun uriToCompressedBase64(context: Context, uri: Uri): String? {
     return try {
-        val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-        val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream) ?: return null
-        inputStream.close()
+        // NOSLOP_EXIF_ORIENTATION_V1
+        val originalBitmap = com.noslop.app.ui.ExifUtils.decodeOriented(context, uri) ?: return null
 
         val maxDim = 256
         val width = originalBitmap.width

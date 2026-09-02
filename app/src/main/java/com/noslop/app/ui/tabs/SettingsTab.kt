@@ -139,14 +139,14 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             Text("Give Permission".tr, color = TextLight)
                                         }
                                         Button(
-                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = true) },
+                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = true, expectedSha256 = updateInfo!!.expectedSha256) },
                                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
                                         ) {
                                             Text("Just Download APK".tr, color = TextLight)
                                         }
                                     } else {
                                         Button(
-                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = false) },
+                                            onClick = { UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, force = false, expectedSha256 = updateInfo!!.expectedSha256) },
                                             colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed)
                                         ) {
                                             Text("Download Update".tr, color = TextLight)

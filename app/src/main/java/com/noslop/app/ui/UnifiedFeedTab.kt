@@ -595,7 +595,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
                 Button(
                     onClick = {
                         updatePopupDismissed = true
-                        com.noslop.app.util.UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion)
+                        com.noslop.app.util.UpdateManager.startDownload(context, updateInfo!!.downloadUrl, updateInfo!!.latestVersion, expectedSha256 = updateInfo!!.expectedSha256)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                 ) { Text("Start Update".tr, fontWeight = FontWeight.Bold) }

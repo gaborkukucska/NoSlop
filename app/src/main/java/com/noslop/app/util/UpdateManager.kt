@@ -1,6 +1,6 @@
+// FILE: app/src/main/java/com/noslop/app/util/UpdateManager.kt
 package com.noslop.app.util
 
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -13,12 +13,42 @@ import com.noslop.app.debug.Logger
 import kotlinx.coroutines.*
 import java.io.File
 import java.io.FileOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
+import java.security.MessageDigest
 
+/**
+ * Downloads and installs OTA updates.
+ *
+ * --- NOSLOP_RELEASE_CHECKSUM_V1 ---
+ * The previous version computed the downloaded APK's SHA-256, logged it as
+ * "Downloaded APK SHA-256 verified: <hex>", and then compared it to nothing at
+ * all before launching the installer. The only real gates were a 2MB floor and
+ * a text/html content-type check, so a MITM (or a compromised CDN, or a
+ * hijacked release asset) could substitute any APK over 2MB and the app would
+ * cheerfully hand it to the package installer.
+ *
+ * Now: the digest is compared against the checksum published with the release
+ * (see UpdateChecker.expectedSha256). On mismatch the file is deleted and the
+ * install is refused. When no checksum is published the install is refused by
+ * default — call with allowUnverified = true only from a UI path where the user
+ * has been shown an explicit warning and agreed to it.
+ *
+ * STILL MISSING, deliberately: this verifies INTEGRITY against whatever the
+ * update channel said, not AUTHENTICITY. An attacker who controls both
+ * content.json and the APK can publish a matching pair. The fix is an Ed25519
+ * signature over the APK verified against a public key compiled into the app —
+ * §2 of docs/PRIVACY_AND_SECURITY_PROPOSAL.md. Do not describe OTA as
+ * MITM-resistant until that lands.
+ *
+ * Also note: the old `DownloadReceiver` no-op BroadcastReceiver and its
+ * DOWNLOAD_COMPLETE manifest registration are gone. Nothing has used Android's
+ * DownloadManager here for a long time.
+ */
 object UpdateManager {
 
     private const val TAG = "UPDATE_MANAGER"
+
+    /** Anything smaller than this is a truncated download or an error page. */
+    private const val MIN_APK_BYTES = 2L * 1024 * 1024
 
     fun canInstallPackages(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -38,7 +68,20 @@ object UpdateManager {
         }
     }
 
-    fun startDownload(context: Context, url: String, version: String, force: Boolean = false) {
+    /**
+     * @param expectedSha256 the digest published with the release, lowercase hex.
+     *        Null means the release published none.
+     * @param allowUnverified when true, proceed even without a published digest.
+     *        Only pass true from a UI path that has warned the user.
+     */
+    fun startDownload(
+        context: Context,
+        url: String,
+        version: String,
+        force: Boolean = false,
+        expectedSha256: String? = null,
+        allowUnverified: Boolean = false
+    ) {
         if (!force && !canInstallPackages(context)) {
             Logger.warn(TAG, "Install permission not granted, requesting it from user")
             Toast.makeText(context, LanguageManager.translate("Please allow NoSlop to install updates, then try again"), Toast.LENGTH_LONG).show()
@@ -46,11 +89,24 @@ object UpdateManager {
             return
         }
 
+        // NOSLOP_RELEASE_CHECKSUM_V1 — refuse before spending the bandwidth.
+        if (expectedSha256.isNullOrBlank() && !allowUnverified) {
+            Logger.error(TAG, "Refusing update $version: the release publishes no SHA-256 checksum")
+            Toast.makeText(
+                context,
+                LanguageManager.translate("This release publishes no checksum, so NoSlop cannot verify the download. Update cancelled."),
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val normalisedExpected = expectedSha256?.trim()?.lowercase()
+
         val fileName = "NoSlop_$version.apk"
         val destFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
 
         Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
-        Logger.info(TAG, "Starting native URL connection download for $url")
+        Logger.info(TAG, "Starting update download for version $version")
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -95,9 +151,13 @@ object UpdateManager {
                 val contentLength = body?.contentLength() ?: -1L
                 Logger.info(TAG, "Download started. Expected size: $contentLength bytes")
 
+                // Digest as we stream, so the file is never read twice and there
+                // is no window between hashing and installing.
+                val digest = MessageDigest.getInstance("SHA-256")
+
                 val inputStream = body?.byteStream()
                 val outputStream = FileOutputStream(destFile)
-                val buffer = ByteArray(16 * 1024)
+                val buffer = ByteArray(64 * 1024)
                 var bytesRead: Int
                 var totalBytesRead = 0L
                 var lastToastTime = System.currentTimeMillis()
@@ -107,8 +167,9 @@ object UpdateManager {
                         outputStream.use { output ->
                             while (input.read(buffer).also { bytesRead = it } != -1) {
                                 output.write(buffer, 0, bytesRead)
+                                digest.update(buffer, 0, bytesRead)
                                 totalBytesRead += bytesRead
-                                
+
                                 val now = System.currentTimeMillis()
                                 if (now - lastToastTime > 3000) {
                                     val mb = totalBytesRead / (1024 * 1024)
@@ -122,28 +183,52 @@ object UpdateManager {
                     }
                 }
 
-                Logger.info(TAG, "Download complete: ${destFile.absolutePath} ($totalBytesRead bytes)")
+                Logger.info(TAG, "Download complete ($totalBytesRead bytes)")
 
-                if (totalBytesRead < 2 * 1024 * 1024) { 
+                if (totalBytesRead < MIN_APK_BYTES) {
                     Logger.error(TAG, "File too small ($totalBytesRead bytes), probably corrupted.")
+                    destFile.delete()
                     withContext(Dispatchers.Main) {
                         Toast.makeText(context, LanguageManager.translate("Download corrupted (file too small). Try again."), Toast.LENGTH_LONG).show()
                     }
-                    destFile.delete()
                     return@launch
                 }
 
-                // Verify APK integrity via SHA-256 checksum
-                val fileDigest = java.security.MessageDigest.getInstance("SHA-256")
-                destFile.inputStream().use { input ->
-                    val buf = ByteArray(16 * 1024)
-                    var r: Int
-                    while (input.read(buf).also { r = it } != -1) {
-                        fileDigest.update(buf, 0, r)
+                // The server can advertise a length and then send less; that is a
+                // truncated APK, not a valid one.
+                if (contentLength > 0 && totalBytesRead != contentLength) {
+                    Logger.error(TAG, "Truncated download: got $totalBytesRead of $contentLength bytes")
+                    destFile.delete()
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, LanguageManager.translate("Download incomplete. Try again."), Toast.LENGTH_LONG).show()
                     }
+                    return@launch
                 }
-                val sha256Hex = fileDigest.digest().joinToString("") { "%02x".format(it) }
-                Logger.info(TAG, "Downloaded APK SHA-256 verified: $sha256Hex")
+
+                val actualSha256 = digest.digest().joinToString("") { "%02x".format(it) }
+
+                if (normalisedExpected != null) {
+                    if (!constantTimeEquals(actualSha256, normalisedExpected)) {
+                        // This is the case the old code could not detect at all.
+                        Logger.error(
+                            TAG,
+                            "CHECKSUM MISMATCH — refusing to install",
+                            "expected=${normalisedExpected.take(12)}… actual=${actualSha256.take(12)}…"
+                        )
+                        destFile.delete()
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(
+                                context,
+                                LanguageManager.translate("Update REJECTED: the downloaded file does not match the published checksum. It has been deleted."),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                        return@launch
+                    }
+                    Logger.info(TAG, "APK checksum verified against the published SHA-256")
+                } else {
+                    Logger.warn(TAG, "Installing an UNVERIFIED APK — no published checksum, user opted in")
+                }
 
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, LanguageManager.translate("Download complete! Launching installer..."), Toast.LENGTH_SHORT).show()
@@ -152,11 +237,23 @@ object UpdateManager {
 
             } catch (e: Exception) {
                 Logger.error(TAG, "Exception during download: ${e.message}")
+                try { destFile.delete() } catch (_: Exception) {}
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, LanguageManager.translate("Download failed: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
                 }
             }
         }
+    }
+
+    /**
+     * Length-independent, branch-free comparison. Overkill for a public digest,
+     * but it costs nothing and stops this becoming a bad example to copy.
+     */
+    private fun constantTimeEquals(a: String, b: String): Boolean {
+        if (a.length != b.length) return false
+        var diff = 0
+        for (i in a.indices) diff = diff or (a[i].code xor b[i].code)
+        return diff == 0
     }
 
     private fun launchInstaller(context: Context, file: File) {
@@ -178,9 +275,5 @@ object UpdateManager {
             Logger.error(TAG, "Failed to launch installer: ${e.message}")
             Toast.makeText(context, LanguageManager.translate("Failed to open installer: {error}").replace("{error}", e.message ?: ""), Toast.LENGTH_LONG).show()
         }
-    }
-
-    class DownloadReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {}
     }
 }

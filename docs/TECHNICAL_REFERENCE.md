@@ -1056,12 +1056,15 @@ is traceable rather than silently disappearing:
    milestone log is a historical record of what shipped *at the time* and
    isn't being retroactively edited; §4.1 above is the authoritative current
    description.
-4. `docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
+4. ~~`docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
    `TorService.writeTorrc` writes `CookieAuthentication 1`, while
    `registerHiddenService` authenticates with a bare `AUTHENTICATE\r\n` (no
-   cookie) — this combination should still be verified against the running
-   `tor-android` behavior. **Still open** (ANALYSiS.md is archived/historical
-   and not being edited; flagging here is the live tracking mechanism).
+   cookie).~~ **Resolved 2026-09-02** — the torrc did write
+   `CookieAuthentication 0`, and the bare `AUTHENTICATE` matched it, which is
+   why control worked and why any app on the device could also use it. All
+   control access now goes through `TorControlChannel`; see §17.1. Empty
+   authentication is retained deliberately, with socket file permissions as the
+   access control.
 5. ~~`docs/BUILD.md` states `minSdk = 26`; `app/build.gradle.kts` sets
    `minSdk = 24`.~~ **Fixed** — BUILD.md now states 24.
 6. ~~`docs/PACKET_SCHEMA.md`'s `POST` field table omits
@@ -1070,9 +1073,12 @@ is traceable rather than silently disappearing:
 7. README's "Implemented" callout under Clearnet-to-Mesh Broadcasts now
    correctly states that the `REACTION`/anchor-ID pipeline is live — this
    item, previously flagged as the README being out of date, **is fixed**.
-8. The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version mismatch
-   noted in §12 is **still real** — not a doc error, an actual dependency
-   skew worth aligning at some point.
+8. ~~The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version
+   mismatch noted in §12.~~ **Fixed 2026-09-02** — the catalog is aligned on
+   4.12.0 and `okhttp-dnsoverhttps` is declared there rather than hardcoded.
+9. The `mvp/` tree is not in `settings.gradle.kts` and does not build. README
+   previously called it the canonical codebase; that claim is corrected, but
+   the directory is still 2.8MB of dead weight in the repo. **Open.**
 9. ~~This document's §2 package-layout table and architecture diagram listed
    `NoSlopDatabase.kt` as Room "version 16" / "version 20" in two places,
    while §10 and the header correctly said v5.~~ **Fixed** — both now read
@@ -1678,6 +1684,179 @@ diagnoses do not depend on that — a gated exit refuses you identically on
 fibre — but treat the durations as an upper bound, and be sceptical of any
 conclusion that rests on absolute latency rather than on a ratio or a
 pattern.
+
+## 17. Audit and Hardening Pass (2026-09-02)
+
+Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
+detail; the status doc is the summary.
+
+### 17.1 Tor control interface — `NOSLOP_CONTROL_SOCKET_V1` / `_V2`
+
+`writeTorrc` used to emit `ControlPort 9051` with `CookieAuthentication 0`, and
+every control operation connected to `127.0.0.1:9051` with a bare
+`AUTHENTICATE`. On Android, loopback is shared between all installed apps. Any
+app holding `INTERNET` could therefore drive our Tor daemon.
+
+Cookie authentication was considered and rejected. It is a global tor setting,
+and `org.torproject.jni.TorService` maintains its own control connection that
+authenticates with empty credentials; enabling it would very likely break the
+library's connection and with it the `STATUS_ON` broadcast, so Tor would never
+report READY. Trading a local attack surface for a non-booting app is a bad
+trade.
+
+`TorControlChannel` instead centralises every control operation and offers
+three modes:
+
+| Mode | torrc | Behaviour |
+|---|---|---|
+| `UNIX_ONLY` | `ControlSocket` only | Destination. File permissions on the app's private `filesDir` are the access control; no TCP port exists to attack. |
+| `AUTO` | both | **Current.** Prefers the socket, falls back to TCP, logs which won plus a directory dump on failure. Leaves 9051 open — diagnostic, not a destination. |
+| `TCP_ONLY` | `ControlPort` only | Exact pre-change behaviour, for isolating a startup failure. |
+
+The first cut shipped `UNIX_ONLY` and the socket never appeared. tor-android
+writes nothing to logcat, so the failure was invisible: no bootstrap-phase
+lines, no hidden service, nine `NEWNYM: control channel unavailable` warnings,
+and circuit rotation entirely inert. `AUTO` exists to answer, on the next run,
+whether tor refuses the directory, places the socket elsewhere, or ignores our
+torrc at all — the last being plausible given `ControlPort 9051` may have been
+tor-android's default rather than ours.
+
+Note `start()` returns early on `Tor already in state READY`, so `writeTorrc`
+is skipped on a warm start. A torrc change needs a genuine tor restart to take
+effect.
+
+### 17.2 TLS trust — `NOSLOP_TLS_TRUST_V1`
+
+`base-config` permitted cleartext for every domain and trusted user
+certificates. System anchors only now, cleartext scoped to `.onion` and
+loopback. Android's network security config matches hostnames and has no CIDR
+syntax, so "any RFC1918 address" is inexpressible — the LAN Hub fast path is
+consequently blocked and `invokeHubApi` falls back to the Hub's `.onion`. A
+commented block pins one known LAN address if the fast path is wanted back.
+Debug TLS interception belongs in a `app/src/debug/res/xml/` overlay, not here.
+
+### 17.3 Release verification — `NOSLOP_RELEASE_CHECKSUM_V1`
+
+The digest is computed while streaming, so the file is never read twice and
+there is no window between hashing and installing. Compared in constant time
+against the published checksum; the file is deleted on mismatch, on truncation
+against `Content-Length`, and on a `text/html` response. With no published
+checksum the install is refused unless `allowUnverified = true` is passed from
+a UI path that has warned the user.
+
+`UpdateChecker` resolves the expected digest from, in order: `hero.apkSha256`
+in `content.json`, a `.sha256` release asset, a bare 64-hex in the release
+notes, then a sibling `<apk-url>.sha256`.
+
+This is integrity against whatever the update channel said, not authenticity.
+See "Still open" item 2.
+
+### 17.4 Media proxy — `NOSLOP_PROXY_TOKEN_V1`
+
+Per-process token on `/stream`, compared in constant time; an untokenised
+request gets 404 rather than 401 so a probing app cannot confirm what the port
+is. The `onion=` parameter must match a well-formed v3 address. The token
+rotates per process, so in-progress mesh streams do not survive an app restart
+in Coil's cache; fully downloaded media is served from `file://` and is
+unaffected.
+
+### 17.5 Mesh framing — `NOSLOP_FRAME_CAP_V1`
+
+Manual newline framing with a 4MB ceiling, generous enough for the largest
+`MEDIA_CHUNK` and small enough that a peer cannot buffer the heap away.
+Connections exceeding it are dropped. The parse-failure branch logs the frame
+length rather than the frame.
+
+### 17.6 Proxy credentials — `NOSLOP_PROXY_SECRET_V1`
+
+`PROXY_URL`, `PROXY_SECRET` and `PROXY_SEND_LEGACY_SECRET` are BuildConfig
+fields sourced from Gradle properties, so the shipped secret is no longer in
+the public repo and rotation is a property change. The Worker accepts either
+the legacy header or a valid HMAC during rollout, and reports which via
+`X-Proxy-Auth`. Reddit and Jamendo sign the full proxied URL; YouTube signs the
+JSON body — the Worker reconstructs both candidates because changing what the
+client signs would break every installed copy at once.
+
+### 17.7 Identity fallback — `NOSLOP_UNLOCK_FALLBACK_V1`
+
+`unlock()` now reads through `secureFallbackRead` and normalises whitespace and
+case before comparing. Burnable private keys go through `secureFallbackWrite`.
+`clearAll()` removes the Room mirror as its docstring always claimed.
+
+### 17.8 Backup — `NOSLOP_BACKUP_STREAMING_V1`
+
+Both directions stream through a 64KB buffer. GCM `update()` emits plaintext
+that is not yet authenticated, so the decrypted archive is written to a temp
+file and unzipped only after `doFinal()` returns without throwing; a tampered
+archive is deleted before a single entry is read. Zip entry names are validated
+as plain file names and every destination is confirmed inside its intended
+parent by canonical path. The plaintext temp archive is deleted in a `finally`,
+success or failure.
+
+`preferences.xml` in the archive is sealed by a non-exportable Keystore key.
+`canOpenRestoredIdentity()` probes it after a restore and sets
+`lastRestoreNeedsIdentityRecovery` — see "Still open" item 3.
+
+### 17.9 Player IP lock — `NOSLOP_PLAYER_IP_LOCK_V1`
+
+`playerEndpoint()` is unconditionally direct. Confirm with `PLAYBACK_DIAG
+resolved DIRECT` lines: `signedFor=` should always be a Tor exit, never
+`104.23.x` or `172.71.x`. The Worker's player-response cache is now cold; if
+player calls are ever routed back through it, remove that cache first, because
+it stores URLs locked to Cloudflare's egress.
+
+### 17.10 Bootstrap bail-out — `NOSLOP_BOOTSTRAP_BAILOUT_V1`
+
+If no control connection has succeeded within 20 polls, `waitForBootstrap`
+returns false immediately so the caller's end-to-end routing check runs. Worth
+keeping independently of §17.1: an unreachable control interface is knowable in
+seconds, and the fallback needs to run while the current bootstrap attempt is
+still alive.
+
+### 17.11 Category picker — `NOSLOP_MUSIC_SELECTABLE_V1`
+
+`hiddenFromPicker` (plumbing categories) is now separate from
+`alwaysIncludedCategories` (always fetched). `Music` is both always fetched and
+a real user choice; filtering the picker by the latter removed it from the UI
+and made `Step6Genres`' `interests.contains("Music")` permanently false.
+
+### 17.12 Content Mix layout — `NOSLOP_CONTENT_MIX_SCROLL_V1`
+
+`FeedMixSettingsSection` is a bare composable emitting siblings with no
+container, and requires a scrolling column from its caller.
+`ContentPreferencesScreen` supplies one; `Step8FeedMix` supplied a `Box`, which
+stacked the header over the card and, being height-constrained without a
+scroll, collapsed the lower sliders to zero height.
+
+### 17.13 EXIF orientation — `NOSLOP_EXIF_ORIENTATION_V1`
+
+`ui/ExifUtils.kt` decodes with the orientation applied and exposes
+`needsRotation()` so small photos that carry a rotation are re-encoded too.
+Rotation is baked into pixels rather than preserved as a tag, because the
+receive path mixes Coil and raw `BitmapFactory` and peers may run a different
+build. Applied at `ChatThreadScreen`, `GroupChatThreadScreen`, `AvatarCropper`
+and `GroupSettingsModal`.
+
+CameraX still has no `setTargetRotation()`; the decode-side fix covers both
+camera and gallery sources, so it was left alone deliberately.
+
+### 17.14 Comment media — `NOSLOP_COMMENT_MEDIA_RERESOLVE_V1`
+
+`isDownloaded` is now a `remember` key on the resolved URL, so it re-resolves
+from proxy URL to `file://` at the moment the file becomes usable. The
+`AsyncImage` also gets a GIF-capable `ImageLoader`, matching the one
+`ChatThreadScreen` already builds for DM GIFs.
+
+### 17.15 Logging — `NOSLOP_LOG_HYGIENE_V1`
+
+Rotates at 4MB keeping one generation, so worst-case disk use is bounded at
+~8MB. Release drops DEBUG. Writes are serialised on a single daemon thread —
+the previous implementation launched a coroutine per line onto the
+multi-threaded IO dispatcher and called `File.appendText()`, opening and
+closing the file per line with no ordering guarantee. Scrubbing covers long
+Base64 blobs and 64-hex digests in addition to onion addresses.
+
+Note the log export surfaces only the active file, not the rotated `.log.1`.
 
 ---
 

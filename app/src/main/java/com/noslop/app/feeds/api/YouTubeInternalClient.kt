@@ -23,8 +23,8 @@ object YouTubeInternalClient {
 
     /** NOSLOP_FEED_RECENCY_V1 — sentinel: the source gave us no usable date. */
     const val UNKNOWN_PUBLISH_DATE = 0L
-    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev"
-    private const val PROXY_SECRET = "NoSlopRocks2026"
+    private val PROXY_URL = com.noslop.app.BuildConfig.PROXY_URL
+    private val PROXY_SECRET = com.noslop.app.BuildConfig.PROXY_SECRET
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
 
     // --- NOSLOP_YT_COLDSTART_V1 ---
@@ -62,10 +62,30 @@ object YouTubeInternalClient {
         )
     }
 
-    /** Player endpoint, proxied unless the proxy is currently refusing us. */
+    /**
+     * Player endpoint. ALWAYS direct, never through the API proxy.
+     *
+     * --- NOSLOP_PLAYER_IP_LOCK_V1 ---
+     * A googlevideo URL carries `&ip=<address>` and is served only to that
+     * address. Resolving through the Cloudflare Worker means YouTube issues the
+     * URL to the Worker's egress; the bytes are then fetched over a Tor exit,
+     * and googlevideo refuses. It refuses SILENTLY — the stream simply never
+     * starts arriving, which surfaces as a video stuck on its thumbnail rather
+     * than as an error anywhere.
+     *
+     * Measured in the 19:19 capture: every URL with signedFor=104.23.x /
+     * 172.71.x (Cloudflare) stalled at bufPos=0; the one with
+     * signedFor=178.20.55.16 (a Tor exit) played.
+     *
+     * HttpClientProvider states the invariant directly — resolution and media
+     * share one client so the ip= lock is issued to, and used by, the same exit.
+     * Proxying /player is the one thing that breaks it.
+     *
+     * Search and metadata still go through the proxy: those responses contain no
+     * IP-locked URLs, so the proxy's shared egress costs nothing there.
+     */
     private fun playerEndpoint(): String =
-        if (proxyIsCoolingDown()) "https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
-        else "$PROXY_URL/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
+        "https://www.youtube.com/youtubei/v1/player?key=$API_KEY&prettyPrint=false"
     
     private const val CLIENT_NAME = "WEB"
     private const val CLIENT_VERSION = "2.20240717.01.00"
@@ -115,7 +135,13 @@ object YouTubeInternalClient {
             hash.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) { "" }
 
-        builder.header("X-Proxy-Secret", PROXY_SECRET)
+        // NOSLOP_PROXY_SECRET_V1 — sending the HMAC key in cleartext beside the
+        // signature made the signature pointless. Kept behind a flag only so the
+        // client and the Worker can be rolled forward independently; set
+        // NOSLOP_PROXY_LEGACY_SECRET=false once the Worker verifies the HMAC.
+        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
+            builder.header("X-Proxy-Secret", PROXY_SECRET)
+        }
         builder.header("X-Proxy-Timestamp", timestamp)
         builder.header("X-Proxy-Signature", hmacSig)
     }
@@ -733,7 +759,11 @@ object YouTubeInternalClient {
                     val payloadStr = payload.toString()
                     val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
-                    val usingProxy = !proxyIsCoolingDown()
+                    // NOSLOP_PLAYER_IP_LOCK_V1 — player calls no longer go through the
+                    // proxy at all, so the proxy-refusal retry paths below are dead for
+                    // this endpoint. Left in place rather than deleted: they are the
+                    // right behaviour if a player call is ever proxied again.
+                    val usingProxy = false
                     val requestBuilder = Request.Builder()
                         .url(playerEndpoint())
                         .header("Content-Type", "application/json")

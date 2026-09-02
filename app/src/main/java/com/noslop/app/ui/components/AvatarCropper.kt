@@ -60,8 +60,11 @@ fun AvatarCropper(
     LaunchedEffect(uri) {
         withContext(Dispatchers.IO) {
             try {
-                context.contentResolver.openInputStream(uri)?.use {
-                    val original = BitmapFactory.decodeStream(it)
+                run {
+                    // NOSLOP_EXIF_ORIENTATION_V1 — decodeStream() drops the EXIF
+                    // rotation, which is why profile pictures came out sideways.
+                    val original = com.noslop.app.ui.ExifUtils.decodeOriented(context, uri)
+                        ?: return@withContext
                     val maxDim = 1024
                     if (original.width > maxDim || original.height > maxDim) {
                         val ratio = maxDim.toFloat() / max(original.width, original.height)

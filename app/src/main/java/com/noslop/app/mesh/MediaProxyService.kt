@@ -13,6 +13,35 @@ object MediaProxyService {
     private const val TAG = "MEDIA_PROXY"
     private val LOCAL_PORT = com.noslop.app.BuildConfig.MEDIA_PROXY_PORT
 
+    // --- NOSLOP_PROXY_TOKEN_V1 ---
+    // This HTTP server binds 127.0.0.1, which on Android is reachable by every
+    // other installed app, not just us. Without a token any app could enumerate
+    // /stream?id=... to pull cached mesh media off the device, and could pass an
+    // arbitrary `onion` value to make NoSlop fetch from a host of its choosing
+    // over the user's Tor circuits.
+    //
+    // The token is generated once per process and only ever appears in URLs we
+    // hand to our own ExoPlayer/Coil instances, so it never leaves the app.
+    // Regenerating on every start also invalidates any URL that leaked into a
+    // previous session's logs.
+    private val SESSION_TOKEN: String by lazy {
+        val bytes = ByteArray(16)
+        java.security.SecureRandom().nextBytes(bytes)
+        bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    /** A well-formed Tor v3 address, and nothing else, may be used as a fetch target. */
+    private val ONION_REGEX = Regex("^[a-z2-7]{56}\\.onion$")
+
+    private fun tokenMatches(supplied: String?): Boolean {
+        if (supplied == null) return false
+        val expected = SESSION_TOKEN
+        if (supplied.length != expected.length) return false
+        var diff = 0
+        for (i in expected.indices) diff = diff or (supplied[i].code xor expected[i].code)
+        return diff == 0
+    }
+
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var serverSocket: ServerSocket? = null
     var isRunning = false
@@ -46,7 +75,7 @@ object MediaProxyService {
     }
 
     fun buildProxyUrl(onionAddress: String, mediaId: String): String {
-        return "http://127.0.0.1:$LOCAL_PORT/stream?onion=$onionAddress&id=$mediaId"
+        return "http://127.0.0.1:$LOCAL_PORT/stream?onion=$onionAddress&id=$mediaId&t=$SESSION_TOKEN"
     }
 
     private suspend fun handleHttpRequest(clientSocket: Socket) = withContext(Dispatchers.IO) {
@@ -77,18 +106,36 @@ object MediaProxyService {
             val queryParams = path.substringAfter("?").split("&")
             var targetOnion: String? = null
             var mediaId = ""
+            var token: String? = null
             for (param in queryParams) {
                 val kv = param.split("=")
                 if (kv.size == 2) {
                     when (kv[0]) {
                         "onion" -> if (kv[1].isNotEmpty() && kv[1] != "null") targetOnion = kv[1]
                         "id" -> mediaId = kv[1]
+                        "t" -> token = kv[1]
                     }
                 }
             }
 
+            // NOSLOP_PROXY_TOKEN_V1 — reject anything that did not come from a URL
+            // we generated. Answer 404 rather than 401 so a probing app cannot use
+            // the response to confirm what this port is.
+            if (!tokenMatches(token)) {
+                Logger.warn(TAG, "Rejected an untokenised request on the media proxy — another app on the device may be probing this port")
+                sendHttpError(output, 404, "Not Found")
+                return@withContext
+            }
+
             if (mediaId.isEmpty()) {
                 sendHttpError(output, 400, "Missing media id parameter")
+                return@withContext
+            }
+
+            // Never let a caller-supplied value become an arbitrary fetch target.
+            if (targetOnion != null && !ONION_REGEX.matches(targetOnion)) {
+                Logger.warn(TAG, "Rejected a malformed onion parameter on the media proxy")
+                sendHttpError(output, 400, "Bad onion parameter")
                 return@withContext
             }
 

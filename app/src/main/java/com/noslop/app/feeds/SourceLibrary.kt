@@ -18,6 +18,17 @@ object SourceLibrary {
      */
     val alwaysIncludedCategories = listOf("Video Platforms", "Social Clearnet", "Music")
 
+    /**
+     * NOSLOP_MUSIC_SELECTABLE_V1
+     * Categories hidden from the onboarding picker because they are pipeline
+     * plumbing rather than a taste. This is deliberately NOT the same list as
+     * [alwaysIncludedCategories]: "Music" is always fetched AND is a real user
+     * choice. Filtering the picker by alwaysIncludedCategories removed Music
+     * from the category page, which in turn made Step6's `interests.contains
+     * ("Music")` permanently false and hid the Music Genres selector entirely.
+     */
+    val hiddenFromPicker = listOf("Video Platforms", "Social Clearnet")
+
     /** Full internal category list — used by the pipeline / recovery logic. */
     val categories = listOf(
         "Technology",
@@ -39,7 +50,7 @@ object SourceLibrary {
     )
 
     /** Categories shown to the user for selection (excludes always-included source categories). */
-    val selectableCategories = categories.filter { it !in alwaysIncludedCategories }
+    val selectableCategories = categories.filter { it !in hiddenFromPicker }
 
     val sources = listOf(
         // Technology

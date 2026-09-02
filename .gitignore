@@ -75,6 +75,7 @@ test_parse/
 local.properties
 *.keystore
 .kotlin/
+*.py
 
 # Captured device logs — never commit these, they contain onion addresses,
 # peer keys and the full process list of the capturing device.

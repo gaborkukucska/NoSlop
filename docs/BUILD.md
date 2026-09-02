@@ -16,14 +16,31 @@ To build and run NoSlop locally, ensure your development environment has the fol
 *   **Gradle**: Configured dynamically. The project uses Gradle Kotlin DSL (`build.gradle.kts` configuration).
 *   **Embedded Tor Daemon**: NoSlop includes a fully native, embedded Tor daemon (`tor-android`). No separate Orbot app or external VPN is required to connect to the mesh network.
 
+### Release signing (optional)
+
+`assembleDebug` and `test` need nothing extra. To produce a *signed* release
+build, put these four properties in `~/.gradle/gradle.properties` (not in the
+repo — `local.properties` and `*.keystore` are gitignored):
+
+```properties
+NOSLOP_STORE_FILE=/absolute/path/to/noslop-release.keystore
+NOSLOP_STORE_PASSWORD=...
+NOSLOP_KEY_ALIAS=noslop
+NOSLOP_KEY_PASSWORD=...
+```
+
+If any of the four are missing, the release signing config is skipped and
+`assembleRelease` produces an unsigned APK. It no longer fails configuration,
+so a fresh clone builds and tests without a keystore.
+
 ---
 
 ## 2. Clone and Installation
 
 1.  **Clone the Repository**:
     ```bash
-    git clone https://github.com/your-username/noslop-android.git
-    cd noslop-android
+    git clone https://github.com/gaborkukucska/NoSlop.git
+    cd NoSlop
     ```
 
 2.  **Open in Android Studio**:

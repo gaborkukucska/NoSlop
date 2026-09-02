@@ -1,14 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    NOSLOP_TLS_TRUST_V1
+
+    The previous version of this file did two things that undercut the whole
+    privacy argument:
+
+      1. base-config set cleartextTrafficPermitted="true" for EVERY domain, so
+         any plain-HTTP URL that reached the app was fetched without complaint.
+      2. base-config trusted <certificates src="user" />, meaning any CA the
+         user (or an MDM profile, or malware with the right prompt) had
+         installed could transparently MITM every TLS connection NoSlop makes —
+         feeds, the update check, the API proxy, all of it.
+
+    Now: system trust anchors only, TLS required everywhere, and cleartext
+    permitted ONLY where it is both necessary and safe — Tor hidden services
+    (already authenticated and encrypted at the rendezvous layer, and no public
+    CA issues certificates for .onion names) and loopback (the local media proxy
+    and mesh listener, which never leave the device).
+
+    KNOWN TRADE-OFF — LAN HUB:
+    NoSlop talks to a Hub on the local network over plain HTTP at
+    http://<lan-ip>:8080. Android's network security config matches hostnames
+    only; it has no CIDR syntax, so there is no way to express "any RFC1918
+    address" here. With this config that LAN request now fails and
+    NoSlopRepository.invokeHubApi() falls back to the Hub's .onion route —
+    correct, but slower. HubSetupScreen and QR link-by-IP will report the Hub
+    as unreachable.
+
+    If you want the LAN fast path back, uncomment the block at the bottom and
+    put your Hub's actual LAN address in it. That is a deliberate, scoped
+    exception for one known host rather than a blanket permit for every domain.
+
+    To intercept TLS with a proxy such as mitmproxy while debugging, add a
+    debug-only overlay at app/src/debug/res/xml/network_security_config.xml
+    that re-enables user CAs. Do not re-enable them here.
+-->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
-            <certificates src="user" />
         </trust-anchors>
     </base-config>
+
+    <!-- Tor hidden services and loopback: cleartext by design. -->
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="true">onion</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
         <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
     </domain-config>
+
+    <!--
+    Optional LAN Hub fast path. Uncomment and replace with your Hub's address.
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.1.42</domain>
+    </domain-config>
+    -->
+
 </network-security-config>

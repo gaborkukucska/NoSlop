@@ -174,28 +174,17 @@ object TorService {
 
     private suspend fun doRequestNewCircuit(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
-            val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
-            controlSocket.soTimeout = 5000
-            val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
-
-            writer.print("AUTHENTICATE\r\n")
-            writer.flush()
-            val authResp = reader.readLine()
-            if (authResp == null || !authResp.startsWith("250")) {
-                Logger.warn(TAG, "NEWNYM auth failed: $authResp")
-                controlSocket.close()
+            val channel = TorControlChannel.open() ?: run {
+                Logger.warn(TAG, "NEWNYM: control channel unavailable")
                 return@withContext false
             }
-
-            writer.print("SIGNAL NEWNYM\r\n")
-            writer.flush()
-            val resp = reader.readLine()
-            controlSocket.close()
-
-            val ok = resp != null && resp.startsWith("250")
-            Logger.info(TAG, "SIGNAL NEWNYM -> $resp")
-            ok
+            channel.use { ch ->
+                ch.send("SIGNAL NEWNYM")
+                val resp = ch.readLine()
+                val ok = resp != null && resp.startsWith("250")
+                Logger.info(TAG, "SIGNAL NEWNYM -> $resp")
+                ok
+            }
         } catch (e: Exception) {
             Logger.warn(TAG, "requestNewCircuit failed: ${e.message}")
             false
@@ -482,28 +471,18 @@ object TorService {
     private suspend fun unregisterHiddenService(serviceId: String) = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Unregistering hidden service $serviceId...")
         try {
-            val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
-            val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
-            val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
-
-            writer.print("AUTHENTICATE\r\n")
-            writer.flush()
-            val authResp = reader.readLine()
-            if (authResp == null || !authResp.startsWith("250")) {
-                controlSocket.close()
+            val channel = TorControlChannel.open() ?: run {
+                Logger.warn(TAG, "Control channel unavailable — cannot unregister $serviceId")
                 return@withContext
             }
-
-            val cmd = "DEL_ONION $serviceId"
-            writer.print("$cmd\r\n")
-            writer.flush()
-            
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                Logger.debug(TAG, "DEL_ONION response: $line")
-                if (line!!.startsWith("250 ") || line!!.startsWith("5")) break
+            channel.use { ch ->
+                ch.send("DEL_ONION $serviceId")
+                var line: String?
+                while (ch.readLine().also { line = it } != null) {
+                    Logger.debug(TAG, "DEL_ONION response: $line")
+                    if (line!!.startsWith("250 ") || line!!.startsWith("5")) break
+                }
             }
-            controlSocket.close()
             Logger.info(TAG, "Successfully unregistered hidden service $serviceId")
         } catch (e: Exception) {
             Logger.error(TAG, "Failed to unregister hidden service $serviceId: ${e.message}")
@@ -523,16 +502,33 @@ object TorService {
     }
 
     /**
-     * Write a custom torrc to enable ControlPort 9051.
-     * Required for ephemeral hidden service registration via jtorctl.
+     * Write a custom torrc exposing a control interface for ephemeral hidden
+     * service registration.
+     *
+     * --- NOSLOP_CONTROL_SOCKET_V1 ---
+     * This used to emit `ControlPort 9051` with `CookieAuthentication 0`, which
+     * handed an unauthenticated Tor control connection to any other app on the
+     * device — loopback is not app-private on Android. The control interface is
+     * now a unix socket inside our own filesDir, protected by file permissions.
+     * See TorControlChannel for the full reasoning and the rollback switch.
      */
     private fun writeTorrc(context: Context) {
         try {
+            TorControlChannel.configure(context)
+
             val torrcFile = org.torproject.jni.TorService.getTorrc(context)
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
-            
-            val content = "SocksPort $SOCKS_PORT\nControlPort ${Constants.TOR_CONTROL_PORT}\nCookieAuthentication 0\n"
+
+            val content = buildString {
+                append("SocksPort $SOCKS_PORT\n")
+                append(TorControlChannel.torrcLines())
+                // Left at 0 deliberately: tor-android's own control connection
+                // authenticates with empty credentials, and enabling cookie auth
+                // globally would break it. Access control is the socket's file
+                // permissions, not a cookie.
+                append("CookieAuthentication 0\n")
+            }
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
         } catch (e: Exception) {
@@ -605,19 +601,10 @@ object TorService {
             var lastLogged: String? = null
             for (attempt in 1..timeoutSeconds) {
                 try {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 1000)
-                        socket.soTimeout = 1500
-                        val writer = java.io.PrintWriter(socket.getOutputStream(), true)
-                        val reader = java.io.BufferedReader(java.io.InputStreamReader(socket.getInputStream()))
-
-                        writer.print("AUTHENTICATE\r\n")
-                        writer.flush()
-                        val auth = reader.readLine()
-                        if (auth != null && auth.startsWith("250")) {
-                            writer.print("GETINFO status/bootstrap-phase\r\n")
-                            writer.flush()
-                            val line = reader.readLine()
+                    TorControlChannel.open(connectTimeoutMs = 1000, readTimeoutMs = 1500)?.use { ch ->
+                        run {
+                            ch.send("GETINFO status/bootstrap-phase")
+                            val line = ch.readLine()
                             if (line != null) {
                                 lastBootstrapPhase = line
                                 // Report progress as it moves, not every second.
@@ -640,12 +627,31 @@ object TorService {
                         Logger.debug(TAG, "Bootstrap poll could not reach the control port: ${e.message}")
                     }
                 }
+
+                // --- NOSLOP_BOOTSTRAP_BAILOUT_V1 ---
+                // If the control interface has not answered once in the first 20
+                // seconds, it is not going to. Polling the remaining 100s buys
+                // nothing and actively hurts: the caller's real-routing fallback,
+                // which CAN promote the state to READY, only runs after this
+                // returns — and in the captured log something restarted Tor every
+                // ~20s, so the 120s never elapsed and the fallback never got a
+                // turn. The app sat in PROXY_READY refusing every request while
+                // Tor was in fact working perfectly.
+                if (attempt >= 20 && !TorControlChannel.hasEverOpened()) {
+                    Logger.warn(
+                        TAG,
+                        "Control interface never answered in ${attempt}s — abandoning bootstrap polling",
+                        "falling back to an end-to-end routing check"
+                    )
+                    return@withContext false
+                }
+
                 delay(1000)
             }
             Logger.warn(
                 TAG,
                 "Tor did not reach 100% bootstrap within ${timeoutSeconds}s. " +
-                    "Last phase: ${lastBootstrapPhase ?: "control port never answered"}"
+                    "Last phase: ${lastBootstrapPhase ?: "control interface never answered"}"
             )
             false
         }
@@ -656,15 +662,14 @@ object TorService {
     private suspend fun waitForControlPort(timeoutSeconds: Int = 10): Boolean =
         withContext(Dispatchers.IO) {
             for (attempt in 1..timeoutSeconds) {
-                try {
-                    Socket().use { socket ->
-                        socket.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 500)
-                        return@withContext true
-                    }
-                } catch (e: Exception) {
-                    delay(1000)
+                val ch = TorControlChannel.open(connectTimeoutMs = 500, readTimeoutMs = 1500)
+                if (ch != null) {
+                    ch.close()
+                    return@withContext true
                 }
+                delay(1000)
             }
+            Logger.warn(TAG, "Control interface did not become available within ${timeoutSeconds}s")
             false
         }
 
@@ -757,20 +762,14 @@ object TorService {
                 // Wait for control port to be ready
                 waitForControlPort(timeoutSeconds = 10)
 
-                val controlSocket = Socket(PROXY_HOST, Constants.TOR_CONTROL_PORT)
-                val writer = java.io.PrintWriter(controlSocket.getOutputStream(), true)
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(controlSocket.getInputStream()))
-
-                // Authenticate (CookieAuthentication 0 means empty password)
-                writer.print("AUTHENTICATE\r\n")
-                writer.flush()
-                val authResp = reader.readLine()
-                Logger.info(TAG, "Control AUTHENTICATE response: $authResp")
-                if (authResp == null || !authResp.startsWith("250")) {
-                    Logger.error(TAG, "Control port authentication failed: $authResp")
-                    controlSocket.close()
+                // ADD_ONION can take a while on a slow device, so this channel gets
+                // a longer read timeout than the short-lived control commands.
+                val channel = TorControlChannel.open(readTimeoutMs = 15000) ?: run {
+                    Logger.error(TAG, "Control channel unavailable — hidden service not registered")
                     return@withContext
                 }
+                val writer = channel.writer
+                val reader = channel.reader
 
                 // Build key parameter
                 val keyParam = if (privateKeyB64 != null) {
@@ -833,7 +832,7 @@ object TorService {
                     Logger.error(TAG, "ADD_ONION response missing ServiceID. Raw response: $responseLines")
                 }
 
-                controlSocket.close()
+                channel.close()
             } catch (e: Exception) {
                 Logger.error(TAG, "Hidden service registration failed: ${e.message}")
             }

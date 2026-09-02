@@ -419,14 +419,23 @@ fun CommentItem(
         // ─── Structured Media Rendering (GIFs / Images) ───
         if (comment.mediaId != null && authorOnion != null) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val resolvedMediaUrl = remember(comment.mediaId, authorOnion) {
-                resolveMediaUrl("noslop://$authorOnion/${comment.mediaId}", context)
-            }
-            
+
             val mediaType = comment.mediaType ?: "image"
             var newlyDownloaded by remember { mutableStateOf(false) }
             val isDownloaded = newlyDownloaded || com.noslop.app.mesh.MediaManager.isMediaDownloaded(comment.mediaId, mediaType)
             val canRender = isDownloaded || comment.authorPublicKeyB64 == localKeys?.publicKeyB64
+
+            // NOSLOP_COMMENT_MEDIA_RERESOLVE_V1
+            // resolveMediaUrl() returns the local file:// path once the media is
+            // fully downloaded and the mesh media-proxy URL until then. Keying
+            // this remember on mediaId/onion alone froze the proxy URL from first
+            // composition, so when the transfer completed Coil was still handed
+            // the proxy URL, re-fetched from a peer that had already finished,
+            // and drew nothing — the black square. isDownloaded is the key that
+            // actually changes at the moment the file becomes usable.
+            val resolvedMediaUrl = remember(comment.mediaId, authorOnion, isDownloaded) {
+                resolveMediaUrl("noslop://$authorOnion/${comment.mediaId}", context)
+            }
             
             LaunchedEffect(comment.mediaId, authorOnion) {
                 if (comment.mediaId != null && authorOnion != null && !isDownloaded) {
@@ -438,8 +447,23 @@ fun CommentItem(
             }
 
             if (canRender) {
+                // GIF frames need a decoder registered; the default ImageLoader has
+                // none, so an animated GIF would otherwise show as a still first
+                // frame. ChatThreadScreen builds the same loader for DM GIFs.
+                val gifImageLoader = remember(context) {
+                    coil.ImageLoader.Builder(context)
+                        .components {
+                            if (android.os.Build.VERSION.SDK_INT >= 28) {
+                                add(coil.decode.ImageDecoderDecoder.Factory())
+                            } else {
+                                add(coil.decode.GifDecoder.Factory())
+                            }
+                        }
+                        .build()
+                }
                 coil.compose.AsyncImage(
                     model = resolvedMediaUrl,
+                    imageLoader = gifImageLoader,
                     contentDescription = "Comment Media".tr,
                     modifier = Modifier
                         .padding(top = 8.dp)

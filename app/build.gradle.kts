@@ -20,6 +20,31 @@ android {
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64"))
         }
+
+        // NOSLOP_PROXY_SECRET_V1
+        // The API proxy endpoint and its HMAC key. Set NOSLOP_PROXY_URL and
+        // NOSLOP_PROXY_SECRET in ~/.gradle/gradle.properties so the shipped
+        // values are not committed. The defaults preserve current behaviour for
+        // anyone building from a clean clone.
+        //
+        // NOSLOP_PROXY_LEGACY_SECRET controls whether the raw secret is still
+        // sent as an X-Proxy-Secret header. Keep it true until the Cloudflare
+        // Worker accepts HMAC-only requests, then set it to false.
+        buildConfigField(
+            "String",
+            "PROXY_URL",
+            "\"" + (project.findProperty("NOSLOP_PROXY_URL") ?: "https://yt-proxy.megadreamland.workers.dev") + "\""
+        )
+        buildConfigField(
+            "String",
+            "PROXY_SECRET",
+            "\"" + (project.findProperty("NOSLOP_PROXY_SECRET") ?: "NoSlopRocks2026") + "\""
+        )
+        buildConfigField(
+            "boolean",
+            "PROXY_SEND_LEGACY_SECRET",
+            (project.findProperty("NOSLOP_PROXY_LEGACY_SECRET") ?: "true").toString()
+        )
     }
     
     // NOSLOP_CONDITIONAL_SIGNING_V1
@@ -162,6 +187,9 @@ dependencies {
     implementation(libs.logging.interceptor)
     implementation(libs.okhttp.dnsoverhttps)
     implementation("com.google.code.gson:gson:2.10.1")
+    // NOSLOP_EXIF_ORIENTATION_V1 — BitmapFactory ignores EXIF orientation, so
+    // every photo the app re-encoded came out sideways. See ui/ExifUtils.kt.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // --- Image loading ---
     implementation(libs.coil.compose)

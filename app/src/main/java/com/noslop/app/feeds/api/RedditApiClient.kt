@@ -15,8 +15,8 @@ import okhttp3.Request
 object RedditApiClient {
 
     private const val TAG = "REDDIT_API"
-    private const val PROXY_URL = "https://yt-proxy.megadreamland.workers.dev"
-    private const val PROXY_SECRET = "NoSlopRocks2026"
+    private val PROXY_URL = com.noslop.app.BuildConfig.PROXY_URL
+    private val PROXY_SECRET = com.noslop.app.BuildConfig.PROXY_SECRET
     private val gson = Gson()
 
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
@@ -77,7 +77,13 @@ object RedditApiClient {
             hash.joinToString("") { "%02x".format(it) }
         } catch (e: Exception) { "" }
 
-        builder.header("X-Proxy-Secret", PROXY_SECRET)
+        // NOSLOP_PROXY_SECRET_V1 — sending the HMAC key in cleartext beside the
+        // signature made the signature pointless. Kept behind a flag only so the
+        // client and the Worker can be rolled forward independently; set
+        // NOSLOP_PROXY_LEGACY_SECRET=false once the Worker verifies the HMAC.
+        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
+            builder.header("X-Proxy-Secret", PROXY_SECRET)
+        }
         builder.header("X-Proxy-Timestamp", timestamp)
         builder.header("X-Proxy-Signature", hmacSig)
     }

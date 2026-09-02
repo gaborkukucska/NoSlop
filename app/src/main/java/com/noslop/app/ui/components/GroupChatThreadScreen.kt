@@ -172,12 +172,17 @@ fun GroupChatThreadScreen(
                     }
                 }
             }
-        } else if (type == "image" && !isGif && file.length() > 500 * 1024) {
+        }
+        // NOSLOP_EXIF_ORIENTATION_V1 — also run for small photos that carry a
+        // rotation, otherwise they ship sideways to every receiver that decodes
+        // with BitmapFactory instead of Coil.
+        else if (type == "image" && !isGif &&
+            (file.length() > 500 * 1024 || com.noslop.app.ui.ExifUtils.needsRotation(file))) {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 compressionProgress = 0
             }
             try {
-                val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
+                val bitmap = com.noslop.app.ui.ExifUtils.decodeOriented(file)
                 if (bitmap != null) {
                     val imageQuality = viewModel.mediaSettings.value.imageQuality
                     val maxDim = when(imageQuality) { "low" -> 640; "medium" -> 960; else -> 1280 }

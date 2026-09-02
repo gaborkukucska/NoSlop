@@ -1,8 +1,77 @@
 # Privacy & Security Hardening Proposal — NoSlop
 
 > [!NOTE]
-> **Status: IMPLEMENTED & VERIFIED (2026-08-30)**
-> All proposed hardening measures in this document (AES-256-GCM backups, HMAC proxy request signatures, Tor circuit rotation, SHA-256 release checksum verification, AES-GCM fallback identity store, and exponential peer cooldown backoff) have been fully implemented in `app/` and verified via automated unit testing (`BUILD SUCCESSFUL`).
+> **Status: PARTIALLY IMPLEMENTED — reviewed 2026-09-01**
+>
+> **Landed and in `app/`:** AES-256-GCM backups (with a CBC read path for legacy
+> archives), Tor circuit rotation, the AES-GCM fallback identity store, and
+> exponential peer cooldown backoff.
+>
+> **Landed with a caveat:** the proxy secret has moved out of source into a
+> Gradle property (`NOSLOP_PROXY_SECRET`) so the shipped value is no longer in
+> the public repo and can be rotated without a code change, and the cleartext
+> `X-Proxy-Secret` header is now behind `PROXY_SEND_LEGACY_SECRET`. That flag
+> still defaults to true, so until the Worker is redeployed and the flag flipped,
+> the secret is still crossing the wire. §1.1 is not closed.
+>
+> Be honest about the ceiling here: a signing key compiled into a public,
+> downloadable APK is not a secret. The HMAC is abuse friction and a
+> rate-limiting hook for the Worker, not authentication, and no amount of
+> rotation changes that. The part of §1.2 that genuinely matters — letting users
+> point at their own Worker — is still unimplemented and needs a Settings UI.
+>
+> **Not implemented:** release signature verification. Until 2026-09-01
+> `UpdateManager` computed the APK's SHA-256 and logged it without comparing it
+> to anything; the only real gates were a 2MB floor and a `text/html` check. A
+> published-checksum comparison has now landed, but the Ed25519 release
+> signature described in §2 has not. Do not treat OTA as MITM-resistant until it
+> does.
+>
+> **Deliberately deferred:** the Double Ratchet in §5. DMs remain static-static
+> X25519 with no forward secrecy, and the README says so.
+
+## Local attack surface — added 2026-09-01
+
+Three issues that were not in the original proposal at all, because the audit
+that produced it looked at network traffic and never at what other apps on the
+same handset can reach. On Android, loopback is shared between every installed
+app; it is not a private namespace.
+
+| Component | Issue | Status |
+|---|---|---|
+| **Tor control interface** | `ControlPort 9051` with `CookieAuthentication 0`. Any app holding INTERNET could open an unauthenticated Tor control connection and issue `GETINFO circuit-status` (deanonymisation), `ADD_ONION`, `SETCONF` or `SIGNAL`. | **PARTIAL.** All control access is centralised in `TorControlChannel`, which supports a private unix `ControlSocket`. The first `UNIX_ONLY` build could not open that socket — tor logs nothing to logcat, so it failed invisibly, taking `NEWNYM` and `ADD_ONION` with it. Currently `Mode.AUTO`: socket preferred, **TCP 9051 still declared as fallback**, so the hole is not yet closed. Cookie auth was rejected deliberately — it is global, and tor-android's own control connection authenticates with empty credentials. See TECHNICAL_REFERENCE §17.1. |
+| **Media proxy** | `127.0.0.1:8080` served `/stream?id=…` with no authentication, so another app could pull cached mesh media, and the caller-supplied `onion=` parameter let it choose an arbitrary fetch target on the user's Tor circuits. | **Fixed.** Per-process token required on every request, verified in constant time; the onion parameter must match a well-formed v3 address. |
+| **Mesh listener** | `readLine()` with no length bound — one peer sending bytes without a newline could exhaust the heap. | **Fixed.** Frames are capped and the connection is dropped past the ceiling. Raw frames are also no longer written to the exportable log. |
+
+## Player URL IP lock — added 2026-09-02
+
+Not a proposal item, but it belongs with the proxy discussion in §1. A
+googlevideo URL carries `&ip=<address>` and is served only to that address.
+Resolving `/player` through the Cloudflare Worker had YouTube issue the URL to
+the Worker's egress; the bytes were then fetched over a Tor exit and refused
+silently, as a stream that never started. `/player` is now always direct
+(`NOSLOP_PLAYER_IP_LOCK_V1`); search and metadata still use the proxy, which
+returns no IP-locked URLs.
+
+Worth noting alongside §1.2: this is the proxy actively harming a request it
+succeeded at, which is a stronger argument for user-configurable endpoints than
+the refusal case.
+
+## Backup — updated 2026-09-01
+
+`importData` read the whole archive and its whole plaintext into memory, so a
+restore including cached media could not complete at all. Both directions now
+stream through a fixed buffer, GCM plaintext is not unzipped until the tag has
+verified, and zip entry names are validated against path traversal.
+
+Separately, and this is a design limit rather than a bug: `preferences.xml` in
+the archive is sealed by a non-exportable Keystore key, so a restore on a NEW
+device brings the data back but not the identity. This used to happen silently.
+It is now detected and surfaced via `BackupManager.lastRestoreNeedsIdentityRecovery`
+so the UI can prompt for Word Cloud recovery.
+
+**Still open:** the UI does not yet read that flag. Wire it into the restore
+screen before telling anyone that device migration works.
 
 This document presents the technical designs and implementation strategies that were applied to address the privacy and security items identified during the audit of the NoSlop codebase.
 
@@ -12,7 +81,7 @@ This document presents the technical designs and implementation strategies that 
 
 | Component | Identified Vulnerability / Limitation | Proposed Hardening Solution | Risk Reduction |
 |---|---|---|---|
-| **API Proxy** (`yt-proxy`) | Static shared secret (`NoSlopRocks2026`), single centralized Cloudflare endpoint, silent clearnet fallbacks | HMAC dynamic request signing, user-configurable / self-hosted worker endpoints, circuit-cycling & Invidious/Piped decentralized racing fallbacks | Eliminates static secret leak, removes single point of failure, prevents accidental IP leaks |
+| **API Proxy** (`yt-proxy`) | Static shared secret (`NoSlopRocks2026`), single centralized Cloudflare endpoint, silent clearnet fallbacks | HMAC dynamic request signing, user-configurable / self-hosted worker endpoints, circuit-cycling & Invidious/Piped decentralized racing fallbacks | Removes single point of failure, prevents accidental IP leaks. **Static secret leak NOT yet eliminated** — see status note above. |
 | **OTA Updates** | Unverified APK installation, clearnet downloads without TLS pinning or signature checks | Cryptographic release signing (Ed25519 signature & SHA-256 checksum verification before install), HTTPS Certificate Pinning, optional Tor routing for update downloads | Prevents MITM / malicious update substitution |
 | **Key Storage** | Plaintext fallback (`noslop_identity_fallback`) when `EncryptedSharedPreferences` fails | Passphrase-derived AES-GCM local key store fallback, strict UI security warnings when running off-Keystore | Prevents unencrypted private key storage on disk |
 | **Backup Export** | AES-256-CBC encryption without AEAD integrity validation | Upgrade to AES-256-GCM or ChaCha20-Poly1305 with MAC tag verification on restore | Protects backup archives against bit-flipping & padding oracle attacks |

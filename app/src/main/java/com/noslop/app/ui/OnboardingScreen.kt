@@ -9,6 +9,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -1110,7 +1112,19 @@ fun Step8FeedMix(
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
         )
 
-        Box(modifier = Modifier.weight(1f)) {
+        // NOSLOP_CONTENT_MIX_SCROLL_V1
+        // Must be a scrolling Column, not a Box. FeedMixSettingsSection emits its
+        // header and its card as siblings with no container of its own, so a Box
+        // draws them on top of each other; and without a scroll the card's inner
+        // Column overflows the constrained height, which collapses the lower
+        // sliders onto one another and puts the rest out of reach.
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+        ) {
             com.noslop.app.ui.tabs.FeedMixSettingsSection(viewModel = viewModel)
         }
     }

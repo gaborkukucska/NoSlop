@@ -15,11 +15,11 @@
 
 ## What is NoSlop?
 
-**NoSlop** is a privacy-first Kotlin Multiplatform app (Android & iOS) for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation.
+**NoSlop** is a privacy-first Android app for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation. (A Kotlin Multiplatform port lives in `mvp/` but is not yet part of the build; `app/` is what ships.)
 
 It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
 
-**Tor routing.** Mesh traffic always goes over Tor — there is no clearnet path for it. Feed, media, search and stream-resolution traffic is routed through Tor whenever the *Route clearnet through Tor* setting is on, which is the default; turning it off is a deliberate user choice. Two things stay off Tor by design and are documented rather than hidden: the update check against `noslop.me` / the GitHub releases API, and the APK download itself, both of which have to work before the Tor daemon has bootstrapped. If that trade-off is not acceptable to you, turn off automatic update checks and fetch releases manually.
+**Tor routing.** Mesh traffic always goes over Tor — there is no clearnet path for it. Feed, media, search and stream-resolution traffic is routed through Tor whenever the *Route clearnet through Tor* setting is on, which is the default; turning it off is a deliberate user choice. This now includes the update check against `noslop.me` / the GitHub releases API and the APK download itself: both wait for Tor to finish bootstrapping and abort rather than fall back to a direct connection. If Tor never comes up, the update check is skipped and told to you, not silently routed around.
 
 ---
 
@@ -40,8 +40,8 @@ NoSlop bypasses centralized app stores entirely. It includes a robust over-the-a
 - Automatically detects new releases from GitHub.
 - Prominently alerts you via a dedicated banner in the Settings tab, persisting until updated.
 - Handles Android 8.0+ `REQUEST_INSTALL_PACKAGES` permissions natively, with fallback options to "Just Download APK" if system permission dialogs fail.
-- Downloads the APK directly via a pure, native `HttpURLConnection` pipeline with live progress toasts, bypassing the unreliable Android `DownloadManager` and DoH CDN redirect issues.
-- Prompts the user to install the update seamlessly from within the app, equipped with anti-corruption file size and content-type verification.
+- Downloads the APK over the app's own OkHttp client with live progress toasts, bypassing the unreliable Android `DownloadManager` and DoH CDN redirect issues. Over Tor when Tor routing is on.
+- Verifies the download against the SHA-256 checksum published with the release before handing it to the installer, and refuses to install on a mismatch, on a truncated file, or when the server returns HTML instead of an APK.
 
 ### Immersive Snapping Feed
 
@@ -96,19 +96,22 @@ Your identity is generated locally and never leaves your device unless you expor
 
 - **Ed25519 + X25519 keypair** — one key for signing, one for encryption. Generated on-device using Lazysodium (libsodium) with a Bouncy Castle fallback for maximum compatibility across all Android versions (API 24+).
 - **Tor v3 onion address** — your identity includes a native `.onion` address derived from your Ed25519 key, making you directly reachable over Tor without a relay.
-- **BIP39 Word Cloud** — your identity is backed up by a 12-word mnemonic phrase. Tap to copy, write it down, and you own your digital life permanently.
+- **Word Cloud** — your identity is backed up by a 12-word mnemonic drawn from a 2053-word list, seeded via PBKDF2-HMAC-SHA512. It is BIP-39-*shaped* but not BIP-39-compatible: the wordlist differs from the standard one and there is no checksum word, so it will not restore in a BIP-39 wallet and a typo produces a wrong key rather than an error. Tap to copy, write it down, and store it somewhere you trust.
 - **Tripcode** — a 6-character Base32 shortcode derived from SHA3-256 of your public key. A human-readable fingerprint that others can verify at a glance.
-- **Hardware key isolation** — private keys are stored in Android's hardware-backed Keystore and never exposed in plaintext, even to NoSlop itself.
-- **AES-encrypted backup** — export your entire identity and database into an encrypted archive. The encryption key is derived from your Word Cloud mnemonic. Move to a new device without losing anything.
+- **Encrypted key storage** — private keys live in `EncryptedSharedPreferences`, wrapped by an AES-256-GCM master key held in the Android Keystore (hardware-backed where the device supports it). Android's Keystore cannot perform Ed25519 or X25519 operations, so NoSlop does unwrap the raw key material in memory to sign and to decrypt. If the Keystore is unavailable, the app falls back to a locally-derived AES-GCM store and warns you in Settings that it is running degraded.
+- **AES-encrypted backup** — export your database, media and settings into an AES-256-GCM archive keyed from your Word Cloud mnemonic. Note that the identity keystore file inside the archive is sealed by a device-bound key, so a backup restores fully on the *same* device; on a new device your data comes back but the identity must be re-derived from the mnemonic.
 
 ### Tor-Routed Networking
 
-**By default**, all outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy (clearnet media can optionally be toggled to bypass Tor for speed in Settings, while mesh traffic remains strictly Tor-routed). running locally on port 9050.
+**By default**, all outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy running locally on port 9050. Clearnet media can optionally be toggled to bypass Tor for speed in Settings; mesh traffic remains strictly Tor-routed regardless.
 
 - Tor circuits are built before any data is sent. The app surfaces a clear status indicator so you always know if Tor is connected.
 - Your real IP address is never exposed to feed servers, peers, or anyone on the network.
 - Hidden service registration gives your node a stable `.onion` address for inbound peer connections.
-- **Tor-friendly API Proxies** — Search and metadata APIs (YouTube, Reddit, Jamendo) are routed through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`). This bypasses the severe IP blocks these platforms apply to Tor exit nodes, ensuring search queries work seamlessly over Tor while media stream bytes are fetched directly.
+- **Tor-friendly API Proxies** — Search and metadata APIs (YouTube, Reddit, Jamendo) can be routed through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`), which sidesteps the IP blocks these platforms apply to Tor exit nodes. Be clear-eyed about what this is: one operator-run endpoint that sees the *content* of proxied queries, though never your IP, since the request still leaves your device over Tor. It is also a single point of failure, and one shared egress is increasingly more flagged than a fresh Tor exit — so NoSlop cools the proxy off and retries direct over Tor whenever it starts serving refusals. Media stream bytes never go through it, and neither does stream resolution: a
+googlevideo URL is IP-locked to whoever requested it, so resolving through the
+proxy produced URLs that could not be fetched over Tor. Search and metadata
+only.
 
 ---
 
@@ -116,22 +119,22 @@ Your identity is generated locally and never leaves your device unless you expor
 
 | Layer | Technology |
 |---|---|
-| UI | Compose Multiplatform (Material Design 3) |
-| Media | ExoPlayer (Android), AVPlayer (iOS), WKWebView/WebView, Coil |
-| Content | Ktor, Kotlinx-serialization, xmlutil, RSS/Atom parser |
-| Networking | Embedded Tor SOCKS5 daemon (onion-routed), Ktor + OkHttp/Darwin |
+| UI | Jetpack Compose (Material Design 3) |
+| Media | Media3 / ExoPlayer, WebView, Coil |
+| Content | OkHttp, Gson, custom RSS/Atom parser |
+| Networking | Embedded Tor SOCKS5 daemon (onion-routed), OkHttp |
 | Signing | Ed25519 (Bouncy Castle lightweight API / Lazysodium key generation) |
 | Key exchange | X25519 |
-| Encryption | ChaCha20-Poly1305 (DMs), AES-256-CBC (backup) |
-| Storage | SQLDelight SQLite + native key-value stores |
+| Encryption | ChaCha20-Poly1305 (DMs), AES-256-GCM (backup, CBC read-only for legacy archives) |
+| Storage | Room (SQLite) + EncryptedSharedPreferences |
 | Background sync | WorkManager (Android) |
-| Camera | CameraX (Android) + AVFoundation (iOS) |
+| Camera | CameraX |
 
 ---
 
 ## Getting Started
 
-1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is now the `mvp/` (Kotlin Multiplatform) directory.
+1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is `app/`; `settings.gradle.kts` includes `:app` only.
 2. **Run the onboarding flow** — 9 steps: set your language, generate your Word Cloud, pick your interests and creators, choose content sources, set your content mix ratios, and optionally deploy a HAI-Net Hub.
 3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
 
