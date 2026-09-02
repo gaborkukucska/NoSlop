@@ -1397,6 +1397,71 @@ as an upper bound.
 *   **OkHttp Concurrency Bottleneck Fix**: Increased `torClient`'s OkHttp `Dispatcher` limits (`maxRequests = 64`, `maxRequestsPerHost = 16`, up from `12` and `4`) in `HttpClientProvider.kt`. Previously, background preloader tasks choked `googlevideo.com` / `invidious` connection pools, starving active ExoPlayer range requests.
 *   **Low-Latency Video Startup**: Updated `DefaultLoadControl` in `VideoPlayer.kt` and `PreloadManager.kt` (`bufferForPlaybackMs = 500`, `minBufferMs = 1000`). Videos now begin playback instantly after 500ms of data is received over Tor, eliminating startup delay and buffering stalls.
 
+## External Audit Fixes (2026-09-03)
+
+An external review of `app/` following the 2026-09-02 self-audit. Applied via
+surgical patch scripts; the running register of what is fixed and what remains
+is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
+
+### Security
+
+*   **SSH host keys were never verified** (`NOSLOP_SSH_HOSTKEY_V1`).
+    `SshDeployer` installed a `UserInfo` whose `promptYesNo()` returned `true`
+    unconditionally, and wrote `known_hosts` to `java.io.tmpdir`, which is not a
+    stable app-private directory on Android. Deployment sends the SSH password
+    and the complete private identity — Ed25519 key, X25519 key, expanded onion
+    seed — so an attacker answering on that IP received all of it. Now a
+    persistent pin in `filesDir`, a two-phase connect that refuses rather than
+    prompts, unconditional refusal on a changed key, and
+    `clearPinnedHostKey()` for the genuine rebuild case. **Still
+    trust-on-first-use** until `onHostKeyPrompt` is wired into HubSetupScreen.
+*   **Packets were forwarded before being verified**
+    (`NOSLOP_VERIFY_BEFORE_FORWARD_V1`). `GossipService.processIncoming()` runs
+    `forwardPacket()`, and every signature check lived in a handler that runs
+    after it returns — so a node relayed forgeries to its entire trusted peer
+    set at every hop out to TTL 6. New `MeshPacketVerifier` checks the 20 types
+    carrying a self-contained signature at step 4.4. Handler checks are
+    unchanged and still run. `MeshPacketVerifier.enforce = false` disables
+    dropping without touching the pipeline; everything logs under `SIGVERIFY`.
+*   **Dedup could be poisoned by an unauthenticated id.** Step 2 recorded
+    `packet.id` before anything verified it, so a forged packet carrying an
+    expected id silently displaced the real one. Split into a check (unchanged
+    position, so rate limiting sees identical traffic) and a record that runs
+    only after verification.
+
+### Bugs found while fixing the above
+
+*   **The firewall buffer never worked.** A `MESSAGE` from an untrusted sender
+    was recorded in the dedup cache at step 2 and buffered at step 4; when
+    `flushFirewallBuffer()` replayed it after the peer became trusted, the step
+    2 check dropped it as a duplicate. Every buffered message was lost. Repaired
+    by the dedup split.
+*   **`isSourceCached()` always returned false.** It looked up a bare URL while
+    entries are keyed `"$url||$quality"`.
+
+### Video playback over Tor
+
+*   **Stream URLs outlived the route they were bound to**
+    (`NOSLOP_ROUTE_AWARE_CACHE_V1`). googlevideo signs a URL to the IP that
+    requested it — `TorService.kt` says so in its own header — but `sourceCache`
+    validated entries on `expire=` alone, so a URL survived both a Tor toggle
+    and every NEWNYM. In the 2026-09-03 capture, `PSIrKxSq8w8` was resolved at
+    00:18:18 for exit 192.42.116.53 and played at 00:25:45 after six rotations:
+    zero bytes, buffer frozen. A third URL carried the device's own address and
+    was fetched over Tor, which can never work. Entries now record the routing
+    mode and `TorService.circuitGeneration`, and all three readers — including
+    the `initialSource` fast path, which bypassed the check entirely — apply the
+    same test. A rotation also now reopens `Unavailable` results immediately
+    instead of making them wait out a 60s TTL.
+*   **Preloads starved the visible video** (`NOSLOP_TOR_PRELOAD_BUDGET_V1`).
+    Four resolves competed for `Semaphore(3)` with a 60s budget each, which is
+    what "Gave up waiting 20s for a resolve slot" was. Under Tor: one slide
+    ahead, none behind, 8s head start. Clearnet behaviour unchanged.
+
+**Not yet fixed:** resolve and playback still use whatever circuit is current,
+so a rotation between them costs the resolve. SOCKS stream isolation is the real
+answer — see finding #17 in the audit register.
+
 ## Next Steps (Planned)
 *   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
 *   **Deep Data Sync**: Synchronize Contact lists, trusted peer statuses, and DM histories between Room (Mobile) and the Hub's master database.

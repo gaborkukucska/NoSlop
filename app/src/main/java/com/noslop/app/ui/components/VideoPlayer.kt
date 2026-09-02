@@ -60,7 +60,61 @@ internal sealed class VideoSource {
 // slides the feed would hand a long-dead URL to ExoPlayer on arrival.
 //
 // Every cache entry now carries an expiry and is re-resolved once stale.
-private class CachedSource(val source: VideoSource, val expiresAtMs: Long)
+// --- NOSLOP_ROUTE_AWARE_CACHE_V1 ---
+// An expiry is not enough. A signed CDN URL is bound to the IP that resolved
+// it, so it is dead the moment the route changes — while its `expire=` stamp
+// still says it has hours left. Two more facts are recorded with every entry:
+//
+//   overTor            the routing mode in force at resolve time. A URL signed
+//                      for the device's own address cannot be fetched through
+//                      Tor, and one signed for an exit cannot be fetched
+//                      directly. Either way, a toggle invalidates.
+//   circuitGeneration  TorService's exit-change counter at resolve time. A
+//                      rotation makes every signed URL from the previous
+//                      generation unusable.
+private class CachedSource(
+    val source: VideoSource,
+    val expiresAtMs: Long,
+    val overTor: Boolean,
+    val circuitGeneration: Long
+)
+
+/**
+ * Why an entry can no longer be used, or null if it still can. Returning the
+ * reason rather than a boolean keeps the log honest about which of the three
+ * conditions fired — "expired" and "the exit moved underneath it" look
+ * identical from the outside and want different fixes.
+ */
+private fun CachedSource.stalenessReason(): String? {
+    if (expiresAtMs <= System.currentTimeMillis()) return "URL expired"
+
+    val overTorNow = HttpClientProvider.useTorForClearnet
+    if (overTor != overTorNow) {
+        return if (overTorNow) {
+            "resolved over clearnet, now routing through Tor — the URL is signed for this device's own address"
+        } else {
+            "resolved over Tor, now routing direct — the URL is signed for an exit"
+        }
+    }
+
+    if (!overTorNow) return null
+
+    val generationNow = com.noslop.app.tor.TorService.circuitGeneration
+    if (circuitGeneration == generationNow) return null
+
+    return when (val s = source) {
+        // Signed URLs are IP-locked to the exit that issued them.
+        is VideoSource.Direct ->
+            if (SIGNED_URL_HINT_PATTERN.containsMatchIn(s.url)) {
+                "circuit rotated ($circuitGeneration -> $generationNow) and the URL is signed for the old exit"
+            } else null
+        // A new exit is exactly the thing that might not be gated, so don't
+        // make a rotation wait out the 60s failure TTL.
+        is VideoSource.Unavailable ->
+            "circuit rotated ($circuitGeneration -> $generationNow) — retrying on the new exit"
+        else -> null
+    }
+}
 
 private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
 
@@ -123,8 +177,14 @@ private fun expiryOfSource(source: VideoSource): Long = when (source) {
 }
 
 internal fun isSourceCached(url: String): Boolean {
-    val entry = sourceCache[url] ?: return false
-    return entry.expiresAtMs > System.currentTimeMillis()
+    // NOSLOP_ROUTE_AWARE_CACHE_V1 — entries are stored under "$url||$quality",
+    // so the bare-url lookup this used to do never matched anything and the
+    // function always answered false. Scan the quality variants, and apply the
+    // same route-aware validity test as every other reader.
+    val entry = sourceCache.entries
+        .firstOrNull { it.key == url || it.key.startsWith("$url||") }
+        ?.value ?: return false
+    return entry.stalenessReason() == null
 }
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
@@ -135,8 +195,9 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
 
     fun freshOrNull(): VideoSource? {
         val entry = sourceCache[cacheKey] ?: return null
-        if (entry.expiresAtMs > System.currentTimeMillis()) return entry.source
-        Logger.info("VIDEO_RESOLVE", "Cached source for $rawUrl expired — re-resolving")
+        // NOSLOP_ROUTE_AWARE_CACHE_V1 — expiry alone used to decide this.
+        val reason = entry.stalenessReason() ?: return entry.source
+        Logger.info("VIDEO_RESOLVE", "Cached source for $rawUrl unusable ($reason) — re-resolving")
         sourceCache.remove(cacheKey)
         return null
     }
@@ -166,7 +227,13 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         } else {
             expiryOfSource(result)
         }
-        sourceCache[cacheKey] = CachedSource(result, expiryMs)
+        // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
+        sourceCache[cacheKey] = CachedSource(
+            source = result,
+            expiresAtMs = expiryMs,
+            overTor = HttpClientProvider.useTorForClearnet,
+            circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
+        )
         result
     }
     // Drop the mutex only after releasing it, otherwise a concurrent caller can
@@ -553,8 +620,12 @@ fun VideoPlayer(
     val initialSource = remember(url, mediaSettings.videoQuality) {
         val q = mediaSettings.videoQuality.ifBlank { "medium" }
         val exactKey = "$url||$q"
-        sourceCache[exactKey]?.takeIf { it.expiresAtMs > System.currentTimeMillis() }?.source
-            ?: sourceCache.entries.find { it.key.startsWith("$url||") && it.value.expiresAtMs > System.currentTimeMillis() }?.value?.source
+        // NOSLOP_ROUTE_AWARE_CACHE_V1 — this fast path read the map directly and
+        // checked only expiry, so it would hand ExoPlayer a URL bound to an exit
+        // we have since rotated away from. That is the stall the 00:25:45
+        // capture shows: bufPos frozen at 11593 with delta=0ms.
+        sourceCache[exactKey]?.takeIf { it.stalenessReason() == null }?.source
+            ?: sourceCache.entries.find { it.key.startsWith("$url||") && it.value.stalenessReason() == null }?.value?.source
     }
 
     var source by remember(url) { mutableStateOf<VideoSource?>(initialSource) }

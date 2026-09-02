@@ -227,6 +227,27 @@ object GossipService {
         relayStates[mediaId]?.lastActivity = System.currentTimeMillis()
     }
 
+    /**
+     * NOSLOP_VERIFY_BEFORE_FORWARD_V1 — the record half of dedup, split out of
+     * processIncoming() step 2 so that only authenticated packets enter the LRU.
+     * Bounded at 1000 ids, evicting the oldest 100 on overflow (unchanged).
+     */
+    private fun markProcessed(packetId: String) {
+        synchronized(processedPacketIds) {
+            if (processedPacketIds.contains(packetId)) return
+            if (processedPacketIds.size >= 1000) {
+                val iterator = processedPacketIds.iterator()
+                repeat(100) {
+                    if (iterator.hasNext()) {
+                        iterator.next()
+                        iterator.remove()
+                    }
+                }
+            }
+            processedPacketIds.add(packetId)
+        }
+    }
+
     suspend fun forwardRelayChunk(mediaId: String, packet: NetworkPacket): Boolean {
         val state = relayStates[mediaId] ?: return false
         state.lastActivity = System.currentTimeMillis()
@@ -278,22 +299,31 @@ object GossipService {
             return false
         }
 
-        // 2. Dedup — drop if already processed
+        // 2. Dedup — drop if already processed.
+        //
+        // --- NOSLOP_VERIFY_BEFORE_FORWARD_V1 ---
+        // This step used to CHECK and RECORD in one operation, which meant an
+        // attacker-chosen packet.id entered the LRU before anything had
+        // authenticated it. Sending a forged packet carrying an id you expect a
+        // real one to use was enough to get the real one silently dropped when
+        // it arrived. The recording half now lives in step 4.6, after the
+        // signature has been checked.
+        //
+        // The CHECK stays here rather than moving down with the record, so that
+        // the rate limiter below still counts exactly the traffic it counted
+        // before: duplicates arriving over multiple gossip paths are common at
+        // TTL 6, and making them consume the 20-per-10s budget would produce
+        // false positives.
+        //
+        // Splitting it also repairs the firewall buffer. A MESSAGE from an
+        // untrusted sender was recorded here and then buffered in step 4; when
+        // flushFirewallBuffer() replayed it after the peer became trusted, this
+        // check dropped it as a duplicate and the message was lost. It now lands.
         synchronized(processedPacketIds) {
             if (processedPacketIds.contains(packetId)) {
                 Logger.debug(TAG, "Dropping duplicate packet: $packetId")
                 return false
             }
-            if (processedPacketIds.size >= 1000) {
-                val iterator = processedPacketIds.iterator()
-                repeat(100) {
-                    if (iterator.hasNext()) {
-                        iterator.next()
-                        iterator.remove()
-                    }
-                }
-            }
-            processedPacketIds.add(packetId)
         }
 
         // 3. Rate limit: 20 packets per sender per 10-second window
@@ -341,6 +371,46 @@ object GossipService {
                 }
             }
         }
+
+        // 4.4. Signature verification — BEFORE anything is forwarded.
+        //
+        // --- NOSLOP_VERIFY_BEFORE_FORWARD_V1 ---
+        // forwardPacket() runs further down this same function, and every
+        // per-type signature check lives in a handler that only runs AFTER
+        // processIncoming() has returned. So this node used to fan a forgery out
+        // to its entire trusted peer set, at every hop out to TTL 6, and only
+        // then reject it locally. One hostile trusted peer could turn its own
+        // 20-per-10s budget into sustained circuit load for the whole
+        // neighbourhood.
+        //
+        // MeshPacketVerifier returns UNVERIFIABLE for the types that genuinely
+        // cannot be checked here (MESSAGE, MEDIA_*, SYNC_*, TYPING,
+        // READ_RECEIPT, GROUP_UPDATE, GROUP_SYNC) and for malformed payloads, so
+        // rejecting junk remains the handler's job. Only a real signature
+        // failure stops here.
+        //
+        // The handler checks are unchanged and still run. If this gate is ever
+        // wrong, MeshPacketVerifier.enforce turns the drop off without touching
+        // this logic.
+        val verdict = MeshPacketVerifier.verify(packet)
+        if (verdict == MeshPacketVerifier.Verdict.INVALID) {
+            if (MeshPacketVerifier.enforce) {
+                Logger.warn(
+                    "SIGVERIFY",
+                    "Dropping ${packet.type} packet $packetId from ${senderId.take(16)}…: signature does not verify"
+                )
+                return false
+            }
+            Logger.warn(
+                "SIGVERIFY",
+                "${packet.type} packet $packetId failed verification but enforcement is OFF — forwarding anyway"
+            )
+        }
+
+        // 4.6. Record the id, now that the packet has survived authentication.
+        // A forgery never reaches this line, so it can no longer displace the
+        // real packet it was impersonating.
+        markProcessed(packetId)
 
         // 4.5. Mesh Filters (Incoming)
         val filterSettings = getMeshFilterSettings?.invoke() ?: com.noslop.app.data.MeshFilterSettings()

@@ -21,6 +21,40 @@ class ExistingDeploymentException(message: String = "Existing HAI-Net deployment
 object SshDeployer {
     private const val TAG = "SshDeployer"
 
+    // NOSLOP_SSH_HOSTKEY_V1 — the NAT keepalive used to run on GlobalScope,
+    // which is unstructured and uncancellable. It now has an owner.
+    private val keepAliveScope = kotlinx.coroutines.CoroutineScope(
+        Dispatchers.IO + kotlinx.coroutines.SupervisorJob()
+    )
+
+    /**
+     * Forget the pinned SSH host key for one host, or for every host when
+     * [host] is null. Call this from Settings when the user has genuinely
+     * rebuilt a Hub machine. Returns true if anything was removed.
+     */
+    fun clearPinnedHostKey(host: String? = null): Boolean {
+        return try {
+            val file = java.io.File(
+                com.noslop.app.NoSlopApp.repository.context.filesDir,
+                "ssh_known_hosts"
+            )
+            if (!file.exists()) return false
+            if (host == null) {
+                Logger.info(TAG, "Clearing all pinned SSH host keys")
+                file.delete()
+            } else {
+                val kept = file.readLines().filterNot { it.trim().startsWith("$host ") }
+                val changed = kept.size != file.readLines().size
+                file.writeText(kept.joinToString("\n").let { if (it.isEmpty()) it else it + "\n" })
+                Logger.info(TAG, "Cleared pinned SSH host key for $host", "changed=$changed")
+                changed
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to clear pinned host key: ${e.message}")
+            false
+        }
+    }
+
     suspend fun deployHaiNetHub(
         ip: String,
         user: String,
@@ -28,57 +62,96 @@ object SshDeployer {
         sharedFolder: String,
         identity: CryptoService.IdentityKeys?,
         strategy: OverwriteStrategy = OverwriteStrategy.PROMPT,
-        onLog: (String) -> Unit = {}
+        onLog: (String) -> Unit = {},
+        // NOSLOP_SSH_HOSTKEY_V1
+        // Called on the FIRST connection to a host whose key is not yet pinned.
+        // Return true to pin and continue, false to abort. When null, trust-on-
+        // first-use applies and the fingerprint is only logged. A key that has
+        // CHANGED is never routed here — that case is refused unconditionally.
+        onHostKeyPrompt: (suspend (host: String, fingerprint: String) -> Boolean)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         try {
             onLog("Connecting to $user@$ip:22...\n")
             Logger.info(TAG, "Connecting to $user@$ip:22")
 
+            // --- NOSLOP_SSH_HOSTKEY_V1 ---
+            // known_hosts lives in app-private internal storage so pins actually
+            // survive between deployments. The old location (java.io.tmpdir) is
+            // not a stable directory on Android, so nothing was ever pinned.
             val jsch = JSch()
-            
+            val knownHostsFile = java.io.File(
+                com.noslop.app.NoSlopApp.repository.context.filesDir,
+                "ssh_known_hosts"
+            )
+            if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
+            jsch.setKnownHosts(knownHostsFile.absolutePath)
+
+            // A UserInfo that never answers a host-key question. Used for the
+            // strict first pass; the yes-once variant below is only installed
+            // after the fingerprint has been accepted.
+            fun silentUserInfo() = object : com.jcraft.jsch.UserInfo {
+                override fun getPassphrase() = null
+                override fun getPassword() = pass
+                override fun promptPassword(message: String) = true
+                override fun promptPassphrase(message: String) = true
+                override fun promptYesNo(message: String) = false
+                override fun showMessage(message: String) {
+                    Logger.info(TAG, "SSH Message: $message")
+                }
+            }
+
+            fun newSession(strict: String, ui: com.jcraft.jsch.UserInfo): com.jcraft.jsch.Session {
+                val s = jsch.getSession(user, ip, 22)
+                s.setPassword(pass)
+                s.userInfo = ui
+                s.setConfig("StrictHostKeyChecking", strict)
+                s.serverAliveInterval = 0
+                return s
+            }
+
             var connectionAttempts = 0
             var session: com.jcraft.jsch.Session
-            
+            var hostKeyApproved = false
+
             while (true) {
                 try {
                     connectionAttempts++
-                    session = jsch.getSession(user, ip, 22)
-                    session.setPassword(pass)
-                    
-                    session.userInfo = object : com.jcraft.jsch.UserInfo {
-                        override fun getPassphrase() = null
-                        override fun getPassword() = pass
-                        override fun promptPassword(message: String) = true
-                        override fun promptPassphrase(message: String) = true
-                        override fun promptYesNo(message: String): Boolean {
-                            Logger.info(TAG, "SSH Host Key Prompt: $message")
-                            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch { onLog("\n[SECURITY] SSH Host Key Fingerprint:\n$message\nAuto-accepting for deployment...\n") }
-                            return true
-                        }
-                        override fun showMessage(message: String) {
-                            Logger.info(TAG, "SSH Message: $message")
-                        }
-                    }
-                    session.setConfig("StrictHostKeyChecking", "ask")
-                    
-                    val knownHostsFile = java.io.File(System.getProperty("java.io.tmpdir"), "noslop_known_hosts")
-                    if (!knownHostsFile.exists()) knownHostsFile.createNewFile()
-                    jsch.setKnownHosts(knownHostsFile.absolutePath)
-                    
-                    session.serverAliveInterval = 0
-                    
+
+                    // Phase 1 — strict. JSch throws rather than prompting, so an
+                    // unknown or changed key cannot be silently accepted.
+                    session = newSession(
+                        if (hostKeyApproved) "ask" else "yes",
+                        if (hostKeyApproved) {
+                            // Yes exactly once, so JSch writes the pin we just approved.
+                            object : com.jcraft.jsch.UserInfo {
+                                override fun getPassphrase() = null
+                                override fun getPassword() = pass
+                                override fun promptPassword(message: String) = true
+                                override fun promptPassphrase(message: String) = true
+                                override fun promptYesNo(message: String): Boolean {
+                                    Logger.info(TAG, "Pinning approved SSH host key for $ip")
+                                    return true
+                                }
+                                override fun showMessage(message: String) {
+                                    Logger.info(TAG, "SSH Message: $message")
+                                }
+                            }
+                        } else silentUserInfo()
+                    )
+
                     session.connect(15000)
                     session.timeout = 0 // Remove socket timeout after connection is established
-                    
+
                     // Start manual keepalive to keep NAT alive without dropping connection on missed replies
                     // We open a dummy channel and write to its stdin to generate client-to-server traffic
                     val dummyChannel = session.openChannel("exec") as com.jcraft.jsch.ChannelExec
                     dummyChannel.setCommand("cat > /dev/null")
                     dummyChannel.connect()
                     val dummyOut = dummyChannel.outputStream
-                    
-                    kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                        while (session.isConnected) {
+
+                    val keepAliveSession = session
+                    keepAliveScope.launch {
+                        while (keepAliveSession.isConnected) {
                             kotlinx.coroutines.delay(10000)
                             try {
                                 dummyOut.write(0)
@@ -88,9 +161,67 @@ object SshDeployer {
                             }
                         }
                     }
-                    
+
                     break
                 } catch (e: Exception) {
+                    val msg = e.message ?: ""
+
+                    // --- The key we pinned no longer matches. Never overridable. ---
+                    if (msg.startsWith("HostKey has been changed")) {
+                        Logger.error(TAG, "SSH HOST KEY MISMATCH for $ip — refusing to connect")
+                        withContext(Dispatchers.Main) {
+                            onLog(
+                                "\n[SECURITY] REFUSED: the SSH host key for $ip does not match " +
+                                    "the one NoSlop pinned on a previous deployment.\n" +
+                                    "This is what an interception attempt looks like. It is also what " +
+                                    "a genuine OS reinstall looks like.\n" +
+                                    "Nothing was sent. If you rebuilt this machine yourself, clear the " +
+                                    "pin from Settings and deploy again.\n"
+                            )
+                        }
+                        return@withContext Result.failure(
+                            Exception(
+                                "SSH host key for $ip has changed since the last deployment. " +
+                                    "Refusing to send your identity. Clear the stored host key if " +
+                                    "you rebuilt this machine."
+                            )
+                        )
+                    }
+
+                    // --- First sight of this host. Confirm, then pin. ---
+                    if (msg.startsWith("UnknownHostKey") && !hostKeyApproved) {
+                        val fingerprint = msg.substringAfter("key fingerprint is", "").trim().trimEnd('.')
+                        Logger.info(TAG, "Unpinned SSH host key for $ip", "fingerprint=$fingerprint")
+                        withContext(Dispatchers.Main) {
+                            onLog(
+                                "\n[SECURITY] First connection to $ip.\n" +
+                                    "Host key fingerprint: $fingerprint\n" +
+                                    "Your SSH password and private identity are about to be sent to " +
+                                    "whoever holds this key. Compare it against the Hub before trusting it.\n"
+                            )
+                        }
+
+                        val approved = onHostKeyPrompt?.invoke(ip, fingerprint) ?: run {
+                            // Trust on first use. Weaker than an explicit confirmation,
+                            // but it pins, so every subsequent connection is protected.
+                            Logger.warn(TAG, "No host-key confirmation handler supplied — pinning on first use")
+                            withContext(Dispatchers.Main) {
+                                onLog("Pinning this key (trust-on-first-use) and continuing...\n")
+                            }
+                            true
+                        }
+
+                        if (!approved) {
+                            Logger.info(TAG, "User rejected SSH host key for $ip")
+                            withContext(Dispatchers.Main) { onLog("Host key rejected. Deployment cancelled.\n") }
+                            return@withContext Result.failure(Exception("SSH host key rejected by user"))
+                        }
+
+                        hostKeyApproved = true
+                        connectionAttempts-- // the strict probe is not a failed attempt
+                        continue
+                    }
+
                     if (connectionAttempts >= 3) throw e
                     Logger.warn(TAG, "SSH Connection attempt $connectionAttempts failed: ${e.message}. Retrying in 2s...")
                     withContext(Dispatchers.Main) { onLog("Connection attempt $connectionAttempts failed. Retrying in 2s...\n") }

@@ -111,6 +111,23 @@ object TorService {
     // rotated" and the caller should proceed.
     private const val CIRCUIT_CONSIDERED_FRESH_MS = 30_000L
 
+    // --- NOSLOP_CIRCUIT_GENERATION_V1 ---
+    // Monotonic count of ACTUAL exit changes. googlevideo signs a stream URL to
+    // the IP that asked for it, so anything resolved under generation N is
+    // worthless once the process is on generation N+1. Consumers compare the
+    // generation stamped on a cached result against this value instead of
+    // trusting the URL's own `expire=` deadline, which says nothing about which
+    // route the URL is bound to.
+    //
+    // Incremented ONLY where a NEWNYM actually succeeded — not on the
+    // cooperative "someone else rotated recently, reporting success" path,
+    // where no rotation occurs and the sibling that did rotate has already
+    // bumped it.
+    @Volatile
+    private var _circuitGeneration = 0L
+
+    val circuitGeneration: Long get() = _circuitGeneration
+
     @Volatile
     private var lastMediaProgressAtMs = 0L
 
@@ -165,7 +182,14 @@ object TorService {
                 return false
             }
             val ok = doRequestNewCircuit()
-            if (ok) lastNewnymAtMs = System.currentTimeMillis()
+            if (ok) {
+                lastNewnymAtMs = System.currentTimeMillis()
+                // NOSLOP_CIRCUIT_GENERATION_V1 — everything resolved on the old
+                // exit is now unusable. Bump before returning so a caller that
+                // re-resolves immediately stamps the new generation.
+                _circuitGeneration++
+                Logger.info(TAG, "Circuit rotated — generation is now ${_circuitGeneration}")
+            }
             return ok
         } finally {
             newnymMutex.unlock()

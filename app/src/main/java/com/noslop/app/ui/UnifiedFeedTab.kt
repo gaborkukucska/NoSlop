@@ -817,16 +817,35 @@ fun UnifiedFeedTab(
     LaunchedEffect(pagerState.currentPage, filterMode) {
         if (pagerState.currentPage !in unifiedItems.indices) return@LaunchedEffect
         
+        // --- NOSLOP_TOR_PRELOAD_BUDGET_V1 ---
+        // Resolving a stream costs a permit on YouTubeInternalClient's
+        // Semaphore(3) and up to a 60s budget. Over clearnet that is cheap and
+        // preloading four slides is free performance. Over Tor it is the
+        // scarcest resource in the app, and the visible video competes for it on
+        // equal terms with speculative work it does not need yet — which is what
+        // "Gave up waiting 20s for a resolve slot for nrXUUIqGioI — earlier
+        // resolves are still stuck" was: the slide the user is looking at losing
+        // the race to slides they may never reach.
+        //
+        // Under Tor: one slide ahead, none behind, and a longer head start for
+        // the visible resolve. Over clearnet, nothing changes.
+        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        val forwardPreloadLimit = if (overTor) 1 else 2
+        val preloadPreviousSlide = !overTor
+        val firstPreloadDelayMs = if (overTor) 8000L else 2000L
+
         // 1. Scan backwards to preload the immediate previous video
-        for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
-            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
-            if (preloadData != null) {
-                val (rawUrl, forcedUrl) = preloadData
-                val urlToCheck = forcedUrl ?: rawUrl
-                if (!urlToCheck.startsWith("file://")) {
-                    preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+        if (preloadPreviousSlide) {
+            for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
+                val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+                if (preloadData != null) {
+                    val (rawUrl, forcedUrl) = preloadData
+                    val urlToCheck = forcedUrl ?: rawUrl
+                    if (!urlToCheck.startsWith("file://")) {
+                        preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                    }
+                    break // Only keep 1 previous video warm
                 }
-                break // Only keep 1 previous video warm
             }
         }
 
@@ -839,7 +858,7 @@ fun UnifiedFeedTab(
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
                     val targetIndex = i
-                    val delayMs = 2000L + (preloadedForwardCount * 1500L)
+                    val delayMs = firstPreloadDelayMs + (preloadedForwardCount * 1500L)
                     preloadScope.launch { 
                         if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
                         if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
@@ -848,7 +867,7 @@ fun UnifiedFeedTab(
                     }
                 }
                 preloadedForwardCount++
-                if (preloadedForwardCount >= 2) break // Keep up to 2 forward slides warm
+                if (preloadedForwardCount >= forwardPreloadLimit) break
             }
         }
     }

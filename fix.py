@@ -1,624 +1,684 @@
 #!/usr/bin/env python3
 """
-NoSlop surgical fix script 10 — document this session.
+NoSlop surgical fix 04 — stop serving stream URLs that are bound to an exit we
+no longer use, and stop speculative preloads from starving the visible video
+under Tor.
 
-    python3 noslop_fix_10_document_session.py
+    python3 patch_04_video_over_tor.py
 
-Updates:
-  * docs/PROJECT_STATUS.md            — new dated section (the index)
-  * docs/TECHNICAL_REFERENCE.md       — new §17 (the detail), plus §14 fixes
-  * docs/PRIVACY_AND_SECURITY_PROPOSAL.md — control-interface status correction
-  * README.md                         — proxy bullet now excludes /player
+THE BUG
+-------
+googlevideo signs a stream URL to the IP that requested it. TorService.kt says
+so in its own header. But nothing binds the *playback* fetch to the exit that
+did the *resolve*, and every NEWNYM moves the whole process onto a new exit, so
+a cached URL routinely outlives the only route on which it works.
 
-Records what shipped AND what did not, including the two regressions
-introduced and fixed during the session. A status doc that only lists wins is
-the same failure mode as a security doc claiming a control it does not have.
+From the 2026-09-03 00:18-00:26 capture:
+
+  * PSIrKxSq8w8 resolved 00:18:18, signedFor=192.42.116.53. ExoPlayer loaded it
+    at 00:25:45 — after rotations at 00:23:30, 00:23:45, 00:24:12, 00:24:39,
+    00:25:00 and 00:25:21. Result: bufPos=11593, delta=0ms, stalled. Zero bytes.
+  * PTO0s8YQ49o resolved 00:18:31, loaded one second later, and played — until
+    00:23:23, when it died with code=2004 (ERROR_CODE_IO_BAD_HTTP_STATUS), i.e.
+    googlevideo refusing the request because the circuit had moved.
+  * A third URL carried ip=1.146.240.106 — the device's own address — with
+    met=1788365643 (00:14:03), four minutes before that capture starts. It was
+    resolved while clearnet routing was on, cached under a six-hour TTL, then
+    fetched over Tor at 00:18:16 where it could never work. That is the 12s
+    stall that triggered the 00:18:27 rotation which then invalidated
+    everything resolved before it.
+
+`sourceCache` is keyed on "$rawUrl||$quality" and validated on expiry alone. It
+has no notion of which route resolved an entry, so it survives both a Tor
+toggle and any number of rotations.
+
+Separately, the resolve gate is Semaphore(3) with a 60s budget per video, and
+the feed preloads one slide back and two forward. Four resolves compete for
+three permits, which is what "Gave up waiting 20s for a resolve slot for
+nrXUUIqGioI — earlier resolves are still stuck" is: the visible video losing to
+speculative ones.
+
+THE FIX
+-------
+1. TorService gains a `circuitGeneration` counter, incremented only when a
+   NEWNYM actually succeeds. It is deliberately NOT incremented on the
+   cooperative "another caller rotated recently, reporting success" path,
+   because no rotation happens there — that caller's freshness came from the
+   sibling rotation that already bumped the counter.
+
+2. Cache entries record the routing mode and the circuit generation in force
+   when they were resolved. An entry is usable only if both still match:
+
+     - routing mode changed  -> always stale (kills the ip=1.146.240.106 class)
+     - generation changed    -> stale for signed URLs, which are IP-locked, and
+                                stale for Unavailable, so a rotation
+                                immediately reopens videos a gated exit refused
+                                rather than making them wait out a 60s TTL.
+                                Unsigned static assets are unaffected.
+
+   Applied in all three places that read the cache, including the `initialSource`
+   fast path in NoSlopVideoPlayer, which read the map directly and would
+   otherwise have handed a stale URL straight to ExoPlayer, leaking the fix.
+
+3. Under Tor routing, the feed preloads one slide forward instead of two, drops
+   the backward preload, and waits longer before starting, so the visible
+   video's resolve gets a clear run at the gate.
+
+WHAT THIS DOES NOT FIX
+----------------------
+It does not make resolve and playback share an exit — it only stops the app
+believing a URL that can no longer work. Videos will re-resolve more often
+under Tor rather than stall silently, which is the better failure, but a
+rotation between resolve and play still costs you the resolve. The real fix is
+SOCKS stream isolation (per-video SOCKS credentials used for both the resolve
+and the ExoPlayer datasource), tracked as finding #17 in the audit doc.
+
+Idempotent. Run from the repo root.
 """
 
 import os
+import re
 import sys
 
 APPLIED, SKIPPED, FAILED = [], [], []
 
+TOR = "app/src/main/java/com/noslop/app/tor/TorService.kt"
+VIDEO = "app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt"
+FEED = "app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt"
+AUDIT_DOC = "docs/AUDIT_2026_09_03.md"
+STATUS_DOC = "docs/PROJECT_STATUS.md"
+
 
 def edit(path, old, new, label, marker=None):
     if not os.path.exists(path):
-        FAILED.append(f"{label}: file not found ({path})")
+        FAILED.append(f"{label}: {path} not found")
         return
     with open(path, "r", encoding="utf-8") as f:
         src = f.read()
-    if marker is not None and marker in src:
+    if marker and marker in src:
         SKIPPED.append(f"{label}: already applied")
         return
-    if marker is None and new in src and old not in src:
-        SKIPPED.append(f"{label}: already applied")
-        return
-    count = src.count(old)
-    if count == 0:
+    if old not in src:
         FAILED.append(f"{label}: anchor text not found in {path}")
         return
-    if count > 1:
-        FAILED.append(f"{label}: anchor matched {count} times in {path}, refusing")
+    if src.count(old) != 1:
+        FAILED.append(f"{label}: anchor matched {src.count(old)} times, expected 1")
         return
     with open(path, "w", encoding="utf-8") as f:
-        f.write(src.replace(old, new))
+        f.write(src.replace(old, new, 1))
     APPLIED.append(label)
 
 
-STATUS = "docs/PROJECT_STATUS.md"
-TECH = "docs/TECHNICAL_REFERENCE.md"
-PROPOSAL = "docs/PRIVACY_AND_SECURITY_PROPOSAL.md"
-README = "README.md"
+# ===========================================================================
+# 1. TorService — circuit generation counter
+# ===========================================================================
+
+TOR_FIELD_OLD = """    @Volatile
+    private var lastMediaProgressAtMs = 0L"""
+
+TOR_FIELD_NEW = """    // --- NOSLOP_CIRCUIT_GENERATION_V1 ---
+    // Monotonic count of ACTUAL exit changes. googlevideo signs a stream URL to
+    // the IP that asked for it, so anything resolved under generation N is
+    // worthless once the process is on generation N+1. Consumers compare the
+    // generation stamped on a cached result against this value instead of
+    // trusting the URL's own `expire=` deadline, which says nothing about which
+    // route the URL is bound to.
+    //
+    // Incremented ONLY where a NEWNYM actually succeeded — not on the
+    // cooperative "someone else rotated recently, reporting success" path,
+    // where no rotation occurs and the sibling that did rotate has already
+    // bumped it.
+    @Volatile
+    private var _circuitGeneration = 0L
+
+    val circuitGeneration: Long get() = _circuitGeneration
+
+    @Volatile
+    private var lastMediaProgressAtMs = 0L"""
+
+TOR_BUMP_OLD = """            val ok = doRequestNewCircuit()
+            if (ok) lastNewnymAtMs = System.currentTimeMillis()
+            return ok"""
+
+TOR_BUMP_NEW = """            val ok = doRequestNewCircuit()
+            if (ok) {
+                lastNewnymAtMs = System.currentTimeMillis()
+                // NOSLOP_CIRCUIT_GENERATION_V1 — everything resolved on the old
+                // exit is now unusable. Bump before returning so a caller that
+                // re-resolves immediately stamps the new generation.
+                _circuitGeneration++
+                Logger.info(TAG, "Circuit rotated — generation is now ${_circuitGeneration}")
+            }
+            return ok"""
+
+# ===========================================================================
+# 2. VideoPlayer — route-aware cache validity
+# ===========================================================================
+
+VIDEO_CLASS_OLD = """private class CachedSource(val source: VideoSource, val expiresAtMs: Long)"""
+
+VIDEO_CLASS_NEW = """// --- NOSLOP_ROUTE_AWARE_CACHE_V1 ---
+// An expiry is not enough. A signed CDN URL is bound to the IP that resolved
+// it, so it is dead the moment the route changes — while its `expire=` stamp
+// still says it has hours left. Two more facts are recorded with every entry:
+//
+//   overTor            the routing mode in force at resolve time. A URL signed
+//                      for the device's own address cannot be fetched through
+//                      Tor, and one signed for an exit cannot be fetched
+//                      directly. Either way, a toggle invalidates.
+//   circuitGeneration  TorService's exit-change counter at resolve time. A
+//                      rotation makes every signed URL from the previous
+//                      generation unusable.
+private class CachedSource(
+    val source: VideoSource,
+    val expiresAtMs: Long,
+    val overTor: Boolean,
+    val circuitGeneration: Long
+)
+
+/**
+ * Why an entry can no longer be used, or null if it still can. Returning the
+ * reason rather than a boolean keeps the log honest about which of the three
+ * conditions fired — "expired" and "the exit moved underneath it" look
+ * identical from the outside and want different fixes.
+ */
+private fun CachedSource.stalenessReason(): String? {
+    if (expiresAtMs <= System.currentTimeMillis()) return "URL expired"
+
+    val overTorNow = HttpClientProvider.useTorForClearnet
+    if (overTor != overTorNow) {
+        return if (overTorNow) {
+            "resolved over clearnet, now routing through Tor — the URL is signed for this device's own address"
+        } else {
+            "resolved over Tor, now routing direct — the URL is signed for an exit"
+        }
+    }
+
+    if (!overTorNow) return null
+
+    val generationNow = com.noslop.app.tor.TorService.circuitGeneration
+    if (circuitGeneration == generationNow) return null
+
+    return when (val s = source) {
+        // Signed URLs are IP-locked to the exit that issued them.
+        is VideoSource.Direct ->
+            if (SIGNED_URL_HINT_PATTERN.containsMatchIn(s.url)) {
+                "circuit rotated ($circuitGeneration -> $generationNow) and the URL is signed for the old exit"
+            } else null
+        // A new exit is exactly the thing that might not be gated, so don't
+        // make a rotation wait out the 60s failure TTL.
+        is VideoSource.Unavailable ->
+            "circuit rotated ($circuitGeneration -> $generationNow) — retrying on the new exit"
+        else -> null
+    }
+}"""
+
+VIDEO_ISCACHED_OLD = """internal fun isSourceCached(url: String): Boolean {
+    val entry = sourceCache[url] ?: return false
+    return entry.expiresAtMs > System.currentTimeMillis()
+}"""
+
+VIDEO_ISCACHED_NEW = """internal fun isSourceCached(url: String): Boolean {
+    // NOSLOP_ROUTE_AWARE_CACHE_V1 — entries are stored under "$url||$quality",
+    // so the bare-url lookup this used to do never matched anything and the
+    // function always answered false. Scan the quality variants, and apply the
+    // same route-aware validity test as every other reader.
+    val entry = sourceCache.entries
+        .firstOrNull { it.key == url || it.key.startsWith("$url||") }
+        ?.value ?: return false
+    return entry.stalenessReason() == null
+}"""
+
+VIDEO_FRESH_OLD = """    fun freshOrNull(): VideoSource? {
+        val entry = sourceCache[cacheKey] ?: return null
+        if (entry.expiresAtMs > System.currentTimeMillis()) return entry.source
+        Logger.info("VIDEO_RESOLVE", "Cached source for $rawUrl expired — re-resolving")
+        sourceCache.remove(cacheKey)
+        return null
+    }"""
+
+VIDEO_FRESH_NEW = """    fun freshOrNull(): VideoSource? {
+        val entry = sourceCache[cacheKey] ?: return null
+        // NOSLOP_ROUTE_AWARE_CACHE_V1 — expiry alone used to decide this.
+        val reason = entry.stalenessReason() ?: return entry.source
+        Logger.info("VIDEO_RESOLVE", "Cached source for $rawUrl unusable ($reason) — re-resolving")
+        sourceCache.remove(cacheKey)
+        return null
+    }"""
+
+VIDEO_STORE_OLD = """        sourceCache[cacheKey] = CachedSource(result, expiryMs)"""
+
+VIDEO_STORE_NEW = """        // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
+        sourceCache[cacheKey] = CachedSource(
+            source = result,
+            expiresAtMs = expiryMs,
+            overTor = HttpClientProvider.useTorForClearnet,
+            circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
+        )"""
+
+VIDEO_INITIAL_OLD = """        val exactKey = "$url||$q"
+        sourceCache[exactKey]?.takeIf { it.expiresAtMs > System.currentTimeMillis() }?.source
+            ?: sourceCache.entries.find { it.key.startsWith("$url||") && it.value.expiresAtMs > System.currentTimeMillis() }?.value?.source"""
+
+VIDEO_INITIAL_NEW = """        val exactKey = "$url||$q"
+        // NOSLOP_ROUTE_AWARE_CACHE_V1 — this fast path read the map directly and
+        // checked only expiry, so it would hand ExoPlayer a URL bound to an exit
+        // we have since rotated away from. That is the stall the 00:25:45
+        // capture shows: bufPos frozen at 11593 with delta=0ms.
+        sourceCache[exactKey]?.takeIf { it.stalenessReason() == null }?.source
+            ?: sourceCache.entries.find { it.key.startsWith("$url||") && it.value.stalenessReason() == null }?.value?.source"""
+
+# ===========================================================================
+# 3. UnifiedFeedTab — preload throttling while routing over Tor
+# ===========================================================================
+
+FEED_OLD = """        // 1. Scan backwards to preload the immediate previous video
+        for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+            if (preloadData != null) {
+                val (rawUrl, forcedUrl) = preloadData
+                val urlToCheck = forcedUrl ?: rawUrl
+                if (!urlToCheck.startsWith("file://")) {
+                    preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                }
+                break // Only keep 1 previous video warm
+            }
+        }
+
+        // 2. Scan forwards to preload upcoming slides near the viewport
+        var preloadedForwardCount = 0
+        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 10)) {
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+            if (preloadData != null) {
+                val (rawUrl, forcedUrl) = preloadData
+                val urlToCheck = forcedUrl ?: rawUrl
+                if (!urlToCheck.startsWith("file://")) {
+                    val targetIndex = i
+                    val delayMs = 2000L + (preloadedForwardCount * 1500L)
+                    preloadScope.launch { 
+                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
+                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
+                        }
+                    }
+                }
+                preloadedForwardCount++
+                if (preloadedForwardCount >= 2) break // Keep up to 2 forward slides warm
+            }
+        }"""
+
+FEED_NEW = """        // --- NOSLOP_TOR_PRELOAD_BUDGET_V1 ---
+        // Resolving a stream costs a permit on YouTubeInternalClient's
+        // Semaphore(3) and up to a 60s budget. Over clearnet that is cheap and
+        // preloading four slides is free performance. Over Tor it is the
+        // scarcest resource in the app, and the visible video competes for it on
+        // equal terms with speculative work it does not need yet — which is what
+        // "Gave up waiting 20s for a resolve slot for nrXUUIqGioI — earlier
+        // resolves are still stuck" was: the slide the user is looking at losing
+        // the race to slides they may never reach.
+        //
+        // Under Tor: one slide ahead, none behind, and a longer head start for
+        // the visible resolve. Over clearnet, nothing changes.
+        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
+        val forwardPreloadLimit = if (overTor) 1 else 2
+        val preloadPreviousSlide = !overTor
+        val firstPreloadDelayMs = if (overTor) 8000L else 2000L
+
+        // 1. Scan backwards to preload the immediate previous video
+        if (preloadPreviousSlide) {
+            for (i in pagerState.currentPage - 1 downTo maxOf(0, pagerState.currentPage - 5)) {
+                val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+                if (preloadData != null) {
+                    val (rawUrl, forcedUrl) = preloadData
+                    val urlToCheck = forcedUrl ?: rawUrl
+                    if (!urlToCheck.startsWith("file://")) {
+                        preloadScope.launch { com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) }
+                    }
+                    break // Only keep 1 previous video warm
+                }
+            }
+        }
+
+        // 2. Scan forwards to preload upcoming slides near the viewport
+        var preloadedForwardCount = 0
+        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 10)) {
+            val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
+            if (preloadData != null) {
+                val (rawUrl, forcedUrl) = preloadData
+                val urlToCheck = forcedUrl ?: rawUrl
+                if (!urlToCheck.startsWith("file://")) {
+                    val targetIndex = i
+                    val delayMs = firstPreloadDelayMs + (preloadedForwardCount * 1500L)
+                    preloadScope.launch { 
+                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
+                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
+                        }
+                    }
+                }
+                preloadedForwardCount++
+                if (preloadedForwardCount >= forwardPreloadLimit) break
+            }
+        }"""
 
 
-# ---------------------------------------------------------------------------
-# 1. PROJECT_STATUS.md — the index entry
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# 4. Documentation
+# ===========================================================================
 
-STATUS_SECTION = """# Project Status - NoSlop
+AUDIT_MARKER_START = "<!-- NOSLOP_AUDIT_REGISTER_START -->"
+AUDIT_MARKER_END = "<!-- NOSLOP_AUDIT_REGISTER_END -->"
 
-## Completed Changes (2026-09-02) — Codebase Audit, Hardening and Fresh-Install Fixes
+AUDIT_BODY = """# External audit — running register
 
-Started as an audit of `app/` against its own documented claims, and turned
-into three rounds of fixes. Full detail in
-[TECHNICAL_REFERENCE.md](TECHNICAL_REFERENCE.md) §17; this is the index.
+Audit of the legacy Android app (`app/`) begun 2026-09-02 against README,
+PROJECT_STATUS, TECHNICAL_REFERENCE and PRIVACY_AND_SECURITY_PROPOSAL as they
+stood *after* the 2026-09-02 self-audit. This file is the working register: what
+has been fixed, and what is still open. It is updated by the patch scripts as
+they run.
 
-Two of the bugs below were introduced during this session and fixed in it.
-They are listed rather than quietly dropped.
+""" + AUDIT_MARKER_START + """
 
-### Documentation claims that were not true
+## Done
 
-The audit compared every headline claim in README and
-[PRIVACY_AND_SECURITY_PROPOSAL.md](PRIVACY_AND_SECURITY_PROPOSAL.md) against
-the code. Nine did not hold. All are now corrected in the docs:
+| # | Item | Where | Patch |
+|---|------|-------|-------|
+| — | SSH host keys were auto-accepted on every connection, and `known_hosts` was written to a directory that does not persist on Android. Deployment ships the SSH password and the full private identity, so an attacker answering on that IP received all of it. Now: persistent pin in `filesDir`, two-phase connect, unconditional refusal on a changed key, fingerprint surfaced, optional confirmation callback, `clearPinnedHostKey()` helper. | `net/SshDeployer.kt` | 01 |
+| — | Keepalive moved off `GlobalScope` onto an owned scope. | `net/SshDeployer.kt` | 01 |
+| — | Packets were relayed to every trusted peer *before* any signature check, since all verification lived in handlers that run after `processIncoming()`. Now verified at gossip step 4.4 for the 20 types carrying a self-contained signature. | `mesh/MeshPacketVerifier.kt`, `mesh/GossipService.kt` | 02 |
+| — | Attacker-supplied `packet.id` entered the dedup LRU before authentication, so a forged packet could displace the real one it impersonated. Dedup split into a check (unchanged position, so rate limiting sees the same traffic) and a record that runs only after verification. | `mesh/GossipService.kt` | 02 |
+| — | **Firewall buffer never worked.** A `MESSAGE` from an untrusted sender was recorded in the dedup cache and then buffered; `flushFirewallBuffer()` replayed it into a duplicate-drop and it was lost. Repaired as a side effect of the dedup split. | `mesh/GossipService.kt` | 02 |
+| — | Resolved stream URLs survived a Tor toggle and every circuit rotation, despite being IP-locked to the route that resolved them. Entries now carry the routing mode and `TorService.circuitGeneration`; all three readers apply the same validity test. | `tor/TorService.kt`, `ui/components/VideoPlayer.kt` | 04 |
+| — | `isSourceCached()` looked up a bare URL while entries are keyed `"$url||$quality"`, so it always answered false. | `ui/components/VideoPlayer.kt` | 04 |
+| — | Speculative preloads competed with the visible video for three resolve permits. Under Tor: one slide ahead, none behind, longer head start. | `ui/UnifiedFeedTab.kt` | 04 |
 
-* **"Private keys are stored in Android's hardware-backed Keystore and never
-  exposed in plaintext, even to NoSlop itself."** Keys live in
-  `EncryptedSharedPreferences`; the Keystore holds only the AES master key that
-  wraps that file. Android Keystore cannot perform Ed25519 or X25519, so the
-  raw key material is necessarily unwrapped in memory to sign and decrypt.
-* **"BIP39 Word Cloud ... official BIP39 English wordlist (2048 words)."** The
-  list has **2053** entries: 25 words are not in BIP-39, 20 BIP-39 words are
-  absent, and the ordering differs. There is also no checksum word, so a
-  mistyped phrase silently derives a wrong key rather than failing. Entropy is
-  fine (~132 bits); the label was not. Correcting the list later is safe —
-  `deriveSeed()` runs PBKDF2 over the mnemonic *string*, so existing phrases
-  keep working.
-* **"AES-256-CBC (backup)."** The code writes AES-256-GCM; CBC is a legacy
-  read path only.
-* **"Kotlin Multiplatform app (Android & iOS)"** and **"the canonical codebase
-  is now `mvp/`."** `settings.gradle.kts` includes `:app` only. The UI is
-  Jetpack Compose, not Compose Multiplatform. The tech-stack rows naming
-  AVPlayer, Ktor/Darwin, SQLDelight and AVFoundation described nothing that
-  ships.
-* **The Tor caveat was stale in our own favour** — README said the update check
-  and APK download stayed off Tor; the code already waited for bootstrap and
-  aborted rather than falling back.
-* **"A pure, native `HttpURLConnection` pipeline."** It is OkHttp. The
-  `DownloadReceiver` for `DOWNLOAD_COMPLETE` was a registered no-op.
-* **"Status: IMPLEMENTED & VERIFIED ... SHA-256 release checksum
-  verification."** Not implemented. `UpdateManager` computed the APK digest,
-  logged it as "verified", and compared it to nothing. The only real gates were
-  a 2MB floor and a `text/html` check.
-* **"Eliminates static secret leak."** The HMAC was added *alongside* the raw
-  secret; `X-Proxy-Secret` still shipped the key in cleartext on every request.
-* **"Move to a new device without losing anything."** The archive carries the
-  Keystore-sealed identity file, which a new device cannot open.
+## Open — ordered by severity
+
+**1. Host key confirmation is not wired to the UI.** `onHostKeyPrompt` exists
+and defaults to null, so the first connection to a host is still
+trust-on-first-use. Every connection after that is protected. Four call sites in
+`HubSetupScreen` (~258, ~627, ~728, ~761) need to pass a callback that blocks on
+a dialog showing the fingerprint. Add a Settings entry for
+`SshDeployer.clearPinnedHostKey()` at the same time.
+
+**2. The Word Cloud cannot restore an identity.** `deriveSeed()` is used only
+for backup-archive encryption; the identity is a random keypair from
+`CryptoService.generateIdentity()`. `BackupManager` and README both say the
+identity "must be re-derived from the mnemonic" and no code can do that. A user
+who loses their phone loses their identity permanently, having been told to
+write down twelve words. Either derive both keys from `deriveSeed()` through a
+domain-separated KDF and add a restore path — a one-way door for existing users,
+whose identities cannot be retrofitted — or correct the copy to say the Word
+Cloud is a backup password. Existing archives survive either way, since
+`deriveSeed()` runs PBKDF2 over the mnemonic string.
+
+**3. `sign()` and `encryptDM()` fail silently.** Both return empty strings on
+exception; 39 `sign()` call sites, none checking. The packet goes out unsigned,
+every receiver drops it, and the sender shows a local echo. Make them throw or
+return null and surface the error.
+
+**4. Signed payloads are delimiter-concatenated user input.** `handle`, `bio`,
+`link` and `content` can all contain the delimiter, so two different messages
+can produce the same signing string. The optional-append pattern makes it worse:
+"content X, no avatar" and "content X|Y with avatar Y" are indistinguishable.
+Needs one canonical encoder — length-prefixed or sorted-key JSON — shared by
+sender, handler and `MeshPacketVerifier`. That also removes the three-way
+duplication `MeshPacketVerifierTest` currently exists to police. Wire-format
+change, so it needs a version field and a transition window.
+
+**5. OTA APK lands in external storage.** `getExternalFilesDir(DIRECTORY_DOWNLOADS)`
+is reachable by any app holding `READ_EXTERNAL_STORAGE` on API 24-28, so the
+file can be swapped between the hash check and the installer launch. Download to
+`filesDir` and add a `<files-path>` entry to `file_paths.xml`.
+
+**6. `runBlocking` inside an OkHttp interceptor.** `HttpClientProvider` line ~193
+blocks the calling thread up to 30s. Callers arrive on `Dispatchers.IO` (64
+threads) via a dispatcher allowing 64 concurrent requests, so a Tor outage can
+starve IO app-wide. Throw `IOException` and let callers use `awaitNetworkReady()`.
+
+**7. DM decryption falls back to the Ed25519 key as an X25519 key.**
+`DmPacketHandler` line ~43. The fallback cannot succeed — wrong key type and
+encoding — and exists only to produce a `FATAL` log line. The real condition is
+"no encryption key for this peer yet"; detect it and request a handshake.
+
+**8. Media and announce packets bypass the trust firewall.** All `MEDIA_*`,
+plus `ANNOUNCE_DISCOVERABLE`, `IDENTITY_UPDATE` and `USER_EXIT`, skip both the
+firewall and the rate limiter. README says untrusted senders are "dropped
+outright". Media relay genuinely needs to work between untrusted nodes, so the
+fix is a separate byte-rate budget for `MEDIA_*`, not a blanket block — plus a
+correction to the README sentence.
+
+**9. The proxy secret is not a secret.** `NoSlopRocks2026` is committed as the
+default and any injected value ships in `BuildConfig` inside an open-source APK.
+Drop `X-Proxy-Secret` and the HMAC, treat the endpoint as public, rate-limit
+server-side.
+
+**10. Room: `exportSchema = false`, eleven hand-written migrations, no migration
+tests.** No `androidTest` source set exists. For an app with no cloud backup, a
+bad migration is unrecoverable data loss. Export schemas, commit `app/schemas/`,
+add `MigrationTestHelper` tests. The header comment in `NoSlopDatabase.kt` still
+discusses `fallbackToDestructiveMigration()`, which the builder no longer calls.
+
+**11. The database is not encrypted at rest.** Posts, comments, contacts, peer
+addresses and history are plaintext SQLite. 1:1 DMs are correctly stored as
+ciphertext, but **group messages are stored decrypted** — the one E2EE surface
+kept in the clear. Encrypt group bodies under a Keystore-backed key at minimum;
+SQLCipher for the whole file is the fuller answer.
+
+**12. ProGuard keeps essentially the whole app.** Five package wildcards defeat
+`isMinifyEnabled`. Annotate the Gson models `@Keep` and remove the wildcards one
+at a time. Note that `IdentityRepository.isEncryptionActive()` currently depends
+on `-keep class androidx.security.crypto.**` to work, so fix that check first.
+
+**13. Private keys leave the device during Hub deployment.** By design, but
+README says the identity "never leaves your device unless you export it
+yourself". Qualify the claim and say plainly on the deploy screen what is sent.
+
+**14. The LAN Hub fast path is documented as working and is not.**
+`network_security_config.xml` blocks cleartext globally and its own header says
+HubSetupScreen will report the Hub unreachable. README still advertises seamless
+LAN discovery. Either document the onion fallback, or give the Hub a self-signed
+certificate and pin it.
+
+**15. Smaller items.** 4MiB frame cap x 16 connections is ~128MB of UTF-16 char
+data worst case. `secureFallbackWrite()` returns plaintext on failure;
+`secureFallbackRead()` returns raw ciphertext on failure. The session lock is a
+UI gate only — keys stay readable regardless. 32 empty catch blocks. `fix.py` and
+`get-git.sh` are force-added past a `.gitignore` that excludes their extensions.
+
+**16. Structure and coverage.** 1,612 test lines against 44,826 production
+(3.6%), no instrumentation tests. `NoSlopViewModel` is 2,458 lines with 31 state
+flows and 121 functions; the repositories beneath it are already split along
+lines the ViewModel could follow.
+
+**17. Video over Tor still has no exit affinity.** Patch 04 stops the app
+trusting URLs bound to a route it has left, but resolve and playback still use
+whatever circuit is current. googlevideo signs to the resolving IP, so a
+rotation between the two costs the resolve. The fix is SOCKS stream isolation:
+give each video its own SOCKS username so Tor's `IsolateSOCKSAuth` pins it to
+one circuit, and use the same credentials for the resolve *and* for the
+`OkHttpDataSource` in `VideoPlayer.kt` (~1112) and `PreloadManager.kt` (~311).
+That also removes the need for NEWNYM — escaping a gated exit becomes a
+per-video nonce bump instead of a process-wide rotation that kills the playing
+video's circuit. Java only sends SOCKS credentials via the global
+`java.net.Authenticator`, so this needs a small custom `SocketFactory` doing the
+SOCKS5 handshake, plus a per-identity `OkHttpClient` with its own
+`ConnectionPool`.
+
+**18. `requestNewCircuit()` reports success when it declines to rotate.** The
+cooperative path returns `true` on the reasoning that a sibling's recent
+rotation already gave the caller a fresh exit. The caller at
+`YouTubeInternalClient.kt` line ~909 reads that as "the route changed", evicts
+the pool, waits 2s and retries the whole client list. Needs to be a tri-state:
+rotated / already-fresh / declined.
+
+**19. The Invidious and Piped fallback tier is dead, not degraded.** Every
+instance failed in the 2026-09-03 capture: 502, 403, 404, 500, unreachable,
+timeout. `invidious.projectsegfau.lt` returned malformed JSON eight times, each
+costing a Tor circuit. Mark an instance dead for the session on first hard
+failure, prune the list, and move `channel joined date` lookups off the path
+that competes with playback.
+
+""" + AUDIT_MARKER_END + """
+
+Verified-accurate claims, and the reasoning behind each finding, are in the
+original audit report.
+"""
+
+STATUS_ANCHOR = "## Next Steps (Planned)"
+
+STATUS_INSERT = """## External Audit Fixes (2026-09-03)
+
+An external review of `app/` following the 2026-09-02 self-audit. Applied via
+surgical patch scripts; the running register of what is fixed and what remains
+is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
 
 ### Security
 
-* **Tor control interface was unauthenticated** (`NOSLOP_CONTROL_SOCKET_V1`,
-  §17.1). `ControlPort 9051` with `CookieAuthentication 0`. Loopback is not
-  app-private on Android, so any installed app holding `INTERNET` could open a
-  Tor control connection belonging to NoSlop and issue `GETINFO
-  circuit-status` (deanonymisation), `ADD_ONION`, `SETCONF` or `SIGNAL`. For an
-  app whose premise is that the user's IP is never exposed, this was the worst
-  hole in the tree. Cookie auth was rejected deliberately: it is global, and
-  tor-android's own control connection authenticates with empty credentials.
-* **TLS trust was inverted** (`NOSLOP_TLS_TRUST_V1`, §17.2).
-  `network_security_config.xml` permitted cleartext for *every* domain and
-  trusted `<certificates src="user" />`, so any user- or MDM-installed CA could
-  MITM every connection. Now system anchors only, with cleartext scoped to
-  `.onion` and loopback. Known trade-off: the LAN Hub HTTP fast path is blocked
-  and falls back to the Hub's `.onion`; Android's NSC has no CIDR syntax, so
-  there is a commented block for pinning one known LAN address.
-* **OTA now actually verifies** (`NOSLOP_RELEASE_CHECKSUM_V1`, §17.3). The
-  digest is compared against the checksum published with the release and the
-  file is deleted on mismatch. `UpdateChecker` looks in four places:
-  `hero.apkSha256`, a `.sha256` release asset, a bare digest in the release
-  notes, then a sibling `<apk>.sha256`. **Releases must now publish a checksum
-  or the installer refuses them.** This verifies integrity, not authenticity —
-  the Ed25519 release signature in §2 of the proposal is still not built.
-* **Local media proxy required no authentication** (`NOSLOP_PROXY_TOKEN_V1`,
-  §17.4). `127.0.0.1:8080` served `/stream?id=…` to any app on the device, and
-  the caller-supplied `onion=` parameter let it choose an arbitrary fetch target
-  on the user's circuits. Now a per-process token verified in constant time,
-  plus a v3-address format check.
-* **Mesh frames were unbounded** (`NOSLOP_FRAME_CAP_V1`, §17.5).
-  `BufferedReader.readLine()` with no ceiling: one peer sending bytes without a
-  newline could exhaust the heap. Capped at 4MB. The parse-failure branch also
-  stopped logging the raw frame, which was landing DM ciphertext and peer keys
-  in the user-exportable log.
-* **Proxy secret moved out of source** (`NOSLOP_PROXY_SECRET_V1`, §17.6) into a
-  Gradle property, and the cleartext header is behind
-  `PROXY_SEND_LEGACY_SECRET`, still defaulting to true. §1.1 is **not closed**
-  until the Worker is redeployed and the flag flipped. A signing key compiled
-  into a public APK is abuse friction, not authentication.
+*   **SSH host keys were never verified** (`NOSLOP_SSH_HOSTKEY_V1`).
+    `SshDeployer` installed a `UserInfo` whose `promptYesNo()` returned `true`
+    unconditionally, and wrote `known_hosts` to `java.io.tmpdir`, which is not a
+    stable app-private directory on Android. Deployment sends the SSH password
+    and the complete private identity — Ed25519 key, X25519 key, expanded onion
+    seed — so an attacker answering on that IP received all of it. Now a
+    persistent pin in `filesDir`, a two-phase connect that refuses rather than
+    prompts, unconditional refusal on a changed key, and
+    `clearPinnedHostKey()` for the genuine rebuild case. **Still
+    trust-on-first-use** until `onHostKeyPrompt` is wired into HubSetupScreen.
+*   **Packets were forwarded before being verified**
+    (`NOSLOP_VERIFY_BEFORE_FORWARD_V1`). `GossipService.processIncoming()` runs
+    `forwardPacket()`, and every signature check lived in a handler that runs
+    after it returns — so a node relayed forgeries to its entire trusted peer
+    set at every hop out to TTL 6. New `MeshPacketVerifier` checks the 20 types
+    carrying a self-contained signature at step 4.4. Handler checks are
+    unchanged and still run. `MeshPacketVerifier.enforce = false` disables
+    dropping without touching the pipeline; everything logs under `SIGVERIFY`.
+*   **Dedup could be poisoned by an unauthenticated id.** Step 2 recorded
+    `packet.id` before anything verified it, so a forged packet carrying an
+    expected id silently displaced the real one. Split into a check (unchanged
+    position, so rate limiting sees identical traffic) and a record that runs
+    only after verification.
 
-### Identity and backup
+### Bugs found while fixing the above
 
-* **Silent permanent lockout in fallback mode** (`NOSLOP_UNLOCK_FALLBACK_V1`,
-  §17.7). `unlock()` read the stored mnemonic raw while `getMnemonic()` read it
-  through `secureFallbackRead`. On any device where `EncryptedSharedPreferences`
-  had failed, the comparison was ciphertext against plaintext and could never
-  match — exactly the devices already running degraded.
-* **Burnable identity keys were stored in plaintext** on those same devices
-  (`NOSLOP_BURNABLE_FALLBACK_V1`); `generateBurnableIdentity` skipped
-  `secureFallbackWrite`.
-* **`clearAll()` did not clear Room** (`NOSLOP_CLEARALL_ROOM_V1`) despite its
-  docstring, leaving a half-wiped identity after a factory reset.
-* **Backup could not restore a real archive** (`NOSLOP_BACKUP_STREAMING_V1`,
-  §17.8). `importData` did `readBytes()` then `doFinal()`, holding the whole
-  archive and its whole plaintext in heap — with media included, the app died
-  before the first zip entry. Both directions now stream through a 64KB buffer;
-  GCM plaintext is not unzipped until the tag verifies; zip entry names are
-  validated against traversal. **Verified 2026-09-02: same-device export and
-  import restores correctly.**
-* Cross-device restore is a design limit, not a bug: `preferences.xml` is
-  sealed by a non-exportable Keystore key. It is now detected and exposed via
-  `BackupManager.lastRestoreNeedsIdentityRecovery` — **which nothing reads
-  yet**. See "Still open".
+*   **The firewall buffer never worked.** A `MESSAGE` from an untrusted sender
+    was recorded in the dedup cache at step 2 and buffered at step 4; when
+    `flushFirewallBuffer()` replayed it after the peer became trusted, the step
+    2 check dropped it as a duplicate. Every buffered message was lost. Repaired
+    by the dedup split.
+*   **`isSourceCached()` always returned false.** It looked up a bare URL while
+    entries are keyed `"$url||$quality"`.
 
-### Playback
+### Video playback over Tor
 
-* **The API proxy was breaking the `ip=` lock** (`NOSLOP_PLAYER_IP_LOCK_V1`,
-  §17.9). A googlevideo URL carries `&ip=<address>` and is served only to that
-  address. Resolving `/player` through the Cloudflare Worker had YouTube issue
-  the URL to the Worker's egress; the bytes were then fetched over a Tor exit
-  and refused — silently, as a stream that never started. Measured in the 19:19
-  capture: every URL with `signedFor=104.23.x` / `172.71.x` (Cloudflare) stalled
-  at `bufPos=0`; the one with `signedFor=178.20.55.16` (a Tor exit) played.
-  `HttpClientProvider` already stated the invariant this violated. `/player` is
-  now always direct; search and metadata still use the proxy, which returns no
-  IP-locked URLs.
-  This is a *different* mechanism from `NOSLOP_PROXY_ATTESTATION_V1`: that
-  covers the proxy being refused. A proxied player **success** is worse than a
-  proxied player failure, because a failure at least triggers the direct retry.
-* **A dead control channel wedged startup for two minutes**
-  (`NOSLOP_BOOTSTRAP_BAILOUT_V1`, §17.10). `waitForBootstrap` polled its full
-  120s in silence, and the connectivity fallback that can promote the state to
-  READY only runs afterwards — so with Tor restarting every ~20s the fallback
-  never got a turn. Now abandons after 20s if no control connection has ever
-  succeeded.
+*   **Stream URLs outlived the route they were bound to**
+    (`NOSLOP_ROUTE_AWARE_CACHE_V1`). googlevideo signs a URL to the IP that
+    requested it — `TorService.kt` says so in its own header — but `sourceCache`
+    validated entries on `expire=` alone, so a URL survived both a Tor toggle
+    and every NEWNYM. In the 2026-09-03 capture, `PSIrKxSq8w8` was resolved at
+    00:18:18 for exit 192.42.116.53 and played at 00:25:45 after six rotations:
+    zero bytes, buffer frozen. A third URL carried the device's own address and
+    was fetched over Tor, which can never work. Entries now record the routing
+    mode and `TorService.circuitGeneration`, and all three readers — including
+    the `initialSource` fast path, which bypassed the check entirely — apply the
+    same test. A rotation also now reopens `Unavailable` results immediately
+    instead of making them wait out a 60s TTL.
+*   **Preloads starved the visible video** (`NOSLOP_TOR_PRELOAD_BUDGET_V1`).
+    Four resolves competed for `Semaphore(3)` with a 60s budget each, which is
+    what "Gave up waiting 20s for a resolve slot" was. Under Tor: one slide
+    ahead, none behind, 8s head start. Clearnet behaviour unchanged.
 
-### Onboarding and media UI
-
-* **"Music" was missing from the category picker**
-  (`NOSLOP_MUSIC_SELECTABLE_V1`, §17.11). `selectableCategories` filtered out
-  everything in `alwaysIncludedCategories`, which contains `"Music"`. Two ideas
-  were conflated: "always fetch this" is not "don't offer this". The knock-on
-  was worse than the missing tile — `Step6Genres` gates on
-  `interests.contains("Music")`, which could then never be true, so the Music
-  Genres selector was unreachable during onboarding.
-* **Content Mix did not scroll and its sliders overlapped**
-  (`NOSLOP_CONTENT_MIX_SCROLL_V1`, §17.12). One line.
-  `FeedMixSettingsSection` emits its header and card as siblings with no
-  container of its own and expects a scrolling column from the caller;
-  `Step8FeedMix` gave it a `Box`. A Box stacks children, and with `weight(1f)`
-  and no scroll the card's inner Column overflowed — Compose gives the
-  remaining children zero height, which is precisely the reported "sliders
-  crammed on top of each other".
-* **Photos were rotated 90°** in DMs, group chats and profile pictures
-  (`NOSLOP_EXIF_ORIENTATION_V1`, §17.13). CameraX writes sensor-orientation
-  pixels plus an EXIF Orientation tag; `BitmapFactory` ignores that tag, and
-  `Bitmap.compress()` then writes a JPEG carrying no EXIF at all, destroying
-  the rotation rather than applying it. Four call sites. Rotation is now baked
-  into the pixels at send time — the receive path mixes Coil (respects EXIF)
-  and raw BitmapFactory (does not), so a tag-preserving fix would have looked
-  right in some views and wrong in others, and wrong on any peer running a
-  different build. The compression branch only ran above 500KB, which is why
-  the bug looked intermittent.
-* **Comment GIFs rendered as a black square until the sheet was reopened**
-  (`NOSLOP_COMMENT_MEDIA_RERESOLVE_V1`, §17.14). `resolveMediaUrl` returns a
-  `file://` path once media is downloaded and the mesh proxy URL until then;
-  the call site remembered it keyed on `(mediaId, authorOnion)`, neither of
-  which changes when a download completes. Coil kept the proxy URL, re-fetched
-  from a peer that had finished sending, and drew nothing. The same
-  `AsyncImage` also had no GIF decoder, so comment GIFs were static first
-  frames.
-
-### Logging, build and hygiene
-
-* **`noslop-debug.log` grew without bound** (`NOSLOP_LOG_HYGIENE_V1`, §17.15) —
-  no rotation, no cap, and DEBUG written in release builds, which was most of
-  the volume. Now rotates at 4MB keeping one generation, drops DEBUG in release,
-  serialises writes on one thread (they were racing on `Dispatchers.IO` and
-  could land out of order), and scrubs Base64 blobs and hex digests rather than
-  onion addresses alone.
-* **A clean clone could not build** (`NOSLOP_CONDITIONAL_SIGNING_V1`).
-  `signingConfigs` called `project.property("NOSLOP_STORE_FILE")`
-  unconditionally at configuration time, so every task failed without a
-  keystore — including `assembleDebug` and `test`. Now conditional, and
-  BUILD.md documents the four properties.
-* `com.jcraft:jsch:0.1.55` (abandoned 2018, no `rsa-sha2-*` or `ssh-ed25519`
-  host keys, so Hub deployment would fail key exchange against any current
-  OpenSSH) swapped for the maintained `com.github.mwiede:jsch` fork.
-* okhttp version skew aligned on 4.12.0; the unused `bcprov-jdk18on` catalog
-  entry removed.
-* `tmp_logs/logcat.txt` deleted — 41MB and 275,618 lines of full device logcat
-  from a personal handset, committed publicly, containing an onion address and
-  the running-process list of every app on the device. `.gitignore` stopped
-  excluding `*.sh`, `*.py` and `tests/`, which would have silently dropped real
-  project files.
-
-### Two regressions introduced and fixed during this session
-
-* **Unclosed comment.** `TorControlChannel.kt`'s header contained `ns/id/*` as
-  shorthand for a Tor control command. Kotlin block comments **nest**, unlike
-  Java's, so that opened a nested comment which never closed and swallowed the
-  file from line 38 to EOF. Every reference to the object came back unresolved.
-  Comment-nesting is now part of the pre-hand-off check.
-* **`UNIX_ONLY` control socket broke `NEWNYM` and `ADD_ONION`.** The first cut
-  removed `ControlPort` and declared only a `ControlSocket`; tor never created
-  it, and since tor-android writes nothing to logcat there was no way to tell
-  whether tor refused the directory, put the socket elsewhere, or ignored our
-  torrc. Nine `control channel unavailable` warnings, no circuit rotation, no
-  hidden service. Now `Mode.AUTO` (§17.1): both are declared, the socket is
-  preferred, TCP is the fallback, and the transport that won is logged along
-  with a directory dump on failure.
-
-### Verified in testing
-
-Mesh sync between fresh peers, reactions, comments, DMs, QR pairing, media
-auto-download and chunking, gossip relay at hops=4, user-recorded video, and
-same-device backup export/import. Multi-device testing is next.
-
----
-
-## Still open
-
-Ordered by how much it would hurt to ship without it.
-
-1. **`AUTO` leaves the TCP control port open.** The local attack surface from
-   §17.1 is temporarily back. One log line decides it — if
-   `TOR_CONTROL Control channel opened` reports `transport=unix:…`, set
-   `MODE = Mode.UNIX_ONLY` and it closes for good. If it reports `tcp:9051`,
-   the WARN block above it has the directory listing and torrc read-back needed
-   to work out where tor actually put its socket.
-2. **OTA verifies integrity, not authenticity.** An attacker controlling both
-   `content.json` and the APK can publish a matching pair. Needs the Ed25519
-   release signature from §2 of the proposal, with the public key compiled in.
-   Do not describe OTA as MITM-resistant until then.
-3. **`lastRestoreNeedsIdentityRecovery` is set but never read.** A cross-device
-   restore brings data back and silently loses the identity. Wire it into the
-   restore screen before telling anyone device migration works.
-4. **The proxy secret still crosses the wire.** `PROXY_SEND_LEGACY_SECRET`
-   defaults to true. Flip it, and `ACCEPT_LEGACY_SECRET` in the Worker, once
-   enough installs have updated.
-5. **No user-configurable Worker endpoint.** This is the part of §1.2 that
-   genuinely removes the single point of failure, and it needs a Settings UI
-   rather than a config change.
-6. **Test coverage is ~3.7%** — 1,612 lines against 43.6k. What is covered
-   (crypto, wire protocol, gossip) is covered sensibly; what is not is exactly
-   where the time goes. `BackupManagerTest` never calls `BackupManager` — it
-   reimplements the crypto and asserts against itself, so it would pass if the
-   class were deleted. A real export/import round trip through Robolectric
-   would be ~40 lines and would have caught the OOM.
-7. **God objects.** `NoSlopViewModel` 2458 lines, `UnifiedFeedTab` 2126,
-   `VideoPlayer` 1803, `NoSlopRepository` 1686, `SettingsTab` 1512. The
-   handler-per-packet split in `mesh/` is the shape to copy.
-8. **LAN Hub over cleartext is now blocked** by the tightened NSC and falls
-   back to the `.onion` route. `HubSetupScreen` and QR link-by-IP will report
-   the Hub unreachable until either the LAN address is pinned in the config or
-   the Hub path is moved to the onion permanently.
-9. **`mvp/` is 2.8MB of dead weight** outside the build. Either wire it into
-   `settings.gradle.kts` or move it out of the repo root.
-10. **The prebuffer ceiling never fires for long videos.** itag=18 full-length
-    files exceed it, so they get no prebuffer at all and always feel slow to
-    start over Tor. Working as designed, but the design is worth revisiting.
-11. **Reddit still 403s from the Worker.** Almost certainly egress IP rather
-    than User-Agent; the fallback chain is the mitigation. Worth measuring
-    whether the Reddit route through the Worker still earns its place at all.
+**Not yet fixed:** resolve and playback still use whatever circuit is current,
+so a rotation between them costs the resolve. SOCKS stream isolation is the real
+answer — see finding #17 in the audit register.
 
 """
 
-edit(
-    STATUS,
-    "# Project Status - NoSlop\n\n",
-    STATUS_SECTION,
-    "PROJECT_STATUS: session section added",
-    marker="## Completed Changes (2026-09-02) — Codebase Audit",
-)
+
+def write_docs():
+    # --- audit register ---
+    if os.path.exists(AUDIT_DOC):
+        with open(AUDIT_DOC, "r", encoding="utf-8") as f:
+            existing = f.read()
+        if AUDIT_MARKER_START in existing and AUDIT_MARKER_END in existing:
+            new_block = AUDIT_BODY.split(AUDIT_MARKER_START, 1)[1].rsplit(AUDIT_MARKER_END, 1)[0]
+            updated = re.sub(
+                re.escape(AUDIT_MARKER_START) + r".*?" + re.escape(AUDIT_MARKER_END),
+                AUDIT_MARKER_START + new_block + AUDIT_MARKER_END,
+                existing,
+                flags=re.DOTALL,
+            )
+            if updated != existing:
+                with open(AUDIT_DOC, "w", encoding="utf-8") as f:
+                    f.write(updated)
+                APPLIED.append(f"{AUDIT_DOC}: register refreshed")
+            else:
+                SKIPPED.append(f"{AUDIT_DOC}: register already current")
+        else:
+            SKIPPED.append(f"{AUDIT_DOC}: exists without markers, left alone")
+    else:
+        os.makedirs(os.path.dirname(AUDIT_DOC), exist_ok=True)
+        with open(AUDIT_DOC, "w", encoding="utf-8") as f:
+            f.write(AUDIT_BODY)
+        APPLIED.append(f"{AUDIT_DOC}: created")
+
+    # --- project status ---
+    if not os.path.exists(STATUS_DOC):
+        FAILED.append(f"{STATUS_DOC} not found")
+        return
+    with open(STATUS_DOC, "r", encoding="utf-8") as f:
+        status = f.read()
+    if "## External Audit Fixes (2026-09-03)" in status:
+        SKIPPED.append(f"{STATUS_DOC}: section already present")
+        return
+    if STATUS_ANCHOR not in status:
+        FAILED.append(f"{STATUS_DOC}: '{STATUS_ANCHOR}' heading not found")
+        return
+    with open(STATUS_DOC, "w", encoding="utf-8") as f:
+        f.write(status.replace(STATUS_ANCHOR, STATUS_INSERT + STATUS_ANCHOR, 1))
+    APPLIED.append(f"{STATUS_DOC}: audit section inserted")
 
 
-# ---------------------------------------------------------------------------
-# 2. TECHNICAL_REFERENCE.md — §17 detail, appended before the footer
-# ---------------------------------------------------------------------------
+def main():
+    if not os.path.exists("app/build.gradle.kts"):
+        print("Run this from the NoSlop repo root (app/build.gradle.kts not found).")
+        sys.exit(1)
 
-TECH_SECTION = """## 17. Audit and Hardening Pass (2026-09-02)
+    edit(TOR, TOR_FIELD_OLD, TOR_FIELD_NEW, "TorService: circuitGeneration counter",
+         marker="NOSLOP_CIRCUIT_GENERATION_V1")
+    edit(TOR, TOR_BUMP_OLD, TOR_BUMP_NEW, "TorService: bump generation on real rotation",
+         marker="Circuit rotated — generation is now")
 
-Indexed from [PROJECT_STATUS.md](PROJECT_STATUS.md). This section is the
-detail; the status doc is the summary.
+    edit(VIDEO, VIDEO_CLASS_OLD, VIDEO_CLASS_NEW, "VideoPlayer: CachedSource + stalenessReason()",
+         marker="NOSLOP_ROUTE_AWARE_CACHE_V1")
+    edit(VIDEO, VIDEO_ISCACHED_OLD, VIDEO_ISCACHED_NEW, "VideoPlayer: isSourceCached key + validity",
+         marker="Scan the quality variants")
+    edit(VIDEO, VIDEO_FRESH_OLD, VIDEO_FRESH_NEW, "VideoPlayer: freshOrNull uses stalenessReason",
+         marker="unusable ($reason)")
+    edit(VIDEO, VIDEO_STORE_OLD, VIDEO_STORE_NEW, "VideoPlayer: stamp route on write",
+         marker="stamp the route this was resolved on")
+    edit(VIDEO, VIDEO_INITIAL_OLD, VIDEO_INITIAL_NEW, "VideoPlayer: initialSource fast path",
+         marker="this fast path read the map directly")
 
-### 17.1 Tor control interface — `NOSLOP_CONTROL_SOCKET_V1` / `_V2`
+    edit(FEED, FEED_OLD, FEED_NEW, "UnifiedFeedTab: preload budget under Tor",
+         marker="NOSLOP_TOR_PRELOAD_BUDGET_V1")
 
-`writeTorrc` used to emit `ControlPort 9051` with `CookieAuthentication 0`, and
-every control operation connected to `127.0.0.1:9051` with a bare
-`AUTHENTICATE`. On Android, loopback is shared between all installed apps. Any
-app holding `INTERNET` could therefore drive our Tor daemon.
+    write_docs()
 
-Cookie authentication was considered and rejected. It is a global tor setting,
-and `org.torproject.jni.TorService` maintains its own control connection that
-authenticates with empty credentials; enabling it would very likely break the
-library's connection and with it the `STATUS_ON` broadcast, so Tor would never
-report READY. Trading a local attack surface for a non-booting app is a bad
-trade.
-
-`TorControlChannel` instead centralises every control operation and offers
-three modes:
-
-| Mode | torrc | Behaviour |
-|---|---|---|
-| `UNIX_ONLY` | `ControlSocket` only | Destination. File permissions on the app's private `filesDir` are the access control; no TCP port exists to attack. |
-| `AUTO` | both | **Current.** Prefers the socket, falls back to TCP, logs which won plus a directory dump on failure. Leaves 9051 open — diagnostic, not a destination. |
-| `TCP_ONLY` | `ControlPort` only | Exact pre-change behaviour, for isolating a startup failure. |
-
-The first cut shipped `UNIX_ONLY` and the socket never appeared. tor-android
-writes nothing to logcat, so the failure was invisible: no bootstrap-phase
-lines, no hidden service, nine `NEWNYM: control channel unavailable` warnings,
-and circuit rotation entirely inert. `AUTO` exists to answer, on the next run,
-whether tor refuses the directory, places the socket elsewhere, or ignores our
-torrc at all — the last being plausible given `ControlPort 9051` may have been
-tor-android's default rather than ours.
-
-Note `start()` returns early on `Tor already in state READY`, so `writeTorrc`
-is skipped on a warm start. A torrc change needs a genuine tor restart to take
-effect.
-
-### 17.2 TLS trust — `NOSLOP_TLS_TRUST_V1`
-
-`base-config` permitted cleartext for every domain and trusted user
-certificates. System anchors only now, cleartext scoped to `.onion` and
-loopback. Android's network security config matches hostnames and has no CIDR
-syntax, so "any RFC1918 address" is inexpressible — the LAN Hub fast path is
-consequently blocked and `invokeHubApi` falls back to the Hub's `.onion`. A
-commented block pins one known LAN address if the fast path is wanted back.
-Debug TLS interception belongs in a `app/src/debug/res/xml/` overlay, not here.
-
-### 17.3 Release verification — `NOSLOP_RELEASE_CHECKSUM_V1`
-
-The digest is computed while streaming, so the file is never read twice and
-there is no window between hashing and installing. Compared in constant time
-against the published checksum; the file is deleted on mismatch, on truncation
-against `Content-Length`, and on a `text/html` response. With no published
-checksum the install is refused unless `allowUnverified = true` is passed from
-a UI path that has warned the user.
-
-`UpdateChecker` resolves the expected digest from, in order: `hero.apkSha256`
-in `content.json`, a `.sha256` release asset, a bare 64-hex in the release
-notes, then a sibling `<apk-url>.sha256`.
-
-This is integrity against whatever the update channel said, not authenticity.
-See "Still open" item 2.
-
-### 17.4 Media proxy — `NOSLOP_PROXY_TOKEN_V1`
-
-Per-process token on `/stream`, compared in constant time; an untokenised
-request gets 404 rather than 401 so a probing app cannot confirm what the port
-is. The `onion=` parameter must match a well-formed v3 address. The token
-rotates per process, so in-progress mesh streams do not survive an app restart
-in Coil's cache; fully downloaded media is served from `file://` and is
-unaffected.
-
-### 17.5 Mesh framing — `NOSLOP_FRAME_CAP_V1`
-
-Manual newline framing with a 4MB ceiling, generous enough for the largest
-`MEDIA_CHUNK` and small enough that a peer cannot buffer the heap away.
-Connections exceeding it are dropped. The parse-failure branch logs the frame
-length rather than the frame.
-
-### 17.6 Proxy credentials — `NOSLOP_PROXY_SECRET_V1`
-
-`PROXY_URL`, `PROXY_SECRET` and `PROXY_SEND_LEGACY_SECRET` are BuildConfig
-fields sourced from Gradle properties, so the shipped secret is no longer in
-the public repo and rotation is a property change. The Worker accepts either
-the legacy header or a valid HMAC during rollout, and reports which via
-`X-Proxy-Auth`. Reddit and Jamendo sign the full proxied URL; YouTube signs the
-JSON body — the Worker reconstructs both candidates because changing what the
-client signs would break every installed copy at once.
-
-### 17.7 Identity fallback — `NOSLOP_UNLOCK_FALLBACK_V1`
-
-`unlock()` now reads through `secureFallbackRead` and normalises whitespace and
-case before comparing. Burnable private keys go through `secureFallbackWrite`.
-`clearAll()` removes the Room mirror as its docstring always claimed.
-
-### 17.8 Backup — `NOSLOP_BACKUP_STREAMING_V1`
-
-Both directions stream through a 64KB buffer. GCM `update()` emits plaintext
-that is not yet authenticated, so the decrypted archive is written to a temp
-file and unzipped only after `doFinal()` returns without throwing; a tampered
-archive is deleted before a single entry is read. Zip entry names are validated
-as plain file names and every destination is confirmed inside its intended
-parent by canonical path. The plaintext temp archive is deleted in a `finally`,
-success or failure.
-
-`preferences.xml` in the archive is sealed by a non-exportable Keystore key.
-`canOpenRestoredIdentity()` probes it after a restore and sets
-`lastRestoreNeedsIdentityRecovery` — see "Still open" item 3.
-
-### 17.9 Player IP lock — `NOSLOP_PLAYER_IP_LOCK_V1`
-
-`playerEndpoint()` is unconditionally direct. Confirm with `PLAYBACK_DIAG
-resolved DIRECT` lines: `signedFor=` should always be a Tor exit, never
-`104.23.x` or `172.71.x`. The Worker's player-response cache is now cold; if
-player calls are ever routed back through it, remove that cache first, because
-it stores URLs locked to Cloudflare's egress.
-
-### 17.10 Bootstrap bail-out — `NOSLOP_BOOTSTRAP_BAILOUT_V1`
-
-If no control connection has succeeded within 20 polls, `waitForBootstrap`
-returns false immediately so the caller's end-to-end routing check runs. Worth
-keeping independently of §17.1: an unreachable control interface is knowable in
-seconds, and the fallback needs to run while the current bootstrap attempt is
-still alive.
-
-### 17.11 Category picker — `NOSLOP_MUSIC_SELECTABLE_V1`
-
-`hiddenFromPicker` (plumbing categories) is now separate from
-`alwaysIncludedCategories` (always fetched). `Music` is both always fetched and
-a real user choice; filtering the picker by the latter removed it from the UI
-and made `Step6Genres`' `interests.contains("Music")` permanently false.
-
-### 17.12 Content Mix layout — `NOSLOP_CONTENT_MIX_SCROLL_V1`
-
-`FeedMixSettingsSection` is a bare composable emitting siblings with no
-container, and requires a scrolling column from its caller.
-`ContentPreferencesScreen` supplies one; `Step8FeedMix` supplied a `Box`, which
-stacked the header over the card and, being height-constrained without a
-scroll, collapsed the lower sliders to zero height.
-
-### 17.13 EXIF orientation — `NOSLOP_EXIF_ORIENTATION_V1`
-
-`ui/ExifUtils.kt` decodes with the orientation applied and exposes
-`needsRotation()` so small photos that carry a rotation are re-encoded too.
-Rotation is baked into pixels rather than preserved as a tag, because the
-receive path mixes Coil and raw `BitmapFactory` and peers may run a different
-build. Applied at `ChatThreadScreen`, `GroupChatThreadScreen`, `AvatarCropper`
-and `GroupSettingsModal`.
-
-CameraX still has no `setTargetRotation()`; the decode-side fix covers both
-camera and gallery sources, so it was left alone deliberately.
-
-### 17.14 Comment media — `NOSLOP_COMMENT_MEDIA_RERESOLVE_V1`
-
-`isDownloaded` is now a `remember` key on the resolved URL, so it re-resolves
-from proxy URL to `file://` at the moment the file becomes usable. The
-`AsyncImage` also gets a GIF-capable `ImageLoader`, matching the one
-`ChatThreadScreen` already builds for DM GIFs.
-
-### 17.15 Logging — `NOSLOP_LOG_HYGIENE_V1`
-
-Rotates at 4MB keeping one generation, so worst-case disk use is bounded at
-~8MB. Release drops DEBUG. Writes are serialised on a single daemon thread —
-the previous implementation launched a coroutine per line onto the
-multi-threaded IO dispatcher and called `File.appendText()`, opening and
-closing the file per line with no ordering guarantee. Scrubbing covers long
-Base64 blobs and 64-hex digests in addition to onion addresses.
-
-Note the log export surfaces only the active file, not the rotated `.log.1`.
-
----
-
-"""
-
-edit(
-    TECH,
-    """---
-
-**Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for""",
-    TECH_SECTION + """**Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for""",
-    "TECHNICAL_REFERENCE: §17 added",
-    marker="## 17. Audit and Hardening Pass (2026-09-02)",
-)
-
-edit(
-    TECH,
-    """4. `docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
-   `TorService.writeTorrc` writes `CookieAuthentication 1`, while
-   `registerHiddenService` authenticates with a bare `AUTHENTICATE\\r\\n` (no
-   cookie) — this combination should still be verified against the running
-   `tor-android` behavior. **Still open** (ANALYSiS.md is archived/historical
-   and not being edited; flagging here is the live tracking mechanism).""",
-    """4. ~~`docs/archived/ANALYSiS.md` item 6 states `CookieAuthentication 0`;
-   `TorService.writeTorrc` writes `CookieAuthentication 1`, while
-   `registerHiddenService` authenticates with a bare `AUTHENTICATE\\r\\n` (no
-   cookie).~~ **Resolved 2026-09-02** — the torrc did write
-   `CookieAuthentication 0`, and the bare `AUTHENTICATE` matched it, which is
-   why control worked and why any app on the device could also use it. All
-   control access now goes through `TorControlChannel`; see §17.1. Empty
-   authentication is retained deliberately, with socket file permissions as the
-   access control.""",
-    "TECHNICAL_REFERENCE §14: item 4 resolved",
-    marker="**Resolved 2026-09-02** — the torrc did write",
-)
-
-edit(
-    TECH,
-    """8. The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version mismatch
-   noted in §12 is **still real** — not a doc error, an actual dependency
-   skew worth aligning at some point.""",
-    """8. ~~The `okhttp` (4.10.0) vs `okhttp-dnsoverhttps` (4.12.0) version
-   mismatch noted in §12.~~ **Fixed 2026-09-02** — the catalog is aligned on
-   4.12.0 and `okhttp-dnsoverhttps` is declared there rather than hardcoded.
-9. The `mvp/` tree is not in `settings.gradle.kts` and does not build. README
-   previously called it the canonical codebase; that claim is corrected, but
-   the directory is still 2.8MB of dead weight in the repo. **Open.**""",
-    "TECHNICAL_REFERENCE §14: item 8 fixed, mvp/ tracked",
-    marker="**Fixed 2026-09-02** — the catalog is aligned",
-)
+    print("\n=== patch 04: video over Tor ===")
+    for a in APPLIED:
+        print(f"  APPLIED  {a}")
+    for s in SKIPPED:
+        print(f"  SKIPPED  {s}")
+    for f in FAILED:
+        print(f"  FAILED   {f}")
+    print()
+    if FAILED:
+        print("Some edits did not apply. Nothing partial was written for those.")
+        sys.exit(1)
+    print("Verify with:  ./gradlew :app:testDebugUnitTest")
+    print("Then:         ./gradlew :app:assembleRelease")
 
 
-# ---------------------------------------------------------------------------
-# 3. PRIVACY_AND_SECURITY_PROPOSAL.md — correct the control-interface status
-# ---------------------------------------------------------------------------
-
-edit(
-    PROPOSAL,
-    """| **Tor control interface** | `ControlPort 9051` with `CookieAuthentication 0`. Any app holding INTERNET could open an unauthenticated Tor control connection and issue `GETINFO circuit-status` (deanonymisation), `ADD_ONION`, `SETCONF` or `SIGNAL`. | **Fixed.** The control interface is now a unix socket in the app's private filesDir with no TCP port at all. Cookie auth was rejected deliberately — it is global, and tor-android's own control connection authenticates with empty credentials. See `TorControlChannel`. |""",
-    """| **Tor control interface** | `ControlPort 9051` with `CookieAuthentication 0`. Any app holding INTERNET could open an unauthenticated Tor control connection and issue `GETINFO circuit-status` (deanonymisation), `ADD_ONION`, `SETCONF` or `SIGNAL`. | **PARTIAL.** All control access is centralised in `TorControlChannel`, which supports a private unix `ControlSocket`. The first `UNIX_ONLY` build could not open that socket — tor logs nothing to logcat, so it failed invisibly, taking `NEWNYM` and `ADD_ONION` with it. Currently `Mode.AUTO`: socket preferred, **TCP 9051 still declared as fallback**, so the hole is not yet closed. Cookie auth was rejected deliberately — it is global, and tor-android's own control connection authenticates with empty credentials. See TECHNICAL_REFERENCE §17.1. |""",
-    "PRIVACY_AND_SECURITY_PROPOSAL: control interface status is accurate",
-    marker="**PARTIAL.** All control access is centralised",
-)
-
-edit(
-    PROPOSAL,
-    """## Backup — updated 2026-09-01""",
-    """## Player URL IP lock — added 2026-09-02
-
-Not a proposal item, but it belongs with the proxy discussion in §1. A
-googlevideo URL carries `&ip=<address>` and is served only to that address.
-Resolving `/player` through the Cloudflare Worker had YouTube issue the URL to
-the Worker's egress; the bytes were then fetched over a Tor exit and refused
-silently, as a stream that never started. `/player` is now always direct
-(`NOSLOP_PLAYER_IP_LOCK_V1`); search and metadata still use the proxy, which
-returns no IP-locked URLs.
-
-Worth noting alongside §1.2: this is the proxy actively harming a request it
-succeeded at, which is a stronger argument for user-configurable endpoints than
-the refusal case.
-
-## Backup — updated 2026-09-01""",
-    "PRIVACY_AND_SECURITY_PROPOSAL: records the player IP lock",
-    marker="## Player URL IP lock — added 2026-09-02",
-)
-
-
-# ---------------------------------------------------------------------------
-# 4. README.md — the proxy no longer touches /player
-# ---------------------------------------------------------------------------
-
-edit(
-    README,
-    """Media stream bytes never go through it.""",
-    """Media stream bytes never go through it, and neither does stream resolution: a
-googlevideo URL is IP-locked to whoever requested it, so resolving through the
-proxy produced URLs that could not be fetched over Tor. Search and metadata
-only.""",
-    "README: proxy bullet excludes player resolution",
-    marker="neither does stream resolution",
-)
-
-
-print("\n=== APPLIED ===")
-for x in APPLIED:
-    print("  +", x)
-print("\n=== SKIPPED ===")
-for x in SKIPPED:
-    print("  =", x)
-if FAILED:
-    print("\n=== FAILED ===")
-    for x in FAILED:
-        print("  !", x)
-
-sys.exit(1 if FAILED else 0)
+if __name__ == "__main__":
+    main()
