@@ -1468,7 +1468,53 @@ is [AUDIT_2026_09_03.md](AUDIT_2026_09_03.md).
 so a rotation between them costs the resolve. SOCKS stream isolation is the real
 answer — see finding #17 in the audit register.
 
-## Next Steps (Planned)
-*   **Global Onion Connectivity**: Transition NoSlop to use the Hub's public `.onion` address as the primary endpoint when the local LAN IP is unreachable.
-*   **Deep Data Sync**: Synchronize Contact lists, trusted peer statuses, and DM histories between Room (Mobile) and the Hub's master database.
-*   **Social Feed Mirroring**: Allow the Hub to serve the Mobile app's preferred RSS/Mesh feed content over the authenticated REST API.
+## Consolidated Master Backlog
+
+The following tasks have been aggregated from all historical gap analyses, audits, and integration plans into this single unified backlog.
+
+### 1. Network & Mesh Parity (From GAP_ANALYSIS.md)
+*   `FOLLOW`/`UNFOLLOW` asymmetric relationship model (§1)
+*   Group admin list + bans (`admins[]`, `bannedIds[]`) — NoSlop has a single admin key and no ban list (§3)
+*   User-selectable theme palettes (low priority, §8)
+*   Document NoSlop's potential future role as a HAI-Net hub "frontend client" (§9)
+*   Confirm `Dns.SYSTEM` fallback exists in `HttpClientProvider.clearnetClient`'s DoH chain (§13.1)
+
+### 2. Hub Integration (From HUB_INTEGRATION_PLAN.md)
+*   **Reconciliation Sync (`MeshPacketHandler.kt`)**: Diff local Room DB vs Hub DB to merge DMs/Posts during failover.
+*   **Clearnet Aggregation Sync (`FeedSyncWorker.kt`)**: Sync "Saved" and "Liked" clearnet states with the Hub.
+*   **Heavy Media Offloading**: Transfer `MediaManager.kt` chunk-downloading logic to the Hub over Tor 24/7. Mobile pulls MP4 over local Wi-Fi.
+*   **Background Sync Worker (`FeedSyncWorker.kt`)**: Wire `syncWithHub()` into Android's WorkManager for background DM/notification checks.
+*   **Automated AES ZIP Export (`data/BackupManager.kt`)**: Push silent, encrypted `noslop_backup.zip` archives to Hub via `POST /api/backup/push`.
+*   **Upload Worker (`data/HubSyncWorker.kt`)**: Create a daily WorkManager job for backups.
+
+### 3. KMP Migration Parity (From KMP_PARITY_PLAN.md)
+*   **Missing Core Screens (~4,800 lines)**: `UnifiedFeedTab.kt`, `MainScreen.kt`, `NoSlopViewModel.kt`, etc.
+*   **Missing UI Components (~2,600 lines)**: `FeedCard.kt`, `ChatThreadScreen.kt`, `CommentsBottomSheet.kt`, `PeerItem.kt`, `AvatarCropper.kt`, etc.
+*   **Missing Tab Screens (~1,060 lines)**: `SettingsTab.kt`, `DMsTab.kt`, `NotificationsScreen.kt`, `LogsViewerScreen.kt`, `ApiKeysScreen.kt`.
+*   **Missing Data Layer (~3,000 lines)**: Rebuild `NoSlopRepository.kt`, DAOs, and Android-specific implementations in SQLDelight.
+*   **Android-Only Dependencies**: Refactor usages of `AndroidViewModel`, CameraX, ExoPlayer, Coil, Accompanist Permissions, ZXing, and Gson.
+
+### 4. Privacy & Security (From PRIVACY_AND_SECURITY_PROPOSAL.md)
+*   Add Ed25519 signature & SHA-256 checksum verification to UpdateManager.kt
+*   Upgrade BackupManager.kt to AES-256-GCM authenticated encryption
+*   Add HTTPS Certificate Pinning for update check domains
+*   Implement dynamic HMAC signing & user-configurable Worker proxy endpoints
+*   Enforce strict Tor IP leak prevention (block clearnet fallbacks when Tor is ON)
+*   Integrate Tor circuit cycling on API proxy errors
+*   Add PIN-derived AES-GCM fallback storage when Android Keystore is unavailable
+*   Implement Double Ratchet protocol for forward-secure DMs
+*   Apply adaptive token-bucket rate limiting across all mesh packet types
+
+### 5. Open Audit Findings (From AUDIT_2026_09_03.md)
+*   **1. Host key confirmation is not wired to the UI.** (Wire `onHostKeyPrompt` in `HubSetupScreen` and add `clearPinnedHostKey()` setting).
+*   **2. The Word Cloud cannot restore an identity.** (No restore path from `deriveSeed()`, either fix or correct docs).
+*   **3. `sign()` and `encryptDM()` fail silently.** (Make them throw/surface errors instead of returning empty strings).
+*   **4. Signed payloads are delimiter-concatenated user input.** (Needs canonical JSON/length-prefixed encoder).
+*   **5. OTA APK lands in external storage.** (Download to `filesDir` and add `<files-path>`).
+*   **6. `runBlocking` inside an OkHttp interceptor.** (Throw `IOException` and use `awaitNetworkReady()`).
+*   **7. DM decryption falls back to Ed25519 as X25519.** (Detect missing encryption key and request handshake instead).
+*   **8. Media and announce packets bypass the trust firewall.** (Add byte-rate budget for `MEDIA_*` instead of blanket bypass).
+*   **9. The proxy secret is not a secret.** (Drop `X-Proxy-Secret`/HMAC, rate limit on server side).
+*   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
+*   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
+*   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).

@@ -451,7 +451,7 @@ implementation effort vs. value:
 - [x] Group chats: `GroupChat` entity + `GROUP_INVITE`/`GROUP_UPDATE`/
       `GROUP_DELETE` packets + per-recipient encryption fan-out, all
       signature-verified and role-authorised (§3)
-- [ ] Group state catch-up: `GROUP_QUERY` / `GROUP_SYNC` so a member offline
+- [x] Group state catch-up: `GROUP_QUERY` / `GROUP_SYNC` so a member offline
       during an update can resynchronise on reconnect (§3)
 - [ ] Group admin list + bans (`admins[]`, `bannedIds[]`) — NoSlop has a
       single admin key and no ban list (§3)

@@ -460,11 +460,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             var retryCount = 0
+            var hasRequestedCatchup = false
             TorService.torState.collect { state ->
                 if (state == TorState.READY || state == TorState.PROXY_READY) {
                     retryCount = 0
                     if (!_torReadyState.value.first) {
                         _torReadyState.value = Pair(true, "Tor proxy connected (Port 9050)")
+                    }
+                    if (state == TorState.READY && !hasRequestedCatchup) {
+                        hasRequestedCatchup = true
+                        repository.requestAllGroupsCatchup()
                     }
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {

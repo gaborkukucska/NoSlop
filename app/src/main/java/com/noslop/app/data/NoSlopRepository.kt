@@ -1162,6 +1162,17 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
+    suspend fun requestAllGroupsCatchup() {
+        try {
+            val groups = db.groupChatDao().getAllGroupChatsList()
+            for (group in groups) {
+                requestGroupCatchup(group.groupId)
+            }
+        } catch (e: Exception) {
+            Logger.warn("REPOSITORY", "Failed to request group catchup for all groups: ${e.message}")
+        }
+    }
+
     val allMeshPosts: Flow<List<MeshPost>> = postDao.getAllPosts()
     val allNotifications: Flow<List<NotificationItem>> = db.notificationDao().getAllNotifications()
     val unreadNotificationCount: Flow<Int> = db.notificationDao().getUnreadCount()
