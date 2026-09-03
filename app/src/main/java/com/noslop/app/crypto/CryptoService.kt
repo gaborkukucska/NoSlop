@@ -205,23 +205,18 @@ object CryptoService {
     }
 
     fun sign(payload: String, privateKeyB64: String): String {
-        return try {
-            val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
-            val privKeyParams = getEd25519PrivateKeyParams(bytes)
-            
-            // Bypass JCA/ASN.1 entirely and use BouncyCastle's lightweight crypto API directly.
-            val signer = Ed25519Signer()
-            signer.init(true, privKeyParams)
-            
-            val msgBytes = payload.toByteArray(Charsets.UTF_8)
-            signer.update(msgBytes, 0, msgBytes.size)
-            val sigBytes = signer.generateSignature()
-            
-            Base64.encodeToString(sigBytes, Base64.NO_WRAP)
-        } catch (e: Exception) {
-            Logger.error(TAG, "Ed25519 signing failed: ${e.message}")
-            ""
-        }
+        val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
+        val privKeyParams = getEd25519PrivateKeyParams(bytes)
+        
+        // Bypass JCA/ASN.1 entirely and use BouncyCastle's lightweight crypto API directly.
+        val signer = Ed25519Signer()
+        signer.init(true, privKeyParams)
+        
+        val msgBytes = payload.toByteArray(Charsets.UTF_8)
+        signer.update(msgBytes, 0, msgBytes.size)
+        val sigBytes = signer.generateSignature()
+        
+        return Base64.encodeToString(sigBytes, Base64.NO_WRAP)
     }
 
     fun verify(payload: String, signatureB64: String, publicKeyB64: String): Boolean {
@@ -245,35 +240,30 @@ object CryptoService {
     }
 
     fun encryptDM(plaintext: String, theirEncPubB64: String, myEncPrivB64: String): Pair<String, String> {
-        return try {
-            val myPriv = decodeX25519PrivateKey(myEncPrivB64)
-            val theirPub = decodeX25519PublicKey(theirEncPubB64)
+        val myPriv = decodeX25519PrivateKey(myEncPrivB64)
+        val theirPub = decodeX25519PublicKey(theirEncPubB64)
 
-            val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
-            ka.init(myPriv)
-            ka.doPhase(theirPub, true)
-            val sharedSecret = ka.generateSecret()
+        val ka = KeyAgreement.getInstance("X25519", BC_PROVIDER)
+        ka.init(myPriv)
+        ka.doPhase(theirPub, true)
+        val sharedSecret = ka.generateSecret()
 
-            val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
-            val chachaKey = ByteArray(digest.digestSize)
-            digest.update(sharedSecret, 0, sharedSecret.size)
-            digest.doFinal(chachaKey, 0)
-            val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
+        val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
+        val chachaKey = ByteArray(digest.digestSize)
+        digest.update(sharedSecret, 0, sharedSecret.size)
+        digest.doFinal(chachaKey, 0)
+        val secureKey = SecretKeySpec(chachaKey, "ChaCha20")
 
-            val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
-            val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
-            val ivSpec = IvParameterSpec(iv)
-            cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
-            val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val cipher = Cipher.getInstance("ChaCha20-Poly1305", BC_PROVIDER)
+        val ivSpec = IvParameterSpec(iv)
+        cipher.init(Cipher.ENCRYPT_MODE, secureKey, ivSpec)
+        val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
 
-            Pair(
-                Base64.encodeToString(ciphertext, Base64.NO_WRAP),
-                Base64.encodeToString(iv, Base64.NO_WRAP)
-            )
-        } catch (e: Exception) {
-            Logger.error(TAG, "DM encryption failed: ${e.message}")
-            Pair("", "")
-        }
+        return Pair(
+            Base64.encodeToString(ciphertext, Base64.NO_WRAP),
+            Base64.encodeToString(iv, Base64.NO_WRAP)
+        )
     }
 
     fun decryptDM(

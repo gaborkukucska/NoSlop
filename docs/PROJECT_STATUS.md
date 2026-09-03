@@ -1502,10 +1502,7 @@ The following tasks have been aggregated from all historical gap analyses, audit
 ### 5. Open Audit Findings (From AUDIT_2026_09_03.md)
 *   **1. Host key confirmation is not wired to the UI.** (Wire `onHostKeyPrompt` in `HubSetupScreen` and add `clearPinnedHostKey()` setting).
 *   **2. The Word Cloud cannot restore an identity.** (No restore path from `deriveSeed()`, either fix or correct docs).
-*   **3. `sign()` and `encryptDM()` fail silently.** (Make them throw/surface errors instead of returning empty strings).
 *   **4. Signed payloads are delimiter-concatenated user input.** (Needs canonical JSON/length-prefixed encoder).
-*   **5. OTA APK lands in external storage.** (Download to `filesDir` and add `<files-path>`).
-*   **6. `runBlocking` inside an OkHttp interceptor.** (Throw `IOException` and use `awaitNetworkReady()`).
 *   **7. DM decryption falls back to Ed25519 as X25519.** (Detect missing encryption key and request handshake instead).
 *   **8. Media and announce packets bypass the trust firewall.** (Add byte-rate budget for `MEDIA_*` instead of blanket bypass).
 *   **9. The proxy secret is not a secret.** (Drop `X-Proxy-Secret`/HMAC, rate limit on server side).

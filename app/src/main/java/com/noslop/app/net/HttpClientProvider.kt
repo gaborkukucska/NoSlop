@@ -190,13 +190,8 @@ object HttpClientProvider {
 
     private val torGuardInterceptor = okhttp3.Interceptor { chain ->
         if (useTorForClearnet && com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
-            kotlinx.coroutines.runBlocking {
-                awaitNetworkReady(30_000L)
-            }
-            if (com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
-                Logger.warn(TAG, "Tor is disconnected — blocking outbound request over Tor for privacy: ${chain.request().url}")
-                throw java.io.IOException("Tor is disconnected — blocking outbound request over Tor for privacy")
-            }
+            Logger.warn(TAG, "Tor is disconnected — blocking outbound request over Tor for privacy: ${chain.request().url}")
+            throw java.io.IOException("Tor is disconnected — blocking outbound request over Tor for privacy")
         }
         chain.proceed(chain.request())
     }

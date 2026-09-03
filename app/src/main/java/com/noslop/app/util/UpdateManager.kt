@@ -103,7 +103,8 @@ object UpdateManager {
         val normalisedExpected = expectedSha256?.trim()?.lowercase()
 
         val fileName = "NoSlop_$version.apk"
-        val destFile = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), fileName)
+        val updatesDir = java.io.File(context.filesDir, "updates").apply { mkdirs() }
+        val destFile = java.io.File(updatesDir, fileName)
 
         Toast.makeText(context, LanguageManager.translate("Downloading update..."), Toast.LENGTH_SHORT).show()
         Logger.info(TAG, "Starting update download for version $version")
