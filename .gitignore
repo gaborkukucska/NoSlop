@@ -82,3 +82,4 @@ local.properties
 # peer keys and the full process list of the capturing device.
 tmp_logs/
 *.logcat
+*.diff

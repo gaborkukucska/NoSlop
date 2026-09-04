@@ -152,8 +152,7 @@ object HttpClientProvider {
      */
     val isNetworkReady: Boolean
         get() = !useTorForClearnet ||
-            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY ||
-            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.PROXY_READY
+            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY
 
     /**
      * Suspend until network work can safely be dispatched. Returns false if Tor
@@ -194,10 +193,11 @@ object HttpClientProvider {
 
         val state = com.noslop.app.tor.TorService.torState.value
         
-        // Fail fast if Tor is totally dead
-        if (state == com.noslop.app.tor.TorState.IDLE || state == com.noslop.app.tor.TorState.FAILED) {
-            Logger.warn(TAG, "Tor is disconnected ($state) — blocking outbound request over Tor for privacy: ${chain.request().url}")
-            throw java.io.IOException("Tor is disconnected ($state) — blocking outbound request over Tor for privacy")
+        // Fail fast if Tor is not fully ready. We don't want to block OkHttp threads
+        // nor do we want to wait for 30s timeouts if the proxy is open but has no circuits.
+        if (state != com.noslop.app.tor.TorState.READY) {
+            Logger.warn(TAG, "Tor is not ready ($state) — failing fast for ${chain.request().url}")
+            throw java.io.IOException("Tor is not ready ($state) — failing fast to prevent hangs")
         }
 
         chain.proceed(chain.request())

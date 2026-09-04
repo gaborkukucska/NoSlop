@@ -224,16 +224,11 @@ object TorService {
      * accepting connections.
      */
     suspend fun awaitReady(timeoutMs: Long = 90_000L): Boolean {
-        if (_torState.value == TorState.READY || _torState.value == TorState.PROXY_READY) return true
-        setTorStatusMessage("Waiting for Tor to connect (${_torState.value})…")
+        if (_torState.value == TorState.READY) return true
         val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-            _torState.first { it == TorState.READY || it == TorState.PROXY_READY || it == TorState.FAILED }
+            _torState.first { it == TorState.READY || it == TorState.FAILED }
         }
-        val ready = ok == TorState.READY || ok == TorState.PROXY_READY
-        setTorStatusMessage(
-            if (ready) null
-            else "Tor could not connect (${_torState.value}). NoSlop will not fetch anything outside Tor."
-        )
+        val ready = ok == TorState.READY
         return ready
     }
 
@@ -305,9 +300,18 @@ object TorService {
         forceRestart: Boolean = false
     ) {
         if (forceRestart) {
-            Logger.info(TAG, "Force restart requested. Resetting Tor bootstrap state...")
+            Logger.info(TAG, "Force restart requested. Resetting Tor bootstrap state and data...")
             bootstrapJob?.cancel()
             _torState.value = TorState.IDLE
+            try {
+                // Delete Tor data directory on force restart to clear corrupt consensus or stuck states
+                val torrcDir = org.torproject.jni.TorService.getTorrc(context).parentFile
+                if (torrcDir != null && torrcDir.exists()) {
+                    torrcDir.listFiles()?.forEach { if (it.name != "torrc") it.deleteRecursively() }
+                }
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Failed to clear Tor data directory: ${e.message}")
+            }
         } else if (_torState.value == TorState.READY || _torState.value == TorState.STARTING || _torState.value == TorState.PROXY_READY) {
             Logger.info(TAG, "Tor already in state ${_torState.value}. Skipping redundant start.")
             val keyChanged = privateKeyB64 != null && privateKeyB64 != currentPrivateKeyB64
