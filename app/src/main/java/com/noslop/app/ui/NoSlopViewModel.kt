@@ -1951,7 +1951,7 @@ fun toggleAggregator() {
                 val burnable = repository.getBurnableIdentity()
                 if (burnable != null) {
                     val timestamp = System.currentTimeMillis()
-                    val payload = "${burnable.publicKeyB64}|$timestamp"
+                    val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(burnable.publicKeyB64, timestamp.toString())
                     val signature = com.noslop.app.crypto.CryptoService.sign(payload, burnable.privateKeyB64)
                     val exitPay = com.noslop.app.mesh.UserExitPayload(
                         userId = burnable.publicKeyB64,

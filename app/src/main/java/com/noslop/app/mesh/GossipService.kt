@@ -27,6 +27,7 @@ object GossipService {
     )
 
     private val firewallBuffer = ConcurrentHashMap<String, MutableList<NetworkPacket>>()
+    private val senderMediaBytes = ConcurrentHashMap<String, Long>()
 
     private val recentlyDeletedPeers = ConcurrentHashMap<String, Long>()
     
@@ -221,6 +222,7 @@ object GossipService {
                 firewallIter.remove()
             }
         }
+        senderMediaBytes.clear()
     }
 
     fun touchRelayState(mediaId: String) {
@@ -330,7 +332,7 @@ object GossipService {
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "IDENTITY_UPDATE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
@@ -368,6 +370,21 @@ object GossipService {
                     }
                     Logger.warn("FIREWALL", "FIREWALL BLOCKED: Sender $senderId is not trusted. Dropping ${packet.type} packet $packetId")
                     return false
+                }
+            }
+        } else if (isMediaRelayPacket) {
+            val dao = peerDao
+            if (dao != null) {
+                val peer = dao.getPeerByPublicKey(senderId)
+                if (peer == null || !peer.isTrusted) {
+                    val payloadSize = packet.payload?.toString()?.length ?: 0
+                    val currentBytes = senderMediaBytes.getOrDefault(senderId, 0L)
+                    val MEDIA_BYTE_LIMIT = 2 * 1024 * 1024 // 2MB per 10s window
+                    if (currentBytes + payloadSize > MEDIA_BYTE_LIMIT) {
+                        Logger.warn("FIREWALL", "Media byte limit exceeded for untrusted sender $senderId. Dropping packet ${packet.id}.")
+                        return false
+                    }
+                    senderMediaBytes[senderId] = currentBytes + payloadSize
                 }
             }
         }

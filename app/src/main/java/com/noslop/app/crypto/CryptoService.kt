@@ -204,6 +204,16 @@ object CryptoService {
         return "${sb.toString().take(56)}.onion"
     }
 
+    /**
+     * Audit Finding #4: Length-prefixed payload encoder for cryptographic signing.
+     * Prevents delimiter-collision attacks in concatenated payloads.
+     */
+    fun encodeForSigning(vararg parts: String?): String {
+        return parts.joinToString("") { part ->
+            if (part == null) "0:" else "${part.length}:$part"
+        }
+    }
+
     fun sign(payload: String, privateKeyB64: String): String {
         val bytes = Base64.decode(privateKeyB64, Base64.DEFAULT)
         val privKeyParams = getEd25519PrivateKeyParams(bytes)

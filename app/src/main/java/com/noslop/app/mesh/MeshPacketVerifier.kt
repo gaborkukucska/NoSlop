@@ -120,7 +120,7 @@ object MeshPacketVerifier {
         }
 
         "DELETE_POST" -> packet.getDeletePostPayload()?.let { p ->
-            Signed("${p.postId}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         // --- CommentPacketHandler ---
@@ -137,28 +137,28 @@ object MeshPacketVerifier {
         }
 
         "DELETE_COMMENT" -> packet.getDeleteCommentPayload()?.let { p ->
-            Signed("${p.postId}|${p.commentId}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.commentId, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         // --- ReactionPacketHandler ---
         "REACTION" -> packet.getReactionPayload()?.let { p ->
-            Signed("${p.postId}|${p.reactionType}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         "VOTE" -> packet.getVotePayload()?.let { p ->
-            Signed("${p.postId}|${p.voteType}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.postId, p.voteType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         "COMMENT_VOTE" -> packet.getCommentVotePayload()?.let { p ->
-            Signed("${p.commentId}|${p.voteType}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.commentId, p.voteType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         "CHAT_REACTION" -> packet.getChatReactionPayload()?.let { p ->
-            Signed("${p.messageId}|${p.reactionType}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.messageId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         "COMMENT_REACTION" -> packet.getCommentReactionPayload()?.let { p ->
-            Signed("${p.commentId}|${p.reactionType}|${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.commentId, p.reactionType, p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         // --- HandshakePacketHandler. These three sign the ENVELOPE, not the payload. ---
@@ -177,11 +177,11 @@ object MeshPacketVerifier {
         }
 
         "CONNECTION_REJECTED" -> packet.getConnectionRejectedPayload()?.let { p ->
-            Signed("${p.fromUserId}|${p.timestamp}", packet.signature, p.fromUserId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.fromUserId, p.timestamp.toString()), packet.signature, p.fromUserId)
         }
 
         "ANNOUNCE_PEER" -> packet.getAnnouncePeerPayload()?.let { p ->
-            Signed("${p.authorId}|${p.timestamp}", p.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
         // Colon-delimited, unlike everything else. Matches
@@ -194,7 +194,7 @@ object MeshPacketVerifier {
         }
 
         "SUBSCRIBE" -> packet.getSubscribePayload()?.let { p ->
-            Signed("${p.creatorId}|${p.subscriberId}|${p.timestamp}", p.signature, p.subscriberId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.creatorId, p.subscriberId, p.timestamp.toString()), p.signature, p.subscriberId)
         }
 
         "IDENTITY_UPDATE" -> packet.getIdentityUpdatePayload()?.let { p ->
@@ -205,7 +205,7 @@ object MeshPacketVerifier {
         }
 
         "USER_EXIT" -> packet.getUserExitPayload()?.let { p ->
-            Signed("${p.userId}|${p.timestamp}", p.signature, p.userId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString()), p.signature, p.userId)
         }
 
         "FOLLOW", "UNFOLLOW" -> packet.getFollowPayload()?.let { p ->
@@ -217,7 +217,7 @@ object MeshPacketVerifier {
         }
 
         "GROUP_INVITE" -> packet.getGroupInvitePayload()?.let { p ->
-            Signed("${p.groupId}|${p.title}|${p.adminPublicKeyB64}|${p.timestamp}", p.signature, p.adminPublicKeyB64)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, p.adminPublicKeyB64, p.timestamp.toString()), p.signature, p.adminPublicKeyB64)
         }
 
         // The handler additionally requires the admin key to match the STORED
@@ -225,11 +225,11 @@ object MeshPacketVerifier {
         // is a strict subset, so it can never reject something the handler would
         // have accepted.
         "GROUP_DELETE" -> packet.getGroupDeletePayload()?.let { p ->
-            Signed("${p.groupId}|delete|${p.adminPublicKeyB64}|${p.timestamp}", p.signature, p.adminPublicKeyB64)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, "delete", p.adminPublicKeyB64, p.timestamp.toString()), p.signature, p.adminPublicKeyB64)
         }
 
         "DELETE_MESSAGE" -> packet.getDeleteMessagePayload()?.let { p ->
-            Signed("${p.messageId}|${p.authorId}|${p.timestamp}", packet.signature, p.authorId)
+            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.messageId, p.authorId, p.timestamp.toString()), packet.signature, p.authorId)
         }
 
         // Everything else: MESSAGE (AEAD-authenticated at decrypt time), MEDIA_*,

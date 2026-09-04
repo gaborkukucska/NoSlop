@@ -152,7 +152,8 @@ object HttpClientProvider {
      */
     val isNetworkReady: Boolean
         get() = !useTorForClearnet ||
-            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY
+            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.READY ||
+            com.noslop.app.tor.TorService.torState.value == com.noslop.app.tor.TorState.PROXY_READY
 
     /**
      * Suspend until network work can safely be dispatched. Returns false if Tor
@@ -189,10 +190,16 @@ object HttpClientProvider {
     }
 
     private val torGuardInterceptor = okhttp3.Interceptor { chain ->
-        if (useTorForClearnet && com.noslop.app.tor.TorService.torState.value != com.noslop.app.tor.TorState.READY) {
-            Logger.warn(TAG, "Tor is disconnected — blocking outbound request over Tor for privacy: ${chain.request().url}")
-            throw java.io.IOException("Tor is disconnected — blocking outbound request over Tor for privacy")
+        if (!useTorForClearnet) return@Interceptor chain.proceed(chain.request())
+
+        val state = com.noslop.app.tor.TorService.torState.value
+        
+        // Fail fast if Tor is totally dead
+        if (state == com.noslop.app.tor.TorState.IDLE || state == com.noslop.app.tor.TorState.FAILED) {
+            Logger.warn(TAG, "Tor is disconnected ($state) — blocking outbound request over Tor for privacy: ${chain.request().url}")
+            throw java.io.IOException("Tor is disconnected ($state) — blocking outbound request over Tor for privacy")
         }
+
         chain.proceed(chain.request())
     }
 

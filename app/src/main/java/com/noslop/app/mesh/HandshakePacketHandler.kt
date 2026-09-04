@@ -395,7 +395,7 @@ class HandshakePacketHandler(
                 val members = parseMembers(group.membersJson)
                 if (members.contains(peerPubKey)) {
                     val timestamp = group.createdAt
-                    val payloadToSign = "${group.groupId}|${group.title}|${group.adminPublicKeyB64}|$timestamp"
+                    val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
                     val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                     val invitePayload = GroupInvitePayload(
                         groupId = group.groupId,
@@ -754,7 +754,7 @@ class HandshakePacketHandler(
         val myKeys = repo.getLocalIdentity() ?: return false
         val groupJson = com.google.gson.Gson().toJson(group)
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "${group.groupId}|$groupJson|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, groupJson, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val syncPayload = GroupSyncPayload(

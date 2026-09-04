@@ -308,9 +308,12 @@ object PreloadManager {
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
 
+        val streamId = com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(resolvedUrl)
+            ?: com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(rawUrl)
+            ?: rawUrl
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
             com.noslop.app.net.HttpClientProvider.activeClearnetClient
-        )
+        ).setDefaultRequestProperties(mapOf("X-Tor-Stream-Id" to streamId))
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 

@@ -1,11 +1,27 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-04) — Tor Stream Isolation & YouTube Client Resolution
+
+* **Tor Stream Isolation & YouTube Egress IP-Lock Alignment**:
+  * Fixed an architectural flaw where YouTube InnerTube client resolution calls (`ANDROID`, `TVHTML5`, `ANDROID_VR`, `IOS`, `TVHTML5_SIMPLY_EMBEDDED_PLAYER`) all shared an identical `X-Tor-Stream-Id` string (`https://www.youtube.com/watch?v=$videoId`). This locked all 5 resolution attempts to the exact same Tor exit node IP; if YouTube flagged that exit IP with `LOGIN_REQUIRED`, every client config failed simultaneously and burned circuit rotation cooldowns.
+  * Fixed ExoPlayer's media byte request stream isolation in `VideoPlayer.kt` and `PreloadManager.kt`, which previously passed the raw stream URL as its stream ID. This caused ExoPlayer to connect via a *different* Tor circuit than the one that resolved the player response, triggering YouTube's egress IP lock (HTTP 403 Forbidden).
+  * **Implementation**:
+    1. Isolated resolution calls per client and attempt (`yt_${videoId}_${config.clientName}_a${attempt}`) so every client config automatically tests an isolated Tor circuit.
+    2. Implemented `YouTubeInternalClient.registerStreamId()` to record the winning stream ID for resolved video URLs.
+    3. Configured `VideoPlayer.kt` and `PreloadManager.kt` to attach the exact registered `streamId` to ExoPlayer's `OkHttpDataSource.Factory`, guaranteeing media byte downloads use the exact same Tor exit circuit/IP as the signed player attestation.
+    4. Verified on ADB device `RFCT217QD6K`: Direct YouTube video streams now resolve and play over Tor in ~4.5s (`itag=18`).
+
 ## Completed Changes (2026-09-03) — Feed Deduplication and UI Fixes
 
 * **Feed Duplication (Canonical Item Key Filtering)**: Addressed a bug where the same video could be served multiple times if it was loaded from different sources with different database IDs. The `loadMoreFeedItems` logic in `NoSlopViewModel` now proactively tracks `CanonicalItemKey` across all read, viewed, and excluded items in the session to guarantee identical content is never shown twice.
 * **Fullscreen Video Zooming**: Fixed an issue in `VideoPlayer.kt` where `ExoVideoPlayer` aggressively zoomed in and cropped the video when tilted to landscape mode. It now unconditionally uses `RESIZE_MODE_FIT` to keep the entire video fully visible.
 * **Thumbnail Overlap**: Resolved a UI bleeding issue in `MediaComponents.kt` where the blurred background poster for the upcoming slide lacked a boundary clip and would visually cover adjacent items in the feed. A `.clipToBounds()` modifier was added to clamp the blur inside its container.
 
+## Completed Changes (2026-09-03) — Audit Findings Batch 2
+* **Finding #4 (Cryptographic Payload Canonicalization)**: Replaced delimiter-concatenation (`$a|$b`) in payload signatures with a length-prefixed encoder (`encodeForSigning`) across all 39 call sites in repositories and verifiers to prevent collision attacks.
+* **Finding #7 (X25519 Encryption Key Confusion)**: `DmPacketHandler` now immediately requests a handshake and drops the packet if it lacks a peer's X25519 key, rather than fatally attempting decryption with an Ed25519 identity key.
+* **Finding #8 (Media & Announce Firewall Bypass)**: Removed blanket rate-limit bypasses for `ANNOUNCE_DISCOVERABLE`. Implemented a 2MB per 10-second byte budget for `MEDIA_*` packets originating from untrusted senders to prevent network and storage flooding.
+* **Finding #13 (Tor Stream Isolation for Video Playback)**: Implemented SOCKS5 stream isolation via OkHttp Interceptors and `java.net.Authenticator`. Each video stream now automatically receives a unique SOCKS username, ensuring Tor assigns dedicated circuits to individual video playback. This prevents playback interruption or 403 Forbidden errors when an unrelated video triggers a global circuit rotation.
 ## Completed Changes (2026-09-02) — Codebase Audit, Hardening and Fresh-Install Fixes
 
 Started as an audit of `app/` against its own documented claims, and turned
@@ -1502,14 +1518,10 @@ The following tasks have been aggregated from all historical gap analyses, audit
 ### 5. Open Audit Findings (From AUDIT_2026_09_03.md)
 *   **1. Host key confirmation is not wired to the UI.** (Wire `onHostKeyPrompt` in `HubSetupScreen` and add `clearPinnedHostKey()` setting).
 *   **2. The Word Cloud cannot restore an identity.** (No restore path from `deriveSeed()`, either fix or correct docs).
-*   **4. Signed payloads are delimiter-concatenated user input.** (Needs canonical JSON/length-prefixed encoder).
-*   **7. DM decryption falls back to Ed25519 as X25519.** (Detect missing encryption key and request handshake instead).
-*   **8. Media and announce packets bypass the trust firewall.** (Add byte-rate budget for `MEDIA_*` instead of blanket bypass).
 *   **9. The proxy secret is not a secret.** (Drop `X-Proxy-Secret`/HMAC, rate limit on server side).
 *   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
 *   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
 *   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
-*   **13. Video playback over Tor lacks stream isolation.** (Resolve and playback use the current circuit; SOCKS stream isolation is needed per audit finding #17).
 
 ### 6. General Enhancements (Legacy Status Log)
 *   Add more no-auth image and video sources.

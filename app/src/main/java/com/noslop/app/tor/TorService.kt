@@ -224,15 +224,15 @@ object TorService {
      * accepting connections.
      */
     suspend fun awaitReady(timeoutMs: Long = 90_000L): Boolean {
-        if (_torState.value == TorState.READY) return true
-        setTorStatusMessage("Waiting for Tor to connect…")
+        if (_torState.value == TorState.READY || _torState.value == TorState.PROXY_READY) return true
+        setTorStatusMessage("Waiting for Tor to connect (${_torState.value})…")
         val ok = kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
-            _torState.first { it == TorState.READY || it == TorState.FAILED }
+            _torState.first { it == TorState.READY || it == TorState.PROXY_READY || it == TorState.FAILED }
         }
-        val ready = ok == TorState.READY
+        val ready = ok == TorState.READY || ok == TorState.PROXY_READY
         setTorStatusMessage(
             if (ready) null
-            else "Tor could not connect. NoSlop will not fetch anything outside Tor."
+            else "Tor could not connect (${_torState.value}). NoSlop will not fetch anything outside Tor."
         )
         return ready
     }

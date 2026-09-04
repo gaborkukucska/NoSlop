@@ -93,6 +93,26 @@ object YouTubeInternalClient {
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
+    private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    fun getStreamIdForUrl(url: String): String? {
+        return urlToStreamId[url]
+    }
+
+    private fun registerStreamId(url: String, videoId: String, streamId: String) {
+        urlToStreamId[url] = streamId
+        urlToStreamId[videoId] = streamId
+        if (urlToStreamId.size > 300) {
+            val iterator = urlToStreamId.keys.iterator()
+            var removed = 0
+            while (iterator.hasNext() && removed < 100) {
+                iterator.next()
+                iterator.remove()
+                removed++
+            }
+        }
+    }
+
     // --- NOSLOP_RESOLVE_BUDGET_V1 ---
     // A player-endpoint call is a small JSON round trip. Inheriting the shared
     // client's 60s connect timeout meant a dead network cost a full minute per
@@ -104,6 +124,8 @@ object YouTubeInternalClient {
     private val playerClient
         get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
             .newBuilder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
             .callTimeout(20, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)
             .build()
@@ -755,6 +777,7 @@ object YouTubeInternalClient {
             var refusedThisAttempt = 0
             for (config in configs) {
                 try {
+                    val streamId = "yt_${videoId}_${config.clientName}_a${attempt}"
                     val payload = buildPlayerPayload(videoId, config)
                     val payloadStr = payload.toString()
                     val requestBody = payloadStr.toRequestBody(jsonMediaType)
@@ -771,6 +794,7 @@ object YouTubeInternalClient {
                         .header("X-YouTube-Client-Version", config.clientVersion)
                         .header("X-Goog-Api-Format-Version", "2")
                         .header("User-Agent", config.userAgent)
+                        .header("X-Tor-Stream-Id", streamId)
                         .header("Connection", "close") // Force OkHttp to drop socket so Tor can route new circuits
                         .post(requestBody)
 
@@ -784,11 +808,6 @@ object YouTubeInternalClient {
                     }
 
                     var response = playerClient.newCall(requestBuilder.build()).execute()
-                    // --- NOSLOP_PROXY_ATTESTATION_V1 ---
-                    // requestBuilder is mutable and the branch below repoints it at
-                    // youtube.com. Without this flag the LOGIN_REQUIRED handler further
-                    // down would "retry directly" a request that is already direct, and
-                    // blame the proxy for a refusal the proxy had no part in.
                     var wentDirectAlready = false
                     if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
                         notePlayerProxyBlocked(response.code)
@@ -812,14 +831,6 @@ object YouTubeInternalClient {
                             if (playability == "OK") {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
-                                    // --- NOSLOP_GEO_LOCK_V1 ---
-                                    // A `gcr=<cc>` parameter pins the URL to the country of the
-                                    // IP that made THIS player request — the API proxy's egress.
-                                    // The bytes are then fetched over a Tor exit that is almost
-                                    // certainly elsewhere, and googlevideo answers 403. In the
-                                    // 13:40 capture the single hard 403 (t2at-KjlfgQ) was also
-                                    // the single URL carrying gcr=ch; nothing without gcr 403'd.
-                                    // So: keep it aside, try another client first.
                                     val geoLock = GEO_LOCK_PATTERN.find(url)?.groupValues?.get(1)
                                     if (geoLock != null && isTor) {
                                         Logger.warn(
@@ -833,20 +844,14 @@ object YouTubeInternalClient {
                                         response.close()
                                         continue
                                     }
-                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} ($streamId) for $videoId")
+                                    registerStreamId(url, videoId, streamId)
                                     response.close()
                                     return@withContext url
                                 } else {
                                     Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                                 }
                             } else if ((playability == "LOGIN_REQUIRED" || playability == "UNPLAYABLE" || playability == "ERROR") && isTor) {
-                                // --- NOSLOP_PROXY_ATTESTATION_V1 ---
-                                // LOGIN_REQUIRED is the attestation gate, not a blocked
-                                // exit — the wording below is kept only because it is
-                                // what existing log-reading habits search for. When the
-                                // refusal came through the proxy, the single most likely
-                                // fix is to ask the same client again WITHOUT it, since
-                                // the proxy's shared egress is the more flagged address.
                                 if (playability == "LOGIN_REQUIRED" && usingProxy && !wentDirectAlready) {
                                     notePlayerProxyRefused(config.clientName)
                                     response.close()
@@ -871,6 +876,7 @@ object YouTubeInternalClient {
                                                     "Resolved direct video stream using ${config.clientName} " +
                                                         "for $videoId (direct over Tor, proxy refused)"
                                                 )
+                                                registerStreamId(directUrl, videoId, streamId)
                                                 return@withContext directUrl
                                             }
                                         }
@@ -882,20 +888,10 @@ object YouTubeInternalClient {
                                     }
                                     continue
                                 }
-                                Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Tor exit likely blocked.")
+                                Logger.warn(TAG, "Video unplayable for ${config.clientName} ($streamId, Status: $playability). Circuit likely blocked.")
                                 response.close()
 
                                 // --- NOSLOP_EXIT_LOTTERY_V1 ---
-                                // The 19:28 capture is bimodal: a resolve either succeeds
-                                // on the first client in a few seconds, or every client is
-                                // refused and it burns the full 60s budget. Nothing in
-                                // between, and no case of a later client rescuing an
-                                // earlier refusal. So once two clients have been refused,
-                                // the remaining ones are a guaranteed ~40s of waste.
-                                //
-                                // A different exit is the only thing that can actually
-                                // help, so try for one; if rotation is refused, stop and
-                                // let the failover have the remaining budget.
                                 if (playability == "LOGIN_REQUIRED") {
                                     refusedThisAttempt++
                                     if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
@@ -907,7 +903,7 @@ object YouTubeInternalClient {
                                         )
                                         val rotatedAway = com.noslop.app.tor.TorService.requestNewCircuit()
                                         if (rotatedAway) {
-                                            client.connectionPool.evictAll()
+                                            com.noslop.app.net.HttpClientProvider.torClient.connectionPool.evictAll()
                                             kotlinx.coroutines.delay(2000L)
                                         } else {
                                             attempt = maxAttempts
@@ -918,15 +914,6 @@ object YouTubeInternalClient {
 
                                 if (config == configs.last() && attempt < maxAttempts) {
                                     Logger.info(TAG, "All clients failed. Rotating Tor circuit to bypass IP block...")
-                                    // --- NOSLOP_ROTATION_AWARE_RETRY_V1 ---
-                                    // The return value used to be discarded. Since the
-                                    // round-2 rate limit this call usually returns false,
-                                    // and retrying every client against the SAME exit
-                                    // reproduces the identical LOGIN_REQUIRED — roughly 20s
-                                    // of guaranteed failure per video, spent holding a
-                                    // resolve permit that other slides are queued behind.
-                                    // If the route did not change there is nothing to
-                                    // retry: go to the failover.
                                     val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
                                     if (!rotated) {
                                         Logger.info(
@@ -936,11 +923,12 @@ object YouTubeInternalClient {
                                         )
                                         attempt = maxAttempts
                                     } else {
-                                        client.connectionPool.evictAll() // Evict stale connections from pool!
-                                        kotlinx.coroutines.delay(2000L) // Give Tor time to build the new circuit
+                                        com.noslop.app.net.HttpClientProvider.torClient.connectionPool.evictAll()
+                                        kotlinx.coroutines.delay(2000L)
                                     }
                                 }
-                                continue // Try TVHTML5 before giving up on this attempt!
+
+                                continue
                             } else {
                                 Logger.warn(TAG, "Video unplayable for ${config.clientName}. Status: $playability")
                             }

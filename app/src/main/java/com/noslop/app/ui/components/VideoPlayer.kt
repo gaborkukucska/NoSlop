@@ -1180,7 +1180,9 @@ private fun ExoVideoPlayer(
                 }
             }
         } else {
+            val streamId = YouTubeInternalClient.getStreamIdForUrl(url) ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl) ?: url
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeMediaClient)
+                .setDefaultRequestProperties(mapOf("X-Tor-Stream-Id" to streamId))
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 

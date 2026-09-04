@@ -651,7 +651,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val peer = peerDao.getPeerByPublicKey(peerPub) ?: return
         if (peer.onionAddress.isNotBlank()) {
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = "$peerPub|${myKeys.publicKeyB64}|$timestamp"
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(peerPub, myKeys.publicKeyB64, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val followPayload = com.noslop.app.mesh.FollowPayload(
                 followedPublicKeyB64 = peerPub,
@@ -706,7 +706,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(group)
 
-        val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, myKeys.publicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = groupId,
@@ -914,7 +914,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
-        val payloadToSign = "$groupId|$title|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, myKeys.publicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
@@ -995,7 +995,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             // Admin: broadcast GROUP_DELETE so all members drop the group
             db.groupChatDao().deleteGroupChat(groupId)
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = "$groupId|delete|${myKeys.publicKeyB64}|$timestamp"
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, "delete", myKeys.publicKeyB64, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val deletePayload = com.noslop.app.mesh.GroupDeletePayload(
                 groupId = groupId,
@@ -1052,7 +1052,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             val finalRemoved = if (removedMembers.isNotEmpty()) removedMembers else listOf(myKeys.publicKeyB64)
 
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = "$groupId|${existing.title}|${myKeys.publicKeyB64}|$timestamp"
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, existing.title, myKeys.publicKeyB64, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
                 groupId = groupId,
@@ -1091,7 +1091,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }.toMap()
 
         val timestamp = group.createdAt
-        val payloadToSign = "${group.groupId}|${group.title}|${group.adminPublicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
             groupId = group.groupId,
@@ -1224,7 +1224,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val myKeys = getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
-            val payload = "${myKeys.publicKeyB64}|${myKeys.displayName}|${address}|$timestamp"
+            val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, myKeys.displayName, address, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payload, myKeys.privateKeyB64)
             val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
                 id = java.util.UUID.randomUUID().toString(),
@@ -1659,7 +1659,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             }
 
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = "$messageId|${myKeys.publicKeyB64}|$timestamp"
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, myKeys.publicKeyB64, timestamp.toString())
             val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
             val deletePay = com.noslop.app.mesh.DeleteMessagePayload(

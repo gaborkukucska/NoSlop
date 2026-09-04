@@ -145,10 +145,10 @@ class MeshSocialRepository(
                                     timestamp = timestamp,
                                     signature = null
                                 )
-                                var payloadToSign = "${myKeys.publicKeyB64}|${syncReq.fromUsername}|${myKeys.onionAddress}|$timestamp"
-                                if (avatarB64 != null) payloadToSign += "|$avatarB64"
-                                if (!syncReq.bio.isNullOrBlank()) payloadToSign += "|${syncReq.bio}"
-                                
+                                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                                    myKeys.publicKeyB64, syncReq.fromUsername, myKeys.onionAddress, timestamp.toString(),
+                                    avatarB64, syncReq.bio.takeIf { !it.isNullOrBlank() }
+                                )
                                 val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                                 val syncPacket = com.noslop.app.mesh.NetworkPacket(
                                     id = UUID.randomUUID().toString(),
@@ -204,7 +204,7 @@ class MeshSocialRepository(
                     val myKeys = getLocalIdentity()
                     if (myKeys != null) {
                         val timestamp = System.currentTimeMillis()
-                        val payload = "${myKeys.publicKeyB64}|$timestamp"
+                        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
                         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
                         
                         val announcePay = com.noslop.app.mesh.AnnouncePeerPayload(
@@ -304,7 +304,7 @@ class MeshSocialRepository(
                             MAX_DELETIONS_PER_CYCLE
                         )
                         for (post in orphanedPosts) {
-                            val payloadToSign = "${post.id}|${myKeys.publicKeyB64}|$currentTimestamp"
+                            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(post.id, myKeys.publicKeyB64, currentTimestamp.toString())
                             val delSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                             val deletePay = com.noslop.app.mesh.DeletePostPayload(
                                 postId = post.id,
@@ -341,7 +341,7 @@ class MeshSocialRepository(
         if (existingPost.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
         
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$postId|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         
         val deletePay = com.noslop.app.mesh.DeletePostPayload(
@@ -382,10 +382,9 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        var payload = "$id|${myKeys.publicKeyB64}|$content|$timestamp"
-        if (avatarB64 != null) {
-            payload += "|$avatarB64"
-        }
+        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            id, myKeys.publicKeyB64, content, timestamp.toString(), avatarB64
+        )
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val postPay = com.noslop.app.mesh.PostPayload(
@@ -509,13 +508,10 @@ class MeshSocialRepository(
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
-            var payloadToSign = "${myKeys.publicKeyB64}|${reqPay.fromUsername}|${myKeys.onionAddress}|${reqPay.timestamp}"
-            if (avatarB64 != null) {
-                payloadToSign += "|$avatarB64"
-            }
-            if (!reqPay.bio.isNullOrBlank()) {
-                payloadToSign += "|${reqPay.bio}"
-            }
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                myKeys.publicKeyB64, reqPay.fromUsername, myKeys.onionAddress, reqPay.timestamp.toString(),
+                avatarB64, reqPay.bio.takeIf { !it.isNullOrBlank() }
+            )
             val reqSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
@@ -557,13 +553,10 @@ class MeshSocialRepository(
                 timestamp = System.currentTimeMillis(),
                 signature = null
             )
-            var payloadToSign = "${myKeys.publicKeyB64}|${handshakePay.fromUsername}|${myKeys.onionAddress}|${handshakePay.timestamp}"
-            if (avatarB64 != null) {
-                payloadToSign += "|$avatarB64"
-            }
-            if (!handshakePay.bio.isNullOrBlank()) {
-                payloadToSign += "|${handshakePay.bio}"
-            }
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                myKeys.publicKeyB64, handshakePay.fromUsername, myKeys.onionAddress, handshakePay.timestamp.toString(),
+                avatarB64, handshakePay.bio.takeIf { !it.isNullOrBlank() }
+            )
             val handshakeSig = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             val gson = com.google.gson.Gson()
             val packet = com.noslop.app.mesh.NetworkPacket(
@@ -617,7 +610,7 @@ class MeshSocialRepository(
         val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity()
         if (myKeys != null) {
             val timestamp = System.currentTimeMillis()
-            val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
             val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
             
             val rejectPay = com.noslop.app.mesh.ConnectionRejectedPayload(
@@ -655,7 +648,7 @@ class MeshSocialRepository(
             val myKeys = getLocalIdentity()
             if (myKeys != null) {
                 val timestamp = System.currentTimeMillis()
-                val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
                 val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                 
                 val exitPayload = com.noslop.app.mesh.UserExitPayload(
@@ -792,10 +785,9 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        var payload = "$postId|$id|$content|$timestamp"
-        if (avatarB64 != null) {
-            payload += "|$avatarB64"
-        }
+        val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postId, id, content, timestamp.toString(), avatarB64
+        )
         val signature = CryptoService.sign(payload, myKeys.privateKeyB64)
 
         val commentData = com.noslop.app.mesh.CommentData(
@@ -857,7 +849,7 @@ class MeshSocialRepository(
         val action = if (existingReaction != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$postId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, reactionType, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.ReactionPayload(
@@ -905,7 +897,7 @@ class MeshSocialRepository(
         val action = if (existingVote != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$postId|$voteType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, voteType, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val votePayload = com.noslop.app.mesh.VotePayload(
@@ -993,7 +985,7 @@ class MeshSocialRepository(
         val action = if (existingReaction != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
-        val payloadToSign = "$messageId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, reactionType, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.ChatReactionPayload(
@@ -1045,7 +1037,7 @@ class MeshSocialRepository(
         val action = if (existingReaction != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
-        val payloadToSign = "$messageId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, reactionType, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.ChatReactionPayload(
@@ -1105,10 +1097,9 @@ class MeshSocialRepository(
         val action = if (existingReaction != null) "remove" else "add"
         val timestamp = System.currentTimeMillis()
         
-        var payloadToSign = "$commentId|$reactionType|${myKeys.publicKeyB64}|$timestamp"
-        if (avatarB64 != null) {
-            payloadToSign += "|$avatarB64"
-        }
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            commentId, reactionType, myKeys.publicKeyB64, timestamp.toString(), avatarB64
+        )
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val reactionPayload = com.noslop.app.mesh.CommentReactionPayload(
@@ -1157,7 +1148,7 @@ class MeshSocialRepository(
         val action = if (existingVote != null) "remove" else "add"
 
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$commentId|$voteType|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(commentId, voteType, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val votePayload = com.noslop.app.mesh.CommentVotePayload(
@@ -1204,13 +1195,9 @@ class MeshSocialRepository(
         val avatarB64 = userProfile.avatarB64
         val bio = userProfile.bio
         val timestamp = System.currentTimeMillis()
-        var payloadToSign = "${myKeys.publicKeyB64}|$newHandle|$timestamp"
-        if (avatarB64 != null) {
-            payloadToSign += "|$avatarB64"
-        }
-        if (bio.isNotBlank()) {
-            payloadToSign += "|$bio"
-        }
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            myKeys.publicKeyB64, newHandle, timestamp.toString(), avatarB64, bio
+        )
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val updatePayload = com.noslop.app.mesh.IdentityUpdatePayload(
@@ -1237,7 +1224,7 @@ class MeshSocialRepository(
         val myKeys = getLocalIdentity() ?: return@withContext false
         val timestamp = System.currentTimeMillis()
 
-        val payloadToSign = "${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val exitPayload = com.noslop.app.mesh.UserExitPayload(
@@ -1278,10 +1265,9 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        var payloadToSign = "$postId|${myKeys.publicKeyB64}|$newContent|$timestamp"
-        if (avatarB64 != null) {
-            payloadToSign += "|$avatarB64"
-        }
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postId, myKeys.publicKeyB64, newContent, timestamp.toString(), avatarB64
+        )
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val editPay = com.noslop.app.mesh.EditPostPayload(
@@ -1315,10 +1301,9 @@ class MeshSocialRepository(
         val userProfile = getUserProfile()
         val avatarB64 = userProfile.avatarB64
 
-        var payloadToSign = "$postId|$commentId|$newContent|$timestamp"
-        if (avatarB64 != null) {
-            payloadToSign += "|$avatarB64"
-        }
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postId, commentId, newContent, timestamp.toString(), avatarB64
+        )
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val editPay = com.noslop.app.mesh.EditCommentPayload(
@@ -1351,7 +1336,7 @@ class MeshSocialRepository(
         if (existingComment.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
 
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = "$postId|$commentId|${myKeys.publicKeyB64}|$timestamp"
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, commentId, myKeys.publicKeyB64, timestamp.toString())
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 
         val deletePay = com.noslop.app.mesh.DeleteCommentPayload(
@@ -1385,7 +1370,7 @@ class MeshSocialRepository(
             if (msg != null && msg.senderPub == myKeys.publicKeyB64) {
                 // If it's our own message, broadcast DELETE_MESSAGE
                 val timestamp = System.currentTimeMillis()
-                val payloadToSign = "$messageId|${myKeys.publicKeyB64}|$timestamp"
+                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(messageId, myKeys.publicKeyB64, timestamp.toString())
                 val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                 
                 val deletePay = com.noslop.app.mesh.DeleteMessagePayload(
@@ -1424,7 +1409,7 @@ class MeshSocialRepository(
         for (msg in messages) {
             if (msg.senderPub == myKeys.publicKeyB64) {
                 val timestamp = System.currentTimeMillis()
-                val payloadToSign = "${msg.id}|${myKeys.publicKeyB64}|$timestamp"
+                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(msg.id, myKeys.publicKeyB64, timestamp.toString())
                 val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                 
                 val deletePay = com.noslop.app.mesh.DeleteMessagePayload(

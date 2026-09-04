@@ -135,6 +135,7 @@ object InvidiousApiClient {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", BROWSER_USER_AGENT)
+                .header("X-Tor-Stream-Id", "inv_${instance.hashCode()}")
                 .build()
             probeClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) {
