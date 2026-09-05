@@ -1536,7 +1536,7 @@ The following tasks have been aggregated from all historical gap analyses, audit
 *   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
 *   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
 *   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
-*   **13. Video playback over Tor lacks stream isolation (ACTIVE BLOCKER - 2026-09-06).** Resolve and playback use the current global Tor circuit. Attempting custom headers or global circuit rotation breaks streaming. Full SOCKS5 stream authentication isolation (`IsolateSOCKSAuth`) with custom `SocketFactory` and Tor bandwidth budgeting is required before Clearnet-over-Tor video playback is stable.
+*   **13. Video playback over Tor lacks stream isolation.** [RESOLVED 2026-09-06] Implemented true SOCKS5 stream isolation via `TorSocksSocketFactory` and `TorSocksSocket` (RFC 1928 + RFC 1929) in `HttpClientProvider.kt`. Player resolution and ExoPlayer media byte fetching share an identical isolated SOCKS username (`yt_${videoId}_${nonce}`), pinning both legs to the exact same Tor exit node IP and satisfying `googlevideo.com`'s IP lock. Bumping `streamNonce` on `LOGIN_REQUIRED` moves resolution to a fresh exit node without invoking disruptive process-wide `SIGNAL NEWNYM` circuit rotations.
 
 ### 6. General Enhancements (Legacy Status Log)
 *   Add more no-auth image and video sources.

@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
                             if (firstPreloadUrl != null && firstPreloadUrl!!.isNotBlank()) {
                                 splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Preparing first video...")
                                 try {
-                                    kotlinx.coroutines.withTimeout(15000L) {
+                                    kotlinx.coroutines.withTimeout(8000L) {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
                                         com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
                                     }

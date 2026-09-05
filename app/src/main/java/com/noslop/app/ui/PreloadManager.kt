@@ -303,8 +303,11 @@ object PreloadManager {
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
 
+        val streamId = com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(resolvedUrl)
+            ?: com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(rawUrl)
+            ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
-            com.noslop.app.net.HttpClientProvider.activeClearnetClient
+            com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
         )
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)

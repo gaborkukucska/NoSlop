@@ -21,28 +21,51 @@ def edit(path, old, new, label):
         f.write(src.replace(old, new, 1))
     APPLIED.append(label)
 
-STATUS_FILE = "docs/PROJECT_STATUS.md"
+YT_CLIENT = "app/src/main/java/com/noslop/app/feeds/api/YouTubeInternalClient.kt"
 
-OLD_BLOCK = """*   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
-*   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
+# 1. Provide default parameter for playerClient
+OLD_PLAYER_DECL = """    private fun playerClient(streamId: String) =
+        com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            .newBuilder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .callTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build()"""
 
-### 6. General Enhancements (Legacy Status Log)"""
+NEW_PLAYER_DECL = """    private fun playerClient(streamId: String = "yt_default") =
+        com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            .newBuilder()
+            .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+            .callTimeout(20, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .build()"""
 
-NEW_BLOCK = """*   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
-*   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
-*   **13. Video playback over Tor lacks stream isolation (ACTIVE BLOCKER - 2026-09-06).** Resolve and playback use the current global Tor circuit. Attempting custom headers or global circuit rotation breaks streaming. Full SOCKS5 stream authentication isolation (`IsolateSOCKSAuth`) with custom `SocketFactory` and Tor bandwidth budgeting is required before Clearnet-over-Tor video playback is stable.
+edit(YT_CLIENT, OLD_PLAYER_DECL, NEW_PLAYER_DECL, "YouTubeInternalClient.kt: default param for playerClient")
 
-### 6. General Enhancements (Legacy Status Log)"""
+# 2. Fix line 806: proxy bypass retry
+OLD_PROXY_RETRY = """                        response.close()
+                        response = playerClient.newCall(directReqBuilder.build()).execute()"""
 
-edit(STATUS_FILE, OLD_BLOCK, NEW_BLOCK, "PROJECT_STATUS.md: Re-add item 13 as active blocker in master backlog")
+NEW_PROXY_RETRY = """                        response.close()
+                        response = activePlayerClient.newCall(directReqBuilder.build()).execute()"""
 
-print("\n=== DOCUMENTATION UPDATE REGISTER ===")
+edit(YT_CLIENT, OLD_PROXY_RETRY, NEW_PROXY_RETRY, "YouTubeInternalClient.kt: line 806 use activePlayerClient")
+
+# 3. Fix line 854: direct-over-tor retry
+OLD_DIRECT_RETRY = """                                    val directResponse = playerClient.newCall(retryDirect).execute()"""
+
+NEW_DIRECT_RETRY = """                                    val directResponse = activePlayerClient.newCall(retryDirect).execute()"""
+
+edit(YT_CLIENT, OLD_DIRECT_RETRY, NEW_DIRECT_RETRY, "YouTubeInternalClient.kt: line 854 use activePlayerClient")
+
+print("\n=== PATCH EXECUTION RESULTS ===")
 for item in APPLIED:
     print(f"  [APPLIED] {item}")
 
 if FAILED:
+    print("\nErrors:")
     for item in FAILED:
         print(f"  [FAILED]  {item}")
     sys.exit(1)
 else:
-    print("\nDocumentation backlog updated successfully!")
+    print(f"\nAll {len(APPLIED)} compilation fixes applied successfully!")

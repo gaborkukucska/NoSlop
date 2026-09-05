@@ -659,8 +659,8 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible) {
-        if (!isVisible) return@LaunchedEffect
+    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, activeVisible) {
+        if (!activeVisible) return@LaunchedEffect
         // On URL change or retry, resolve the source. But try the fast path first:
         // if PreloadManager already resolved this URL, sourceCache will have it instantly.
         val forceRefresh = retryTrigger > 0
@@ -1063,14 +1063,10 @@ private fun ExoVideoPlayer(
                 if (stalledSamples >= stallThresholdSamples && noBytesEver && url.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Zero bytes over Tor after ${stallThresholdSamples * 2}s — clearing resume pos and re-resolving for: $rawUrl"
+                        "Zero bytes over Tor after ${stallThresholdSamples * 2}s — clearing resume pos and retrying resolve on fresh circuit: $rawUrl"
                     )
                     PlaybackPositionStore.clear(rawUrl)
                     stalledSamples = 0
-                    val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
-                    if (rotated) {
-                        kotlinx.coroutines.delay(2000L)
-                    }
                     onRetry()
                     return@LaunchedEffect
                 }
@@ -1179,7 +1175,11 @@ private fun ExoVideoPlayer(
                 }
             }
         } else {
-            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeMediaClient)
+            val streamId = YouTubeInternalClient.getStreamIdForUrl(url)
+                ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl)
+                ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
+            val client = HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 

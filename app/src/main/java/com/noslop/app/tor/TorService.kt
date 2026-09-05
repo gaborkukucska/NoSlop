@@ -545,7 +545,7 @@ object TorService {
             torrcFile.parentFile?.mkdirs()
 
             val content = buildString {
-                append("SocksPort $SOCKS_PORT\n")
+                append("SocksPort $SOCKS_PORT IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth\n")
                 append(TorControlChannel.torrcLines())
                 // Left at 0 deliberately: tor-android's own control connection
                 // authenticates with empty credentials, and enabling cookie auth

@@ -6,9 +6,14 @@ import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.dnsoverhttps.DnsOverHttps
+import java.io.IOException
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.Socket
+import java.net.SocketAddress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 object HttpClientProvider {
@@ -146,6 +151,50 @@ object HttpClientProvider {
     val activeMediaClient: OkHttpClient
         get() = activeClearnetClient
 
+    private val isolatedMediaClientCache = ConcurrentHashMap<String, OkHttpClient>()
+
+    /**
+     * SOCKS5 Stream Isolation Client.
+     * Each distinct streamId is assigned its own isolated Tor circuit via Tor's IsolateSOCKSAuth.
+     * Media resolution and media byte playback share the identical streamId, guaranteeing that
+     * googlevideo.com's ip= lock matches the resolving exit node IP, while preventing circuit
+     * rotations or collisions between different videos.
+     */
+    fun getOrCreateIsolatedMediaClient(streamId: String): OkHttpClient {
+        if (!useTorForClearnet) return rawClearnetClient
+
+        val cleanId = streamId.take(64)
+        return isolatedMediaClientCache.computeIfAbsent(cleanId) { id ->
+            val socketFactory = TorSocksSocketFactory(
+                proxyHost = "127.0.0.1",
+                proxyPort = com.noslop.app.BuildConfig.TOR_SOCKS_PORT,
+                username = id
+            )
+            OkHttpClient.Builder()
+                .proxy(Proxy.NO_PROXY)
+                .socketFactory(socketFactory)
+                .dns(TorDns)
+                .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
+                .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(60, TimeUnit.SECONDS)
+                .addInterceptor(torGuardInterceptor)
+                .addInterceptor(userAgentInterceptor)
+                .build()
+        }.also {
+            if (isolatedMediaClientCache.size > 60) {
+                val it = isolatedMediaClientCache.keys.iterator()
+                var removed = 0
+                while (it.hasNext() && removed < 20) {
+                    it.next()
+                    it.remove()
+                    removed++
+                }
+            }
+        }
+    }
+
     /**
      * True when it is safe to dispatch network work: either Tor is off by
      * configuration, or Tor is fully READY.
@@ -236,4 +285,140 @@ object HttpClientProvider {
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
     }
+}
+
+internal object TorDns : Dns {
+    override fun lookup(hostname: String): List<InetAddress> {
+        // Return dummy InetAddress with the hostname so OkHttp passes the hostname into
+        // InetSocketAddress without performing a local DNS lookup. Tor SOCKS5 resolves domain names
+        // remotely at the exit node via ATYP 0x03.
+        return listOf(InetAddress.getByAddress(hostname, byteArrayOf(0, 0, 0, 0)))
+    }
+}
+
+internal class TorSocksSocket(
+    private val proxyHost: String,
+    private val proxyPort: Int,
+    private val username: String
+) : Socket() {
+
+    private var targetEndpoint: InetSocketAddress? = null
+
+    override fun connect(endpoint: SocketAddress?, timeout: Int) {
+        val target = endpoint as? InetSocketAddress
+            ?: throw IOException("Unsupported endpoint type: ${endpoint?.javaClass?.name}")
+        targetEndpoint = target
+
+        val handshakeTimeout = if (timeout > 0) timeout else 20000
+
+        // 1. Connect TCP socket to Tor SOCKS5 proxy on 127.0.0.1:proxyPort
+        super.connect(InetSocketAddress(proxyHost, proxyPort), handshakeTimeout)
+
+        val inStream = super.getInputStream()
+        val outStream = super.getOutputStream()
+
+        val prevSoTimeout = super.getSoTimeout()
+        super.setSoTimeout(handshakeTimeout)
+
+        try {
+            // 2. SOCKS5 greeting: Method 0x02 (Username/Password auth)
+            outStream.write(byteArrayOf(0x05, 0x01, 0x02))
+            outStream.flush()
+
+            val ver = inStream.read()
+            val method = inStream.read()
+            if (ver != 0x05 || method != 0x02) {
+                throw IOException("SOCKS5 proxy rejected username auth: ver=$ver, method=$method")
+            }
+
+            // 3. Username/Password subnegotiation (RFC 1929)
+            // [0x01, ulen, username..., plen, password...]
+            val userBytes = username.toByteArray(Charsets.UTF_8)
+            val safeUserBytes = if (userBytes.size > 255) userBytes.copyOf(255) else userBytes
+            val passBytes = ByteArray(0)
+            val authReq = ByteArray(3 + safeUserBytes.size + passBytes.size)
+            authReq[0] = 0x01
+            authReq[1] = safeUserBytes.size.toByte()
+            System.arraycopy(safeUserBytes, 0, authReq, 2, safeUserBytes.size)
+            authReq[2 + safeUserBytes.size] = passBytes.size.toByte()
+            outStream.write(authReq)
+            outStream.flush()
+
+            val authVer = inStream.read()
+            val authStatus = inStream.read()
+            if (authStatus != 0x00) {
+                throw IOException("SOCKS5 auth failed: ver=$authVer, status=0x${authStatus.toString(16)}")
+            }
+
+            // 4. SOCKS5 CONNECT command (RFC 1928) with DOMAINNAME (0x03)
+            val hostStr = target.hostName
+            val hostBytes = hostStr.toByteArray(Charsets.UTF_8)
+            val port = target.port
+
+            val cmd = ByteArray(4 + 1 + hostBytes.size + 2)
+            cmd[0] = 0x05
+            cmd[1] = 0x01 // CONNECT
+            cmd[2] = 0x00 // RSV
+            cmd[3] = 0x03 // DOMAINNAME
+            cmd[4] = hostBytes.size.toByte()
+            System.arraycopy(hostBytes, 0, cmd, 5, hostBytes.size)
+            cmd[5 + hostBytes.size] = (port shr 8).toByte()
+            cmd[6 + hostBytes.size] = (port and 0xFF).toByte()
+
+            outStream.write(cmd)
+            outStream.flush()
+
+            // 5. Read SOCKS5 reply
+            val repVer = inStream.read()
+            val repCode = inStream.read()
+            val repRsv = inStream.read()
+            val repAtyp = inStream.read()
+            if (repVer < 0 || repCode < 0) {
+                throw IOException("Unexpected EOF from SOCKS5 proxy")
+            }
+            if (repCode != 0x00) {
+                throw IOException("SOCKS5 connect to $hostStr:$port failed: rep=0x${repCode.toString(16)}")
+            }
+
+            // Consume bound address and port
+            when (repAtyp) {
+                0x01 -> readExact(inStream, 4 + 2) // IPv4 + Port
+                0x03 -> {
+                    val len = inStream.read()
+                    if (len < 0) throw IOException("Unexpected EOF reading SOCKS5 domain length")
+                    readExact(inStream, len + 2) // Domain + Port
+                }
+                0x04 -> readExact(inStream, 16 + 2) // IPv6 + Port
+                else -> throw IOException("Unknown SOCKS5 address type: $repAtyp")
+            }
+        } finally {
+            super.setSoTimeout(prevSoTimeout)
+        }
+    }
+
+    private fun readExact(inStream: InputStream, count: Int) {
+        var read = 0
+        val buf = ByteArray(count)
+        while (read < count) {
+            val r = inStream.read(buf, read, count - read)
+            if (r < 0) throw IOException("Unexpected EOF reading SOCKS5 response")
+            read += r
+        }
+    }
+
+    override fun getRemoteSocketAddress(): SocketAddress? = targetEndpoint ?: super.getRemoteSocketAddress()
+    override fun getInetAddress(): InetAddress? = targetEndpoint?.address ?: super.getInetAddress()
+    override fun getPort(): Int = targetEndpoint?.port ?: super.getPort()
+}
+
+internal class TorSocksSocketFactory(
+    private val proxyHost: String,
+    private val proxyPort: Int,
+    private val username: String
+) : javax.net.SocketFactory() {
+    override fun createSocket(): Socket = TorSocksSocket(proxyHost, proxyPort, username)
+    override fun createSocket(host: String, port: Int): Socket = createSocket().apply { connect(InetSocketAddress.createUnresolved(host, port)) }
+    override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket = createSocket(host, port)
+    override fun createSocket(host: InetAddress, port: Int): Socket = createSocket().apply { connect(InetSocketAddress(host, port)) }
+    override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket = createSocket(address, port)
 }

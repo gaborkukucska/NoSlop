@@ -48,17 +48,21 @@ object InvidiousApiClient {
     private val probeClient: okhttp3.OkHttpClient
         get() = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) probeClientTor else probeClientDirect
 
-    // Hardcoded Invidious instances (active public servers)
+    // Hardcoded Invidious instances (including .onion services and active public servers)
     private val INVIDIOUS_INSTANCES = listOf(
-        "https://yewtu.be",
+        "http://inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion",
+        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion",
+        "https://inv.nadeko.net",
         "https://invidious.nerdvpn.de",
-        "https://invidious.flokinet.to"
+        "https://invidious.tiekoetter.com",
+        "https://yewtu.be"
     )
 
     // Robust Piped API instances that deliver clean MP4 streams over Tor
     private val PIPED_INSTANCES = listOf(
         "https://pipedapi.adminforge.de",
-        "https://api.piped.privacydev.net"
+        "https://piped-api.privacy.com.de",
+        "https://pipedapi.drgns.space"
     )
 
     private val gossipedInstances = ConcurrentHashMap.newKeySet<String>()
@@ -133,7 +137,6 @@ object InvidiousApiClient {
             val request = Request.Builder()
                 .url(url)
                 .header("User-Agent", BROWSER_USER_AGENT)
-                .header("X-Tor-Stream-Id", "inv_${instance.hashCode()}")
                 .build()
             probeClient.newCall(request).awaitResponse().use { response ->
                 if (!response.isSuccessful) {
@@ -239,23 +242,23 @@ object InvidiousApiClient {
      * Races Piped API and Invidious .onion endpoints in parallel over Tor.
      */
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? {
-        // 1. Race Piped API instances over Tor (quick 2s probe)
+        // 1. Race Piped API instances over Tor (6s budget)
         val pipedHealthy = healthyPipedInstances()
         val pipedResult = raceInstances(
             label = "resolvePiped($videoId)",
             instances = pipedHealthy,
-            deadlineMs = System.currentTimeMillis() + 2_000L,
+            deadlineMs = System.currentTimeMillis() + 6_000L,
             urlFor = { "$it/streams/$videoId" },
             parse = { _, body -> pickPipedStreamUrl(videoId, body, quality) }
         )
         if (pipedResult != null) return pipedResult
 
-        // 2. Race Invidious instances (quick 2s probe)
+        // 2. Race Invidious instances (8s budget)
         val invidiousHealthy = healthyInvidiousInstances()
         return raceInstances(
             label = "resolveInvidious($videoId)",
             instances = invidiousHealthy,
-            deadlineMs = System.currentTimeMillis() + 2_000L,
+            deadlineMs = System.currentTimeMillis() + 8_000L,
             urlFor = { "$it/api/v1/videos/$videoId?local=true" },
             parse = { instance, body -> pickInvidiousStreamUrl(videoId, instance, body, quality) }
         )

@@ -122,8 +122,8 @@ object YouTubeInternalClient {
     // retries and redirects, and unlike a coroutine timeout it actually
     // interrupts the blocking socket. Shares the parent's connection pool and
     // dispatcher, so this is not a second client in any meaningful sense.
-    private val playerClient
-        get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+    private fun playerClient(streamId: String = "yt_default") =
+        com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
             .newBuilder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
             .callTimeout(20, TimeUnit.SECONDS)
@@ -753,18 +753,14 @@ object YouTubeInternalClient {
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
+        var streamNonce = 0
         var attempt = 0
-        // --- NOSLOP_NEWNYM_COOLDOWN_V1 ---
-        // Was 4. With rotations now gated to one per minute, attempts 3 and 4
-        // could only ever re-ask the same exit that just refused us, while
-        // still spending eight more requests against the shared rate limit.
         val maxAttempts = if (isTor) 2 else 1
 
         while (attempt < maxAttempts) {
             attempt++
-            // --- NOSLOP_EXIT_LOTTERY_V1 ---
-            // Reset per attempt: after a successful rotation we are on a new
-            // exit and it deserves a clean slate.
+            val currentStreamId = if (isTor) "yt_${videoId}_$streamNonce" else videoId
+            val activePlayerClient = playerClient(currentStreamId)
             var refusedThisAttempt = 0
             for (config in configs) {
                 if (!kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive.let { it == null || it }) {
@@ -776,10 +772,6 @@ object YouTubeInternalClient {
                     val payloadStr = payload.toString()
                     val requestBody = payloadStr.toRequestBody(jsonMediaType)
 
-                    // NOSLOP_PLAYER_IP_LOCK_V1 — player calls no longer go through the
-                    // proxy at all, so the proxy-refusal retry paths below are dead for
-                    // this endpoint. Left in place rather than deleted: they are the
-                    // right behaviour if a player call is ever proxied again.
                     val usingProxy = false
                     val requestBuilder = Request.Builder()
                         .url(playerEndpoint())
@@ -799,7 +791,7 @@ object YouTubeInternalClient {
                         applyProxyAuthHeaders(requestBuilder, payloadStr)
                     }
 
-                    var response = playerClient.newCall(requestBuilder.build()).execute()
+                    var response = activePlayerClient.newCall(requestBuilder.build()).execute()
                     var wentDirectAlready = false
                     if (usingProxy && (response.code == 403 || response.code == 429 || response.code == 400)) {
                         notePlayerProxyBlocked(response.code)
@@ -811,7 +803,7 @@ object YouTubeInternalClient {
                             .removeHeader("X-Proxy-Signature")
                             
                         response.close()
-                        response = playerClient.newCall(directReqBuilder.build()).execute()
+                        response = activePlayerClient.newCall(directReqBuilder.build()).execute()
                     }
                     
                     if (response.isSuccessful) {
@@ -842,7 +834,8 @@ object YouTubeInternalClient {
                                         response.close()
                                         continue
                                     }
-                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for $videoId")
+                                    registerStreamId(url, videoId, currentStreamId)
                                     response.close()
                                     return@withContext url
                                 } else {
@@ -858,7 +851,7 @@ object YouTubeInternalClient {
                                         .removeHeader("X-Proxy-Timestamp")
                                         .removeHeader("X-Proxy-Signature")
                                         .build()
-                                    val directResponse = playerClient.newCall(retryDirect).execute()
+                                    val directResponse = activePlayerClient.newCall(retryDirect).execute()
                                     val directBody = if (directResponse.isSuccessful) directResponse.body?.string() else null
                                     directResponse.close()
                                     if (!directBody.isNullOrBlank()) {
@@ -884,27 +877,26 @@ object YouTubeInternalClient {
                                     }
                                     continue
                                 }
-                                Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Circuit likely blocked.")
+                                Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Circuit $currentStreamId likely blocked.")
                                 response.close()
 
-                                // --- NOSLOP_EXIT_LOTTERY_V1 ---
-                                // If a client is refused, try the next config. Do NOT rotate circuits during resolve,
-                                // because rotating Tor destroys the stream the user is actively watching.
+                                // If this circuit's exit is gated with LOGIN_REQUIRED, advance stream isolation nonce
+                                // so the next attempt automatically routes over a brand new circuit without SIGNAL NEWNYM.
                                 if (playability == "LOGIN_REQUIRED") {
                                     refusedThisAttempt++
                                     if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
                                         Logger.warn(
                                             TAG,
-                                            "$refusedThisAttempt clients refused on the same circuit for " +
-                                                "$videoId — proceeding to failover without rotating active Tor circuit."
+                                            "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
+                                                "$videoId — advancing stream isolation nonce to escape to a fresh circuit."
                                         )
-                                        attempt = maxAttempts
+                                        streamNonce++
                                         break
                                     }
                                 }
 
                                 if (config == configs.last() && attempt < maxAttempts) {
-                                    attempt = maxAttempts
+                                    streamNonce++
                                 }
 
                                 continue
