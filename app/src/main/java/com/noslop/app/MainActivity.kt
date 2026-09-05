@@ -54,10 +54,10 @@ class MainActivity : ComponentActivity() {
                         if (showSplash) {
                             val startTime = System.currentTimeMillis()
                             
-                            // 1. Wait for Tor readiness if clearnet over Tor is enabled (up to 10s, non-blocking once ready)
+                            // 1. Wait for Tor readiness if clearnet over Tor is enabled (up to 35s on cold start)
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
-                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(10000L)
+                                com.noslop.app.net.HttpClientProvider.awaitNetworkReady(35000L)
                             } catch (_: Exception) {}
 
                             var firstPreloadUrl: String? = null

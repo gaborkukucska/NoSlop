@@ -193,11 +193,11 @@ object HttpClientProvider {
 
         val state = com.noslop.app.tor.TorService.torState.value
         
-        // Fail fast if Tor is not fully ready. We don't want to block OkHttp threads
-        // nor do we want to wait for 30s timeouts if the proxy is open but has no circuits.
-        if (state != com.noslop.app.tor.TorState.READY) {
-            Logger.warn(TAG, "Tor is not ready ($state) — failing fast for ${chain.request().url}")
-            throw java.io.IOException("Tor is not ready ($state) — failing fast to prevent hangs")
+        // Fail fast only if Tor is completely dead or failed.
+        // If it is PROXY_READY or STARTING, allow requests to reach Tor SOCKS proxy.
+        if (state == com.noslop.app.tor.TorState.FAILED || state == com.noslop.app.tor.TorState.IDLE) {
+            Logger.warn(TAG, "Tor is unavailable ($state) — failing fast for ${chain.request().url}")
+            throw java.io.IOException("Tor is unavailable ($state) — failing fast to prevent hangs")
         }
 
         chain.proceed(chain.request())

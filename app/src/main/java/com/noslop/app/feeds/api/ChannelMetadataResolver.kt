@@ -41,26 +41,28 @@ object ChannelMetadataResolver {
         val key = author.lowercase().trim()
 
         val cached = cache[key]
-        if (cached != null) return@withContext cached
+        if (cached != null) return@withContext if (cached == -1L) null else cached
+
+        // Fast path: if video has a valid publishedAt timestamp, use it as a reliable upper bound
+        // without burning scarce Tor SOCKS circuits on third-party channel lookups.
+        if (publishedAt > 0L) {
+            cache[key] = publishedAt
+            return@withContext publishedAt
+        }
 
         try {
-            // Attempt to resolve exact joined date via Invidious API
+            // Fallback: only query if no publishedAt is available
             val joinedMs = InvidiousApiClient.getChannelJoinedTimestamp(key)
             if (joinedMs != null && joinedMs > 0L) {
                 cache[key] = joinedMs
                 Logger.info(TAG, "Resolved exact creation date for $author: $joinedMs")
                 return@withContext joinedMs
+            } else {
+                cache[key] = -1L // Mark failed to prevent infinite re-querying
             }
         } catch (e: Exception) {
+            cache[key] = -1L
             Logger.debug(TAG, "Failed to resolve channel date for $author: ${e.message}")
-        }
-
-        // Upper-bound fallback: If video was published in the past (> 0L),
-        // the channel MUST have existed on or before that publication date.
-        if (publishedAt > 0L) {
-            // Only cache as fallback if we don't already have an exact date
-            cache.putIfAbsent(key, publishedAt)
-            return@withContext publishedAt
         }
 
         return@withContext null

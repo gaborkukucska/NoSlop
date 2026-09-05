@@ -817,18 +817,17 @@ fun UnifiedFeedTab(
                 if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                     viewModel.markItemReadState(currentItem.item.id, true)
                 } else if (currentItem is UnifiedItem.Mesh) {
-                    // Instantly record the swipe to prevent it from getting stuck as 'unseen'
                     viewModel.recordItemSwiped(currentItem.id)
                 }
 
-                kotlinx.coroutines.delay(1000L)
+                // Mark viewed immediately so swiping past quickly doesn't resurrect it
                 viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
             }
         }
     }
 
-    LaunchedEffect(pagerState.currentPage, filterMode) {
-        if (pagerState.currentPage !in unifiedItems.indices) return@LaunchedEffect
+    LaunchedEffect(pagerState.settledPage, filterMode) {
+        if (pagerState.settledPage !in unifiedItems.indices) return@LaunchedEffect
         
         // --- NOSLOP_TOR_PRELOAD_BUDGET_V1 ---
         // Resolving a stream costs a permit on YouTubeInternalClient's
@@ -845,7 +844,8 @@ fun UnifiedFeedTab(
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
         val forwardPreloadLimit = if (overTor) 1 else 2
         val preloadPreviousSlide = !overTor
-        val firstPreloadDelayMs = if (overTor) 8000L else 2000L
+        // Start preloading the immediate next slide promptly (400ms) after settling
+        val firstPreloadDelayMs = 400L
 
         // 1. Scan backwards to preload the immediate previous video
         if (preloadPreviousSlide) {
@@ -864,7 +864,7 @@ fun UnifiedFeedTab(
 
         // 2. Scan forwards to preload upcoming slides near the viewport
         var preloadedForwardCount = 0
-        for (i in pagerState.currentPage + 1..minOf(unifiedItems.size - 1, pagerState.currentPage + 10)) {
+        for (i in pagerState.settledPage + 1..minOf(unifiedItems.size - 1, pagerState.settledPage + 10)) {
             val preloadData = getPreloadDataFromItem(unifiedItems[i], context)
             if (preloadData != null) {
                 val (rawUrl, forcedUrl) = preloadData

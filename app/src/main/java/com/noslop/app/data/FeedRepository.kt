@@ -45,6 +45,8 @@ class FeedRepository(
     private val OFFICIAL_NEGATIVE_KEYWORDS =
         listOf("nude", "porn", "murder", "rape", "gore", "nsfw", "sex", "kill")
 
+    private val isSyncRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
     // --- Observable feed state ---
     val allSources: Flow<List<FeedSource>> = feedDao.getAllSources()
     val allFeedItems: Flow<List<FeedItem>> = feedDao.getAllItems()
@@ -181,6 +183,10 @@ class FeedRepository(
             Logger.info(TAG, "Aggregator is disabled via settings. Skipping feed fetch.")
             return@withContext
         }
+        if (!isSyncRunning.compareAndSet(false, true)) {
+            Logger.info(TAG, "Feed sync is already in progress. Skipping redundant request.")
+            return@withContext
+        }
 
         ensureDefaultApiSourcesExist()
 
@@ -225,8 +231,9 @@ class FeedRepository(
         val explicitApiSources = activeSources.filter { it.feedType == "api" }
         val activeCategories = (activeSources.mapNotNull { it.category } + userCategories + com.noslop.app.feeds.SourceLibrary.alwaysIncludedCategories).distinct().toMutableList()
 
-        // Limited parallel dispatcher over Tor to avoid socket/bandwidth saturation
-        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(2)
+        // Single-worker dispatcher over Tor to prevent starving foreground video streaming
+        val parallelism = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 1 else 2
+        val dispatcher = kotlinx.coroutines.Dispatchers.IO.limitedParallelism(parallelism)
 
         // --- Phase 1: Ramp-Up (Fast initial fetch) ---
         val rampUpJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
@@ -276,20 +283,26 @@ class FeedRepository(
             })
         }
 
-        // --- Phase 3: Creator Specific API searches ---
-        val sampledCreators = creatorKeywordList.shuffled().take(5)
-        for (creator in sampledCreators) {
-            backgroundJobs.add(async(dispatcher) {
-                try {
-                    searchCustomFeed(creator, null)
-                } catch(e: Exception) { 
-                    Logger.error(TAG, "Creator sync failed", e.message) 
-                }
-            })
+        // --- Phase 3: Creator Specific API searches (run only if Tor is not congested) ---
+        if (!com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+            val sampledCreators = creatorKeywordList.shuffled().take(3)
+            for (creator in sampledCreators) {
+                backgroundJobs.add(async(dispatcher) {
+                    try {
+                        searchCustomFeed(creator, null)
+                    } catch(e: Exception) { 
+                        Logger.error(TAG, "Creator sync failed", e.message) 
+                    }
+                })
+            }
         }
 
-        kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
-        _feedBuildStatus.value = ""
+        try {
+            kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
+        } finally {
+            isSyncRunning.set(false)
+            _feedBuildStatus.value = ""
+        }
         Logger.info(TAG, "Feed synchronization completed.")
     }
 

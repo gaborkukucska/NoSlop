@@ -82,19 +82,13 @@ object TorService {
     @Volatile
     private var lastNewnymAtMs = 0L
 
-    /** Tor's own NEWNYM rate limit is ~10s; a streaming video needs far more
-     *  breathing room than that to rebuild and fill a buffer. */
-    private const val NEWNYM_MIN_INTERVAL_MS = 60_000L
+    /** Protect the Tor daemon and active circuits from rotation storms.
+     *  Rebuilding Tor circuits takes time; rotating faster than 90s overwhelms the daemon. */
+    private const val NEWNYM_MIN_INTERVAL_MS = 90_000L
 
     // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
-    // The 60s gate above was right about the danger and wrong to apply it
-    // unconditionally. Rotating mid-stream caused the round-2 failure;
-    // rotating while nothing is playing costs nothing and is the ONLY remedy
-    // for landing on an exit YouTube has gated, which the 19:28 capture shows
-    // costing a full minute per affected video.
-    //
-    // The discriminator is not elapsed time, it is whether bytes are moving.
-    private const val NEWNYM_IDLE_INTERVAL_MS = 15_000L
+    // Minimum 75s even when idle to prevent rapid circuit churn that invalidates caches.
+    private const val NEWNYM_IDLE_INTERVAL_MS = 75_000L
 
     /** How recently the buffer must have advanced to count as "streaming". */
     private const val MEDIA_ACTIVE_WINDOW_MS = 10_000L
@@ -400,6 +394,7 @@ object TorService {
                         if (_torState.value != TorState.READY) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor circuits established. Promoting state to READY.")
+                            setTorStatusMessage(null)
                             triggerRegistration()
                         }
                     } else {
@@ -408,6 +403,7 @@ object TorService {
                         if (isTor) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor connectivity verified. Promoting state to READY.")
+                            setTorStatusMessage(null)
                             triggerRegistration()
                         } else {
                             Logger.warn(
@@ -748,6 +744,9 @@ object TorService {
                     val isTor = body.contains("IsTor\":true") || body.contains("IsTor\": true") || body.contains("Congratulations")
                     val detail = if (isTor) "Routed securely via Tor!" else "Proxy responded but not Tor-routed"
                     Logger.info(TAG, "Tor API check complete — isTor=$isTor")
+                    if (isTor) {
+                        setTorStatusMessage(null)
+                    }
                     Pair(isTor, detail)
                 }
             } catch (e: Exception) {
@@ -759,20 +758,20 @@ object TorService {
                     client.newCall(request).execute().use { response ->
                         val isTor = response.isSuccessful
                         Logger.info(TAG, "Tor fallback check (ipify) complete — isTor=$isTor")
+                        if (isTor) {
+                            setTorStatusMessage(null)
+                        }
                         Pair(isTor, if (isTor) "Routed securely via Tor!" else "Proxy check failed")
                     }
                 } catch (e2: Exception) {
                     Logger.warn(TAG, "Tor check fallback failed (${e2.message}).")
-                    // --- NOSLOP_TOR_HEALTH_V1 ---
-                    // Both probes failed, which means the daemon reports circuits
-                    // but nothing they carry is arriving. Every feed, API and mesh
-                    // peer is about to fail the same way. Previously this went only
-                    // to the log and the user was left watching "Preparing your
-                    // feed..." with no idea why — say it instead.
-                    setTorStatusMessage(
-                        "Tor is connected but no traffic is getting through. " +
-                            "Check the device's internet connection."
-                    )
+                    // Only set error status if Tor was supposed to be fully ready
+                    if (_torState.value == TorState.READY) {
+                        setTorStatusMessage(
+                            "Tor is connected but no traffic is getting through. " +
+                                "Check the device's internet connection."
+                        )
+                    }
                     Pair(false, "Tor connectivity check failed: ${e2.message}")
                 }
             }

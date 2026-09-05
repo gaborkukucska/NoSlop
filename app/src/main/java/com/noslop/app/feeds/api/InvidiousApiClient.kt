@@ -37,30 +37,28 @@ object InvidiousApiClient {
             .build()
     }
 
-    private val probeClientTor: okhttp3.OkHttpClient
-        get() = com.noslop.app.net.HttpClientProvider.torClient
+    private val probeClientTor: okhttp3.OkHttpClient by lazy {
+        com.noslop.app.net.HttpClientProvider.torClient.newBuilder()
+            .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+            .callTimeout(6, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+    }
 
     private val probeClient: okhttp3.OkHttpClient
         get() = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) probeClientTor else probeClientDirect
 
-    // Hardcoded Invidious instances (including .onion services)
+    // Hardcoded Invidious instances (active public servers)
     private val INVIDIOUS_INSTANCES = listOf(
-        "http://inv.nadekonw7plitnjuawu6ytjsl7jlglk2t6pyq6eftptmiv3dvqndwvyd.onion",
-        "http://nerdvpneaggggfdiurknszkbmhvjndks5z5k3g5yp4nhphflh3n3boad.onion",
         "https://yewtu.be",
-        "https://invidious.flokinet.to",
         "https://invidious.nerdvpn.de",
-        "https://invidious.projectsegfau.lt",
-        "https://invidious.perennialte.ch"
+        "https://invidious.flokinet.to"
     )
 
     // Robust Piped API instances that deliver clean MP4 streams over Tor
     private val PIPED_INSTANCES = listOf(
-        "https://pipedapi.kavin.rocks",
-        "https://api.piped.privacydev.net",
-        "https://pipedapi.leptons.xyz",
         "https://pipedapi.adminforge.de",
-        "https://piped-api.garudalinux.org"
+        "https://api.piped.privacydev.net"
     )
 
     private val gossipedInstances = ConcurrentHashMap.newKeySet<String>()
@@ -241,23 +239,23 @@ object InvidiousApiClient {
      * Races Piped API and Invidious .onion endpoints in parallel over Tor.
      */
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? {
-        // 1. Race Piped API instances over Tor (Piped returns unthrottled, unencrypted direct MP4 streams)
+        // 1. Race Piped API instances over Tor (quick 2s probe)
         val pipedHealthy = healthyPipedInstances()
         val pipedResult = raceInstances(
             label = "resolvePiped($videoId)",
             instances = pipedHealthy,
-            deadlineMs = System.currentTimeMillis() + 8_000L,
+            deadlineMs = System.currentTimeMillis() + 2_000L,
             urlFor = { "$it/streams/$videoId" },
             parse = { _, body -> pickPipedStreamUrl(videoId, body, quality) }
         )
         if (pipedResult != null) return pipedResult
 
-        // 2. Race Invidious instances (including .onion services) with local stream proxying
+        // 2. Race Invidious instances (quick 2s probe)
         val invidiousHealthy = healthyInvidiousInstances()
         return raceInstances(
             label = "resolveInvidious($videoId)",
             instances = invidiousHealthy,
-            deadlineMs = System.currentTimeMillis() + 15_000L,
+            deadlineMs = System.currentTimeMillis() + 2_000L,
             urlFor = { "$it/api/v1/videos/$videoId?local=true" },
             parse = { instance, body -> pickInvidiousStreamUrl(videoId, instance, body, quality) }
         )
@@ -452,7 +450,7 @@ object InvidiousApiClient {
         return raceInstances(
             label = "channel joined date",
             instances = healthyInvidiousInstances(),
-            deadlineMs = System.currentTimeMillis() + 10_000L,
+            deadlineMs = System.currentTimeMillis() + 3_000L,
             urlFor = { "$it/api/v1/channels/$encoded" },
             parse = { _, body ->
                 val root = com.google.gson.JsonParser.parseString(body).asJsonObject

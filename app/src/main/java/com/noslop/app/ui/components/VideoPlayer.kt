@@ -189,7 +189,7 @@ internal fun isSourceCached(url: String): Boolean {
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 
-internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false, context: android.content.Context): VideoSource {
+internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false, context: android.content.Context, isPreload: Boolean = false): VideoSource {
     val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
     val cacheKey = "$rawUrl||$quality"
 
@@ -221,7 +221,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         if (!forceRefresh) {
             freshOrNull()?.let { return@withLock it }
         }
-        val result = doResolve(rawUrl, quality)
+        val result = doResolve(rawUrl, quality, isPreload)
         val expiryMs = if ((result is VideoSource.Embed || result is VideoSource.Unavailable) && !HttpClientProvider.isNetworkReady) {
             System.currentTimeMillis() + 10_000L
         } else {
@@ -259,7 +259,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
     return resolved
 }
 
-private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = withContext(Dispatchers.IO) {
+private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolean): VideoSource = withContext(Dispatchers.IO) {
     if (rawUrl.isBlank()) return@withContext VideoSource.Unavailable
 
     if (HttpClientProvider.useTorForClearnet && !HttpClientProvider.isNetworkReady && !rawUrl.startsWith("file://") && !rawUrl.contains("127.0.0.1") && !rawUrl.contains("localhost")) {
@@ -292,7 +292,7 @@ private suspend fun doResolve(rawUrl: String, quality: String): VideoSource = wi
             }
             VideoSource.Direct(rawUrl)
         }
-        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl, quality)
+        isYouTubeUrl(rawUrl) -> resolveYouTubeSource(rawUrl, quality, isPreload)
         isVimeoUrl(rawUrl) -> resolveVimeoSource(rawUrl, quality)
         rawUrl.contains("archive.org/embed") || rawUrl.contains("archive.org/details") -> {
             val id = if (rawUrl.contains("/details/")) {
@@ -401,30 +401,39 @@ private var ytDirectFailTimestamp = 0L
 private const val YT_CIRCUIT_BREAKER_THRESHOLD = 5
 private const val YT_CIRCUIT_BREAKER_RESET_MS = 45 * 1000L // 45 seconds
 
-private suspend fun resolveYouTubeSource(url: String, quality: String): VideoSource {
+private suspend fun resolveYouTubeSource(url: String, quality: String, isPreload: Boolean = false): VideoSource {
     val videoId = extractYouTubeId(url) ?: run {
         Logger.warn("VIDEO_RESOLVE", "Could not extract YouTube video ID from: $url")
         return VideoSource.Unavailable
     }
 
-    // Circuit breaker: skip direct resolve if it's been failing consistently
+    val isTor = HttpClientProvider.useTorForClearnet
     val now = System.currentTimeMillis()
-    if (ytDirectFailCount >= YT_CIRCUIT_BREAKER_THRESHOLD && (now - ytDirectFailTimestamp) < YT_CIRCUIT_BREAKER_RESET_MS) {
+
+    // Circuit breaker only applies when Tor is OFF (where WebView embed fallback is permitted).
+    // When routing over Tor, embeds are prohibited for privacy, so the circuit breaker must never
+    // lock out subsequent videos from attempting direct resolution.
+    val circuitBreakerOpen = !isTor && ytDirectFailCount >= YT_CIRCUIT_BREAKER_THRESHOLD && (now - ytDirectFailTimestamp) < YT_CIRCUIT_BREAKER_RESET_MS
+
+    if (circuitBreakerOpen) {
         Logger.info("VIDEO_RESOLVE", "YouTube direct stream circuit breaker OPEN — skipping to embed for $videoId")
     } else {
-        // Reset circuit breaker if enough time has passed
         if ((now - ytDirectFailTimestamp) >= YT_CIRCUIT_BREAKER_RESET_MS) {
             ytDirectFailCount = 0
         }
-        val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality)
+        val streamUrl = YouTubeInternalClient.resolveStreamUrl(videoId, quality, canRotateCircuit = !isPreload)
         if (streamUrl != null) {
             ytDirectFailCount = 0
             return VideoSource.Direct(streamUrl)
         }
-        if (HttpClientProvider.isNetworkReady) {
+        if (HttpClientProvider.isNetworkReady && !isTor) {
             ytDirectFailCount++
             ytDirectFailTimestamp = System.currentTimeMillis()
         }
+    }
+
+    if (isTor) {
+        return VideoSource.Unavailable
     }
 
     val embedUrl = "https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&rel=0&modestbranding=1"
@@ -650,7 +659,8 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality) {
+    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible) {
+        if (!isVisible) return@LaunchedEffect
         // On URL change or retry, resolve the source. But try the fast path first:
         // if PreloadManager already resolved this URL, sourceCache will have it instantly.
         val forceRefresh = retryTrigger > 0
@@ -688,13 +698,10 @@ fun VideoPlayer(
             }
 
             is VideoSource.Direct -> {
-                if (activeVisible) {
-                    // --- NOSLOP_FAILURE_VISIBILITY_V1 ---
-                    // ExoVideoPlayer draws its own "Video unavailable / Retry
-                    // Playback" card, but one level deeper than the poster
-                    // overlay, so zIndex inside it cannot outrank the poster.
-                    // Lifting the whole subtree once it has failed is what puts
-                    // that card back in front of the user.
+                // Strictly mount ExoVideoPlayer ONLY when this slide is visible to the user.
+                // PreloadManager handles warming upcoming slides; mounting ExoVideoPlayer for offscreen
+                // slides starves Tor bandwidth and kills active playback.
+                if (isVisible) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -971,6 +978,9 @@ private fun ExoVideoPlayer(
 
     LaunchedEffect(isVisible, exoPlayer) {
         exoPlayer?.let { player ->
+            if (isVisible) {
+                com.noslop.app.tor.TorService.noteMediaProgress()
+            }
             player.playWhenReady = isVisible
             if (!isVisible) {
                 player.pause()
@@ -1042,44 +1052,33 @@ private fun ExoVideoPlayer(
                 if (stalledSamples == 5) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "NO PROGRESS for 10s — buffer has not advanced. " +
-                            "If bufPos is also 0 the stream never started arriving. | $rawUrl"
+                        "NO PROGRESS for 10s — buffer has not advanced. | $rawUrl"
                     )
                 }
 
                 // --- NOSLOP_TOR_CIRCUIT_V1 ---
-                // Zero bytes after 12s for googlevideo URLs over Tor means the exit is likely blocked.
-                // --- NOSLOP_STALL_DETECT_V2 ---
-                // Was `rawUrl.contains("googlevideo")`. rawUrl is the *page*
-                // URL (youtube.com/watch?v=...), so that was never true and
-                // this whole recovery branch was dead code. The resolved
-                // stream URL is `url`.
-                if (stalledSamples >= 6 && noBytesEver && url.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
+                // Over Tor on mobile, SOCKS connection + TLS + initial chunk fetch can take 15-20s.
+                // A 12s timeout prematurely kills legitimate Tor streams. Give it 30s (15 samples).
+                val stallThresholdSamples = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) 15 else 6
+                if (stalledSamples >= stallThresholdSamples && noBytesEver && url.contains("googlevideo") && retryKey < MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Zero bytes over Tor after 12s — this exit is likely blocked " +
-                            "for googlevideo. Requesting a new Tor circuit and re-resolving. | $rawUrl"
+                        "Zero bytes over Tor after ${stallThresholdSamples * 2}s — clearing resume pos and re-resolving for: $rawUrl"
                     )
+                    PlaybackPositionStore.clear(rawUrl)
                     stalledSamples = 0
-                    com.noslop.app.tor.TorService.setTorStatusMessage(
-                        "Tor exit blocked by this provider — trying a new route…"
-                    )
                     val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
-                    if (!rotated) {
-                        Logger.warn(PLAYBACK_DIAG_TAG, "Could not rotate circuit; will retry resolve anyway")
+                    if (rotated) {
+                        kotlinx.coroutines.delay(2000L)
                     }
-                    // Give Tor a moment to build the replacement circuit before
-                    // asking for a fresh URL against it.
-                    kotlinx.coroutines.delay(2000L)
-                    com.noslop.app.tor.TorService.setTorStatusMessage(null)
                     onRetry()
                     return@LaunchedEffect
                 }
 
-                if (stalledSamples >= 6 && noBytesEver && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
+                if (stalledSamples >= stallThresholdSamples && noBytesEver && retryKey >= MAX_AUTO_RESOLVE_RETRIES) {
                     Logger.warn(
                         PLAYBACK_DIAG_TAG,
-                        "Still zero bytes after $retryKey circuit changes — giving up on this " +
+                        "Still zero bytes after $retryKey retries — giving up on this " +
                             "video rather than fetching it outside Tor. | $rawUrl"
                     )
                     com.noslop.app.tor.TorService.setTorStatusMessage(
@@ -1180,18 +1179,16 @@ private fun ExoVideoPlayer(
                 }
             }
         } else {
-            val streamId = YouTubeInternalClient.getStreamIdForUrl(url) ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl) ?: url
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(HttpClientProvider.activeMediaClient)
-                .setDefaultRequestProperties(mapOf("X-Tor-Stream-Id" to streamId))
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    15000, // min buffer (15s)
-                    60000, // max buffer (60s)
-                    2000,  // buffer for playback (2s)
-                    5000   // buffer for playback after rebuffer (5s)
+                    6000,  // min buffer (6s)
+                    30000, // max buffer (30s)
+                    500,   // buffer for playback (0.5s)
+                    2000   // buffer for playback after rebuffer (2s)
                 )
                 .build()
 
@@ -1226,6 +1223,7 @@ private fun ExoVideoPlayer(
                         seekTo(resumeMs)
                     }
 
+                    com.noslop.app.ui.PreloadManager.currentlyPlayingUrl = rawUrl
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
                             isBuffering = playbackState == androidx.media3.common.Player.STATE_BUFFERING
@@ -1267,6 +1265,9 @@ private fun ExoVideoPlayer(
         exoPlayer = player
 
         onDispose {
+            if (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl == rawUrl) {
+                com.noslop.app.ui.PreloadManager.currentlyPlayingUrl = null
+            }
             try {
                 val currentPos = player.currentPosition
                 Logger.debug("VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")

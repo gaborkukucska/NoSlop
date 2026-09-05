@@ -92,6 +92,8 @@ object PreloadManager {
     // it. A member function may legally forward-reference a later property, but
     // ordering it explicitly removes any question about initialisation.
     private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
+    @Volatile
+    var currentlyPlayingUrl: String? = null
 
     // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
     // from the main thread: preWarm() is called via launch{} from a Composable
@@ -161,6 +163,10 @@ object PreloadManager {
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
         if (rawUrl.isBlank()) return
+        if (rawUrl == currentlyPlayingUrl) {
+            Logger.info("PRELOAD", "Skipping preWarm for actively playing video: $rawUrl")
+            return
+        }
 
         if (!com.noslop.app.net.HttpClientProvider.isNetworkReady && rawUrl.startsWith("http")) {
             Logger.info("PRELOAD", "Network not ready, awaiting network before preWarm: $rawUrl")
@@ -181,7 +187,7 @@ object PreloadManager {
                 Logger.info("PRELOAD", "Using forced resolved URL for $rawUrl -> $forcedResolvedUrl")
                 VideoSource.Direct(forcedResolvedUrl)
             } else {
-                resolveSource(rawUrl, false, context)
+                resolveSource(rawUrl, false, context, isPreload = true)
             }
         } catch (e: Exception) {
             Logger.warn("PRELOAD", "preWarm: resolveSource failed for $rawUrl: ${e.message}")
@@ -206,17 +212,7 @@ object PreloadManager {
                     finish(rawUrl, deferred)
                     return
                 }
-                // --- NOSLOP_PRELOAD_STAMPEDE_V1 ---
-                val declaredBytes = declaredContentLength(resolved.url)
-                if (declaredBytes != null && declaredBytes > prebufferCeilingBytes()) {  // NOSLOP_TOR_GATE_UI_V1
-                    Logger.info(
-                        "PRELOAD",
-                        "Skipping buffer for $rawUrl — ${declaredBytes / 1_000_000}MB " +
-                            "exceeds the prebuffer ceiling; it would starve the visible video"
-                    )
-                    finish(rawUrl, deferred)
-                    return
-                }
+                // Quality settings influence which stream is selected, never drop preload based on file length.
 
                 val expiresAt = expiryOfResolvedUrl(resolved.url)
                 if (expiresAt - System.currentTimeMillis() < MIN_USEFUL_TTL_MS) {
@@ -261,7 +257,6 @@ object PreloadManager {
             for (task in preloadQueue) {
                 try {
                     doWarmUp(task.context, task.rawUrl, task.resolvedUrl, task.expiresAtMs)
-                    kotlinx.coroutines.delay(2000L) // Stagger to prevent network socket contention with active video
                 } catch (e: Exception) {
                     Logger.error("PRELOAD", "Error in background warmUp for ${task.rawUrl}: ${e.message}")
                 } finally {
@@ -308,21 +303,19 @@ object PreloadManager {
         }
         Logger.info("PRELOAD", "doWarmUp starting for: $rawUrl -> $resolvedUrl")
 
-        val streamId = com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(resolvedUrl)
-            ?: com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(rawUrl)
-            ?: rawUrl
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
             com.noslop.app.net.HttpClientProvider.activeClearnetClient
-        ).setDefaultRequestProperties(mapOf("X-Tor-Stream-Id" to streamId))
+        )
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
+        // Low-latency initial buffer for pre-warming so ExoPlayer reaches READY in 1-2 seconds
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // min buffer (15s)
-                60000, // max buffer (60s)
-                2000,  // buffer for playback (2s)
-                5000   // buffer for playback after rebuffer (5s)
+                5000,  // min buffer (5s)
+                20000, // max buffer (20s)
+                500,   // buffer for playback (0.5s)
+                1500   // buffer for playback after rebuffer (1.5s)
             )
             .build()
 
@@ -361,11 +354,7 @@ object PreloadManager {
         val mediaItem = MediaItem.Builder().setUri(resolvedUrl).setMimeType(mimeType).build()
 
         player.setMediaItem(mediaItem)
-        val resumeMs = com.noslop.app.ui.components.PlaybackPositionStore.resumePositionFor(rawUrl)
-        if (resumeMs > 0L) {
-            Logger.info("PRELOAD", "Pre-buffering video at saved resume position ${resumeMs}ms for: $rawUrl")
-            player.seekTo(resumeMs)
-        }
+        // Resume from start on preload to ensure fast initial buffering
         player.prepare()
         player.playWhenReady = false // Pause initially
         player.repeatMode = ExoPlayer.REPEAT_MODE_ONE
@@ -416,11 +405,6 @@ object PreloadManager {
         val entry = preloadedPlayers[cacheKey]
 
         if (entry == null) {
-            if (pendingTasks.containsKey(rawUrl)) {
-                Logger.warn("PRELOAD", "Video $rawUrl claimed while still in preload queue! Cancelling background preload.")
-                cancelledTasks.add(rawUrl)
-                pendingTasks.remove(rawUrl)
-            }
             Logger.warn("PRELOAD", "No preloaded player found for: $cacheKey - will create fresh player")
             return null
         }
@@ -448,6 +432,7 @@ object PreloadManager {
         }
 
         preloadedPlayers.remove(cacheKey)
+        currentlyPlayingUrl = rawUrl
         Logger.info("PRELOAD", "Claimed preloaded video: $cacheKey")
         return entry.player
     }

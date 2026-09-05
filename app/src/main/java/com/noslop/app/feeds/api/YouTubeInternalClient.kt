@@ -89,6 +89,7 @@ object YouTubeInternalClient {
     
     private const val CLIENT_NAME = "WEB"
     private const val CLIENT_VERSION = "2.20240717.01.00"
+    private val startupTimestampMs = System.currentTimeMillis()
     
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
@@ -125,7 +126,6 @@ object YouTubeInternalClient {
         get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
             .newBuilder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            .connectionPool(okhttp3.ConnectionPool(0, 1, TimeUnit.NANOSECONDS))
             .callTimeout(20, TimeUnit.SECONDS)
             .connectTimeout(15, TimeUnit.SECONDS)
             .build()
@@ -202,11 +202,7 @@ object YouTubeInternalClient {
             }
             
             if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
-                if ((response?.code == 429 || response?.code == 403) && com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                    Logger.info(TAG, "Proxy returned HTTP ${response.code} over Tor — requesting new Tor circuit")
-                    com.noslop.app.tor.TorService.requestNewCircuit()
-                }
-
+                // Do not rotate Tor circuits on search proxy errors; simply bypass the proxy and go direct.
                 val directReq = request.newBuilder()
                     .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
                     .removeHeader("X-Proxy-Secret")
@@ -500,12 +496,8 @@ object YouTubeInternalClient {
     // --- NOSLOP_GEO_LOCK_V1 ---
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
-    // --- NOSLOP_EXIT_LOTTERY_V1 ---
-    // Two different InnerTube clients refused from the same circuit is not a
-    // coincidence about those two clients: they are asking from the same
-    // address, so it is the exit that is gated. Asking the remaining three
-    // costs ~40s and cannot succeed.
-    private const val EXIT_BLOCKED_THRESHOLD = 2
+    // Allow trying client configs (especially ANDROID_VR and TVHTML5) before declaring blocked exit.
+    private const val EXIT_BLOCKED_THRESHOLD = 4
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -588,7 +580,6 @@ object YouTubeInternalClient {
         if (formats != null && formats.size() > 0) {
             val valid = formats.mapNotNull { element ->
                 val obj = element.asJsonObject ?: return@mapNotNull null
-                if (isTor && exceedsTorSizeCeiling(obj)) return@mapNotNull null
                 extractFormatStreamUrl(obj)
             }
             if (valid.isNotEmpty()) {
@@ -673,7 +664,7 @@ object YouTubeInternalClient {
     // ceiling.
     private const val RESOLVE_BUDGET_MS = 60_000L
 
-    suspend fun resolveStreamUrl(videoId: String, quality: String = "high"): String? {
+    suspend fun resolveStreamUrl(videoId: String, quality: String = "high", canRotateCircuit: Boolean = true): String? {
         val gotPermit = kotlinx.coroutines.withTimeoutOrNull(RESOLVE_QUEUE_WAIT_MS) {
             playerResolveGate.acquire()
             true
@@ -690,7 +681,7 @@ object YouTubeInternalClient {
 
         try {
             val resolved = kotlinx.coroutines.withTimeoutOrNull(RESOLVE_BUDGET_MS) {
-                resolveStreamUrlInner(videoId, quality)
+                resolveStreamUrlInner(videoId, quality, canRotateCircuit)
             }
             if (resolved == null) {
                 Logger.warn(
@@ -704,7 +695,7 @@ object YouTubeInternalClient {
         }
     }
 
-    private suspend fun resolveStreamUrlInner(videoId: String, quality: String): String? = withContext(Dispatchers.IO) {
+    private suspend fun resolveStreamUrlInner(videoId: String, quality: String, canRotateCircuit: Boolean): String? = withContext(Dispatchers.IO) {
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
 
         // --- NOSLOP_GEO_LOCK_V1 ---
@@ -776,8 +767,11 @@ object YouTubeInternalClient {
             // exit and it deserves a clean slate.
             var refusedThisAttempt = 0
             for (config in configs) {
+                if (!kotlin.coroutines.coroutineContext[kotlinx.coroutines.Job]?.isActive.let { it == null || it }) {
+                    Logger.info(TAG, "resolveStreamUrl cancelled for $videoId (slide swiped away)")
+                    return@withContext null
+                }
                 try {
-                    val streamId = "yt_${videoId}_${config.clientName}_a${attempt}"
                     val payload = buildPlayerPayload(videoId, config)
                     val payloadStr = payload.toString()
                     val requestBody = payloadStr.toRequestBody(jsonMediaType)
@@ -794,8 +788,6 @@ object YouTubeInternalClient {
                         .header("X-YouTube-Client-Version", config.clientVersion)
                         .header("X-Goog-Api-Format-Version", "2")
                         .header("User-Agent", config.userAgent)
-                        .header("X-Tor-Stream-Id", streamId)
-                        .header("Connection", "close") // Force OkHttp to drop socket so Tor can route new circuits
                         .post(requestBody)
 
                     if (config.clientName.contains("TV") || config.clientName.contains("WEB") || config.clientName.contains("EMBED")) {
@@ -828,6 +820,12 @@ object YouTubeInternalClient {
                             val root = gson.fromJson(bodyStr, JsonObject::class.java)
                             val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
                             
+                            if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE") {
+                                Logger.warn(TAG, "Video $videoId is permanently unplayable: $playability. Bailing immediately.")
+                                response.close()
+                                return@withContext null
+                            }
+
                             if (playability == "OK") {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
@@ -844,8 +842,7 @@ object YouTubeInternalClient {
                                         response.close()
                                         continue
                                     }
-                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} ($streamId) for $videoId")
-                                    registerStreamId(url, videoId, streamId)
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} for $videoId")
                                     response.close()
                                     return@withContext url
                                 } else {
@@ -876,7 +873,6 @@ object YouTubeInternalClient {
                                                     "Resolved direct video stream using ${config.clientName} " +
                                                         "for $videoId (direct over Tor, proxy refused)"
                                                 )
-                                                registerStreamId(directUrl, videoId, streamId)
                                                 return@withContext directUrl
                                             }
                                         }
@@ -888,44 +884,27 @@ object YouTubeInternalClient {
                                     }
                                     continue
                                 }
-                                Logger.warn(TAG, "Video unplayable for ${config.clientName} ($streamId, Status: $playability). Circuit likely blocked.")
+                                Logger.warn(TAG, "Video unplayable for ${config.clientName} (Status: $playability). Circuit likely blocked.")
                                 response.close()
 
                                 // --- NOSLOP_EXIT_LOTTERY_V1 ---
+                                // If a client is refused, try the next config. Do NOT rotate circuits during resolve,
+                                // because rotating Tor destroys the stream the user is actively watching.
                                 if (playability == "LOGIN_REQUIRED") {
                                     refusedThisAttempt++
                                     if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
                                         Logger.warn(
                                             TAG,
                                             "$refusedThisAttempt clients refused on the same circuit for " +
-                                                "$videoId — this is the exit being gated, not the clients. " +
-                                                "Skipping the remaining ${configs.size - refusedThisAttempt}."
+                                                "$videoId — proceeding to failover without rotating active Tor circuit."
                                         )
-                                        val rotatedAway = com.noslop.app.tor.TorService.requestNewCircuit()
-                                        if (rotatedAway) {
-                                            com.noslop.app.net.HttpClientProvider.torClient.connectionPool.evictAll()
-                                            kotlinx.coroutines.delay(2000L)
-                                        } else {
-                                            attempt = maxAttempts
-                                        }
+                                        attempt = maxAttempts
                                         break
                                     }
                                 }
 
                                 if (config == configs.last() && attempt < maxAttempts) {
-                                    Logger.info(TAG, "All clients failed. Rotating Tor circuit to bypass IP block...")
-                                    val rotated = com.noslop.app.tor.TorService.requestNewCircuit()
-                                    if (!rotated) {
-                                        Logger.info(
-                                            TAG,
-                                            "Circuit was not rotated — a retry would hit the same exit. " +
-                                                "Going straight to the Invidious/Piped failover for $videoId."
-                                        )
-                                        attempt = maxAttempts
-                                    } else {
-                                        com.noslop.app.net.HttpClientProvider.torClient.connectionPool.evictAll()
-                                        kotlinx.coroutines.delay(2000L)
-                                    }
+                                    attempt = maxAttempts
                                 }
 
                                 continue
@@ -950,13 +929,15 @@ object YouTubeInternalClient {
         }
 
         // --- NOSLOP_GEO_LOCK_V1 ---
-        // Nothing better exists. A geo-locked URL will probably 403, but
-        // "probably" beats a guaranteed Unavailable, and the failure is now
-        // visible to the user with a Retry button rather than hidden behind
-        // the poster.
-        geoLockedFallback?.let {
-            Logger.warn(TAG, "Falling back to the geo-locked stream for $videoId — it may 403")
-            return@withContext it
+        // Over Tor, a geo-locked URL is guaranteed to fail with 403 and cause
+        // stalling/circuit-rotation storms. Only use it when NOT routing over Tor.
+        if (!isTor) {
+            geoLockedFallback?.let {
+                Logger.warn(TAG, "Falling back to the geo-locked stream for $videoId — it may 403")
+                return@withContext it
+            }
+        } else if (geoLockedFallback != null) {
+            Logger.warn(TAG, "Discarding geo-locked stream for $videoId because Tor routing is active")
         }
 
         return@withContext null
