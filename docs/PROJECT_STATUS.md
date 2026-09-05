@@ -361,6 +361,20 @@ of the resolve path. Full detail in
 
 ### Known Issues Under Investigation
 
+* **Clearnet-over-Tor Video Playback & Tor Daemon Circuit Latency (2026-09-06 session update)**:
+  * **Status**: Open / Unresolved.
+  * **Empirical Observations**:
+    * When *Route Clearnet via Tor* is disabled (direct clearnet), the feed, images, articles, and video playback stream responsively without stalls.
+    * When *Route Clearnet via Tor* is enabled, most video content fails to become ready on swipe or stalls during buffering, and Tor socket connections eventually time out (`Connect timed out` across port 9050).
+  * **Root Causes & Attempts Documented**:
+    1. *Tor Circuit Churn & Egress IP Invalidation*: `googlevideo.com` stream URLs are strictly bound to the Tor exit IP that resolved them. Calling `SIGNAL NEWNYM` mid-session changes the exit IP, invalidating all preloaded and cached URLs (`circuit rotated (N -> N+1) and the URL is signed for the old exit`). Circuit rotations were previously being triggered by background search proxy 403s, offscreen video cards, and failing failovers.
+    2. *Tor Socket Flooding & Daemon Gridlock*: Disagreeing readiness checks (`PROXY_READY` vs `READY`) previously released dozens of parallel RSS, public API, onion mesh, and video requests into Tor before circuits reached 100% bootstrap, saturating the embedded Tor daemon's local connection capacity.
+    3. *InnerTube Bot Attestation & Dead Failovers*: Public Tor exit IPs are frequently gated by YouTube with `LOGIN_REQUIRED`. The fallback instances (Invidious / Piped) are largely unresponsive, rate-limited (HTTP 401/403/500/502), or timed out over Tor, blocking the resolve semaphore.
+    4. *Preload Double-Buffering & Seek Poisoning*: Mounting players for offscreen slides while `PreloadManager` also buffers resulted in multiple ExoPlayer instances competing for limited Tor bandwidth. Also, videos attempting to resume from deep saved offsets stalled on Tor range requests.
+  * **Remaining Requirements**:
+    * SOCKS stream isolation per video (`IsolateSOCKSAuth` via credentials) rather than destructive process-wide `SIGNAL NEWNYM` circuit rotation.
+    * Suppress heavy background feed sync tasks while foreground video streaming is active over Tor.
+
 * Mid-playback stalls on thin connections. Preload bandwidth competing with
   the visible stream is the first suspect; `MAX_PRELOAD = 3` was raised on the
   assumption bandwidth was not the constraint, and that should be re-checked.
@@ -1522,6 +1536,7 @@ The following tasks have been aggregated from all historical gap analyses, audit
 *   **10. Room: `exportSchema = false` and no tests.** (Export schemas, add `MigrationTestHelper`).
 *   **11. The database is not encrypted at rest.** (Encrypt group bodies or use SQLCipher).
 *   **12. ProGuard keeps essentially the whole app.** (Remove wildcards, annotate models).
+*   **13. Video playback over Tor lacks stream isolation (ACTIVE BLOCKER - 2026-09-06).** Resolve and playback use the current global Tor circuit. Attempting custom headers or global circuit rotation breaks streaming. Full SOCKS5 stream authentication isolation (`IsolateSOCKSAuth`) with custom `SocketFactory` and Tor bandwidth budgeting is required before Clearnet-over-Tor video playback is stable.
 
 ### 6. General Enhancements (Legacy Status Log)
 *   Add more no-auth image and video sources.
