@@ -842,7 +842,8 @@ fun UnifiedFeedTab(
         // Under Tor: one slide ahead, none behind, and a longer head start for
         // the visible resolve. Over clearnet, nothing changes.
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        val forwardPreloadLimit = if (overTor) 1 else 2
+        // Stream isolation guarantees separate circuits, allowing 2 forward preloads without circuit contention
+        val forwardPreloadLimit = 2
         val preloadPreviousSlide = !overTor
         // Start preloading the immediate next slide promptly (400ms) after settling
         val firstPreloadDelayMs = 400L

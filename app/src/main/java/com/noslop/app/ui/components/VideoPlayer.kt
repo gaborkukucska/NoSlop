@@ -228,12 +228,15 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
             expiryOfSource(result)
         }
         // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
-        sourceCache[cacheKey] = CachedSource(
-            source = result,
-            expiresAtMs = expiryMs,
-            overTor = HttpClientProvider.useTorForClearnet,
-            circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
-        )
+        // Never poison sourceCache with an Unavailable result from a speculative background preload.
+        if (!(isPreload && result is VideoSource.Unavailable)) {
+            sourceCache[cacheKey] = CachedSource(
+                source = result,
+                expiresAtMs = expiryMs,
+                overTor = HttpClientProvider.useTorForClearnet,
+                circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
+            )
+        }
         result
     }
     // Drop the mutex only after releasing it, otherwise a concurrent caller can
@@ -648,8 +651,8 @@ fun VideoPlayer(
     
     // DEBOUNCE VISIBILITY TO PREVENT FLICKERS AND UNWANTED RECOMPOSITIONS!
     val isActiveOrNext = isVisible || isNextSlide
-    var activeVisible by remember { mutableStateOf(isActiveOrNext) }
-    LaunchedEffect(isActiveOrNext) {
+    var activeVisible by remember(url) { mutableStateOf(isActiveOrNext) }
+    LaunchedEffect(isActiveOrNext, url) {
         if (isActiveOrNext) {
             activeVisible = true
         } else {
@@ -685,7 +688,7 @@ fun VideoPlayer(
         // Only one automatic attempt. If it fails again the exit is not the
         // problem and the button is the honest answer.
         if (resolvedSource is VideoSource.Unavailable && retryTrigger == 0 && activeVisible) {
-            kotlinx.coroutines.delay(2500L)
+            kotlinx.coroutines.delay(300L)
             Logger.info("VIDEO", "Auto-retrying unavailable resolve for $url on a fresher circuit")
             retryTrigger++
         }

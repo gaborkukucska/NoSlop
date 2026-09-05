@@ -95,6 +95,7 @@ object YouTubeInternalClient {
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
 
     private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val videoStreamNonces = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     fun getStreamIdForUrl(url: String): String? {
         return urlToStreamId[url]
@@ -496,8 +497,8 @@ object YouTubeInternalClient {
     // --- NOSLOP_GEO_LOCK_V1 ---
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
-    // Allow trying client configs (especially ANDROID_VR and TVHTML5) before declaring blocked exit.
-    private const val EXIT_BLOCKED_THRESHOLD = 4
+    // Fast-fail to a fresh circuit after 2 clients return LOGIN_REQUIRED on the same exit
+    private const val EXIT_BLOCKED_THRESHOLD = 2
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -753,9 +754,9 @@ object YouTubeInternalClient {
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
-        var streamNonce = 0
+        var streamNonce = videoStreamNonces.compute(videoId) { _, n -> n ?: 0 }
         var attempt = 0
-        val maxAttempts = if (isTor) 2 else 1
+        val maxAttempts = if (isTor) 3 else 1
 
         while (attempt < maxAttempts) {
             attempt++
@@ -890,13 +891,13 @@ object YouTubeInternalClient {
                                             "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
                                                 "$videoId — advancing stream isolation nonce to escape to a fresh circuit."
                                         )
-                                        streamNonce++
+                                        streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
                                         break
                                     }
                                 }
 
                                 if (config == configs.last() && attempt < maxAttempts) {
-                                    streamNonce++
+                                    streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
                                 }
 
                                 continue
