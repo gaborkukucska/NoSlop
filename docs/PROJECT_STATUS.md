@@ -1,5 +1,24 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-07) — Feed Toggle Stabilization, Position Resume & Mesh Sync Parity
+
+* **All / Mesh Quick Switch & Feed Position Restoration**:
+  * Resolved the ANR freeze when toggling from "Mesh" back to "All": eliminated concurrent `loadMoreFeedItems` loops on the main thread and added `isLoadingMoreFeedItems` concurrency gating.
+  * Restored full feed caching in `NoSlopViewModel.kt` (`cachedDefaultFeed`) so toggling to Mesh and back restores the exact feed items and slide position instantly without re-fetching.
+  * Eliminated startup/tab-switch position clobbering by guarding `saveFeedPosition` against overwriting active positions with page 0 during layout composition.
+  * Fixed cold-start restore to resume directly from `saved_feed_active_id` without filtering it out through `cachedViewedIds`.
+* **Mesh Viewed State & Historical Browse ("See Old Posts")**:
+  * Configured the Mesh feed to hide viewed posts by default, showing an alternative "Nothing New Here" card with a "See Old Posts" button to re-browse historical mesh broadcasts.
+  * Added `.verticalScroll(rememberScrollState())` to the empty-state container so `PullToRefreshBox` functions correctly when the list is empty.
+  * Guarded `markItemViewed` to keep mesh broadcasts with pending media downloads visible on the feed until the media is fully downloaded and watched.
+* **Cryptographic Signature Verification Alignment (`encodeForSigning`)**:
+  * Synchronized payload signature verification across `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `ReactionPacketHandler.kt`, and `SyncPacketHandler.kt` to match `CryptoService.encodeForSigning` for `POST`, `EDIT_POST`, `DELETE_POST`, `USER_HANDSHAKE`, `CONNECTION_REQUEST`, and `CHAT_REACTION`.
+  * Added backwards-compatible signature fallback in `SyncPacketHandler.kt` to accept legacy pipe-delimited reactions and comments from earlier builds.
+* **Mesh Peer Synchronization & Media Transfer Stability**:
+  * Implemented and exposed `requestAllPeersInventorySync()`, automatically triggering inventory sync upon receiving trusted `ANNOUNCE_PEER` heartbeats and when pulling down to refresh on the Mesh tab.
+  * Exempted sync and media packets (`INVENTORY_SYNC_REQUEST`, `SYNC_RESPONSE`, `MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_TRANSFER_ACK`) from Tor cooldown drops in `MeshTransport.kt`.
+  * Tuned `MediaManager.kt` initial chunk size to 512KB and raised direct-peer timeout thresholds before mesh recovery, doubling Tor media throughput.
+
 ## Completed Changes (2026-09-06) — SOCKS5 Stream Isolation & Clearnet-over-Tor Playback Stabilization
 
 * **True SOCKS5 Stream Isolation (`TorSocksSocket` & `TorSocksSocketFactory`)**:
