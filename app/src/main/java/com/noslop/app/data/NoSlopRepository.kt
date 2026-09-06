@@ -1381,8 +1381,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // Thin pass-throughs preserving the repository's public API; logic lives in the extracted,
     // single-responsibility EngagementRepository (Stage 0.3).
 
-    suspend fun markAsViewed(itemId: String, itemType: String) =
-        engagementRepository.markAsViewed(itemId, itemType)
+    suspend fun markAsViewed(itemId: String, itemType: String, url: String? = null, canonicalKey: String? = null) =
+        engagementRepository.markAsViewed(itemId, itemType, url, canonicalKey)
+
+    suspend fun deleteFeedItemsByAuthor(author: String) =
+        feedRepository.deleteFeedItemsByAuthor(author)
 
     suspend fun getViewedItemIds(): Set<String> =
         engagementRepository.getViewedItemIds()

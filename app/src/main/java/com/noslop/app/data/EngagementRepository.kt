@@ -29,6 +29,14 @@ fun normalizeFeedItemId(rawId: String, link: String = ""): String {
         val videoId = cleanUrl.substringAfter("youtu.be/").substringBefore("?").substringBefore("#")
         if (videoId.isNotBlank()) return "yt_$videoId"
     }
+    if (cleanUrl.contains("youtube.com/shorts/")) {
+        val videoId = cleanUrl.substringAfter("youtube.com/shorts/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
+    if (cleanUrl.contains("youtube.com/embed/")) {
+        val videoId = cleanUrl.substringAfter("youtube.com/embed/").substringBefore("?").substringBefore("#").trimEnd('/')
+        if (videoId.isNotBlank()) return "yt_$videoId"
+    }
     if (rawId.startsWith("yt:") || rawId.startsWith("yt_")) {
         val videoId = rawId.removePrefix("yt:video:").removePrefix("yt:").removePrefix("yt_")
         if (videoId.isNotBlank()) return "yt_$videoId"
@@ -112,14 +120,19 @@ class EngagementRepository(
      * Record that a content item has been viewed for >5 seconds.
      * History items are never removed (except when the cap is reached, oldest are pruned).
      */
-    suspend fun markAsViewed(itemId: String, itemType: String) = withContext(Dispatchers.IO) {
-        val normId = normalizeFeedItemId(itemId)
+    suspend fun markAsViewed(itemId: String, itemType: String, url: String? = null, canonicalKey: String? = null) = withContext(Dispatchers.IO) {
+        val normId = normalizeFeedItemId(itemId, url ?: "")
         viewedHistoryDao.insertViewedItem(
             ViewedHistoryItem(itemId = itemId, itemType = itemType)
         )
-        if (normId != itemId) {
+        if (normId.isNotBlank() && normId != itemId) {
             viewedHistoryDao.insertViewedItem(
                 ViewedHistoryItem(itemId = normId, itemType = itemType)
+            )
+        }
+        if (!canonicalKey.isNullOrBlank() && canonicalKey != itemId && canonicalKey != normId) {
+            viewedHistoryDao.insertViewedItem(
+                ViewedHistoryItem(itemId = canonicalKey, itemType = itemType)
             )
         }
         // Prune oldest items if we exceed the history limit

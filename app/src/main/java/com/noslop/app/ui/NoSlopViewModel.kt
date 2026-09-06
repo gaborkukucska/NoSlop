@@ -437,6 +437,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
         viewModelScope.launch {
             repository.getMediaSettings()
+            repository.getMeshFilterSettings()
             repository.getNotificationSettings()
             repository.getFeedMixSettings()
             repository.initForegroundServiceSetting()
@@ -525,12 +526,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Cleaned up DB Flow: NO MORE PREPENDING! This strictly updates existing items for live reaction counts.
         viewModelScope.launch {
             refreshExclusionCaches()
-            combine(feedItems, meshPosts, localKeys) { feeds, meshes, keys ->
-                Triple(feeds, meshes, keys)
-            }.collect { (feeds, meshes, keys) ->
+            combine(
+                combine(feedItems, meshPosts) { f, m -> f to m },
+                localKeys,
+                meshFilterSettingsFlow
+            ) { (feeds, meshes), keys, filters ->
+                Triple(feeds, meshes, keys) to filters
+            }.collect { (tuple, filters) ->
+                val (feeds, meshes, keys) = tuple
                 if (_isOnboardingComplete.value && keys == null) return@collect
 
-                val filters = meshFilterSettings.value
                 allFeeds = feeds
                 allMeshes = meshes.filter { mesh ->
                     if (mesh.isOrphaned) return@filter false
@@ -636,11 +641,31 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun syncFilterMode(mode: String, forceRefresh: Boolean = false) {
         if (currentFilterMode != mode || forceRefresh) {
+            currentFilterMode = mode
             if (mode == "Live Feed") {
-                if (currentFilterMode != mode) clearSearchAndRestoreFeed()
+                activeSearchQuery = ""
+                isSearchModeActive = false
+                if (cachedDefaultFeed.isNotEmpty() && !forceRefresh) {
+                    _unifiedFeed.value = cachedDefaultFeed.toList()
+                    sessionLoadedIds.clear()
+                    sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(50)
+                        if (savedFeedItemId != null) {
+                            _restoreScrollPositionEvent.emit(savedFeedItemId!!)
+                        } else {
+                            _scrollToTopEvent.emit(Unit)
+                        }
+                    }
+                } else {
+                    sessionLoadedIds.clear()
+                    loadMoreFeedItems("Live Feed")
+                    viewModelScope.launch {
+                        kotlinx.coroutines.delay(150)
+                        _scrollToTopEvent.emit(Unit)
+                    }
+                }
             } else {
-                currentFilterMode = mode
-                _unifiedFeed.value = emptyList()
                 sessionLoadedIds.clear()
                 loadMoreFeedItems(mode)
                 if (forceRefresh) {
@@ -755,8 +780,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun clearSearchAndRestoreFeed() {
-        if (_isRefreshingFeeds.value) return
-        _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
                 activeSearchQuery = ""
@@ -769,7 +792,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 sessionLoadedIds.addAll(cachedDefaultFeed.map { it.id })
                 
                 if (_unifiedFeed.value.isEmpty()) {
-                    loadMoreFeedItems()
+                    loadMoreFeedItems("Live Feed")
                 } else {
                     kotlinx.coroutines.delay(50)
                     if (savedFeedItemId != null) {
@@ -780,8 +803,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 }
             } catch (e: Exception) {
                 Logger.error("VM", "Clear search exception: ${e.message}")
-            } finally {
-                _isRefreshingFeeds.value = false
             }
         }
     }
@@ -797,8 +818,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()
         
-        val exclusionIds = currentIds + sessionLoadedIds
+        val isPersistentList = actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
+                               actualFilter == "Mesh" || actualFilter == "P2P Mesh" || actualFilter == "My Content"
         
+        val exclusionIds = currentIds + sessionLoadedIds
         val readOrHiddenIds = cachedViewedIds + cachedExcludedIds + exclusionIds
         
         // DEDUPLICATION: Prevent articles/videos with the exact same title or canonical key from reappearing
@@ -806,26 +829,31 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val readTitles = readOrHiddenFeeds
             .mapNotNull { it.title.lowercase().trim().takeIf { t -> t.isNotBlank() } }
             .toSet()
-        val excludedFeedKeys = readOrHiddenFeeds
-            .map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) }
+        val excludedFeedKeys = (readOrHiddenFeeds.map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) } + cachedViewedIds + cachedExcludedIds)
             .toSet()
             
         val excludedMeshKeys = allMeshes.filter { it.id in readOrHiddenIds }
             .map { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
             .toSet()
-
-        val isHistoryOrLiked = actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved"
         
         var unseenFeeds = allFeeds.filter { 
-            if (isHistoryOrLiked) {
+            if (isPersistentList) {
                 it.id !in currentIds
             } else {
                 val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
-                it.id !in exclusionIds && it.title.lowercase().trim() !in readTitles && cKey !in excludedFeedKeys
+                it.id !in exclusionIds &&
+                it.id !in cachedViewedIds &&
+                cKey !in cachedExcludedIds &&
+                it.title.lowercase().trim() !in readTitles && 
+                cKey !in excludedFeedKeys
             }
         }
+        // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed
+        if (unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive) {
+            unseenFeeds = allFeeds.filter { it.id !in exclusionIds && it.id !in cachedExcludedIds }
+        }
         var unseenMeshes = allMeshes.filter { 
-            if (isHistoryOrLiked) {
+            if (isPersistentList) {
                 it.id !in currentIds
             } else {
                 val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it))
@@ -876,7 +904,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val bannedList = _bannedChannels.value
         if (bannedList.isNotEmpty()) {
             unseenFeeds = unseenFeeds.filter { item ->
-                item.author == null || bannedList.none { b -> item.author.equals(b, ignoreCase = true) }
+                val aClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                if (aClean.isBlank()) true
+                else bannedList.none { b ->
+                    val bClean = b.trim().lowercase().removePrefix("@")
+                    aClean == bClean || aClean.contains(bClean) || bClean.contains(aClean)
+                }
             }
         }
 
@@ -978,7 +1011,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        val specificNeeded = if (isSearchActive) 30 else if (isInitialLoad) 3 else 10
+        val specificNeeded = if (isSearchActive) 30 else if (actualFilter == "Mesh" || actualFilter == "My Content") 20 else if (isInitialLoad) 3 else 10
 
         if (isSpecificFilter || isSearchActive) {
             val specificFeeds = unseenFeeds.filter {
@@ -1052,12 +1085,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                _unifiedFeed.value = (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
-                if (isInitialLoad) {
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(150)
-                        _scrollToTopEvent.emit(Unit)
-                    }
+                // If switching filters, replace feed directly with new batch rather than appending
+                _unifiedFeed.value = if (actualFilter == "Mesh" || actualFilter == "My Content" || currentFilterMode != "Live Feed") {
+                    batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                } else {
+                    (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+                }
+                viewModelScope.launch {
+                    kotlinx.coroutines.delay(150)
+                    _scrollToTopEvent.emit(Unit)
                 }
             }
             return
@@ -1592,6 +1628,7 @@ fun toggleAggregator() {
 
                 // Refresh what's been seen / swiped so the new mix excludes them
                 refreshExclusionCaches()
+                _bannedChannels.value = repository.getBannedChannels()
 
                 // Clear session and rebuild from scratch
                 sessionLoadedIds.clear()
@@ -1614,7 +1651,13 @@ fun toggleAggregator() {
 
     fun markItemViewed(itemId: String, isMesh: Boolean) {
         viewModelScope.launch {
-            repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed")
+            val item = _unifiedFeed.value.find { it.id == itemId }
+            val (url, cKey) = when (item) {
+                is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
+                is UnifiedItem.Mesh -> Pair(item.post.clearnetUrl, com.noslop.app.data.getCanonicalItemKey(item))
+                else -> Pair(null, null)
+            }
+            repository.markAsViewed(itemId, if (isMesh) "mesh" else "feed", url, cKey)
             cachedViewedIds = repository.getViewedItemIds()
         }
     }
@@ -2175,15 +2218,16 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.banChannel(channelName)
             _bannedChannels.value = repository.getBannedChannels()
+            repository.deleteFeedItemsByAuthor(channelName)
             refreshExclusionCaches()
             val bannedList = _bannedChannels.value
             _unifiedFeed.value = _unifiedFeed.value.filter { uItem ->
                 if (uItem is UnifiedItem.Feed) {
-                    val a = uItem.item.author?.trim()?.lowercase()
-                    if (a.isNullOrBlank()) true
+                    val aClean = uItem.item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    if (aClean.isBlank()) true
                     else bannedList.none { b ->
-                        val bClean = b.trim().lowercase()
-                        a == bClean || a.contains(bClean) || bClean.contains(a)
+                        val bClean = b.trim().lowercase().removePrefix("@")
+                        aClean == bClean || aClean.contains(bClean) || bClean.contains(aClean)
                     }
                 } else true
             }

@@ -95,6 +95,12 @@ class FeedRepository(
         Logger.info(TAG, "Purged stale YouTube items from DB")
     }
 
+    /** Purge feed items from a banned author */
+    suspend fun deleteFeedItemsByAuthor(author: String) = withContext(Dispatchers.IO) {
+        feedDao.deleteItemsByAuthor(author)
+        Logger.info(TAG, "Purged items for banned author $author from DB")
+    }
+
     /**
      * Detects when a destructive Room migration has wiped feed sources and user
      * preferences that were stored only in Room (app_settings, feed_sources).
@@ -311,9 +317,12 @@ class FeedRepository(
             Logger.info(TAG, "Refreshing source ${source.title} (${source.url})")
             val items = FeedParser.fetchAndParse(source.url, source.id)
             if (items.isNotEmpty()) {
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val filteredItems = items.filter { item ->
                     val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    !isBanned && allNegative.none { text.contains(it) }
                 }
                 if (filteredItems.isNotEmpty()) {
                     feedDao.insertItems(filteredItems)
@@ -375,9 +384,12 @@ class FeedRepository(
                 language = langPref
             )
             if (apiItems.isNotEmpty()) {
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val filteredApiItems = apiItems.filter { item ->
                     val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    !isBanned && allNegative.none { text.contains(it) }
                 }
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)

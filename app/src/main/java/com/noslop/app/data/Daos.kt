@@ -78,6 +78,9 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%'")
     suspend fun deleteYouTubeItems()
 
+    @Query("DELETE FROM feed_items WHERE isSaved = 0 AND (author = :author OR author LIKE '%' || :author || '%')")
+    suspend fun deleteItemsByAuthor(author: String)
+
     @Query("DELETE FROM feed_items WHERE isSaved = 0")
     suspend fun clearUnsavedItems()
 

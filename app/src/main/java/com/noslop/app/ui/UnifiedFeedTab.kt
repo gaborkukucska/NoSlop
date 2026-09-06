@@ -816,8 +816,6 @@ fun UnifiedFeedTab(
 
                 if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                     viewModel.markItemReadState(currentItem.item.id, true)
-                } else if (currentItem is UnifiedItem.Mesh) {
-                    viewModel.recordItemSwiped(currentItem.id)
                 }
 
                 // Mark viewed immediately so swiping past quickly doesn't resurrect it
@@ -842,8 +840,8 @@ fun UnifiedFeedTab(
         // Under Tor: one slide ahead, none behind, and a longer head start for
         // the visible resolve. Over clearnet, nothing changes.
         val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        // Stream isolation guarantees separate circuits, allowing 2 forward preloads without circuit contention
-        val forwardPreloadLimit = 2
+        // Over Tor on mobile, preload 1 slide forward to prevent choking the Tor daemon
+        val forwardPreloadLimit = if (overTor) 1 else 2
         val preloadPreviousSlide = !overTor
         // Start preloading the immediate next slide promptly (400ms) after settling
         val firstPreloadDelayMs = 400L
@@ -945,7 +943,7 @@ fun UnifiedFeedTab(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
                 beyondViewportPageCount = 2,
-                key = { index -> unifiedItems[index].id }
+                key = { index -> if (index in unifiedItems.indices) unifiedItems[index].id else "item_$index" }
             ) { index ->
                 
                 // Trigger infinite load strictly when nearing the bottom of the list
