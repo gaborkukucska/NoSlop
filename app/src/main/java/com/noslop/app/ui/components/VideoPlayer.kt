@@ -990,7 +990,8 @@ private fun ExoVideoPlayer(
                 try {
                     val currentPos = player.currentPosition
                     Logger.debug("VIDEO_DEBUG", "LaunchedEffect isVisible=false. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
-                    if (currentPos > 0L) {
+                    // Only store resume positions if user watched at least 8 seconds; swiping past should not poison the buffer
+                    if (currentPos >= 8000L) {
                         PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
                     }
                 } catch (e: Exception) {
@@ -1111,7 +1112,8 @@ private fun ExoVideoPlayer(
                 playWhenReady = isVisible
                 
                 val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
-                if (resumeMs > 0L && Math.abs(currentPosition - resumeMs) > 1000L) {
+                // Only seek preloaded video if user watched deeply (>= 8s); micro-seeks destroy the pre-warmed buffer
+                if (resumeMs >= 8000L && Math.abs(currentPosition - resumeMs) > 3000L) {
                     Logger.info("VIDEO", "Resuming preloaded video at ${resumeMs}ms: $rawUrl")
                     seekTo(resumeMs)
                 }
@@ -1221,7 +1223,7 @@ private fun ExoVideoPlayer(
                     repeatMode = androidx.media3.exoplayer.ExoPlayer.REPEAT_MODE_ONE
                     
                     val resumeMs = PlaybackPositionStore.resumePositionFor(rawUrl)
-                    if (resumeMs > 0L) {
+                    if (resumeMs >= 8000L) {
                         Logger.info("VIDEO", "Resuming video at ${resumeMs}ms: $rawUrl")
                         seekTo(resumeMs)
                     }

@@ -176,7 +176,7 @@ object HttpClientProvider {
                 .dns(TorDns)
                 .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
                 .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-                .connectTimeout(20, TimeUnit.SECONDS)
+                .connectTimeout(35, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .writeTimeout(60, TimeUnit.SECONDS)
                 .addInterceptor(torGuardInterceptor)
@@ -309,7 +309,7 @@ internal class TorSocksSocket(
             ?: throw IOException("Unsupported endpoint type: ${endpoint?.javaClass?.name}")
         targetEndpoint = target
 
-        val handshakeTimeout = if (timeout > 0) timeout else 20000
+        val handshakeTimeout = if (timeout > 0) timeout else 35000
 
         // 1. Connect TCP socket to Tor SOCKS5 proxy on 127.0.0.1:proxyPort
         super.connect(InetSocketAddress(proxyHost, proxyPort), handshakeTimeout)

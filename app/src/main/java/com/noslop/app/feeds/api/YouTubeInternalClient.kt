@@ -752,7 +752,7 @@ object YouTubeInternalClient {
             InnerTubeClientConfig("TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", "Mozilla/5.0 (PlayStation; PlayStation 4/12.02) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15")
         )
         
-        var streamNonce = videoStreamNonces.compute(videoId) { _, n -> n ?: 0 }
+        var streamNonce = videoStreamNonces.compute(videoId) { _, n -> if (n != null) n + 1 else 0 }
         var attempt = 0
         val maxAttempts = if (isTor) 3 else 1
 

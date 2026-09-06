@@ -45,7 +45,7 @@ object PreloadManager {
     // capture shows "Stored preloaded player for l_P-bF8-UgQ" followed by
     // "Evicting preloaded player for l_P-bF8-UgQ" while that video was the one
     // on screen. 3 is what the comment already describes.
-    private const val MAX_PRELOAD = 3
+    private const val MAX_PRELOAD = 4
 
     // Don't bother buffering a stream that dies before the user can plausibly
     // reach it; VideoPlayer will re-resolve on arrival instead.
