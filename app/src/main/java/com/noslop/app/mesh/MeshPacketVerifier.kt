@@ -108,14 +108,16 @@ object MeshPacketVerifier {
 
         // --- PostPacketHandler ---
         "POST" -> packet.getPostPayload()?.let { p ->
-            var s = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}"
-            if (p.authorAvatarB64 != null) s += "|${p.authorAvatarB64}"
+            val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
+            )
             Signed(s, p.signature, p.authorId)
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
-            var s = "${p.postId}|${p.authorId}|${p.content}|${p.timestamp}"
-            if (p.authorAvatarB64 != null) s += "|${p.authorAvatarB64}"
+            val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.postId, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
+            )
             Signed(s, p.signature, p.authorId)
         }
 
@@ -169,9 +171,10 @@ object MeshPacketVerifier {
                 packet.getUserHandshakePayload()
             }
             p?.let {
-                var s = "${it.fromUserId}|${it.fromUsername}|${it.fromHomeNode}|${it.timestamp}"
-                if (it.authorAvatarB64 != null) s += "|${it.authorAvatarB64}"
-                if (!it.bio.isNullOrBlank()) s += "|${it.bio}"
+                val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                    it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString(),
+                    it.authorAvatarB64, it.bio.takeIf { b -> !b.isNullOrBlank() }
+                )
                 Signed(s, packet.signature, it.fromUserId)
             }
         }

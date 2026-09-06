@@ -162,7 +162,10 @@ class MeshTransport(
             packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE" ||
             packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" ||
             packet.type == "GROUP_DELETE" || packet.type == "DELETE_MESSAGE" ||
-            packet.type == "CHAT_REACTION"
+            packet.type == "CHAT_REACTION" || packet.type == "INVENTORY_SYNC_REQUEST" ||
+            packet.type == "SYNC_RESPONSE" || packet.type == "SYNC_REQUEST" ||
+            packet.type == "MEDIA_REQUEST" || packet.type == "MEDIA_CHUNK" ||
+            packet.type == "MEDIA_TRANSFER_ACK"
 
         // --- NOSLOP_TOR_STARVATION_V1 ---
         // Enforce the peer cooldown HERE rather than only in

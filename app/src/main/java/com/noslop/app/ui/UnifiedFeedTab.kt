@@ -643,6 +643,7 @@ fun UnifiedFeedTab(
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     val viewedHistoryIds by viewModel.viewedHistoryIds.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
+    val showOldMeshPosts by viewModel.showOldMeshPosts.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
     var searchQuery by remember { mutableStateOf("") }
@@ -686,7 +687,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, showOldMeshPosts) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val filtered = unifiedFeed.filter { item ->
@@ -745,12 +746,7 @@ fun UnifiedFeedTab(
         if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
             forceScrollToTop = true
         }
-        
         viewModel.syncFilterMode(filterMode)
-        
-        if (unifiedItems.size < 5 && !isRefreshing) {
-            viewModel.loadMoreFeedItems(filterMode)
-        }
     }
 
     LaunchedEffect(unifiedItems) {
@@ -770,6 +766,8 @@ fun UnifiedFeedTab(
         viewModel.scrollToTopEvent.collect {
             if (unifiedItems.isNotEmpty()) {
                 pagerState.scrollToPage(0)
+            } else {
+                forceScrollToTop = true
             }
         }
     }
@@ -799,7 +797,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(pagerState.settledPage, filterMode, isRefreshing) {
+    LaunchedEffect(pagerState.settledPage) {
         if (pagerState.settledPage in unifiedItems.indices) {
             val currentItem = unifiedItems[pagerState.settledPage]
             
@@ -810,15 +808,21 @@ fun UnifiedFeedTab(
             }
 
             if (currentItem !is UnifiedItem.Tutorial) {
-                if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
-                    viewModel.saveFeedPosition(currentItem.id)
+                // Only save position if we aren't currently waiting to restore a saved position
+                if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing && restoreItemId == null) {
+                    // Do not let startup page 0 overwrite a pending saved active slide position
+                    val currentSaved = viewModel.currentSavedFeedItemId
+                    if (currentSaved == null || currentSaved == currentItem.id || pagerState.settledPage > 0) {
+                        viewModel.saveFeedPosition(currentItem.id)
+                    }
                 }
 
                 if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
                     viewModel.markItemReadState(currentItem.item.id, true)
                 }
 
-                // Mark viewed immediately so swiping past quickly doesn't resurrect it
+                // If user dwells on the slide for 4s without swiping, mark it as viewed
+                kotlinx.coroutines.delay(4000L)
                 viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
             }
         }
@@ -884,30 +888,27 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(filterMode) {
         var previousPage = -1
-        var pageEnteredAt = 0L
         snapshotFlow { pagerState.settledPage }.collect { currentPage ->
-            val now = System.currentTimeMillis()
-            if (previousPage >= 0 && previousPage < currentPage && previousPage in unifiedItems.indices) {
-                val dwellMs = now - pageEnteredAt
+            if (previousPage >= 0 && previousPage in unifiedItems.indices && previousPage != currentPage) {
                 val leftItem = unifiedItems[previousPage]
-                if (dwellMs < 1000L) {
-                    viewModel.recordItemSwiped(leftItem.id)
-                } else {
-                    viewModel.markItemViewed(leftItem.id, leftItem is UnifiedItem.Mesh)
-                }
-                viewModel.discardFeedItem(leftItem.id)
+                viewModel.markItemViewed(leftItem.id, leftItem is UnifiedItem.Mesh)
             }
             previousPage = currentPage
-            pageEnteredAt = now
         }
     }
 
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,
-        onRefresh = { viewModel.refreshLiveFeed() },
+        onRefresh = { 
+            if (filterMode == "Mesh") {
+                viewModel.refreshMeshFeed()
+            } else {
+                viewModel.refreshLiveFeed()
+            }
+        },
         modifier = Modifier.fillMaxSize()
     ) {
         val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -923,11 +924,29 @@ fun UnifiedFeedTab(
         }
 
         if (unifiedItems.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
                 if (isRefreshing) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
+                    }
+                } else if (filterMode == "Mesh" && viewModel.hasMeshPosts && !showOldMeshPosts) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("Nothing New Here".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("You're all caught up on mesh posts.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(24.dp))
+                        Button(
+                            onClick = { viewModel.setShowOldMeshPosts(true) },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("See Old Posts".tr, fontWeight = FontWeight.Bold)
+                        }
                     }
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -947,7 +966,7 @@ fun UnifiedFeedTab(
             ) { index ->
                 
                 // Trigger infinite load strictly when nearing the bottom of the list
-                if (index >= unifiedItems.size - 3) {
+                if (unifiedItems.size >= 5 && index >= unifiedItems.size - 3) {
                     LaunchedEffect(index) {
                         viewModel.loadMoreFeedItems(filterMode)
                     }
@@ -1050,9 +1069,8 @@ fun UnifiedFeedTab(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(if (!isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
-                                    if (isActiveTab) {
+                                    if (isActiveTab && filterMode != "Live Feed") {
                                         filterMode = "Live Feed"
-                                        viewModel.syncFilterMode("Live Feed", forceRefresh = true)
                                     }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 6.dp)
@@ -1071,9 +1089,11 @@ fun UnifiedFeedTab(
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(if (isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
-                                    if (isActiveTab) {
+                                    if (isActiveTab && filterMode != "Mesh") {
+                                        if (filterMode == "Live Feed" && pagerState.currentPage in unifiedItems.indices) {
+                                            viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
+                                        }
                                         filterMode = "Mesh"
-                                        viewModel.syncFilterMode("Mesh", forceRefresh = true)
                                     }
                                 }
                                 .padding(horizontal = 14.dp, vertical = 6.dp)

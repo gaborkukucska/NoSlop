@@ -73,7 +73,14 @@ class MeshPacketHandler(
             "CONNECTION_REQUEST" -> handshake.handleConnectionRequest(packet)
             "USER_HANDSHAKE" -> handshake.handleUserHandshake(packet)
             "CONNECTION_REJECTED" -> handshake.handleConnectionRejected(packet)
-            "ANNOUNCE_PEER" -> handshake.handleAnnouncePeer(packet)
+            "ANNOUNCE_PEER" -> {
+                val res = handshake.handleAnnouncePeer(packet)
+                val peer = db.peerDao().getPeerByPublicKey(packet.senderId)
+                if (peer != null && peer.isTrusted) {
+                    repo.requestInventorySync(peer)
+                }
+                res
+            }
             "ANNOUNCE_DISCOVERABLE" -> handshake.handleAnnounceDiscoverable(packet)
             "ANNOUNCE_INVIDIOUS_INSTANCE" -> handshake.handleAnnounceInvidiousInstance(packet)
             "SUBSCRIBE" -> handshake.handleSubscribe(packet)

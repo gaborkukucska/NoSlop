@@ -1559,6 +1559,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun deletePeer(publicKeyB64: String) = meshSocialRepository.deletePeer(publicKeyB64)
 
     suspend fun requestInventorySync(peer: Peer) = meshSocialRepository.requestInventorySync(peer)
+    suspend fun requestAllPeersInventorySync() = meshSocialRepository.requestAllPeersInventorySync()
 
     suspend fun markNotificationAsRead(id: String) = withContext(Dispatchers.IO) {
         db.notificationDao().markAsRead(id)

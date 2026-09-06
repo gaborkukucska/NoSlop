@@ -35,10 +35,9 @@ class PostPacketHandler(
             if (!filterSettings.allowIncomingTextPosts) return false
         }
 
-        var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
-        if (postPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${postPay.authorAvatarB64}"
-        }
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
+        )
         val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
@@ -103,10 +102,9 @@ class PostPacketHandler(
 
     suspend fun handleEditPost(packet: NetworkPacket): Boolean {
         val editPay = packet.getEditPostPayload() ?: return false
-        var payloadToVerify = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
-        if (editPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${editPay.authorAvatarB64}"
-        }
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
+        )
         val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
         if (!isValid) return false
 
@@ -126,7 +124,9 @@ class PostPacketHandler(
 
     suspend fun handleDeletePost(packet: NetworkPacket): Boolean {
         val deletePay = packet.getDeletePostPayload() ?: return false
-        val payloadToVerify = "${deletePay.postId}|${deletePay.authorId}|${deletePay.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            deletePay.postId, deletePay.authorId, deletePay.timestamp.toString()
+        )
         val isValid = CryptoService.verify(payloadToVerify, deletePay.signature, deletePay.authorId)
         if (!isValid) return false
 

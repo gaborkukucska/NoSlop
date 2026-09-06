@@ -282,10 +282,9 @@ class SyncPacketHandler(
                 if (!filterSettings.allowIncomingTextPosts) continue
             }
 
-            var payloadToVerify = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
-            if (postPay.authorAvatarB64 != null) {
-                payloadToVerify += "|${postPay.authorAvatarB64}"
-            }
+            val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
+            )
             val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
@@ -335,10 +334,9 @@ class SyncPacketHandler(
         // Process synced comments
         var storedComments = 0
         syncPay.comments?.forEach { c ->
-            var payloadToVerify = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
-            if (c.authorAvatarB64 != null) {
-                payloadToVerify += "|${c.authorAvatarB64}"
-            }
+            val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                c.postId, c.id, c.content, c.timestamp.toString(), c.authorAvatarB64
+            )
             val isValid = CryptoService.verify(payloadToVerify, c.signature, c.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting comment ${c.id} — invalid signature")
@@ -371,8 +369,12 @@ class SyncPacketHandler(
         // Process synced reactions
         var storedReactions = 0
         syncPay.reactions?.forEach { r ->
-            val payloadToVerify = "${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}"
-            val isValid = CryptoService.verify(payloadToVerify, r.signature, r.authorId)
+            val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                r.postId, r.reactionType, r.authorId, r.timestamp.toString()
+            )
+            val legacyPipePayload = "${r.postId}|${r.reactionType}|${r.authorId}|${r.timestamp}"
+            val isValid = CryptoService.verify(payloadToVerify, r.signature, r.authorId) ||
+                CryptoService.verify(legacyPipePayload, r.signature, r.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting reaction ${r.id} — invalid signature")
                 return@forEach

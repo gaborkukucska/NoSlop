@@ -576,6 +576,14 @@ class MeshSocialRepository(
         true
     }
 
+    suspend fun requestAllPeersInventorySync() = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext
+        val peers = peerDao.getAllPeersList().filter { it.isTrusted && it.onionAddress.isNotBlank() }
+        for (peer in peers) {
+            requestInventorySync(peer)
+        }
+    }
+
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext
         val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
@@ -1098,7 +1106,7 @@ class MeshSocialRepository(
         val timestamp = System.currentTimeMillis()
         
         val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-            commentId, reactionType, myKeys.publicKeyB64, timestamp.toString(), avatarB64
+            commentId, reactionType, myKeys.publicKeyB64, timestamp.toString()
         )
         val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
 

@@ -130,7 +130,7 @@ object MediaManager {
         val retryQueue = LinkedBlockingQueue<Pair<Long, Int>>() // <offset, length>
 
         // AIMD State for chunk size and concurrency
-        var currentChunkSize = 256 * 1024 // Start with 256KB for better Tor circuit payload efficiency
+        var currentChunkSize = 512 * 1024 // Start with 512KB for higher throughput over Tor circuits
         var currentConcurrency = 2.0 // Start with 2 inflight chunks to pipeline over circuit latency
         var ssthresh = 8.0 // Slow-start threshold for concurrency
         var consecutiveTimeouts = 0
@@ -597,7 +597,7 @@ object MediaManager {
                         dl.consecutiveTimeouts++
                     }
                     
-                    if (dl.consecutiveTimeouts >= 6 && dl.status == ActiveDownload.Status.ACTIVE) {
+                    if (dl.consecutiveTimeouts >= 15 && dl.status == ActiveDownload.Status.ACTIVE) {
                         Logger.warn(TAG, "Media ${dl.metadata.id}: send failures. Recovering.")
                         val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
                         if (isTemp) {

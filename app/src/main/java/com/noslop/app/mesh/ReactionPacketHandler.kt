@@ -23,7 +23,9 @@ class ReactionPacketHandler(
         val payload = packet.getReactionPayload() ?: return false
         
         // Verify signature
-        val payloadToVerify = "${payload.postId}|${payload.reactionType}|${payload.authorId}|${payload.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.postId, payload.reactionType, payload.authorId, payload.timestamp.toString()
+        )
         if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
             Logger.warn(TAG, "Reaction signature verification failed for post ${payload.postId} from ${payload.authorId}")
             return false
@@ -89,7 +91,9 @@ class ReactionPacketHandler(
         val payload = packet.getVotePayload() ?: return false
         
         // Verify signature
-        val payloadToVerify = "${payload.postId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.postId, payload.voteType, payload.authorId, payload.timestamp.toString()
+        )
         if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
             Logger.warn(TAG, "Vote signature verification failed for post ${payload.postId} from ${payload.authorId}")
             return false
@@ -120,7 +124,9 @@ class ReactionPacketHandler(
         val payload = packet.getCommentVotePayload() ?: return false
         
         // Verify signature
-        val payloadToVerify = "${payload.commentId}|${payload.voteType}|${payload.authorId}|${payload.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            payload.commentId, payload.voteType, payload.authorId, payload.timestamp.toString()
+        )
         if (!CryptoService.verify(payloadToVerify, payload.signature, payload.authorId)) {
             Logger.warn(TAG, "Comment Vote signature verification failed for comment ${payload.commentId} from ${payload.authorId}")
             return false
@@ -147,7 +153,9 @@ class ReactionPacketHandler(
 
     suspend fun handleChatReaction(packet: NetworkPacket): Boolean {
         val reactionPay = packet.getChatReactionPayload() ?: return false
-        val payloadToVerify = "${reactionPay.messageId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            reactionPay.messageId, reactionPay.reactionType, reactionPay.authorId, reactionPay.timestamp.toString()
+        )
         val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
         if (!isValid) return false
 
@@ -172,7 +180,9 @@ class ReactionPacketHandler(
 
     suspend fun handleCommentReaction(packet: NetworkPacket): Boolean {
         val reactionPay = packet.getCommentReactionPayload() ?: return false
-        val payloadToVerify = "${reactionPay.commentId}|${reactionPay.reactionType}|${reactionPay.authorId}|${reactionPay.timestamp}"
+        val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            reactionPay.commentId, reactionPay.reactionType, reactionPay.authorId, reactionPay.timestamp.toString()
+        )
         val isValid = CryptoService.verify(payloadToVerify, reactionPay.signature, reactionPay.authorId)
         if (!isValid) return false
 
