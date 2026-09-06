@@ -872,7 +872,7 @@ fun UnifiedFeedTab(
                 val urlToCheck = forcedUrl ?: rawUrl
                 if (!urlToCheck.startsWith("file://")) {
                     val targetIndex = i
-                    val delayMs = firstPreloadDelayMs + (preloadedForwardCount * 1500L)
+                    val delayMs = if (preloadedForwardCount == 0) 50L else 300L
                     preloadScope.launch { 
                         if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
                         if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {

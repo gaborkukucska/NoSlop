@@ -22,178 +22,101 @@ def edit(path, old, new, label):
     APPLIED.append(label)
 
 # ---------------------------------------------------------------------------
-# 1. YouTubeInternalClient.kt: persistent nonce per video, threshold=2, maxAttempts=3
+# 1. YouTubeInternalClient.kt: Stop discarding valid geo-locked streams
 # ---------------------------------------------------------------------------
 YT_CLIENT = "app/src/main/java/com/noslop/app/feeds/api/YouTubeInternalClient.kt"
 
-OLD_NONCE_MAP = """    private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()"""
+OLD_GEO_FALLBACK_VAR = """        // --- NOSLOP_GEO_LOCK_V1 ---
+        // Holds a URL that resolved fine but is pinned to a country we will not
+        // be fetching from. Used only as a last resort, after the failover.
+        var geoLockedFallback: String? = null"""
 
-NEW_NONCE_MAP = """    private val urlToStreamId = java.util.concurrent.ConcurrentHashMap<String, String>()
-    private val videoStreamNonces = java.util.concurrent.ConcurrentHashMap<String, Int>()"""
+NEW_GEO_FALLBACK_VAR = """        // Stream isolation guarantees the resolving exit IP matches media playback,
+        // so streams are valid regardless of geographical region tags."""
 
-edit(YT_CLIENT, OLD_NONCE_MAP, NEW_NONCE_MAP, "YouTubeInternalClient.kt: add videoStreamNonces map")
+edit(YT_CLIENT, OLD_GEO_FALLBACK_VAR, NEW_GEO_FALLBACK_VAR, "YouTubeInternalClient.kt: remove geoLockedFallback var")
 
-OLD_THRESHOLD = """    // Allow trying client configs (especially ANDROID_VR and TVHTML5) before declaring blocked exit.
-    private const val EXIT_BLOCKED_THRESHOLD = 4"""
-
-NEW_THRESHOLD = """    // Fast-fail to a fresh circuit after 2 clients return LOGIN_REQUIRED on the same exit
-    private const val EXIT_BLOCKED_THRESHOLD = 2"""
-
-edit(YT_CLIENT, OLD_THRESHOLD, NEW_THRESHOLD, "YouTubeInternalClient.kt: lower EXIT_BLOCKED_THRESHOLD to 2")
-
-OLD_LOOP_INIT = """        var streamNonce = 0
-        var attempt = 0
-        val maxAttempts = if (isTor) 2 else 1
-
-        while (attempt < maxAttempts) {
-            attempt++
-            val currentStreamId = if (isTor) "yt_${videoId}_$streamNonce" else videoId"""
-
-NEW_LOOP_INIT = """        var streamNonce = videoStreamNonces.compute(videoId) { _, n -> n ?: 0 }
-        var attempt = 0
-        val maxAttempts = if (isTor) 3 else 1
-
-        while (attempt < maxAttempts) {
-            attempt++
-            val currentStreamId = if (isTor) "yt_${videoId}_$streamNonce" else videoId"""
-
-edit(YT_CLIENT, OLD_LOOP_INIT, NEW_LOOP_INIT, "YouTubeInternalClient.kt: persistent streamNonce & maxAttempts=3")
-
-OLD_BUMP_NONCE = """                                if (playability == "LOGIN_REQUIRED") {
-                                    refusedThisAttempt++
-                                    if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
+OLD_GEO_CHECK = """                            if (playability == "OK") {
+                                val url = extractUrlFromPlayerResponse(root, quality)
+                                if (url != null) {
+                                    val geoLock = GEO_LOCK_PATTERN.find(url)?.groupValues?.get(1)
+                                    if (geoLock != null && isTor) {
                                         Logger.warn(
                                             TAG,
-                                            "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
-                                                "$videoId — advancing stream isolation nonce to escape to a fresh circuit."
+                                            "${config.clientName} returned a stream for $videoId " +
+                                                "geo-locked to '$geoLock' — it was signed for the API " +
+                                                "proxy's country and will 403 when fetched over a Tor " +
+                                                "exit elsewhere. Trying another route first."
                                         )
-                                        streamNonce++
-                                        break
+                                        if (geoLockedFallback == null) geoLockedFallback = url
+                                        response.close()
+                                        continue
                                     }
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for $videoId")
+                                    registerStreamId(url, videoId, currentStreamId)
+                                    response.close()
+                                    return@withContext url
+                                } else {
+                                    Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                                 }
+                            }"""
 
-                                if (config == configs.last() && attempt < maxAttempts) {
-                                    streamNonce++
-                                }"""
-
-NEW_BUMP_NONCE = """                                if (playability == "LOGIN_REQUIRED") {
-                                    refusedThisAttempt++
-                                    if (refusedThisAttempt >= EXIT_BLOCKED_THRESHOLD) {
-                                        Logger.warn(
-                                            TAG,
-                                            "$refusedThisAttempt clients refused on circuit $currentStreamId for " +
-                                                "$videoId — advancing stream isolation nonce to escape to a fresh circuit."
-                                        )
-                                        streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
-                                        break
-                                    }
+NEW_GEO_CHECK = """                            if (playability == "OK") {
+                                val url = extractUrlFromPlayerResponse(root, quality)
+                                if (url != null) {
+                                    Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for $videoId")
+                                    registerStreamId(url, videoId, currentStreamId)
+                                    response.close()
+                                    return@withContext url
+                                } else {
+                                    Logger.warn(TAG, "No URL found in player response for ${config.clientName} despite OK status")
                                 }
+                            }"""
 
-                                if (config == configs.last() && attempt < maxAttempts) {
-                                    streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
-                                }"""
+edit(YT_CLIENT, OLD_GEO_CHECK, NEW_GEO_CHECK, "YouTubeInternalClient.kt: accept valid stream immediately without geo-discard")
 
-edit(YT_CLIENT, OLD_BUMP_NONCE, NEW_BUMP_NONCE, "YouTubeInternalClient.kt: update videoStreamNonces on bump")
+OLD_GEO_END = """        // --- NOSLOP_GEO_LOCK_V1 ---
+        // Over Tor, a geo-locked URL is guaranteed to fail with 403 and cause
+        // stalling/circuit-rotation storms. Only use it when NOT routing over Tor.
+        if (!isTor) {
+            geoLockedFallback?.let {
+                Logger.warn(TAG, "Falling back to the geo-locked stream for $videoId — it may 403")
+                return@withContext it
+            }
+        } else if (geoLockedFallback != null) {
+            Logger.warn(TAG, "Discarding geo-locked stream for $videoId because Tor routing is active")
+        }
+
+        return@withContext null"""
+
+NEW_GEO_END = """        return@withContext null"""
+
+edit(YT_CLIENT, OLD_GEO_END, NEW_GEO_END, "YouTubeInternalClient.kt: clean up end of resolveStreamUrlInner")
 
 # ---------------------------------------------------------------------------
-# 2. VideoPlayer.kt: Don't cache preload Unavailable, key activeVisible, fast auto-retry
-# ---------------------------------------------------------------------------
-VIDEO_PLAYER = "app/src/main/java/com/noslop/app/ui/components/VideoPlayer.kt"
-
-OLD_CACHE_STORE = """        val result = doResolve(rawUrl, quality, isPreload)
-        val expiryMs = if ((result is VideoSource.Embed || result is VideoSource.Unavailable) && !HttpClientProvider.isNetworkReady) {
-            System.currentTimeMillis() + 10_000L
-        } else {
-            expiryOfSource(result)
-        }
-        // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
-        sourceCache[cacheKey] = CachedSource(
-            source = result,
-            expiresAtMs = expiryMs,
-            overTor = HttpClientProvider.useTorForClearnet,
-            circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
-        )
-        result"""
-
-NEW_CACHE_STORE = """        val result = doResolve(rawUrl, quality, isPreload)
-        val expiryMs = if ((result is VideoSource.Embed || result is VideoSource.Unavailable) && !HttpClientProvider.isNetworkReady) {
-            System.currentTimeMillis() + 10_000L
-        } else {
-            expiryOfSource(result)
-        }
-        // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
-        // Never poison sourceCache with an Unavailable result from a speculative background preload.
-        if (!(isPreload && result is VideoSource.Unavailable)) {
-            sourceCache[cacheKey] = CachedSource(
-                source = result,
-                expiresAtMs = expiryMs,
-                overTor = HttpClientProvider.useTorForClearnet,
-                circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
-            )
-        }
-        result"""
-
-edit(VIDEO_PLAYER, OLD_CACHE_STORE, NEW_CACHE_STORE, "VideoPlayer.kt: do not cache preload Unavailable")
-
-OLD_ACTIVE_VISIBLE = """    val isActiveOrNext = isVisible || isNextSlide
-    var activeVisible by remember { mutableStateOf(isActiveOrNext) }
-    LaunchedEffect(isActiveOrNext) {
-        if (isActiveOrNext) {
-            activeVisible = true
-        } else {
-            kotlinx.coroutines.delay(500)
-            activeVisible = false
-            isVideoReady = false
-        }
-    }"""
-
-NEW_ACTIVE_VISIBLE = """    val isActiveOrNext = isVisible || isNextSlide
-    var activeVisible by remember(url) { mutableStateOf(isActiveOrNext) }
-    LaunchedEffect(isActiveOrNext, url) {
-        if (isActiveOrNext) {
-            activeVisible = true
-        } else {
-            kotlinx.coroutines.delay(500)
-            activeVisible = false
-            isVideoReady = false
-        }
-    }"""
-
-edit(VIDEO_PLAYER, OLD_ACTIVE_VISIBLE, NEW_ACTIVE_VISIBLE, "VideoPlayer.kt: key activeVisible on url")
-
-OLD_RETRY_DELAY = """        if (resolvedSource is VideoSource.Unavailable && retryTrigger == 0 && activeVisible) {
-            kotlinx.coroutines.delay(2500L)
-            Logger.info("VIDEO", "Auto-retrying unavailable resolve for $url on a fresher circuit")
-            retryTrigger++
-        }"""
-
-NEW_RETRY_DELAY = """        if (resolvedSource is VideoSource.Unavailable && retryTrigger == 0 && activeVisible) {
-            kotlinx.coroutines.delay(300L)
-            Logger.info("VIDEO", "Auto-retrying unavailable resolve for $url on a fresher circuit")
-            retryTrigger++
-        }"""
-
-edit(VIDEO_PLAYER, OLD_RETRY_DELAY, NEW_RETRY_DELAY, "VideoPlayer.kt: quick 300ms auto-retry on Unavailable")
-
-# ---------------------------------------------------------------------------
-# 3. UnifiedFeedTab.kt: Preload 2 slides ahead over Tor
+# 2. UnifiedFeedTab.kt: Snappy pre-warming for upcoming slides
 # ---------------------------------------------------------------------------
 UNIFIED_FEED = "app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt"
 
-OLD_PRELOAD_LIMIT = """        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        val forwardPreloadLimit = if (overTor) 1 else 2
-        val preloadPreviousSlide = !overTor
-        // Start preloading the immediate next slide promptly (400ms) after settling
-        val firstPreloadDelayMs = 400L"""
+OLD_PRELOAD_STAGGER = """                    val targetIndex = i
+                    val delayMs = firstPreloadDelayMs + (preloadedForwardCount * 1500L)
+                    preloadScope.launch { 
+                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
+                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
+                        }
+                    }"""
 
-NEW_PRELOAD_LIMIT = """        val overTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        // Stream isolation guarantees separate circuits, allowing 2 forward preloads without circuit contention
-        val forwardPreloadLimit = 2
-        val preloadPreviousSlide = !overTor
-        // Start preloading the immediate next slide promptly (400ms) after settling
-        val firstPreloadDelayMs = 400L"""
+NEW_PRELOAD_STAGGER = """                    val targetIndex = i
+                    val delayMs = if (preloadedForwardCount == 0) 50L else 300L
+                    preloadScope.launch { 
+                        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+                        if (kotlin.math.abs(pagerState.currentPage - targetIndex) <= 2) {
+                            com.noslop.app.ui.PreloadManager.preWarm(context, rawUrl, forcedUrl) 
+                        }
+                    }"""
 
-edit(UNIFIED_FEED, OLD_PRELOAD_LIMIT, NEW_PRELOAD_LIMIT, "UnifiedFeedTab.kt: preload 2 slides ahead")
+edit(UNIFIED_FEED, OLD_PRELOAD_STAGGER, NEW_PRELOAD_STAGGER, "UnifiedFeedTab.kt: reduce preload stagger to 50ms / 300ms")
 
 print("\n=== PATCH EXECUTION RESULTS ===")
 for item in APPLIED:

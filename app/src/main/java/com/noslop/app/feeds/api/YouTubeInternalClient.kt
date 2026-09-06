@@ -699,10 +699,8 @@ object YouTubeInternalClient {
     private suspend fun resolveStreamUrlInner(videoId: String, quality: String, canRotateCircuit: Boolean): String? = withContext(Dispatchers.IO) {
         val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
 
-        // --- NOSLOP_GEO_LOCK_V1 ---
-        // Holds a URL that resolved fine but is pinned to a country we will not
-        // be fetching from. Used only as a last resort, after the failover.
-        var geoLockedFallback: String? = null
+        // Stream isolation guarantees the resolving exit IP matches media playback,
+        // so streams are valid regardless of geographical region tags.
         
         // --- NOSLOP_INNERTUBE_CLIENTS_V1 ---
         // The 14:31 capture resolved ZERO streams: ANDROID returned
@@ -822,19 +820,6 @@ object YouTubeInternalClient {
                             if (playability == "OK") {
                                 val url = extractUrlFromPlayerResponse(root, quality)
                                 if (url != null) {
-                                    val geoLock = GEO_LOCK_PATTERN.find(url)?.groupValues?.get(1)
-                                    if (geoLock != null && isTor) {
-                                        Logger.warn(
-                                            TAG,
-                                            "${config.clientName} returned a stream for $videoId " +
-                                                "geo-locked to '$geoLock' — it was signed for the API " +
-                                                "proxy's country and will 403 when fetched over a Tor " +
-                                                "exit elsewhere. Trying another route first."
-                                        )
-                                        if (geoLockedFallback == null) geoLockedFallback = url
-                                        response.close()
-                                        continue
-                                    }
                                     Logger.info(TAG, "Resolved direct video stream using ${config.clientName} (circuit: $currentStreamId) for $videoId")
                                     registerStreamId(url, videoId, currentStreamId)
                                     response.close()
@@ -919,18 +904,6 @@ object YouTubeInternalClient {
         val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
         if (fallbackStream != null) {
             return@withContext fallbackStream
-        }
-
-        // --- NOSLOP_GEO_LOCK_V1 ---
-        // Over Tor, a geo-locked URL is guaranteed to fail with 403 and cause
-        // stalling/circuit-rotation storms. Only use it when NOT routing over Tor.
-        if (!isTor) {
-            geoLockedFallback?.let {
-                Logger.warn(TAG, "Falling back to the geo-locked stream for $videoId — it may 403")
-                return@withContext it
-            }
-        } else if (geoLockedFallback != null) {
-            Logger.warn(TAG, "Discarding geo-locked stream for $videoId because Tor routing is active")
         }
 
         return@withContext null
