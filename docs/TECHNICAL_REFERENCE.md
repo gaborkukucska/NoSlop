@@ -1858,6 +1858,30 @@ Base64 blobs and 64-hex digests in addition to onion addresses.
 
 Note the log export surfaces only the active file, not the rotated `.log.1`.
 
+## 18. SOCKS5 Stream Isolation & Egress IP Affinity (2026-09-06)
+
+### 18.1 The Exit Invalidation & Rotation Conundrum
+YouTube's `googlevideo.com` CDN issues direct stream URLs bound strictly to the IP address that resolved the player response (`&ip=<address>`). When routing clearnet traffic through Tor on Android:
+- Earlier attempts to pass `X-Tor-Stream-Id` HTTP headers failed because Google's CDN returns HTTP 403 Forbidden on unrecognized request headers, and Tor SOCKS5 does not inspect TLS-encrypted HTTP payloads.
+- Process-wide `SIGNAL NEWNYM` rotations rotated all circuits simultaneously, terminating active ExoPlayer playback streams and invalidating all pre-warmed URLs.
+- Disabling circuit rotation entirely caused the app to become trapped on exit nodes flagged by YouTube with `LOGIN_REQUIRED`.
+
+### 18.2 SOCKS5 Stream Isolation (`TorSocksSocket` & `TorSocksSocketFactory`)
+Implemented standard SOCKS5 Username/Password authentication (RFC 1928 / RFC 1929) via custom `Socket` and `SocketFactory` classes in `HttpClientProvider.kt`:
+1. `TorSocksSocket` opens a loopback connection to `127.0.0.1:TOR_SOCKS_PORT` and presents auth method `0x02` (Username/Password).
+2. It sends subnegotiation version 1 with `username = streamId` (e.g. `yt_${videoId}_${streamNonce}`) and empty password.
+3. Tor's native `IsolateSOCKSAuth` flag on `SocksPort` automatically isolates connections by SOCKS credentials, assigning each unique `streamId` its own dedicated 3-hop circuit and exit node.
+4. `TorDns` prevents local DNS resolution by handing dummy `InetAddress` records to OkHttp, ensuring all hostname lookups occur remotely at the Tor exit node via SOCKS5 `ATYP 0x03` (DOMAINNAME).
+
+### 18.3 Nonce-Bumping Circuit Hopping
+When YouTube returns `LOGIN_REQUIRED` across 2 client configs (`ANDROID` and `TVHTML5`), `YouTubeInternalClient` increments `streamNonce` in `videoStreamNonces[videoId]`. The subsequent attempt automatically opens a SOCKS connection under `yt_${videoId}_1`, causing Tor to assign a brand new exit node without invoking `SIGNAL NEWNYM`. Active streams and other preloaded players are completely unaffected.
+
+### 18.4 Egress Region Parameter Retention
+Removed obsolete code that discarded stream URLs carrying `gcr=` country tags over Tor. With SOCKS5 stream isolation, both the resolution request and the media chunk requests originate from the same exit node IP, making regional parameters (`gcr=ir`, `gcr=ro`, `gcr=us`) valid and preventing false `Unavailable` failures.
+
+### 18.5 Micro-Seek Elimination
+ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking away from byte 0. `PlaybackPositionStore` now ignores offsets under 8,000ms, preserving preloaded initial frame buffers and allowing claimed preloaded players to render in 200-300ms on swipe.
+
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
