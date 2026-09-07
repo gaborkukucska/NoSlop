@@ -115,6 +115,17 @@ class DmPacketHandler(
                 }
             }
 
+            // Peer just delivered an authenticated DM, immediately clear any network failure cooldown
+            peer?.onionAddress?.takeIf { it.isNotBlank() }?.let {
+                GossipService.recordSendSuccess(it)
+            }
+
+            // Peer just delivered an authenticated DM, update online presence and clear typing status
+            repo.updatePeerTypingState(packet.senderId, false)
+            peer?.let {
+                peerDao.insertPeer(it.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+            }
+
             val threadKey = groupId ?: packet.senderId
             val msg = ChatMessage(
                 id = msgPay.id,
@@ -225,6 +236,9 @@ class DmPacketHandler(
         val typing = packet.getTypingPayload() ?: return false
         Logger.debug(TAG, "Received TYPING signal from ${packet.senderId}: isTyping=${typing.isTyping}")
         repo.updatePeerTypingState(packet.senderId, typing.isTyping)
+        peerDao.getPeerByPublicKey(packet.senderId)?.let {
+            peerDao.insertPeer(it.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
+        }
         return true
     }
 
@@ -236,6 +250,51 @@ class DmPacketHandler(
         if (receipt.messageId.isBlank()) return false
         messageDao.markAsReadById(receipt.messageId)
         repo.triggerDmSync()
+        return true
+    }
+
+    suspend fun handleDmSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
+        val syncReq = packet.getDmSyncRequestPayload() ?: return false
+        val peerPub = packet.senderId
+        val peer = peerDao.getPeerByPublicKey(peerPub)
+        if (peer == null || !peer.isTrusted || peer.onionAddress.isBlank()) {
+            Logger.warn(TAG, "Rejecting DM_SYNC_REQUEST: sender ${peerPub.take(12)}... not trusted or missing onion")
+            return false
+        }
+
+        GossipService.recordSendSuccess(peer.onionAddress)
+
+        val missedMessages = messageDao.getMessagesSentAfter(
+            peerPub = peerPub,
+            myPub = localKeys.publicKeyB64,
+            since = syncReq.since,
+            limit = 50
+        )
+
+        if (missedMessages.isEmpty()) {
+            Logger.info(TAG, "DM_SYNC_REQUEST from ${peer.handle}: up to date (since=${syncReq.since})")
+            return true
+        }
+
+        Logger.info(TAG, "DM_SYNC_REQUEST from ${peer.handle}: catching up ${missedMessages.size} missed message(s)")
+        for (msg in missedMessages) {
+            val msgPay = EncryptedPayload(
+                id = msg.id,
+                nonce = msg.nonce,
+                ciphertext = msg.ciphertext,
+                timestamp = msg.timestamp
+            )
+            val packetToSend = NetworkPacket(
+                id = UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = localKeys.publicKeyB64,
+                targetUserId = peerPub,
+                type = "MESSAGE",
+                payload = com.google.gson.Gson().toJsonTree(msgPay)
+            )
+            repo.meshTransport.sendPacket(peer.onionAddress, packet = packetToSend)
+            kotlinx.coroutines.delay(100L)
+        }
         return true
     }
 }

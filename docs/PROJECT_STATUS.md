@@ -1,5 +1,24 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
+
+* **Express Lane Concurrency for DMs (`MeshTransport.kt`)**:
+  * Decoupled transport concurrency into dedicated pools: `dmSemaphore(4)` exclusively reserved for real-time user communications (`MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_*`) and `bulkSemaphore(4)` for bulk feed/media data (`SYNC_RESPONSE`, `MEDIA_*`, etc.).
+  * Direct Messages, handshakes, and DM sync now have absolute priority and can never be starved or delayed by concurrent feed sync responses or media chunk downloads.
+* **Persistent DM Outbox & Immediate Peer Flush (`MeshSocialRepository.kt`)**:
+  * Implemented persistent Outbox storage (`app_settings["pending_dm_outbox"]`) for direct messages that fail direct send when a peer or circuit is temporarily offline, guaranteeing message retention across process restarts.
+  * Added event-driven outbox flushing: when a peer connects, announces presence, or Tor finishes bootstrapping, any queued outbox DMs for that peer are transmitted immediately without multi-minute delays.
+* **Bi-Directional Missed Message Synchronization (`DM_SYNC_REQUEST`)**:
+  * Implemented `DM_SYNC_REQUEST` wire protocol to catch up on missed DMs upon reconnect or app startup.
+  * Nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and request missed messages since that timestamp; counterparties stream missing `MESSAGE` packets directly over the express lane.
+* **Peer Cooldown Auto-Reset & Backoff Cap (`GossipService.kt`)**:
+  * Capped exponential cooldown backoff to 2 minutes (120s) max (down from 1 hour) to avoid locking out mobile peers experiencing brief connectivity transitions.
+  * Configured incoming authenticated packets (`MESSAGE`, `ANNOUNCE_PEER`, `USER_HANDSHAKE`, `TYPING`) to immediately reset failure counters and clear cooldowns for the sender's onion address.
+* **Presence & Typing Indicator Parity (`HandshakePacketHandler.kt`, `DmPacketHandler.kt`, `ChatThreadScreen.kt`)**:
+  * Aligned `ANNOUNCE_PEER` signature verification to support both `encodeForSigning` and legacy pipe payloads, fixing the regression where trusted peers were never marked `isOnline = true`.
+  * Updated `DmPacketHandler` to refresh `isOnline = true` and `lastSeenAt` on incoming `MESSAGE` and `TYPING` packets.
+  * Added 6-second auto-expiration to peer typing state in `NoSlopRepository`, dismissed typing status when a message is delivered, and debounced typing stop (4s idle / on send) in `ChatThreadScreen`.
+
 ## Completed Changes (2026-09-07) — Feed Toggle Stabilization, Position Resume & Mesh Sync Parity
 
 * **All / Mesh Quick Switch & Feed Position Restoration**:

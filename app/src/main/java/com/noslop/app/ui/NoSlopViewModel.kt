@@ -482,6 +482,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     if (state == TorState.READY && !hasRequestedCatchup) {
                         hasRequestedCatchup = true
+                        repository.onTorReady()
                         repository.requestAllGroupsCatchup()
                     }
                     refreshTorStatus()
@@ -1931,10 +1932,23 @@ fun toggleAggregator() {
 
     fun sendTestPost() { viewModelScope.launch { repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}") } }
 
+    fun syncDmsWithPeer(peer: Peer) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+            repository.requestDmSync(peer)
+        }
+    }
+
     fun selectChatPeer(peerPub: String?) {
         _selectedGroupChatId.value = null
         _selectedPeerPub.value = peerPub
-        if (peerPub != null) viewModelScope.launch { repository.markMessagesAsRead(peerPub) }
+        if (peerPub != null) {
+            viewModelScope.launch {
+                repository.markMessagesAsRead(peerPub)
+                val peer = peers.value.find { it.publicKeyB64 == peerPub }
+                if (peer != null) syncDmsWithPeer(peer)
+            }
+        }
     }
 
     fun selectGroupChat(groupId: String?) {

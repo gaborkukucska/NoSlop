@@ -68,9 +68,9 @@ object GossipService {
         val now = System.currentTimeMillis()
         
         if (count >= PEER_FAILURE_THRESHOLD) {
-            // Exponential backoff: 30s * 2^(count - 3), capped at 1 hour (3600s)
-            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(7)
-            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(3600_000L)
+            // Exponential backoff: 30s * 2^(count - 3), capped at 2 minutes (120s) so transient network hitches don't lock peers out
+            val exponent = (count - PEER_FAILURE_THRESHOLD).coerceAtMost(3)
+            val cooldownMs = (PEER_COOLDOWN_MS * (1 shl exponent)).coerceAtMost(120_000L)
             
             if (now - lastFailureTime < cooldownMs) {
                 return true
@@ -89,6 +89,10 @@ object GossipService {
      * Record a successful send to reset failure counter
      */
     fun recordSendSuccess(peerOnionAddress: String) {
+        peerSendFailures.remove(peerOnionAddress)
+    }
+
+    fun clearPeerCooldown(peerOnionAddress: String) {
         peerSendFailures.remove(peerOnionAddress)
     }
 
@@ -293,6 +297,11 @@ object GossipService {
         val senderId = packet.senderId
 
         Logger.debug(TAG, "processIncoming: Analyzing ${packet.type} packet $packetId from ${senderId.take(16)}... (hops=${packet.hops ?: DEFAULT_MAX_HOPS})")
+
+        // If incoming packet is from a known peer, immediately clear any active failure cooldown
+        peerDao?.getPeerByPublicKey(senderId)?.onionAddress?.takeIf { it.isNotBlank() }?.let {
+            recordSendSuccess(it)
+        }
 
         // 1. TTL Check — drop if expired
         val hops = packet.hops ?: DEFAULT_MAX_HOPS

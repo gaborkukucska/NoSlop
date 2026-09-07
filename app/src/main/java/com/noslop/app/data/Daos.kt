@@ -209,6 +209,12 @@ interface MessageDao {
     @Query("UPDATE chat_messages SET isRead = 1 WHERE id = :messageId")
     suspend fun markAsReadById(messageId: String)
 
+    @Query("SELECT MAX(timestamp) FROM chat_messages WHERE chatWithPeerPub = :peerPub AND senderPub = :peerPub")
+    suspend fun getLatestReceivedTimestamp(peerPub: String): Long?
+
+    @Query("SELECT * FROM chat_messages WHERE chatWithPeerPub = :peerPub AND senderPub = :myPub AND timestamp > :since ORDER BY timestamp ASC LIMIT :limit")
+    suspend fun getMessagesSentAfter(peerPub: String, myPub: String, since: Long, limit: Int = 50): List<ChatMessage>
+
     @Query("DELETE FROM chat_messages WHERE chatWithPeerPub = :peerPub")
     suspend fun deleteMessagesWithPeer(peerPub: String)
 

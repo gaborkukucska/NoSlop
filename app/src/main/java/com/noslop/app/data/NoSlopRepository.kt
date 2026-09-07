@@ -638,11 +638,25 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     
     private val _peerTypingStates = kotlinx.coroutines.flow.MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val peerTypingStates: kotlinx.coroutines.flow.StateFlow<Map<String, Boolean>> = _peerTypingStates.asStateFlow()
+    private val typingTimeoutJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
 
     fun updatePeerTypingState(peerPub: String, isTyping: Boolean) {
+        typingTimeoutJobs[peerPub]?.cancel()
         val current = _peerTypingStates.value.toMutableMap()
         current[peerPub] = isTyping
         _peerTypingStates.value = current
+
+        // If typing is true, auto-expire after 6s in case the false signal was dropped
+        if (isTyping) {
+            typingTimeoutJobs[peerPub] = repositoryScope.launch {
+                kotlinx.coroutines.delay(6000L)
+                val map = _peerTypingStates.value.toMutableMap()
+                if (map[peerPub] == true) {
+                    map[peerPub] = false
+                    _peerTypingStates.value = map
+                }
+            }
+        }
     }
 
     suspend fun toggleFollowPeer(peerPub: String, follow: Boolean) {
@@ -1557,6 +1571,16 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
 
     suspend fun deletePeer(publicKeyB64: String) = meshSocialRepository.deletePeer(publicKeyB64)
+
+    suspend fun requestDmSync(peer: Peer) = meshSocialRepository.requestDmSync(peer)
+    suspend fun requestAllPeersDmSync() = meshSocialRepository.requestAllPeersDmSync()
+    fun flushOutboxForPeer(peerPub: String, onionAddress: String) = meshSocialRepository.flushOutboxForPeer(peerPub, onionAddress)
+
+    suspend fun onTorReady() = withContext(Dispatchers.IO) {
+        Logger.info("REPOSITORY", "Tor is READY: Triggering high-priority DM catchup and peer heartbeat")
+        meshSocialRepository.requestAllPeersDmSync()
+        startPresenceHeartbeat()
+    }
 
     suspend fun requestInventorySync(peer: Peer) = meshSocialRepository.requestInventorySync(peer)
     suspend fun requestAllPeersInventorySync() = meshSocialRepository.requestAllPeersInventorySync()

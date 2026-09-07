@@ -337,6 +337,10 @@ data class InventorySyncRequestPayload(
     val inventory: List<InventoryItem>
 )
 
+data class DmSyncRequestPayload(
+    @SerializedName("since") val since: Long
+)
+
 data class CommentSyncData(
     val id: String,
     @SerializedName("post_id") val postId: String,
@@ -505,6 +509,10 @@ data class NetworkPacket(
 
     fun getInventorySyncRequestPayload(): InventorySyncRequestPayload? = if (type == "INVENTORY_SYNC_REQUEST" && payload != null) {
         Gson().fromJson(payload, InventorySyncRequestPayload::class.java)
+    } else null
+
+    fun getDmSyncRequestPayload(): DmSyncRequestPayload? = if (type == "DM_SYNC_REQUEST" && payload != null) {
+        Gson().fromJson(payload, DmSyncRequestPayload::class.java)
     } else null
 
     fun getIdentityUpdatePayload(): IdentityUpdatePayload? = if (type == "IDENTITY_UPDATE" && payload != null) {

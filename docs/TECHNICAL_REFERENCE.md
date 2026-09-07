@@ -1882,6 +1882,29 @@ Removed obsolete code that discarded stream URLs carrying `gcr=` country tags ov
 ### 18.5 Micro-Seek Elimination
 ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking away from byte 0. `PlaybackPositionStore` now ignores offsets under 8,000ms, preserving preloaded initial frame buffers and allowing claimed preloaded players to render in 200-300ms on swipe.
 
+## 19. Direct Message Fast-Lane & Missed Message Catch-up (2026-09-07)
+
+### 19.1 Concurrency Pool Isolation (`dmSemaphore` vs `bulkSemaphore`)
+Previously, `MeshTransport` funneled all outbound Tor sockets through a single `torSemaphore(4)`. When background inventory sync ran or peers exchanged broadcasts, bursts of `SYNC_RESPONSE` and media chunks exhausted all permits. Real-time DMs and typing signals were forced into an unconstrained FIFO queue behind 15-second Tor handshakes.
+- `dmSemaphore` (4 permits): Strictly reserved for `MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, and `GROUP_*` packets.
+- `bulkSemaphore` (4 permits): Confines bulk inventory sync, media chunk transfers, and general gossip.
+- Guarantees that feed and media activity can never monopolize circuits or delay direct messaging.
+
+### 19.2 Persistent DM Outbox (`MeshSocialRepository`)
+In-memory coroutine retry loops failed to survive app kills or system reboots. Undelivered DMs are now serialized to `app_settings["pending_dm_outbox"]`.
+- When a direct send fails, the packet is placed into the persistent queue.
+- Reconnect triggers (Tor reaching `READY`, peer `ANNOUNCE_PEER` receipts, or opening a chat thread) flush pending outbox DMs immediately to the target onion address.
+
+### 19.3 Bi-directional Message Synchronization (`DM_SYNC_REQUEST`)
+Upon establishing peer presence or application start, nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and dispatch a `DM_SYNC_REQUEST(since: Long)`.
+The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any missing `MESSAGE` packets directly over the fast-lane. The existing idempotency of `messageDao.insertMessage` (`OnConflictStrategy.REPLACE`) ensures zero duplicate message creation.
+
+### 19.4 Peer Cooldown Dynamic Reset & Verification Alignment
+- Peer failure cooldown is capped at 120s max (preventing 1-hour lockout traps).
+- Incoming authenticated packets from a peer immediately clear any failure cooldown on the peer's onion address.
+- `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
+- Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
+
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for

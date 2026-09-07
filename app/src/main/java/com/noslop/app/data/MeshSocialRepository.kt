@@ -72,60 +72,127 @@ class MeshSocialRepository(
         return if (setting == "burnable") getBurnableIdentity() else getLocalIdentity()
     }
 
+    // Persistent DM outbox: queued packets waiting for peer connection
+    private val pendingOutboxMessages = java.util.concurrent.ConcurrentHashMap<String, MutableList<com.noslop.app.mesh.NetworkPacket>>()
+    private var outboxWorkerJob: kotlinx.coroutines.Job? = null
+
+    init {
+        loadPersistedOutbox()
+        startOutboxWorker()
+    }
+
+    private fun loadPersistedOutbox() {
+        repositoryScope.launch(Dispatchers.IO) {
+            try {
+                val json = db.appSettingDao().getSetting("pending_dm_outbox")
+                if (!json.isNullOrBlank()) {
+                    val typeToken = object : com.google.gson.reflect.TypeToken<Map<String, List<com.noslop.app.mesh.NetworkPacket>>>() {}.type
+                    val map: Map<String, List<com.noslop.app.mesh.NetworkPacket>>? = com.google.gson.Gson().fromJson(json, typeToken)
+                    map?.forEach { (peerPub, packets) ->
+                        pendingOutboxMessages[peerPub] = java.util.Collections.synchronizedList(packets.toMutableList())
+                    }
+                    val total = pendingOutboxMessages.values.sumOf { it.size }
+                    Logger.info(TAG, "Restored $total pending DM(s) from persistent outbox")
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to load persisted outbox: ${e.message}")
+            }
+        }
+    }
+
+    private fun savePersistedOutbox() {
+        try {
+            val copy = mutableMapOf<String, List<com.noslop.app.mesh.NetworkPacket>>()
+            pendingOutboxMessages.forEach { (peerPub, list) ->
+                val snapshot = synchronized(list) { list.toList() }
+                if (snapshot.isNotEmpty()) {
+                    copy[peerPub] = snapshot
+                }
+            }
+            val json = com.google.gson.Gson().toJson(copy)
+            repositoryScope.launch(Dispatchers.IO) {
+                db.appSettingDao().insertSetting(AppSetting("pending_dm_outbox", json))
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to save outbox: ${e.message}")
+        }
+    }
+
+    private fun enqueuePendingDm(recipientPub: String, packet: com.noslop.app.mesh.NetworkPacket) {
+        val list = pendingOutboxMessages.getOrPut(recipientPub) { 
+            java.util.Collections.synchronizedList(mutableListOf()) 
+        }
+        synchronized(list) {
+            if (list.none { it.id == packet.id }) {
+                list.add(packet)
+            }
+        }
+        savePersistedOutbox()
+        Logger.info(TAG, "Enqueued message ${packet.id} for $recipientPub in persistent outbox (pending: ${list.size})")
+    }
+
+    fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
+        val list = pendingOutboxMessages[recipientPub] ?: return
+        val toSend = synchronized(list) { list.toList() }
+        if (toSend.isEmpty()) return
+        repositoryScope.launch(Dispatchers.IO) {
+            Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
+            for (packet in toSend) {
+                val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                if (success) {
+                    list.remove(packet)
+                    savePersistedOutbox()
+                    Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
+    private fun startOutboxWorker() {
+        if (outboxWorkerJob?.isActive == true) return
+        outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
+                val hasPending = pendingOutboxMessages.values.any { it.isNotEmpty() }
+                if (hasPending) {
+                    val peers = peerDao.getAllPeersList().filter { it.isTrusted && it.onionAddress.isNotBlank() }
+                    for (peer in peers) {
+                        flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+                    }
+                }
+            }
+        }
+    }
+
     fun dispatchPacket(onionAddress: String, packet: com.noslop.app.mesh.NetworkPacket) {
         repositoryScope.launch {
             val hubStatus = meshTransport.repository.getAppSetting("hub_deployment_status")
             val hasHub = !hubStatus.isNullOrBlank()
 
-            // Always push to Hub if linked (additional relay for redundancy)
             if (hasHub) {
                 com.noslop.app.mesh.GossipService.pushPacketToHub?.invoke(packet)
             }
 
-            // Directed packets (DMs) MUST always be sent directly over Tor as well.
-            // Hub delegation only replaces direct sends for non-targeted broadcasts.
             val isDirected = !packet.targetUserId.isNullOrBlank()
             if (isDirected || !hasHub) {
                 if (onionAddress.isNotBlank()) {
                     val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
                     if (!success && isDirected) {
-                        Logger.warn(TAG, "Direct send to $onionAddress failed. Falling back to gossip relay for ${packet.type} ${packet.id}.")
+                        Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
-                            // Mark offline so presence UI reflects reality
-                            peerDao.insertPeer(peer.copy(isOnline = false))
-                            
-                            // CRITICAL: Gossip-broadcast the actual packet so it
-                            // reaches the recipient via any reachable intermediate peer or Hub.
-                            // Give it full hops so it can traverse the mesh.
+                            if (packet.type == "MESSAGE") {
+                                enqueuePendingDm(packet.targetUserId!!, packet)
+                            }
+
+                            // Relay via mesh gossip with full hops
                             val gossipPacket = packet.copy(
                                 id = UUID.randomUUID().toString(),
                                 hops = 6
                             )
                             com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
-                            Logger.info(TAG, "Gossip-relayed ${packet.type} ${packet.id} as fallback via mesh broadcast.")
-                            
-                            // Spool background retries for 72 hours! (4320 minutes)
-                            repositoryScope.launch {
-                                Logger.warn(TAG, "Direct send failed. Spooling background retries for 72h for ${packet.type}.")
-                                kotlinx.coroutines.delay((5000..30000).random().toLong()) // Initial scatter to prevent dogpiling Tor
-                                for (i in 1..4320) {
-                                    val jitter = (0..15000).random().toLong()
-                                    kotlinx.coroutines.delay(60_000 + jitter) // Wait 1 min + random jitter
-                                    Logger.info(TAG, "Background retry $i/4320 for ${packet.type} to $onionAddress")
-                                    // Give it a fresh ID so it passes deduplication on the target
-                                    val retryPacket = packet.copy(id = java.util.UUID.randomUUID().toString())
-                                    if (meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, retryPacket)) {
-                                        Logger.info(TAG, "Background retry $i/4320 succeeded for ${packet.type} to $onionAddress!")
-                                        // Mark them back online
-                                        val updatedPeer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
-                                        if (updatedPeer != null) {
-                                            peerDao.insertPeer(updatedPeer.copy(isOnline = true, lastSeenAt = System.currentTimeMillis()))
-                                        }
-                                        break
-                                    }
-                                }
-                            }
                             
                             // Also send a USER_HANDSHAKE to heal the identity for future attempts
                             val myKeys = packet.targetUserId?.let { getIdentityForPeer(it) } ?: getLocalIdentity()
@@ -574,6 +641,32 @@ class MeshSocialRepository(
             requestInventorySync(peer)
         }
         true
+    }
+
+    suspend fun requestDmSync(peer: Peer) = withContext(Dispatchers.IO) {
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
+        if (!peer.isTrusted || peer.onionAddress.isBlank()) return@withContext
+
+        val since = messageDao.getLatestReceivedTimestamp(peer.publicKeyB64) ?: 0L
+        val payload = com.noslop.app.mesh.DmSyncRequestPayload(since = since)
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = 3,
+            senderId = myKeys.publicKeyB64,
+            targetUserId = peer.publicKeyB64,
+            type = "DM_SYNC_REQUEST",
+            payload = com.google.gson.Gson().toJsonTree(payload)
+        )
+        Logger.info(TAG, "Requesting DM sync from ${peer.handle} (since=$since)")
+        meshTransport.sendPacket(peer.onionAddress, packet = packet)
+    }
+
+    suspend fun requestAllPeersDmSync() = withContext(Dispatchers.IO) {
+        val peers = peerDao.getAllPeersList().filter { it.isTrusted && it.onionAddress.isNotBlank() }
+        for (peer in peers) {
+            flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+            requestDmSync(peer)
+        }
     }
 
     suspend fun requestAllPeersInventorySync() = withContext(Dispatchers.IO) {

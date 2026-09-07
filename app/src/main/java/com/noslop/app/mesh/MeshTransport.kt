@@ -25,7 +25,9 @@ class MeshTransport(
     private var isRunning = false
 
     @Volatile private var listening = false
-    private val torSemaphore = kotlinx.coroutines.sync.Semaphore(4) // Limit concurrent Tor circuits so mesh pings don't starve media/feeds
+    // Dedicated priority concurrency pools: DMs and handshakes have reserved permits and are never starved by bulk feed/media sync
+    private val dmSemaphore = kotlinx.coroutines.sync.Semaphore(4)
+    private val bulkSemaphore = kotlinx.coroutines.sync.Semaphore(4)
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private val MAX_SIMULTANEOUS_CONNECTIONS = 16
 
@@ -157,65 +159,59 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "SYNC_REQUEST" || packet.type == "ANNOUNCE_DISCOVERABLE"
-        val isCriticalPacket = packet.type == "CONNECTION_REQUEST" ||
-            packet.type == "USER_HANDSHAKE" || packet.type == "MESSAGE" ||
-            packet.type == "GROUP_INVITE" || packet.type == "GROUP_UPDATE" ||
-            packet.type == "GROUP_DELETE" || packet.type == "DELETE_MESSAGE" ||
-            packet.type == "CHAT_REACTION" || packet.type == "INVENTORY_SYNC_REQUEST" ||
-            packet.type == "SYNC_RESPONSE" || packet.type == "SYNC_REQUEST" ||
-            packet.type == "MEDIA_REQUEST" || packet.type == "MEDIA_CHUNK" ||
-            packet.type == "MEDIA_TRANSFER_ACK"
+        val isDmHighPriority = packet.type == "MESSAGE" || packet.type == "DELETE_MESSAGE" ||
+            packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" ||
+            packet.type == "DM_SYNC_REQUEST" || packet.type == "GROUP_INVITE" ||
+            packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
+            packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
 
-        // --- NOSLOP_TOR_STARVATION_V1 ---
-        // Enforce the peer cooldown HERE rather than only in
-        // GossipService.broadcast/forward. MediaManager and SyncPacketHandler
-        // call sendPacket directly and bypassed it entirely, so traffic kept
-        // flowing to peers we had already given up on — each send burning a
-        // Tor circuit slot for up to two minutes.
-        //
-        // Critical packets bypass: a user-initiated DM or handshake should
-        // still be attempted even against a peer we think is down.
-        if (!isCriticalPacket && GossipService.isPeerInCooldown(onionAddress)) {
+        val isInteractive = packet.type == "CHAT_REACTION" || packet.type == "TYPING" || packet.type == "READ_RECEIPT"
+        val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
+
+        // Critical user messaging bypasses peer cooldown entirely
+        if (!isDmHighPriority && GossipService.isPeerInCooldown(onionAddress)) {
             Logger.debug(TAG, "Skipping ${packet.type} to $onionAddress: peer in cooldown")
             return@withContext pushedToHub
         }
 
-        if (isBackground) {
-            if (!torSemaphore.tryAcquire()) {
-                Logger.warn(TAG, "Dropping background packet ${packet.type} to $onionAddress: Tor circuits busy")
+        val acquiredDmSemaphore: Boolean
+        if (isDmHighPriority) {
+            dmSemaphore.acquire()
+            acquiredDmSemaphore = true
+        } else if (isInteractive) {
+            acquiredDmSemaphore = dmSemaphore.tryAcquire()
+            if (!acquiredDmSemaphore && !bulkSemaphore.tryAcquire()) {
+                Logger.warn(TAG, "Dropping interactive ${packet.type} to $onionAddress: circuits busy")
                 return@withContext pushedToHub
             }
-        } else if (isCriticalPacket) {
-            torSemaphore.acquire()
+        } else if (isBackground) {
+            acquiredDmSemaphore = false
+            if (!bulkSemaphore.tryAcquire()) {
+                Logger.warn(TAG, "Dropping background ${packet.type} to $onionAddress: bulk circuits busy")
+                return@withContext pushedToHub
+            }
         } else {
-            // --- NOSLOP_TOR_STARVATION_V1 ---
-            // Was an unbounded acquire(). With the pool saturated by dead
-            // peers that built an ever-growing queue of sends that were
-            // themselves doomed. Wait briefly, then give up.
-            // Poll rather than withTimeoutOrNull { acquire() }: cancelling a
-            // suspended acquire() has a permit-loss corner case, and leaking a
-            // permit here would shrink the pool permanently — the exact
-            // failure we are fixing. tryAcquire has no such edge.
+            // Bulk sync (posts, comments, media chunks) acquires strictly from bulkSemaphore
+            acquiredDmSemaphore = false
             var acquired = false
-            val waitUntilMs = System.currentTimeMillis() + 5000L
+            val waitUntilMs = System.currentTimeMillis() + 4000L
             while (System.currentTimeMillis() < waitUntilMs) {
-                if (torSemaphore.tryAcquire()) { acquired = true; break }
-                delay(100)
+                if (bulkSemaphore.tryAcquire()) { acquired = true; break }
+                delay(80)
             }
             if (!acquired) {
-                Logger.warn(TAG, "Dropping ${packet.type} to $onionAddress: Tor circuits busy (waited 5s)")
+                Logger.warn(TAG, "Dropping bulk ${packet.type} to $onionAddress: bulk circuits busy")
                 return@withContext pushedToHub
             }
         }
-        
+
         try {
-            // Fresh v3 onion descriptors can take up to 45 seconds to fetch from HSDirs.
-            // A 20s timeout interrupts Tor's circuit building, causing an infinite retry loop.
-            val isCritical = isCriticalPacket
-            val maxAttempts = if (isCritical) 2 else 1
-            // Fast-fail offline onion destinations so Tor SOCKS proxy remains available for media
-            val connectTimeout = if (isCritical) 15000 else 10000
+            val maxAttempts = if (isDmHighPriority) 2 else 1
+            val connectTimeout = when {
+                isDmHighPriority -> 15000
+                isInteractive -> 6000
+                else -> 10000
+            }
             for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
                 try {
@@ -246,12 +242,12 @@ class MeshTransport(
                     // every one ran the full retry sequence. A second 60s
                     // attempt after a 60s timeout rarely succeeds and costs
                     // another slot-minute. Critical packets still retry.
-                    if (!isCritical && msg.contains("timed out", ignoreCase = true)) {
+                    if (!isDmHighPriority && msg.contains("timed out", ignoreCase = true)) {
                         Logger.warn(TAG, "Connect timed out to $onionAddress — fast-failing non-critical ${packet.type} to free circuit.")
                         break
                     }
                     if (attempt < maxAttempts) {
-                        val delayMs = if (isCritical) attempt * 4000L else attempt * 2000L
+                        val delayMs = if (isDmHighPriority) attempt * 4000L else attempt * 2000L
                         delay(delayMs)
                     }
                 } finally {
@@ -262,7 +258,7 @@ class MeshTransport(
             GossipService.recordSendFailure(onionAddress)
             return@withContext pushedToHub
         } finally {
-            torSemaphore.release()
+            if (acquiredDmSemaphore) dmSemaphore.release() else bulkSemaphore.release()
         }
     }
 }

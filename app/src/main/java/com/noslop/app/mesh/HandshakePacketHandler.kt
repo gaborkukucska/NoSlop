@@ -281,8 +281,13 @@ class HandshakePacketHandler(
 
     suspend fun handleAnnouncePeer(packet: NetworkPacket): Boolean {
         val announcePay = packet.getAnnouncePeerPayload() ?: return false
-        val payloadToVerify = "${announcePay.authorId}|${announcePay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) return false
+        val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(announcePay.authorId, announcePay.timestamp.toString())
+        val pipePayload = "${announcePay.authorId}|${announcePay.timestamp}"
+        if (!CryptoService.verify(encodePayload, announcePay.signature, announcePay.authorId) &&
+            !CryptoService.verify(pipePayload, announcePay.signature, announcePay.authorId)) {
+            Logger.warn(TAG, "ANNOUNCE_PEER signature verification failed for ${announcePay.authorId}")
+            return false
+        }
         
         val isOldPacket = (System.currentTimeMillis() - announcePay.timestamp) > 5 * 60 * 1000L
         if (isOldPacket) return true
@@ -291,13 +296,19 @@ class HandshakePacketHandler(
         if (peer != null) {
             val wasOffline = !peer.isOnline
             val newOnion = announcePay.onionAddress?.takeIf { it.isNotBlank() } ?: peer.onionAddress
+            GossipService.recordSendSuccess(newOnion)
             peerDao.insertPeer(peer.copy(
                 isOnline = true,
                 lastSeenAt = System.currentTimeMillis(),
                 onionAddress = newOnion
             ))
-            if (wasOffline && peer.isTrusted) {
-                repo.requestInventorySync(peer)
+            if (peer.isTrusted) {
+                // Instantly flush any pending outbox DMs and request missed messages
+                repo.flushOutboxForPeer(peer.publicKeyB64, newOnion)
+                repo.requestDmSync(peer)
+                if (wasOffline) {
+                    repo.requestInventorySync(peer)
+                }
             }
         }
         return true

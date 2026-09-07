@@ -396,6 +396,10 @@ fun ChatThreadScreen(
         val downloadProgress by viewModel.downloadProgress.collectAsState()
         val listState = rememberLazyListState()
 
+        LaunchedEffect(peer.publicKeyB64) {
+            viewModel.syncDmsWithPeer(peer)
+        }
+
         LaunchedEffect(messages.size) {
             if (messages.isNotEmpty()) {
                 listState.animateScrollToItem(messages.size - 1)
@@ -796,17 +800,29 @@ fun ChatInputBar(
             IconButton(onClick = onLaunchCamera) { Icon(Icons.Default.CameraAlt, contentDescription = "Camera".tr, tint = TextMuted) }
         }
 
+        val coroutineScope = rememberCoroutineScope()
+        var typingStopJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
         AndroidGifTextField(
             value = rawText,
             onValueChange = { 
                 rawText = it
                 onTyping(it.isNotEmpty())
+                typingStopJob?.cancel()
+                if (it.isNotEmpty()) {
+                    typingStopJob = coroutineScope.launch {
+                        kotlinx.coroutines.delay(4000L)
+                        onTyping(false)
+                    }
+                }
             },
             hint = "Message...",
             onMediaAttached = onMediaAttached,
             sendOnEnter = isSendOnEnterEnabled,
             onSend = { 
                 if (rawText.isNotBlank() || hasAttachment) {
+                    typingStopJob?.cancel()
+                    onTyping(false)
                     onSendMessage(rawText)
                     rawText = ""
                 }
@@ -819,6 +835,8 @@ fun ChatInputBar(
         IconButton(
             onClick = {
                 if (rawText.isNotBlank() || hasAttachment) {
+                    typingStopJob?.cancel()
+                    onTyping(false)
                     onSendMessage(rawText)
                     rawText = ""
                 }
