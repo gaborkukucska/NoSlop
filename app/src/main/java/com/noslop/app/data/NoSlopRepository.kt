@@ -1406,8 +1406,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     val allViewedHistory: Flow<List<ViewedHistoryItem>> = engagementRepository.allViewedHistory
 
-    suspend fun recordSwipe(itemId: String) =
-        engagementRepository.recordSwipe(itemId)
+    suspend fun recordSwipe(itemId: String, url: String? = null, canonicalKey: String? = null) =
+        engagementRepository.recordSwipe(itemId, url, canonicalKey)
 
     suspend fun getSwipeExcludedIds(): Set<String> =
         engagementRepository.getSwipeExcludedIds()

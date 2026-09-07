@@ -1279,7 +1279,7 @@ private fun ExoVideoPlayer(
             try {
                 val currentPos = player.currentPosition
                 Logger.debug("VIDEO_DEBUG", "onDispose called. currentPos=$currentPos, duration=${player.duration}, rawUrl=$rawUrl")
-                if (currentPos > 0L) {
+                if (currentPos >= 8000L) {
                     PlaybackPositionStore.save(rawUrl, currentPos, player.duration)
                 }
             } catch (e: Exception) {

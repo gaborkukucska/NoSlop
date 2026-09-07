@@ -155,22 +155,29 @@ class EngagementRepository(
 
     /**
      * Record that the user swiped away a content item.
-     * If the item has been swiped away twice, it is excluded from future aggregations.
-     * Swiping does NOT remove items from the viewed history.
+     * Item is immediately excluded from future aggregations across all of its canonical IDs.
      */
-    suspend fun recordSwipe(itemId: String) = withContext(Dispatchers.IO) {
-        val existing = swipeTrackerDao.getSwipeForItem(itemId)
-        val newCount = (existing?.swipeCount ?: 0) + 1
-        swipeTrackerDao.upsertSwipe(
-            SwipeTracker(
-                itemId = itemId,
-                swipeCount = newCount,
-                lastSwipedAt = System.currentTimeMillis()
+    suspend fun recordSwipe(itemId: String, url: String? = null, canonicalKey: String? = null) = withContext(Dispatchers.IO) {
+        suspend fun recordSingle(id: String) {
+            val existing = swipeTrackerDao.getSwipeForItem(id)
+            val newCount = (existing?.swipeCount ?: 0) + 1
+            swipeTrackerDao.upsertSwipe(
+                SwipeTracker(
+                    itemId = id,
+                    swipeCount = newCount,
+                    lastSwipedAt = System.currentTimeMillis()
+                )
             )
-        )
-        if (newCount >= 1) {
-            Logger.info(TAG, "Item $itemId swiped away $newCount times — excluded from future feeds")
         }
+        recordSingle(itemId)
+        val normId = normalizeFeedItemId(itemId, url ?: "")
+        if (normId.isNotBlank() && normId != itemId) {
+            recordSingle(normId)
+        }
+        if (!canonicalKey.isNullOrBlank() && canonicalKey != itemId && canonicalKey != normId) {
+            recordSingle(canonicalKey)
+        }
+        Logger.info(TAG, "Item $itemId (normId=$normId, cKey=$canonicalKey) swiped away — excluded from future feeds")
     }
 
     /** Get item IDs that have been swiped away >= 2 times. */

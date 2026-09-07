@@ -1,5 +1,23 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-07) — Feed Swipe History Tracking, Slide Position Persistence & Playback Tuning
+
+* **Immediate Swipe-Away History & Feed Exclusion (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`, `EngagementRepository.kt`)**:
+  * Fixed an issue where swiped-away clearnet slides (even if still loading or briefly viewed) were not saved to history and were repeatedly re-served.
+  * Capturing page transitions in `UnifiedFeedTab.kt` now immediately calls `markItemReadState(id, true)`, `markItemViewed(id, isMesh = false)`, and `recordItemSwiped(id)`.
+  * Updated `recordSwipe()` in `EngagementRepository.kt` to record the raw ID, normalized ID (`normId`), and canonical URL/title key (`canonicalKey`) into `swipe_tracker`, excluding swiped items across all of their key representations in `cachedExcludedIds`.
+  * Patched `unseenFeeds` filtering and fallback in `NoSlopViewModel.kt` to enforce `cachedExcludedIds` and `cachedViewedIds` across all representation keys, preventing swiped or viewed items from resurrecting into the Live Feed.
+* **Cold-Start Slide Position Persistence (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Fixed a race condition where the feed page position was lost on app close and restart: introduced `isSavedPositionLoaded` StateFlow in `NoSlopViewModel.kt` to guarantee Compose waits for SQLite to load `saved_feed_active_id`.
+  * `UnifiedFeedTab.kt` now waits for `isSavedPositionLoaded == true` and non-empty `unifiedItems` before evaluating restore targets, preventing startup page 0 composition from clobbering `saved_feed_active_id`.
+  * Preserved `savedActiveId` in `restoredFeed` on cold-start even if other historical items are excluded.
+* **YouTube Playback & Stream Resolution over Tor (`YouTubeInternalClient.kt`, `VideoPlayer.kt`)**:
+  * Prioritized `ANDROID_VR` in InnerTube configs right after `ANDROID`: `ANDROID_VR` serves progressive 360p muxed `itag=18` streams without requiring BotGuard / PoToken attestation.
+  * Raised `EXIT_BLOCKED_THRESHOLD` from 2 to 3 so `ANDROID_VR` gets a chance on the current circuit before advancing circuit isolation nonces.
+  * Increased Tor InnerTube resolve `maxAttempts` from 3 to 4, significantly improving resolution success across Tor exits.
+  * Filtered out Invidious `.onion` stream fallback URLs in `YouTubeInternalClient.kt` to prevent severe 2004 timeouts over mobile Tor.
+  * In `VideoPlayer.kt`, guarded `PlaybackPositionStore.save()` in `onDispose` with `currentPosition >= 8000L` to prevent micro-seeks on short-lived or swiped slides.
+
 ## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
 
 * **Express Lane Concurrency for DMs (`MeshTransport.kt`)**:

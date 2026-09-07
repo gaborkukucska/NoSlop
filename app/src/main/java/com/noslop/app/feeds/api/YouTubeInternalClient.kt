@@ -497,8 +497,8 @@ object YouTubeInternalClient {
     // --- NOSLOP_GEO_LOCK_V1 ---
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
-    // Fast-fail to a fresh circuit after 2 clients return LOGIN_REQUIRED on the same exit
-    private const val EXIT_BLOCKED_THRESHOLD = 2
+    // Fast-fail to a fresh circuit after 3 clients return LOGIN_REQUIRED on the same exit
+    private const val EXIT_BLOCKED_THRESHOLD = 3
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -738,12 +738,12 @@ object YouTubeInternalClient {
         val configs = listOf(
             InnerTubeClientConfig("ANDROID", "3", "21.26.364", "com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip"),
             InnerTubeClientConfig(
-                "TVHTML5", "7", "7.20250312.16.00",
-                "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.master.0 (unlike Gecko) Starboard/17"
-            ),
-            InnerTubeClientConfig(
                 "ANDROID_VR", "28", "1.62.27",
                 "com.google.android.apps.youtube.vr.oculus/1.62.27 (Linux; U; Android 12; GB) gzip"
+            ),
+            InnerTubeClientConfig(
+                "TVHTML5", "7", "7.20250312.16.00",
+                "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.master.0 (unlike Gecko) Starboard/17"
             ),
             InnerTubeClientConfig(
                 "IOS", "5", "20.10.4",
@@ -754,7 +754,7 @@ object YouTubeInternalClient {
         
         var streamNonce = videoStreamNonces.compute(videoId) { _, n -> if (n != null) n + 1 else 0 }
         var attempt = 0
-        val maxAttempts = if (isTor) 3 else 1
+        val maxAttempts = if (isTor) 4 else 1
 
         while (attempt < maxAttempts) {
             attempt++
@@ -900,9 +900,9 @@ object YouTubeInternalClient {
             }
         }
         
-        // Decentralized Invidious / Piped failover
+        // Decentralized Invidious / Piped failover (skip onion streams as they stall ExoPlayer over Tor)
         val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
-        if (fallbackStream != null) {
+        if (fallbackStream != null && !fallbackStream.contains(".onion")) {
             return@withContext fallbackStream
         }
 

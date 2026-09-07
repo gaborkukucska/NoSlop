@@ -780,6 +780,7 @@ fun UnifiedFeedTab(
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     var hasRestoredInitialPosition by remember { mutableStateOf(false) }
+    val isSavedPositionLoaded by viewModel.isSavedPositionLoaded.collectAsState()
     val savedTargetId by viewModel.savedActiveItemId.collectAsState()
     
     LaunchedEffect(Unit) {
@@ -788,18 +789,22 @@ fun UnifiedFeedTab(
         }
     }
     
-    // Scroll directly to saved position once unifiedItems populates on cold start
+    // Scroll directly to saved position once unifiedItems populates on cold start and saved target is loaded
     val activeRestoreTarget = restoreItemId ?: savedTargetId
-    LaunchedEffect(activeRestoreTarget, unifiedItems.size) {
-        if (!hasRestoredInitialPosition && !activeRestoreTarget.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
-            val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
-            if (index >= 0) {
-                pagerState.scrollToPage(index)
+    LaunchedEffect(isSavedPositionLoaded, activeRestoreTarget, unifiedItems.size) {
+        if (!hasRestoredInitialPosition && isSavedPositionLoaded && unifiedItems.isNotEmpty()) {
+            if (!activeRestoreTarget.isNullOrEmpty()) {
+                val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
+                if (index >= 0) {
+                    pagerState.scrollToPage(index)
+                    hasRestoredInitialPosition = true
+                    restoreItemId = null
+                } else {
+                    hasRestoredInitialPosition = true
+                }
+            } else {
                 hasRestoredInitialPosition = true
-                restoreItemId = null
             }
-        } else if (unifiedItems.isNotEmpty() && activeRestoreTarget.isNullOrEmpty()) {
-            hasRestoredInitialPosition = true
         }
     }
 
@@ -890,14 +895,22 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(filterMode) {
-        var previousPage = -1
-        snapshotFlow { pagerState.settledPage }.collect { currentPage ->
-            if (previousPage >= 0 && previousPage in unifiedItems.indices && previousPage != currentPage) {
-                val leftItem = unifiedItems[previousPage]
-                viewModel.markItemViewed(leftItem.id, leftItem is UnifiedItem.Mesh)
+    var lastSettledPage by remember { mutableStateOf(-1) }
+    LaunchedEffect(pagerState.settledPage, hasRestoredInitialPosition) {
+        val currentPage = pagerState.settledPage
+        if (hasRestoredInitialPosition && lastSettledPage >= 0 && lastSettledPage in unifiedItems.indices && lastSettledPage != currentPage) {
+            val leftItem = unifiedItems[lastSettledPage]
+            if (leftItem is UnifiedItem.Feed) {
+                viewModel.markItemReadState(leftItem.item.id, true)
+                viewModel.markItemViewed(leftItem.id, isMesh = false)
+                viewModel.recordItemSwiped(leftItem.id)
+            } else if (leftItem is UnifiedItem.Mesh) {
+                viewModel.markItemViewed(leftItem.id, isMesh = true)
+                viewModel.recordItemSwiped(leftItem.id)
             }
-            previousPage = currentPage
+        }
+        if (hasRestoredInitialPosition && currentPage in unifiedItems.indices) {
+            lastSettledPage = currentPage
         }
     }
 

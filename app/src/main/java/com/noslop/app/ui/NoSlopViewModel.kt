@@ -155,6 +155,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val currentSavedFeedItemId: String? get() = savedFeedItemId
     private val _savedActiveItemId = MutableStateFlow<String?>(null)
     val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
+    private val _isSavedPositionLoaded = MutableStateFlow(false)
+    val isSavedPositionLoaded: StateFlow<Boolean> = _isSavedPositionLoaded.asStateFlow()
     private val sessionLoadedIds = mutableSetOf<String>()
     private var lastSearchResultIds = emptySet<String>()
     private val allSearchResultItemIds = mutableSetOf<String>()
@@ -464,6 +466,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val savedId = repository.getAppSetting("saved_feed_active_id")
             savedFeedItemId = savedId
             _savedActiveItemId.value = savedId
+            _isSavedPositionLoaded.value = true
         }
 
         viewModelScope.launch {
@@ -579,7 +582,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             // Keep full restored feed so user can scroll both up and down
                             val candidateIds = idList
                             val restoredFeed = candidateIds.mapNotNull { id ->
-                                if (id in cachedExcludedIds) return@mapNotNull null
+                                if (id in cachedExcludedIds && id != savedActiveId) return@mapNotNull null
                                 val feed = feeds.find { it.id == id }
                                 if (feed != null) UnifiedItem.Feed(feed)
                                 else {
@@ -592,6 +595,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                                 _unifiedFeed.value = restoredFeed
                                 savedFeedItemId = savedActiveId
                                 _savedActiveItemId.value = savedActiveId
+                                _isSavedPositionLoaded.value = true
                                 sessionLoadedIds.addAll(restoredFeed.map { it.id })
 
                                 viewModelScope.launch {
@@ -887,9 +891,14 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 it.id !in currentIds
             } else {
                 val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
+                val normId = normalizeFeedItemId(it.id, it.url ?: "")
                 it.id !in exclusionIds &&
                 it.id !in cachedViewedIds &&
+                it.id !in cachedExcludedIds &&
+                normId !in cachedViewedIds &&
+                normId !in cachedExcludedIds &&
                 cKey !in cachedExcludedIds &&
+                cKey !in cachedViewedIds &&
                 it.title.lowercase().trim() !in readTitles && 
                 cKey !in excludedFeedKeys
             }
@@ -897,8 +906,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed
         val isUsingFallback = unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive
         if (isUsingFallback) {
-            // Never resurrect items the user already saved or reacted to
-            unseenFeeds = allFeeds.filter { it.id !in exclusionIds && it.id !in cachedExcludedIds && !it.isSaved }
+            // Never resurrect items the user already saved, swiped away, or viewed
+            unseenFeeds = allFeeds.filter { 
+                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
+                val normId = normalizeFeedItemId(it.id, it.url ?: "")
+                it.id !in exclusionIds && 
+                it.id !in cachedExcludedIds && 
+                normId !in cachedExcludedIds && 
+                cKey !in cachedExcludedIds && 
+                !it.isSaved
+            }
             if (!_isRefreshingFeeds.value) {
                 refreshFeeds()
             }
@@ -1759,7 +1776,14 @@ fun toggleAggregator() {
 
     fun recordItemSwiped(itemId: String) {
         viewModelScope.launch {
-            repository.recordSwipe(itemId)
+            val item = _unifiedFeed.value.find { it.id == itemId }
+                ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
+            val (url, cKey) = when (item) {
+                is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
+                is UnifiedItem.Mesh -> Pair(item.post.clearnetUrl, com.noslop.app.data.getCanonicalItemKey(item))
+                else -> Pair(null, null)
+            }
+            repository.recordSwipe(itemId, url, cKey)
             cachedExcludedIds = repository.getSwipeExcludedIds()
         }
     }

@@ -1905,6 +1905,27 @@ The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any mis
 - `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
 - Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
 
+## 20. Feed Engagement Tracking, Slide Position Persistence & Playback Hardening (2026-09-07)
+
+### 20.1 Swipe-Away Transition Hook & Multi-Key Exclusion
+Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwell timer elapsed. If a user swiped away while the card was loading or within 3 seconds, the item remained unread (`isRead = false`), was never registered in `swipe_tracker`, and was omitted from `cachedExcludedIds`.
+- `UnifiedFeedTab.kt` now tracks page transitions using `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+- `EngagementRepository.recordSwipe()` now writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
+- `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed.
+
+### 20.2 Cold-Start Slide Position Race Condition Elimination
+`UnifiedFeedTab.kt` previously initialized `hasRestoredInitialPosition = true` on the first frame if `savedTargetId` was null. Because `NoSlopViewModel` loads `saved_feed_active_id` asynchronously from Room on `Dispatchers.IO`, `savedTargetId` was momentarily null during early composition. Consequently, `LaunchedEffect(pagerState.settledPage)` at page 0 immediately executed `saveFeedPosition(item0.id)`, overwriting the persisted active ID.
+- `isSavedPositionLoaded` StateFlow in `NoSlopViewModel` indicates when Room DB retrieval is complete.
+- `UnifiedFeedTab.kt` gates position restoration on `isSavedPositionLoaded == true`, scrolling to the saved target via `pagerState.scrollToPage(index)` before permitting any position saves.
+- `restoredFeed` preserves `savedActiveId` on cold start even if other items in `saved_feed_list` are excluded.
+
+### 20.3 Tor Video Resolution & Playback Tuning
+- **Attestation Gate Bypass (`ANDROID_VR`)**: Placed `ANDROID_VR` second in `YouTubeInternalClient.configs`. Unlike standard `ANDROID` which requires PoToken / BotGuard, `ANDROID_VR` serves progressive 360p `itag=18` streams without attestation checks.
+- **Circuit Hopping Threshold**: Raised `EXIT_BLOCKED_THRESHOLD` to 3 so `ANDROID_VR` is evaluated on the active Tor circuit before triggering circuit nonce advancement.
+- **Tor Circuit Attempts**: Raised `maxAttempts` over Tor from 3 to 4.
+- **Onion Stream Rejection**: Filtered out Invidious `.onion` stream fallback URLs in `YouTubeInternalClient.kt` to avoid high-latency double-hop timeouts (`code=2004`).
+- **Micro-Seek Elimination on Dispose**: Guarded `PlaybackPositionStore.save()` in `VideoPlayer.onDispose` to ignore positions `< 8000ms`, preventing short-lived or swiped slides from forcing Range requests over Tor.
+
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for
