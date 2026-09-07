@@ -1,4 +1,4 @@
-# doc_update.py
+#!/usr/bin/env python3
 import sys
 
 APPLIED = []
@@ -29,87 +29,203 @@ def edit(path, old, new, label):
     except Exception as e:
         FAILED.append(f"{label}: Could not write {path}: {e}")
 
-# ---------------------------------------------------------------------------
-# 1. PROJECT_STATUS.md: Add documentation for DM fast-lane, outbox & presence
-# ---------------------------------------------------------------------------
-STATUS_FILE = "docs/PROJECT_STATUS.md"
-
-OLD_STATUS_HEADER = '''# Project Status - NoSlop
-
-## Completed Changes (2026-09-07) — Feed Toggle Stabilization, Position Resume & Mesh Sync Parity'''
-
-NEW_STATUS_HEADER = '''# Project Status - NoSlop
-
-## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
-
-* **Express Lane Concurrency for DMs (`MeshTransport.kt`)**:
-  * Decoupled transport concurrency into dedicated pools: `dmSemaphore(4)` exclusively reserved for real-time user communications (`MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_*`) and `bulkSemaphore(4)` for bulk feed/media data (`SYNC_RESPONSE`, `MEDIA_*`, etc.).
-  * Direct Messages, handshakes, and DM sync now have absolute priority and can never be starved or delayed by concurrent feed sync responses or media chunk downloads.
-* **Persistent DM Outbox & Immediate Peer Flush (`MeshSocialRepository.kt`)**:
-  * Implemented persistent Outbox storage (`app_settings["pending_dm_outbox"]`) for direct messages that fail direct send when a peer or circuit is temporarily offline, guaranteeing message retention across process restarts.
-  * Added event-driven outbox flushing: when a peer connects, announces presence, or Tor finishes bootstrapping, any queued outbox DMs for that peer are transmitted immediately without multi-minute delays.
-* **Bi-Directional Missed Message Synchronization (`DM_SYNC_REQUEST`)**:
-  * Implemented `DM_SYNC_REQUEST` wire protocol to catch up on missed DMs upon reconnect or app startup.
-  * Nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and request missed messages since that timestamp; counterparties stream missing `MESSAGE` packets directly over the express lane.
-* **Peer Cooldown Auto-Reset & Backoff Cap (`GossipService.kt`)**:
-  * Capped exponential cooldown backoff to 2 minutes (120s) max (down from 1 hour) to avoid locking out mobile peers experiencing brief connectivity transitions.
-  * Configured incoming authenticated packets (`MESSAGE`, `ANNOUNCE_PEER`, `USER_HANDSHAKE`, `TYPING`) to immediately reset failure counters and clear cooldowns for the sender's onion address.
-* **Presence & Typing Indicator Parity (`HandshakePacketHandler.kt`, `DmPacketHandler.kt`, `ChatThreadScreen.kt`)**:
-  * Aligned `ANNOUNCE_PEER` signature verification to support both `encodeForSigning` and legacy pipe payloads, fixing the regression where trusted peers were never marked `isOnline = true`.
-  * Updated `DmPacketHandler` to refresh `isOnline = true` and `lastSeenAt` on incoming `MESSAGE` and `TYPING` packets.
-  * Added 6-second auto-expiration to peer typing state in `NoSlopRepository`, dismissed typing status when a message is delivered, and debounced typing stop (4s idle / on send) in `ChatThreadScreen`.
-
-## Completed Changes (2026-09-07) — Feed Toggle Stabilization, Position Resume & Mesh Sync Parity'''
-
-edit(STATUS_FILE, OLD_STATUS_HEADER, NEW_STATUS_HEADER, "docs/PROJECT_STATUS.md: Document DM fast lane and presence fixes")
+VIEW_MODEL = "app/src/main/java/com/noslop/app/ui/NoSlopViewModel.kt"
+FEED_TAB = "app/src/main/java/com/noslop/app/ui/UnifiedFeedTab.kt"
 
 # ---------------------------------------------------------------------------
-# 2. TECHNICAL_REFERENCE.md: Add Section 19 documenting DM Priority & Sync
+# 1. NoSlopViewModel.kt: Expose savedActiveItemId StateFlow and load on init
 # ---------------------------------------------------------------------------
-TECH_FILE = "docs/TECHNICAL_REFERENCE.md"
+OLD_SAVED_DECL = """    private var savedFeedItemId: String? = null
+    val currentSavedFeedItemId: String? get() = savedFeedItemId"""
 
-OLD_TECH_END = '''### 18.5 Micro-Seek Elimination
-ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking away from byte 0. `PlaybackPositionStore` now ignores offsets under 8,000ms, preserving preloaded initial frame buffers and allowing claimed preloaded players to render in 200-300ms on swipe.
+NEW_SAVED_DECL = """    private var savedFeedItemId: String? = null
+    val currentSavedFeedItemId: String? get() = savedFeedItemId
+    private val _savedActiveItemId = MutableStateFlow<String?>(null)
+    val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()"""
 
----'''
+edit(VIEW_MODEL, OLD_SAVED_DECL, NEW_SAVED_DECL, "NoSlopViewModel.kt: expose savedActiveItemId StateFlow")
 
-NEW_TECH_END = '''### 18.5 Micro-Seek Elimination
-ExoPlayer range requests over Tor incur 10-15s latency round trips when seeking away from byte 0. `PlaybackPositionStore` now ignores offsets under 8,000ms, preserving preloaded initial frame buffers and allowing claimed preloaded players to render in 200-300ms on swipe.
+# ---------------------------------------------------------------------------
+# 2. NoSlopViewModel.kt: Load savedActiveItemId on ViewModel init
+# ---------------------------------------------------------------------------
+OLD_VM_INIT = """        viewModelScope.launch {
+            _appLanguage.value = repository.getAppLanguage()"""
 
-## 19. Direct Message Fast-Lane & Missed Message Catch-up (2026-09-07)
+NEW_VM_INIT = """        viewModelScope.launch {
+            val savedId = repository.getAppSetting("saved_feed_active_id")
+            savedFeedItemId = savedId
+            _savedActiveItemId.value = savedId
+        }
 
-### 19.1 Concurrency Pool Isolation (`dmSemaphore` vs `bulkSemaphore`)
-Previously, `MeshTransport` funneled all outbound Tor sockets through a single `torSemaphore(4)`. When background inventory sync ran or peers exchanged broadcasts, bursts of `SYNC_RESPONSE` and media chunks exhausted all permits. Real-time DMs and typing signals were forced into an unconstrained FIFO queue behind 15-second Tor handshakes.
-- `dmSemaphore` (4 permits): Strictly reserved for `MESSAGE`, `DELETE_MESSAGE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, and `GROUP_*` packets.
-- `bulkSemaphore` (4 permits): Confines bulk inventory sync, media chunk transfers, and general gossip.
-- Guarantees that feed and media activity can never monopolize circuits or delay direct messaging.
+        viewModelScope.launch {
+            _appLanguage.value = repository.getAppLanguage()"""
 
-### 19.2 Persistent DM Outbox (`MeshSocialRepository`)
-In-memory coroutine retry loops failed to survive app kills or system reboots. Undelivered DMs are now serialized to `app_settings["pending_dm_outbox"]`.
-- When a direct send fails, the packet is placed into the persistent queue.
-- Reconnect triggers (Tor reaching `READY`, peer `ANNOUNCE_PEER` receipts, or opening a chat thread) flush pending outbox DMs immediately to the target onion address.
+edit(VIEW_MODEL, OLD_VM_INIT, NEW_VM_INIT, "NoSlopViewModel.kt: load savedActiveItemId in init")
 
-### 19.3 Bi-directional Message Synchronization (`DM_SYNC_REQUEST`)
-Upon establishing peer presence or application start, nodes query `MessageDao.getLatestReceivedTimestamp(peerPub)` and dispatch a `DM_SYNC_REQUEST(since: Long)`.
-The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any missing `MESSAGE` packets directly over the fast-lane. The existing idempotency of `messageDao.insertMessage` (`OnConflictStrategy.REPLACE`) ensures zero duplicate message creation.
+# ---------------------------------------------------------------------------
+# 3. NoSlopViewModel.kt: Do not truncate candidateIds with subList; keep full feed
+# ---------------------------------------------------------------------------
+OLD_RESTORE_FEED = """                        val savedIdsStr = repository.getAppSetting("saved_feed_list")
+                        val savedActiveId = repository.getAppSetting("saved_feed_active_id")
+                        if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                            val idList = savedIdsStr.split(",")
+                            val activeIdxInSaved = if (!savedActiveId.isNullOrEmpty()) idList.indexOf(savedActiveId) else 0
+                            val candidateIds = if (activeIdxInSaved >= 0) idList.subList(activeIdxInSaved, idList.size) else idList
+                            val restoredFeed = candidateIds.mapNotNull { id ->
+                                if (id in cachedExcludedIds) return@mapNotNull null
+                                val feed = feeds.find { it.id == id }
+                                if (feed != null) UnifiedItem.Feed(feed)
+                                else {
+                                    val mesh = meshes.find { it.id == id }
+                                    if (mesh != null) UnifiedItem.Mesh(mesh) else null
+                                }
+                            }
+                            if (restoredFeed.isNotEmpty()) {
+                                cachedDefaultFeed = restoredFeed
+                                _unifiedFeed.value = restoredFeed
+                                savedFeedItemId = savedActiveId
+                                sessionLoadedIds.addAll(restoredFeed.map { it.id })
 
-### 19.4 Peer Cooldown Dynamic Reset & Verification Alignment
-- Peer failure cooldown is capped at 120s max (preventing 1-hour lockout traps).
-- Incoming authenticated packets from a peer immediately clear any failure cooldown on the peer's onion address.
-- `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
-- Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
+                                viewModelScope.launch {
+                                    if (savedActiveId != null) {
+                                        _restoreScrollPositionEvent.emit(savedActiveId)
+                                    }
+                                }"""
 
----'''
+NEW_RESTORE_FEED = """                        val savedIdsStr = repository.getAppSetting("saved_feed_list")
+                        val savedActiveId = repository.getAppSetting("saved_feed_active_id")
+                        if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                            val idList = savedIdsStr.split(",")
+                            // Keep full restored feed so user can scroll both up and down
+                            val candidateIds = idList
+                            val restoredFeed = candidateIds.mapNotNull { id ->
+                                if (id in cachedExcludedIds) return@mapNotNull null
+                                val feed = feeds.find { it.id == id }
+                                if (feed != null) UnifiedItem.Feed(feed)
+                                else {
+                                    val mesh = meshes.find { it.id == id }
+                                    if (mesh != null) UnifiedItem.Mesh(mesh) else null
+                                }
+                            }
+                            if (restoredFeed.isNotEmpty()) {
+                                cachedDefaultFeed = restoredFeed
+                                _unifiedFeed.value = restoredFeed
+                                savedFeedItemId = savedActiveId
+                                _savedActiveItemId.value = savedActiveId
+                                sessionLoadedIds.addAll(restoredFeed.map { it.id })
 
-edit(TECH_FILE, OLD_TECH_END, NEW_TECH_END, "docs/TECHNICAL_REFERENCE.md: Document Section 19 DM Priority and Outbox")
+                                viewModelScope.launch {
+                                    if (savedActiveId != null) {
+                                        _restoreScrollPositionEvent.emit(savedActiveId)
+                                    }
+                                }"""
 
-print("\n=== DOCS UPDATE RESULTS ===")
+edit(VIEW_MODEL, OLD_RESTORE_FEED, NEW_RESTORE_FEED, "NoSlopViewModel.kt: preserve full restored feed without subList truncation")
+
+# ---------------------------------------------------------------------------
+# 4. NoSlopViewModel.kt: Do not wipe saved position on refreshLiveFeed
+# ---------------------------------------------------------------------------
+OLD_REFRESH_WIPE = """                // Clear saved feed persistence so the DB flow doesn't resurrect old state
+                repository.putAppSetting("saved_feed_list", "")
+                repository.putAppSetting("saved_feed_active_id", "")"""
+
+NEW_REFRESH_WIPE = """                // Keep saved position intact so user does not lose their place on refresh"""
+
+edit(VIEW_MODEL, OLD_REFRESH_WIPE, NEW_REFRESH_WIPE, "NoSlopViewModel.kt: stop wiping saved position on refreshLiveFeed")
+
+# ---------------------------------------------------------------------------
+# 5. UnifiedFeedTab.kt: Add hasRestoredInitialPosition guard against Page 0 clobbering
+# ---------------------------------------------------------------------------
+OLD_TAB_RESTORE = """    var restoreItemId by remember { mutableStateOf<String?>(null) }
+    
+    LaunchedEffect(Unit) {
+        viewModel.restoreScrollPositionEvent.collect { itemId ->
+            restoreItemId = itemId
+        }
+    }
+    
+    // Explicitly wait for unifiedItems state to populate before scrolling
+    LaunchedEffect(restoreItemId, unifiedItems) {
+        if (restoreItemId != null && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == restoreItemId }
+            if (index >= 0) {
+                pagerState.scrollToPage(index)
+                restoreItemId = null // Consume event
+            }
+        }
+    }
+
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage in unifiedItems.indices) {
+            val currentItem = unifiedItems[pagerState.settledPage]
+            
+            if (currentItem is UnifiedItem.Tutorial) {
+                viewModel.setFeedTutorialStep(currentItem.step + 1)
+            } else if (currentTutStep != -1 && currentTutStep < 5) {
+                viewModel.completeFeedTutorial()
+            }
+
+            if (currentItem !is UnifiedItem.Tutorial) {
+                // Only save position if we aren't currently waiting to restore a saved position
+                if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing && restoreItemId == null) {
+                    // Do not let startup page 0 overwrite a pending saved active slide position
+                    val currentSaved = viewModel.currentSavedFeedItemId
+                    if (currentSaved == null || currentSaved == currentItem.id || pagerState.settledPage > 0) {
+                        viewModel.saveFeedPosition(currentItem.id)
+                    }
+                }"""
+
+NEW_TAB_RESTORE = """    var restoreItemId by remember { mutableStateOf<String?>(null) }
+    var hasRestoredInitialPosition by remember { mutableStateOf(false) }
+    val savedTargetId by viewModel.savedActiveItemId.collectAsState()
+    
+    LaunchedEffect(Unit) {
+        viewModel.restoreScrollPositionEvent.collect { itemId ->
+            restoreItemId = itemId
+        }
+    }
+    
+    // Scroll directly to saved position once unifiedItems populates on cold start
+    val activeRestoreTarget = restoreItemId ?: savedTargetId
+    LaunchedEffect(activeRestoreTarget, unifiedItems.size) {
+        if (!hasRestoredInitialPosition && !activeRestoreTarget.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
+            if (index >= 0) {
+                pagerState.scrollToPage(index)
+                hasRestoredInitialPosition = true
+                restoreItemId = null
+            }
+        } else if (unifiedItems.isNotEmpty() && activeRestoreTarget.isNullOrEmpty()) {
+            hasRestoredInitialPosition = true
+        }
+    }
+
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage in unifiedItems.indices) {
+            val currentItem = unifiedItems[pagerState.settledPage]
+            
+            if (currentItem is UnifiedItem.Tutorial) {
+                viewModel.setFeedTutorialStep(currentItem.step + 1)
+            } else if (currentTutStep != -1 && currentTutStep < 5) {
+                viewModel.completeFeedTutorial()
+            }
+
+            if (currentItem !is UnifiedItem.Tutorial) {
+                // Only save position AFTER initial restore has completed so startup page 0 never clobbers saved state
+                if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                    viewModel.saveFeedPosition(currentItem.id)
+                }"""
+
+edit(FEED_TAB, OLD_TAB_RESTORE, NEW_TAB_RESTORE, "UnifiedFeedTab.kt: implement hasRestoredInitialPosition to protect saved feed position")
+
+print("\n=== PATCH EXECUTION RESULTS ===")
 for item in APPLIED:
     print(f"  [APPLIED] {item}")
+
 if FAILED:
     print("\nErrors occurred:")
     for item in FAILED:
         print(f"  [FAILED]  {item}")
     sys.exit(1)
 else:
-    print(f"\nAll documentation updates applied successfully!")
+    print(f"\nAll {len(APPLIED)} feed position patches applied successfully!")

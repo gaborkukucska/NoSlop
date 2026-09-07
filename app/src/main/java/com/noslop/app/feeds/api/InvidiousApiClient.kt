@@ -358,32 +358,8 @@ object InvidiousApiClient {
             }
         }
 
-        val adaptiveFormats = root.getAsJsonArray("adaptiveFormats")
-        if (adaptiveFormats != null && adaptiveFormats.size() > 0) {
-            var bestUrl: String? = null
-            var bestItag = 18
-            var bestBitrate = 0
-            for (el in adaptiveFormats) {
-                val obj = el.asJsonObject
-                val mimeType = obj.get("type")?.asString ?: continue
-                if (!mimeType.startsWith("video/")) continue
-                val url = obj.get("url")?.asString ?: continue
-                val bitrate = obj.get("bitrate")?.asInt ?: 0
-                val itag = obj.get("itag")?.asInt ?: 18
-                if (mimeType.contains("mp4") && bitrate > bestBitrate) {
-                    bestBitrate = bitrate
-                    bestUrl = url
-                    bestItag = itag
-                } else if (bestUrl == null) {
-                    bestUrl = url
-                    bestItag = itag
-                }
-            }
-            if (bestUrl != null) {
-                return formatStreamUrl(bestUrl, bestItag)
-            }
-        }
-
+        // Do NOT fall back to adaptiveFormats: those are video-only or audio-only by definition.
+        // Returning a soundless 1080p stream over Tor causes 10s buffering stalls. Only return muxed formatStreams.
         return null
     }
 

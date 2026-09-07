@@ -40,12 +40,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
         if (isVisible) {
             hasError = false
             
-            val preloaded = PreloadManager.claim(url)
+            val preloaded = PreloadManager.claim(actualKey, url) ?: PreloadManager.claim(url, url)
             val player = if (preloaded != null) {
                 preloaded.apply {
                     playWhenReady = true
                     val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
-                    if (resumeMs > 0L) {
+                    // Ignore micro-seeks under 8s to prevent destroying preloaded audio buffer over Tor
+                    if (resumeMs >= 8000L && Math.abs(currentPosition - resumeMs) > 3000L) {
                         Logger.info("AUDIO", "Resuming preloaded audio at ${resumeMs}ms: $url")
                         seekTo(resumeMs)
                     }
@@ -90,7 +91,13 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                     .build()
                     
                 val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-                    .setBufferDurationsMs(1500, 15000, 500, 1000)
+                    .setBufferDurationsMs(
+                        10000, // min buffer (10s)
+                        30000, // max buffer (30s)
+                        500,   // buffer for playback (0.5s)
+                        4000   // buffer for playback after rebuffer (4s)
+                    )
+                    .setPrioritizeTimeOverSizeThresholds(true)
                     .build()
 
                 androidx.media3.exoplayer.ExoPlayer.Builder(context)
@@ -102,7 +109,7 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
                         setMediaItem(mediaItem)
                         volume = 1f
                         val resumeMs = PlaybackPositionStore.resumePositionFor(actualKey)
-                        if (resumeMs > 0L) {
+                        if (resumeMs >= 8000L) {
                             Logger.info("AUDIO", "Resuming audio at ${resumeMs}ms: $url")
                             seekTo(resumeMs)
                         }
@@ -158,7 +165,10 @@ fun AudioPlayer(url: String, isVisible: Boolean = true, stableKey: String? = nul
             
             onDispose {
                 try {
-                    PlaybackPositionStore.save(actualKey, player.currentPosition, player.duration)
+                    val pos = player.currentPosition
+                    if (pos >= 8000L) {
+                        PlaybackPositionStore.save(actualKey, pos, player.duration)
+                    }
                 } catch (e: Exception) {
                     Logger.warn("AUDIO", "Failed to save playback position for $url: ${e.message}")
                 }

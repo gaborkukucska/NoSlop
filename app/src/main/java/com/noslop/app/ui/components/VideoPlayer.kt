@@ -857,14 +857,11 @@ fun VideoPlayer(
             }
         }
 
-        // --- NOSLOP_FEED_VARIETY_V1 ---
-        // Gate on activeVisible, not isVisible: the player itself renders on
-        // activeVisible (current OR next slide, with a 500ms debounce leaving),
-        // so gating the overlay more tightly left a window where a video was
-        // resolving with no indicator on screen.
-        if (activeVisible && !isVideoReady && !loadingTimedOut && !hasFailed &&
+        // Show loading overlay immediately on frame 1 when isVisible is true or activeVisible is warming up
+        val shouldShowLoading = (isVisible || activeVisible) && !isVideoReady && !loadingTimedOut && !hasFailed &&
             (isResolving || awaitingFirstFrame)
-        ) {
+
+        if (shouldShowLoading) {
             VideoLoadingOverlay(
                 label = if (isResolving) "Finding stream".tr else "Buffering".tr,
                 modifier = Modifier.zIndex(2f)
@@ -1183,18 +1180,24 @@ private fun ExoVideoPlayer(
             val streamId = YouTubeInternalClient.getStreamIdForUrl(url)
                 ?: YouTubeInternalClient.getStreamIdForUrl(rawUrl)
                 ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
-            val client = HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            val isYouTube = url.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
+            val client = if (isYouTube) {
+                HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            } else {
+                HttpClientProvider.activeClearnetClient
+            }
             val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(client)
             val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
 
             val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                    6000,  // min buffer (6s)
-                    30000, // max buffer (30s)
+                    15000, // min buffer (15s) to stay ahead on Tor
+                    50000, // max buffer (50s)
                     500,   // buffer for playback (0.5s)
-                    2000   // buffer for playback after rebuffer (2s)
+                    6000   // buffer for playback after rebuffer (6s) to prevent stutter loops
                 )
+                .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
             androidx.media3.exoplayer.ExoPlayer.Builder(context)
@@ -1368,15 +1371,6 @@ private fun ExoVideoPlayer(
         },
         contentAlignment = Alignment.Center
     ) {
-        if (isBuffering && !hasError) {
-            if (thumbnailUrl == null && thumbnailB64 == null) {
-                com.noslop.app.ui.LoadingShimmer()
-            } else {
-                // Rebuffering mid-stream: keep the poster visible underneath.
-                VideoLoadingOverlay(label = "Buffering".tr)
-            }
-        }
-
         if (!hasError) {
             AndroidView(
                 factory = { ctx ->
@@ -1404,6 +1398,15 @@ private fun ExoVideoPlayer(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Render buffering animation on top of the native AndroidView with zIndex(5f)
+            if (isBuffering) {
+                if (thumbnailUrl == null && thumbnailB64 == null) {
+                    com.noslop.app.ui.LoadingShimmer(modifier = Modifier.zIndex(5f))
+                } else {
+                    VideoLoadingOverlay(label = "Buffering".tr, modifier = Modifier.zIndex(5f))
+                }
+            }
             
             if (isFastForwarding) {
                 Surface(

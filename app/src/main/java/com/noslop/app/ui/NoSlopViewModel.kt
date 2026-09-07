@@ -153,6 +153,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var isSearchModeActive = false
     private var savedFeedItemId: String? = null
     val currentSavedFeedItemId: String? get() = savedFeedItemId
+    private val _savedActiveItemId = MutableStateFlow<String?>(null)
+    val savedActiveItemId: StateFlow<String?> = _savedActiveItemId.asStateFlow()
     private val sessionLoadedIds = mutableSetOf<String>()
     private var lastSearchResultIds = emptySet<String>()
     private val allSearchResultItemIds = mutableSetOf<String>()
@@ -459,6 +461,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         viewModelScope.launch {
+            val savedId = repository.getAppSetting("saved_feed_active_id")
+            savedFeedItemId = savedId
+            _savedActiveItemId.value = savedId
+        }
+
+        viewModelScope.launch {
             _appLanguage.value = repository.getAppLanguage()
             _userProfile.value = repository.getUserProfile()
             _selectedInterests.value = repository.getUserSelectedCategories()
@@ -568,8 +576,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                         val savedActiveId = repository.getAppSetting("saved_feed_active_id")
                         if (!savedIdsStr.isNullOrEmpty() && currentFilterMode == "Live Feed" && !isSearchModeActive) {
                             val idList = savedIdsStr.split(",")
-                            val activeIdxInSaved = if (!savedActiveId.isNullOrEmpty()) idList.indexOf(savedActiveId) else 0
-                            val candidateIds = if (activeIdxInSaved >= 0) idList.subList(activeIdxInSaved, idList.size) else idList
+                            // Keep full restored feed so user can scroll both up and down
+                            val candidateIds = idList
                             val restoredFeed = candidateIds.mapNotNull { id ->
                                 if (id in cachedExcludedIds) return@mapNotNull null
                                 val feed = feeds.find { it.id == id }
@@ -583,6 +591,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                                 cachedDefaultFeed = restoredFeed
                                 _unifiedFeed.value = restoredFeed
                                 savedFeedItemId = savedActiveId
+                                _savedActiveItemId.value = savedActiveId
                                 sessionLoadedIds.addAll(restoredFeed.map { it.id })
 
                                 viewModelScope.launch {
@@ -616,6 +625,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }.toList()
                     
                     _unifiedFeed.value = (newIncomingMeshes + updatedFeed).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+
+                    if (_unifiedFeed.value.size < 5 && currentFilterMode == "Live Feed" && !isSearchModeActive) {
+                        loadMoreFeedItems("Live Feed")
+                    }
                 }
             }
         }
@@ -884,7 +897,11 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed
         val isUsingFallback = unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive
         if (isUsingFallback) {
-            unseenFeeds = allFeeds.filter { it.id !in exclusionIds && it.id !in cachedExcludedIds }
+            // Never resurrect items the user already saved or reacted to
+            unseenFeeds = allFeeds.filter { it.id !in exclusionIds && it.id !in cachedExcludedIds && !it.isSaved }
+            if (!_isRefreshingFeeds.value) {
+                refreshFeeds()
+            }
         }
         var unseenMeshes = allMeshes.filter { 
             if (isPersistentList) {
@@ -1618,8 +1635,6 @@ fun toggleAggregator() {
                 isSearchModeActive = false
                 currentFilterMode = "Live Feed"
                 
-                // Immediately remix the feed from the local DB, applying filters
-                // and preserving history (avoiding already seen content)
                 savedFeedItemId = null
                 repository.putAppSetting("saved_feed_list", "")
                 repository.putAppSetting("saved_feed_active_id", "")
@@ -1629,20 +1644,18 @@ fun toggleAggregator() {
                 cachedDefaultFeed = emptyList()
                 sessionLoadedIds.clear()
                 
-                // --- NOSLOP_FEED_RECENCY_V1 ---
-                // Purge BEFORE rebuilding. Previously loadMoreFeedItems() ran
-                // first, so the feed the user saw immediately after tapping
-                // Reset was assembled from the very rows the next line deletes
-                // — i.e. it was repopulated with exactly the stale content the
-                // reset was supposed to clear.
+                // Purge stale YouTube items from DB so fresh items are fetched
                 repository.deleteYouTubeItems()
                 com.noslop.app.ui.PreloadManager.evictAll()
+                com.noslop.app.ui.components.PlaybackPositionStore.clearAll()
 
-                // Now rebuild from what actually remains
-                loadMoreFeedItems()
-
-                // Kick off background fetch to replenish the database
+                // Fetch fresh feeds from the network FIRST so the feed is populated with fresh content
                 repository.refreshFeeds()
+
+                // Refresh exclusion caches and rebuild from freshly fetched items
+                refreshExclusionCaches()
+                loadMoreFeedItems("Live Feed")
+                _scrollToTopEvent.emit(Unit)
                 
             } catch (e: Exception) {
                 Logger.error("VM", "Force reset exception: ${e.message}")
@@ -1685,9 +1698,10 @@ fun toggleAggregator() {
                 savedFeedItemId = null
                 currentFilterMode = "Live Feed"
 
-                // Clear saved feed persistence so the DB flow doesn't resurrect old state
-                repository.putAppSetting("saved_feed_list", "")
-                repository.putAppSetting("saved_feed_active_id", "")
+                // Keep saved position intact so user does not lose their place on refresh
+
+                // Fetch fresh feeds from the network
+                repository.refreshFeeds()
 
                 // Refresh what's been seen / swiped so the new mix excludes them
                 refreshExclusionCaches()
@@ -2302,6 +2316,10 @@ fun toggleAggregator() {
                 _unifiedFeed.value = _unifiedFeed.value.filter { it.id != item.id }
                 return@launch
             }
+            // Mark item as viewed, read, and recorded so it never recurs in the unread Live Feed
+            markItemViewed(item.id, isMesh = false)
+            markItemReadState(item.id, true)
+            recordItemSwiped(item.id)
             repository.reactToFeedItemWithType(item, reactionType)
             if (reactionType == "like") repository.updateSavedState(item.id, true)
         }
@@ -2351,6 +2369,11 @@ fun toggleAggregator() {
     }
 
     fun reactToMeshPost(postId: String, reactionType: String = "like") {
+        markItemViewed(postId, isMesh = true)
+        if (reactionType == "noslop" || reactionType in setOf("downvote", "slop", "vomit", "clown")) {
+            recordItemSwiped(postId)
+            _unifiedFeed.value = _unifiedFeed.value.filter { it.id != postId }
+        }
         if (reactionType == "upvote" || reactionType == "downvote") viewModelScope.launch { repository.voteToMeshPost(postId, reactionType) }
         else viewModelScope.launch { repository.reactToMeshPost(postId, reactionType) }
     }

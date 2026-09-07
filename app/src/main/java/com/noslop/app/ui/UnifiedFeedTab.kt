@@ -779,6 +779,8 @@ fun UnifiedFeedTab(
     }
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
+    var hasRestoredInitialPosition by remember { mutableStateOf(false) }
+    val savedTargetId by viewModel.savedActiveItemId.collectAsState()
     
     LaunchedEffect(Unit) {
         viewModel.restoreScrollPositionEvent.collect { itemId ->
@@ -786,14 +788,18 @@ fun UnifiedFeedTab(
         }
     }
     
-    // Explicitly wait for unifiedItems state to populate before scrolling
-    LaunchedEffect(restoreItemId, unifiedItems) {
-        if (restoreItemId != null && unifiedItems.isNotEmpty()) {
-            val index = unifiedItems.indexOfFirst { it.id == restoreItemId }
+    // Scroll directly to saved position once unifiedItems populates on cold start
+    val activeRestoreTarget = restoreItemId ?: savedTargetId
+    LaunchedEffect(activeRestoreTarget, unifiedItems.size) {
+        if (!hasRestoredInitialPosition && !activeRestoreTarget.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
             if (index >= 0) {
                 pagerState.scrollToPage(index)
-                restoreItemId = null // Consume event
+                hasRestoredInitialPosition = true
+                restoreItemId = null
             }
+        } else if (unifiedItems.isNotEmpty() && activeRestoreTarget.isNullOrEmpty()) {
+            hasRestoredInitialPosition = true
         }
     }
 
@@ -808,13 +814,9 @@ fun UnifiedFeedTab(
             }
 
             if (currentItem !is UnifiedItem.Tutorial) {
-                // Only save position if we aren't currently waiting to restore a saved position
-                if (filterMode == "Live Feed" && !searchResultsActive && !isRefreshing && restoreItemId == null) {
-                    // Do not let startup page 0 overwrite a pending saved active slide position
-                    val currentSaved = viewModel.currentSavedFeedItemId
-                    if (currentSaved == null || currentSaved == currentItem.id || pagerState.settledPage > 0) {
-                        viewModel.saveFeedPosition(currentItem.id)
-                    }
+                // Only save position AFTER initial restore has completed so startup page 0 never clobbers saved state
+                if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                    viewModel.saveFeedPosition(currentItem.id)
                 }
 
                 if (currentItem is UnifiedItem.Feed && !currentItem.item.isRead) {
@@ -1908,22 +1910,20 @@ fun UnifiedFeedTab(
 private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.Context): Pair<String, String?>? {
     return when (item) {
         is UnifiedItem.Feed -> {
-            val mediaUrl = item.item.mediaUrl ?: return null
-            if (item.item.mediaType == "video" || item.item.mediaType == "audio") {
-                // Use the same key logic as FullScreenFeedCard: item.mediaUrl ?: item.url
+            val targetUrl = item.item.mediaUrl ?: item.item.url ?: return null
+            if (item.item.mediaType == "video" || item.item.mediaType == "audio" || isAudioItem(item) || isVideoItem(item)) {
                 val stableKey = item.item.mediaUrl ?: item.item.url ?: return null
                 Pair(stableKey, null)
             } else null
         }
         is UnifiedItem.Mesh -> {
             val type = item.post.mediaType ?: item.post.clearnetMediaType
-            if (type == "video" || type == "audio") {
+            if (type == "video" || type == "audio" || isAudioItem(item) || isVideoItem(item)) {
                 val resolvedUrl = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl ?: return null
-                // Use the same key logic as FullScreenMeshCardV2: post.mediaUrl ?: post.clearnetUrl
                 val rawUrl = item.post.mediaUrl ?: item.post.clearnetUrl ?: return null
                 val forced = if (resolvedUrl != rawUrl) resolvedUrl else null
                 Pair(rawUrl, forced)
-    } else null
+            } else null
         }
         is UnifiedItem.Tutorial -> null
     }

@@ -88,7 +88,7 @@ class SyncPacketHandler(
 
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            val maxBatchSize = 5
+            val maxBatchSize = 25
             
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {
@@ -215,7 +215,7 @@ class SyncPacketHandler(
 
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
-            val maxBatchSize = 5
+            val maxBatchSize = 25
 
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {

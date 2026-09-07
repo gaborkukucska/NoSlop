@@ -306,20 +306,25 @@ object PreloadManager {
         val streamId = com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(resolvedUrl)
             ?: com.noslop.app.feeds.api.YouTubeInternalClient.getStreamIdForUrl(rawUrl)
             ?: ("stream_" + (rawUrl.hashCode() and 0x7fffffff))
-        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(
+        val isYouTube = resolvedUrl.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
+        val mediaHttpClient = if (isYouTube) {
             com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
-        )
+        } else {
+            com.noslop.app.net.HttpClientProvider.activeClearnetClient
+        }
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(mediaHttpClient)
         val dataSourceFactory = androidx.media3.datasource.DefaultDataSource.Factory(context, httpDataSourceFactory)
         val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
 
-        // Low-latency initial buffer for pre-warming so ExoPlayer reaches READY in 1-2 seconds
+        // Generous rebuffer threshold so claimed player never loops on 1.8s stalls
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                5000,  // min buffer (5s)
-                20000, // max buffer (20s)
+                15000, // min buffer (15s)
+                50000, // max buffer (50s)
                 500,   // buffer for playback (0.5s)
-                1500   // buffer for playback after rebuffer (1.5s)
+                6000   // buffer for playback after rebuffer (6s)
             )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
@@ -389,8 +394,11 @@ object PreloadManager {
                     "PRELOAD",
                     "ExoPlayer error during preload for $rawUrl (code=${error.errorCode}): ${error.message}"
                 )
-                // Don't release here - VideoPlayer inspects playerError on claim
-                // and decides whether to re-resolve.
+                // Immediately evict dead preloaded player so claim() doesn't hand a broken player to UI
+                val quality = try {
+                    com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
+                } catch (_: Exception) { "medium" }
+                preloadedPlayers.remove("$rawUrl||$quality")?.player?.release()
             }
         })
     }
@@ -417,6 +425,16 @@ object PreloadManager {
                 "PRELOAD",
                 "Discarding preloaded player for $cacheKey — URL changed since warm-up (re-resolved). " +
                     "Building a fresh player."
+            )
+            preloadedPlayers.remove(cacheKey)
+            entry.player.release()
+            return null
+        }
+
+        if (entry.player.playerError != null) {
+            Logger.warn(
+                "PRELOAD",
+                "Discarding preloaded player for $cacheKey — player encountered background error (${entry.player.playerError?.errorCode})."
             )
             preloadedPlayers.remove(cacheKey)
             entry.player.release()

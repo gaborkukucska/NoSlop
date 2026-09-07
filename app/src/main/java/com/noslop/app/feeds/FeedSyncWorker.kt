@@ -9,6 +9,11 @@ import com.noslop.app.debug.Logger
 class FeedSyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         return try {
+            // If user is actively watching a video, defer background feed sync to protect Tor bandwidth
+            if (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                Logger.info("FEED_SYNC", "Video playback in progress — deferring background feed sync to protect Tor bandwidth")
+                return Result.retry()
+            }
             NoSlopApp.repository.refreshFeeds()
             Logger.info("FEED_SYNC", "Background WorkManager feed sync completed")
             Result.success()

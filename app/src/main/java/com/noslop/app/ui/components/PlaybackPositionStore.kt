@@ -129,6 +129,13 @@ internal object PlaybackPositionStore {
         persistRemove(url)
     }
 
+    fun clearAll() {
+        positions.clear()
+        lastPersistedMs.clear()
+        prefs?.edit()?.clear()?.apply()
+        Logger.info("VIDEO", "PlaybackPositionStore: cleared all saved playback positions")
+    }
+
     // ─── Disk helpers ───────────────────────────────────────────────────────
 
     private fun persistSave(url: String, positionMs: Long) {

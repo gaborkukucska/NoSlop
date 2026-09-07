@@ -32,6 +32,19 @@ import kotlinx.coroutines.withContext
  *
  * Behavior is a verbatim move from the original repository — no logic changes (ADR-004).
  */
+internal fun matchesNegativeKeywords(text: String, negativeKeywords: List<String>): Boolean {
+    val lowerText = text.lowercase()
+    for (kw in negativeKeywords) {
+        val clean = kw.trim().lowercase()
+        if (clean.isBlank()) continue
+        val regex = Regex("\\b${Regex.escape(clean)}\\b", RegexOption.IGNORE_CASE)
+        if (regex.containsMatchIn(lowerText)) {
+            return true
+        }
+    }
+    return false
+}
+
 class FeedRepository(
     private val context: Context,
     private val feedDao: FeedDao,
@@ -253,12 +266,22 @@ class FeedRepository(
             })
         }
 
+        // Fast ramp-up: fetch first 2 creators immediately so user has their favorite creator videos right away
+        val rampUpCreators = creatorKeywordList.take(2)
+        val remainingCreators = creatorKeywordList.drop(2)
+        for (creator in rampUpCreators) {
+            rampUpJobs.add(async(dispatcher) {
+                _feedBuildStatus.value = "Preparing your feed..."
+                fetchCreatorVideos(creator)
+            })
+        }
+
         val priorityCats = listOf("Video Platforms", "Music").mapNotNull { cat -> activeCategories.find { it == cat } }
         for (cat in priorityCats) {
             activeCategories.remove(cat)
             rampUpJobs.add(async(dispatcher) {
                 _feedBuildStatus.value = "Preparing your feed..."
-                fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
+                fetchApiCategory(cat, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
             })
         }
 
@@ -282,25 +305,22 @@ class FeedRepository(
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo, creatorKeywordList)
+                    fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
                 }
             })
         }
 
-        // --- Phase 3: Creator Specific API searches (run only if Tor is not congested) ---
-        if (!com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-            val sampledCreators = creatorKeywordList.shuffled().take(3)
-            for (creator in sampledCreators) {
-                backgroundJobs.add(async(dispatcher) {
-                    try {
-                        searchCustomFeed(creator, null)
-                    } catch(e: Exception) { 
-                        Logger.error(TAG, "Creator sync failed", e.message) 
-                    }
-                })
-            }
+        // --- Phase 3: Creator Specific API searches for all remaining creators ---
+        for (creator in remainingCreators) {
+            backgroundJobs.add(async(dispatcher) {
+                try {
+                    fetchCreatorVideos(creator)
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
+                }
+            })
         }
 
         try {
@@ -322,7 +342,7 @@ class FeedRepository(
                     val text = "${item.title} ${item.excerpt}".lowercase()
                     val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
                     val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
-                    !isBanned && allNegative.none { text.contains(it) }
+                    !isBanned && !matchesNegativeKeywords(text, allNegative)
                 }
                 if (filteredItems.isNotEmpty()) {
                     feedDao.insertItems(filteredItems)
@@ -336,26 +356,43 @@ class FeedRepository(
         }
     }
 
+    private suspend fun fetchCreatorVideos(creator: String) {
+        try {
+            Logger.info(TAG, "Fetching latest videos for creator: $creator")
+            var items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = true)
+            if (items.isEmpty()) {
+                items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = false)
+            }
+            if (items.isNotEmpty()) {
+                val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
+                val userNegative = preferencesRepository.getUserNegativeKeywords()
+                val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
+                val filteredItems = items.filter { item ->
+                    val text = "${item.title} ${item.excerpt}".lowercase()
+                    val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
+                    val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
+                    !isBanned && !matchesNegativeKeywords(text, allNegative)
+                }
+                if (filteredItems.isNotEmpty()) {
+                    feedDao.insertItems(filteredItems)
+                    Logger.info(TAG, "Fetched ${filteredItems.size} videos for creator: $creator")
+                }
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Failed fetching videos for creator $creator: ${e.message}")
+        }
+    }
+
     private suspend fun fetchApiCategory(
         category: String,
         explicitApiSources: List<FeedSource>,
         userCategories: List<String>,
         langPref: String,
         allNegative: List<String>,
-        apiKeyRepo: ApiKeyRepository,
-        creatorKeywordList: List<String>
+        apiKeyRepo: ApiKeyRepository
     ) {
         try {
             val keywords = preferencesRepository.getUserKeywordsForCategory(category).toMutableList()
-            
-            // Enrich with creator keywords relevant to this category
-            val relevantCreators = com.noslop.app.feeds.SourceLibrary.creatorSuggestionsByCategory[category]
-            if (relevantCreators != null) {
-                val matchedCreators = creatorKeywordList.filter { it in relevantCreators }
-                if (matchedCreators.isNotEmpty()) {
-                    keywords.addAll(matchedCreators.shuffled().take(3)) // Take a few relevant ones
-                }
-            }
 
             if (category == "Music") {
                 val genres = preferencesRepository.getSelectedMusicGenres()
@@ -389,7 +426,7 @@ class FeedRepository(
                     val text = "${item.title} ${item.excerpt}".lowercase()
                     val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
                     val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
-                    !isBanned && allNegative.none { text.contains(it) }
+                    !isBanned && !matchesNegativeKeywords(text, allNegative)
                 }
                 if (filteredApiItems.isNotEmpty()) {
                     feedDao.insertItems(filteredApiItems)
@@ -442,7 +479,7 @@ class FeedRepository(
 
                 val filteredApiItems = apiItems.filter { item ->
                     val text = "${item.title} ${item.excerpt}".lowercase()
-                    allNegative.none { text.contains(it) }
+                    !matchesNegativeKeywords(text, allNegative)
                 }
 
                 if (filteredApiItems.isNotEmpty()) {
