@@ -1947,6 +1947,13 @@ In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDat
 - Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
 - Search results replace the active feed instead of appending to the live feed.
 
+### 20.7 Mesh Tab Instant Empty State & Position Restoration on Return
+Previously, toggling to the Mesh tab checked `if (isRefreshing)` before checking for Mesh empty state. Because background clearnet feed sync was running over Tor, `isRefreshing` remained true for up to a minute, displaying "Curating your feed..." over the Mesh tab despite no clearnet feeds belonging to Mesh mode. Additionally, `loadMoreFeedItems()` in `NoSlopViewModel` triggered `refreshFeeds()` whenever `unseenFeeds.isEmpty()`, which was always true on the Mesh tab.
+- `NoSlopViewModel.loadMoreFeedItems()` restricts `isUsingFallback` to feed modes (`actualFilter == "Live Feed" || actualFilter == "Random"`), preventing Mesh switches from firing clearnet sync.
+- `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card with the "See Old Posts" button by default with zero delay.
+- The tab-switching restore mechanism uses a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)` independent of the one-time cold-start flag, restoring the exact slide position when returning to "All".
+- On tab clicks ("All" / "Mesh"), `lastSettledPage` is reset to -1 so tab switches do not trigger false swipe-away events against the vacated slide.
+
 ---
 ---
 

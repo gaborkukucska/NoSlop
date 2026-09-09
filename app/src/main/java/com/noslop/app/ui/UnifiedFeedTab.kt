@@ -799,23 +799,31 @@ fun UnifiedFeedTab(
         }
     }
     
-    // Scroll directly to saved position once unifiedItems populates on cold start and saved target is loaded
-    val activeRestoreTarget = restoreItemId ?: savedTargetId
-    LaunchedEffect(isSavedPositionLoaded, activeRestoreTarget, unifiedItems.size) {
+    // 1. Dedicated restore handler for tab switching (All <-> Mesh) and navigation events
+    LaunchedEffect(restoreItemId, unifiedItems.size) {
+        val target = restoreItemId
+        if (!target.isNullOrEmpty() && unifiedItems.isNotEmpty()) {
+            val index = unifiedItems.indexOfFirst { it.id == target }
+            if (index >= 0) {
+                pagerState.scrollToPage(index)
+                lastSettledPage = index
+                restoreItemId = null // Consumed
+            }
+        }
+    }
+
+    // 2. Cold-start restore handler: runs once when savedTargetId is loaded from Room SQLite
+    LaunchedEffect(isSavedPositionLoaded, savedTargetId, unifiedItems.size) {
         if (!hasRestoredInitialPosition && isSavedPositionLoaded && unifiedItems.isNotEmpty()) {
-            if (!activeRestoreTarget.isNullOrEmpty()) {
-                val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
+            val target = savedTargetId
+            if (!target.isNullOrEmpty()) {
+                val index = unifiedItems.indexOfFirst { it.id == target }
                 if (index >= 0) {
                     pagerState.scrollToPage(index)
                     lastSettledPage = index
-                    hasRestoredInitialPosition = true
-                    restoreItemId = null
-                } else {
-                    hasRestoredInitialPosition = true
                 }
-            } else {
-                hasRestoredInitialPosition = true
             }
+            hasRestoredInitialPosition = true
         }
     }
 
@@ -950,28 +958,38 @@ fun UnifiedFeedTab(
 
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                if (isRefreshing) {
+                if (filterMode == "Mesh") {
+                    if (!showOldMeshPosts) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                            Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("Nothing New Here".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("You're all caught up on mesh posts.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = { viewModel.setShowOldMeshPosts(true) },
+                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("See Old Posts".tr, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                            Icon(Icons.Default.Hub, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text("No Mesh Posts Found".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("No posts have been received from the mesh network yet.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                } else if (isRefreshing) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Spacer(modifier = Modifier.height(16.dp))
                         Text("Curating your feed...".tr, color = TextMuted, fontWeight = FontWeight.Bold)
-                    }
-                } else if (filterMode == "Mesh" && viewModel.hasMeshPosts && !showOldMeshPosts) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
-                        Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Nothing New Here".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("You're all caught up on mesh posts.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
-                        Spacer(modifier = Modifier.height(24.dp))
-                        Button(
-                            onClick = { viewModel.setShowOldMeshPosts(true) },
-                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("See Old Posts".tr, fontWeight = FontWeight.Bold)
-                        }
                     }
                 } else {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1095,6 +1113,7 @@ fun UnifiedFeedTab(
                                 .background(if (!isMeshOnly) AccentGreen else Color.Transparent)
                                 .clickable {
                                     if (isActiveTab && filterMode != "Live Feed") {
+                                        lastSettledPage = -1
                                         filterMode = "Live Feed"
                                     }
                                 }
@@ -1118,6 +1137,7 @@ fun UnifiedFeedTab(
                                         if (filterMode == "Live Feed" && pagerState.currentPage in unifiedItems.indices) {
                                             viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                         }
+                                        lastSettledPage = -1
                                         filterMode = "Mesh"
                                     }
                                 }

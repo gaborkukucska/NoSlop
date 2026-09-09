@@ -912,8 +912,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 cKey !in excludedFeedKeys
             }
         }
-        // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed
-        val isUsingFallback = unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive
+        // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed (feed modes only)
+        val isFeedMode = actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random"
+        val isUsingFallback = isFeedMode && unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive
         if (isUsingFallback) {
             // Never resurrect items the user already saved, swiped away, or viewed
             unseenFeeds = allFeeds.filter { 

@@ -7,6 +7,11 @@
   * `UnifiedFeedTab.kt` detects page transitions using hoisted `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
   * `EngagementRepository.recordSwipe()` now writes the raw `itemId`, normalized ID (`normId`), and canonical URL/title key (`canonicalKey`) into `swipe_tracker`.
   * Updated `loadMoreFeedItems()` in `NoSlopViewModel.kt` to check `cachedExcludedIds` and `cachedViewedIds` across all representation keys, preventing swiped or viewed items from resurrecting into the Live Feed.
+* **Mesh Tab Instant "Nothing New Here" Default & Tab-Switch Restore (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Prioritized `filterMode == "Mesh"` in the empty-feed container of `UnifiedFeedTab.kt`, completely decoupling the Mesh view from `isRefreshing`. Toggling to Mesh now displays "Nothing New Here" and the "See Old Posts" button instantly with zero delay, rather than stalling for 30s behind clearnet background sync.
+  * Restricted `isUsingFallback` in `NoSlopViewModel.loadMoreFeedItems()` to feed modes (`Live Feed` / `Random`), preventing Mesh mode from ever misinterpreting empty clearnet lists as feed exhaustion or triggering redundant clearnet refreshes.
+  * Decoupled `restoreScrollPositionEvent` handling in `UnifiedFeedTab.kt` into a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)`, guaranteeing that returning from Mesh back to "All" restores the exact slide position instantly.
+  * Reset `lastSettledPage = -1` on All/Mesh toggle clicks so switching tabs never falsely marks the vacated slide as swiped away.
 * **Cold-Start Slide Position Persistence (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
   * Eliminated cold-start position clobbering: introduced `isSavedPositionLoaded` StateFlow in `NoSlopViewModel.kt` to ensure Compose waits for SQLite to load `saved_feed_active_id`.
   * Prevented Room's initial empty emission on cold start from clearing the saved feed list by waiting until `feeds.isNotEmpty() || meshes.isNotEmpty()`.
