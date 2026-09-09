@@ -141,7 +141,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                 messages = activeChatMessages,
                 localKeys = localKeys,
                 viewModel = viewModel,
-                onSendMessage = { txt, media, replyTo -> viewModel.sendGroupMessage(activeGroup.groupId, txt, media, replyTo) },
+                onSendMessage = { txt, media, replyTo, privacy -> viewModel.sendGroupMessage(activeGroup.groupId, txt, media, replyTo, privacy) },
                 onBack = { viewModel.selectGroupChat(null) }
             )
         }
@@ -974,11 +974,55 @@ fun CreateGroupDialog(
             }
         },
         confirmButton = {
+            var showOpenGroupWarning by remember { mutableStateOf(false) }
+
+            if (showOpenGroupWarning) {
+                AlertDialog(
+                    onDismissRequest = { showOpenGroupWarning = false },
+                    containerColor = SurfaceDark,
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Group Warning".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    text = {
+                        Text(
+                            "Allowing members to invite peers will open this group across the mesh network, enabling anyone in the group to add new members. Members can still choose 'Friends Only' messaging to keep their messages private to direct contacts, and as the admin you can always remove any member at any time. Do you want to proceed?".tr,
+                            color = TextLight,
+                            fontSize = 14.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showOpenGroupWarning = false
+                                onCreate(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, selectedPubs.toList())
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            Text("Create Group".tr, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showOpenGroupWarning = false }) {
+                            Text("Review Settings".tr, color = TextMuted)
+                        }
+                    }
+                )
+            }
+
             Button(
                 onClick = {
                     if (title.isNotBlank()) {
-                        onCreate(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, selectedPubs.toList())
-                        onDismiss()
+                        if (allowInvites) {
+                            showOpenGroupWarning = true
+                        } else {
+                            onCreate(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, selectedPubs.toList())
+                            onDismiss()
+                        }
                     }
                 },
                 enabled = title.isNotBlank(),

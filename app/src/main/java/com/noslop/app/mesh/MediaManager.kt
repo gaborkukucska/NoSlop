@@ -24,7 +24,7 @@ object MediaManager {
     const val MIN_CHUNK_SIZE = 128 * 1024
     const val MAX_CHUNK_SIZE = 1024 * 1024
     const val DOWNLOAD_TIMEOUT_MS = 90000L // 90 seconds (generous for Tor, avoids dead time)
-    private const val MAX_CONCURRENCY = 4
+    private const val MAX_CONCURRENCY = 2
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var repository: NoSlopRepository? = null
@@ -523,6 +523,13 @@ object MediaManager {
     private fun requestNextChunks(dl: ActiveDownload) {
         val repo = repository ?: return
         val peer = dl.peerOnion ?: return
+
+        // Throttle background mesh sync when user is actively watching or resolving video in foreground
+        if (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+            Logger.debug(TAG, "Throttling background media chunk download while video is playing")
+            return
+        }
+
         val now = System.currentTimeMillis()
 
         val requestsToSend = mutableListOf<Pair<Long, Int>>()
@@ -685,7 +692,7 @@ object MediaManager {
                 } else {
                     dl.currentConcurrency += 1.0 / Math.floor(dl.currentConcurrency) // Congestion avoidance
                 }
-                dl.currentConcurrency = Math.min(4.0, dl.currentConcurrency) // Max 4 concurrent requests over Tor
+                dl.currentConcurrency = Math.min(2.0, dl.currentConcurrency) // Max 2 concurrent requests over Tor
             }
             requestNextChunks(dl)
         }

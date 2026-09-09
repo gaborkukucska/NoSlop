@@ -270,6 +270,8 @@ data class GroupInvitePayload(
     @SerializedName("avatar_b64") val avatarB64: String? = null,
     @SerializedName("description") val description: String? = null,
     @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("allow_member_invites") val allowMemberInvites: Boolean = true,
+    @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean = true,
     val timestamp: Long,
     val signature: String
 )
@@ -282,6 +284,8 @@ data class GroupUpdatePayload(
     @SerializedName("added_members") val addedMembers: List<String>? = null,
     @SerializedName("removed_members") val removedMembers: List<String>? = null,
     @SerializedName("member_handles") val memberHandles: Map<String, String>? = null,
+    @SerializedName("allow_member_invites") val allowMemberInvites: Boolean? = null,
+    @SerializedName("allow_member_self_remove") val allowMemberSelfRemove: Boolean? = null,
     val timestamp: Long,
     val signature: String
 )
@@ -303,6 +307,20 @@ data class GroupSyncPayload(
     @SerializedName("group_chat_json") val groupChatJson: String,
     val timestamp: Long,
     val signature: String
+)
+
+data class GroupMessagePayload(
+    val id: String,
+    @SerializedName("group_id") val groupId: String,
+    @SerializedName("sender_handle") val senderHandle: String,
+    @SerializedName("sender_tripcode") val senderTripcode: String? = null,
+    val content: String,
+    val timestamp: Long,
+    val privacy: String = "public",
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_type") val mediaType: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    @SerializedName("reply_to") val replyToMessageId: String? = null
 )
 
 data class TypingPayload(
@@ -497,6 +515,10 @@ data class NetworkPacket(
 
     fun getGroupSyncPayload(): GroupSyncPayload? = if (type == "GROUP_SYNC" && payload != null) {
         Gson().fromJson(payload, GroupSyncPayload::class.java)
+    } else null
+
+    fun getGroupMessagePayload(): GroupMessagePayload? = if (type == "GROUP_MESSAGE" && payload != null) {
+        Gson().fromJson(payload, GroupMessagePayload::class.java)
     } else null
 
     fun getTypingPayload(): TypingPayload? = if (type == "TYPING" && payload != null) {

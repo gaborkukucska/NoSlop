@@ -220,6 +220,20 @@ object MeshPacketVerifier {
         }
 
         "GROUP_INVITE" -> packet.getGroupInvitePayload()?.let { p ->
+            val candidates = (listOf(p.adminPublicKeyB64) + p.members).distinct()
+            for (candidate in candidates) {
+                if (candidate.isBlank()) continue
+                val encCand = com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, candidate, p.timestamp.toString())
+                val encAdmin = com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, p.adminPublicKeyB64, p.timestamp.toString())
+                val pipeCand = "${p.groupId}|${p.title}|$candidate|${p.timestamp}"
+                val pipeAdmin = "${p.groupId}|${p.title}|${p.adminPublicKeyB64}|${p.timestamp}"
+                if (CryptoService.verify(encCand, p.signature, candidate) ||
+                    CryptoService.verify(encAdmin, p.signature, candidate) ||
+                    CryptoService.verify(pipeCand, p.signature, candidate) ||
+                    CryptoService.verify(pipeAdmin, p.signature, candidate)) {
+                    return@let Signed(encCand, p.signature, candidate)
+                }
+            }
             Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.groupId, p.title, p.adminPublicKeyB64, p.timestamp.toString()), p.signature, p.adminPublicKeyB64)
         }
 

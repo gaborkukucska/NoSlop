@@ -730,6 +730,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             avatarB64 = avatarB64,
             description = description,
             memberHandles = memberHandlesMap,
+            allowMemberInvites = allowMemberInvites,
+            allowMemberSelfRemove = allowMemberSelfRemove,
             timestamp = timestamp,
             signature = signature
         )
@@ -769,8 +771,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     membersJson = membersJson,
                     createdAt = invite.timestamp,
                     description = invite.description,
-                    allowMemberInvites = true,
-                    allowMemberSelfRemove = true,
+                    allowMemberInvites = invite.allowMemberInvites,
+                    allowMemberSelfRemove = invite.allowMemberSelfRemove,
                     avatarB64 = invite.avatarB64,
                     memberHandlesJson = memberHandlesJson
                 )
@@ -808,18 +810,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
     }
 
-    suspend fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
+    suspend fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null, privacy: String = "public") {
         val myKeys = getLocalIdentity() ?: return
         val group = db.groupChatDao().getGroupChatById(groupId) ?: return
         val msgId = java.util.UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
-
-        val jsonPayload = com.google.gson.JsonObject().apply {
-            addProperty("content", text)
-            addProperty("groupId", groupId)
-            if (media != null) add("media", com.google.gson.Gson().toJsonTree(media))
-            if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
-        }.toString()
+        val myHandle = getLocalHandle() ?: "Me"
 
         val localMsg = ChatMessage(
             id = msgId,
@@ -838,33 +834,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
         } catch (e: Exception) { emptyList() }
 
-        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, localEcho=$msgId")
+        Logger.info("REPOSITORY", "sendGroupMessage: groupId=$groupId, members=${memberPubs.size}, privacy=$privacy, localEcho=$msgId")
 
-        var sentCount = 0
+        val jsonPayload = com.google.gson.JsonObject().apply {
+            addProperty("content", text)
+            addProperty("groupId", groupId)
+            if (media != null) add("media", com.google.gson.Gson().toJsonTree(media))
+            if (replyToMessageId != null) addProperty("replyTo", replyToMessageId)
+        }.toString()
+
+        var directSentCount = 0
+        var hasUnconnectedMembers = false
+
         for (memberPub in memberPubs) {
             if (memberPub == myKeys.publicKeyB64) continue
             val peer = peerDao.getPeerByPublicKey(memberPub)
-            if (peer == null) {
-                Logger.warn("REPOSITORY", "sendGroupMessage: skipping member ${memberPub.take(12)}... (not in peerDao)")
+            if (peer == null || peer.onionAddress.isBlank()) {
+                hasUnconnectedMembers = true
                 continue
             }
-            if (peer.onionAddress.isBlank()) {
-                Logger.warn("REPOSITORY", "sendGroupMessage: skipping member ${memberPub.take(12)}... (no onion address)")
+            if (privacy == "friends" && !peer.isTrusted) {
                 continue
             }
+
             val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
-            // --- NOSLOP_GROUP_DM_V1 ---
-            // encryptDM expects the X25519 key. This used to pass
-            // myKeys.privateKeyB64 (Ed25519); decodeX25519PrivateKey threw,
-            // encryptDM caught it and returned Pair("", ""), and every group
-            // message went out empty with no error surfaced anywhere.
             val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
             if (ciphertext.isBlank() || nonce.isBlank()) {
                 Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
                 continue
             }
-            // groupId has to ride on the payload or the receiver has no way
-            // to route this into the group thread.
+
             val msgPayload = com.noslop.app.mesh.EncryptedPayload(id = msgId, ciphertext = ciphertext, nonce = nonce, groupId = groupId, timestamp = timestamp)
             val packet = com.noslop.app.mesh.NetworkPacket(
                 id = java.util.UUID.randomUUID().toString(),
@@ -873,10 +872,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 type = "MESSAGE",
                 payload = com.google.gson.Gson().toJsonTree(msgPayload)
             )
-            meshTransport.sendPacket(peer.onionAddress, packet = packet)
-            sentCount++
+            meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
+            directSentCount++
         }
-        Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $sentCount/${memberPubs.size - 1} member(s)")
+
+        // When the group has unconnected members or message is public, broadcast GROUP_MESSAGE over mesh gossip
+        if (privacy == "public" || hasUnconnectedMembers) {
+            val groupMsgPayload = com.noslop.app.mesh.GroupMessagePayload(
+                id = msgId,
+                groupId = groupId,
+                senderHandle = myHandle,
+                senderTripcode = myKeys.tripcode,
+                content = text,
+                timestamp = timestamp,
+                privacy = privacy,
+                mediaId = media?.id,
+                mediaType = media?.type,
+                mediaMetadata = media,
+                replyToMessageId = replyToMessageId
+            )
+            val broadcastPacket = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = if (privacy == "friends") 1 else 6,
+                senderId = myKeys.publicKeyB64,
+                type = "GROUP_MESSAGE",
+                payload = com.google.gson.Gson().toJsonTree(groupMsgPayload)
+            )
+            com.noslop.app.mesh.GossipService.broadcast(broadcastPacket)
+            Logger.info("REPOSITORY", "sendGroupMessage: broadcasted GROUP_MESSAGE over mesh gossip (privacy=$privacy, hops=${broadcastPacket.hops})")
+        }
+        Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $directSentCount direct member(s)")
     }
 
     suspend fun updateGroupChat(
@@ -917,27 +942,36 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }
         val memberHandlesMap = existingHandles.toMap()
 
+        val isAdmin = existing.adminPublicKeyB64 == myKeys.publicKeyB64
+        val effectiveTitle = if (isAdmin) title else existing.title
+        val effectiveDescription = if (isAdmin) description else existing.description
+        val effectiveAvatarB64 = if (isAdmin) avatarB64 else existing.avatarB64
+        val effectiveAllowInvites = if (isAdmin) allowInvites else existing.allowMemberInvites
+        val effectiveAllowSelfRemove = if (isAdmin) allowSelfRemove else existing.allowMemberSelfRemove
+
         val updatedGroup = existing.copy(
-            title = title,
-            description = description,
-            avatarB64 = avatarB64,
-            allowMemberInvites = allowInvites,
-            allowMemberSelfRemove = allowSelfRemove,
+            title = effectiveTitle,
+            description = effectiveDescription,
+            avatarB64 = effectiveAvatarB64,
+            allowMemberInvites = effectiveAllowInvites,
+            allowMemberSelfRemove = effectiveAllowSelfRemove,
             membersJson = membersJson,
             memberHandlesJson = com.google.gson.Gson().toJson(memberHandlesMap)
         )
         db.groupChatDao().insertGroupChat(updatedGroup)
 
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, title, myKeys.publicKeyB64, timestamp.toString())
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(groupId, effectiveTitle, myKeys.publicKeyB64, timestamp.toString())
         val signature = com.noslop.app.crypto.CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
         val updatePayload = com.noslop.app.mesh.GroupUpdatePayload(
             groupId = groupId,
-            title = title,
-            avatarB64 = avatarB64,
-            description = description,
+            title = if (isAdmin) effectiveTitle else null,
+            avatarB64 = if (isAdmin) effectiveAvatarB64 else null,
+            description = if (isAdmin) effectiveDescription else null,
             addedMembers = addedMembers.takeIf { it.isNotEmpty() },
             removedMembers = removedMembers.takeIf { it.isNotEmpty() },
             memberHandles = memberHandlesMap,
+            allowMemberInvites = if (isAdmin) effectiveAllowInvites else null,
+            allowMemberSelfRemove = if (isAdmin) effectiveAllowSelfRemove else null,
             timestamp = timestamp,
             signature = signature
         )
@@ -968,12 +1002,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         if (addedMembers.isNotEmpty()) {
             val invitePayload = com.noslop.app.mesh.GroupInvitePayload(
                 groupId = groupId,
-                title = title,
+                title = effectiveTitle,
                 adminPublicKeyB64 = existing.adminPublicKeyB64,
                 members = newMembers,
-                avatarB64 = avatarB64,
-                description = description,
+                avatarB64 = effectiveAvatarB64,
+                description = effectiveDescription,
                 memberHandles = memberHandlesMap,
+                allowMemberInvites = existing.allowMemberInvites,
+                allowMemberSelfRemove = existing.allowMemberSelfRemove,
                 timestamp = timestamp,
                 signature = signature
             )
@@ -1115,6 +1151,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             avatarB64 = group.avatarB64,
             description = group.description,
             memberHandles = memberHandlesMap,
+            allowMemberInvites = group.allowMemberInvites,
+            allowMemberSelfRemove = group.allowMemberSelfRemove,
             timestamp = timestamp,
             signature = signature
         )
@@ -1390,6 +1428,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun updateSavedState(itemId: String, isSaved: Boolean) =
         feedRepository.updateSavedState(itemId, isSaved)
+
+    suspend fun getSavedFeedItemsList(): List<FeedItem> = withContext(Dispatchers.IO) {
+        db.feedDao().getSavedItemsList()
+    }
 
     // --- Engagement: viewed history & swipe tracking (delegated to EngagementRepository) ---
     // Thin pass-throughs preserving the repository's public API; logic lives in the extracted,

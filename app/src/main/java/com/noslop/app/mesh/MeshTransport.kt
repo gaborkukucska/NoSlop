@@ -25,9 +25,10 @@ class MeshTransport(
     private var isRunning = false
 
     @Volatile private var listening = false
-    // Dedicated priority concurrency pools: DMs and handshakes have reserved permits and are never starved by bulk feed/media sync
+    // Dedicated priority concurrency pools: DMs/groups, bulk feed, and media chunks each have isolated pools
     private val dmSemaphore = kotlinx.coroutines.sync.Semaphore(4)
     private val bulkSemaphore = kotlinx.coroutines.sync.Semaphore(4)
+    private val mediaSemaphore = kotlinx.coroutines.sync.Semaphore(2)
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private val MAX_SIMULTANEOUS_CONNECTIONS = 16
 
@@ -81,42 +82,47 @@ class MeshTransport(
         activeConnections.incrementAndGet()
         Logger.info(TAG, "Incoming TCP connection from $clientIp (active: ${activeConnections.get()})")
         try {
-            socket.soTimeout = 30000 // 30-second read timeout
+            socket.soTimeout = 45000 // 45-second read timeout to accommodate Tor latency
 
-            // --- NOSLOP_FRAME_CAP_V1 ---
-            // BufferedReader.readLine() has no upper bound. A peer that sends
-            // bytes forever without a newline buffered all of them into heap,
-            // which is a one-connection OOM. Read framed by hand with a cap and
-            // drop the connection when a frame exceeds it.
-            val reader = InputStreamReader(BufferedInputStream(socket.getInputStream()), Charsets.UTF_8)
-            val frame = StringBuilder(8192)
+            // Bounded buffer reading in 8KB chunks: avoids millions of loop iterations
+            // on large 1MB media chunks while strictly enforcing MAX_PACKET_CHARS.
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8), 32768)
+            val frame = StringBuilder(16384)
+            val buf = CharArray(8192)
+
             while (true) {
-                val ch = reader.read()
-                if (ch == -1) break
-                if (ch == '\r'.code) continue
-                if (ch != '\n'.code) {
+                val count = reader.read(buf)
+                if (count == -1) break
+                var start = 0
+                for (i in 0 until count) {
+                    val c = buf[i]
+                    if (c == '\n') {
+                        for (j in start until i) {
+                            if (buf[j] != '\r') frame.append(buf[j])
+                        }
+                        start = i + 1
+                        val packetStr = frame.toString().trim()
+                        frame.setLength(0)
+                        if (packetStr.isNotEmpty()) {
+                            try {
+                                Logger.debug(TAG, "Parsing incoming packet (length: ${packetStr.length})")
+                                val packet = NetworkPacket.fromJson(packetStr)
+                                Logger.info(TAG, "Received packet over TCP", "type=${packet.type}")
+                                repository.handleIncomingPacket(packet)
+                            } catch (e: Exception) {
+                                Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}", "bytes=${packetStr.length}")
+                            }
+                        }
+                    }
+                }
+                if (start < count) {
+                    for (j in start until count) {
+                        if (buf[j] != '\r') frame.append(buf[j])
+                    }
                     if (frame.length >= MAX_PACKET_CHARS) {
                         Logger.warn(TAG, "Dropping connection from $clientIp: frame exceeded $MAX_PACKET_CHARS chars with no newline")
                         return@withContext
                     }
-                    frame.append(ch.toChar())
-                    continue
-                }
-
-                val packetStr = frame.toString().trim()
-                frame.setLength(0)
-                if (packetStr.isEmpty()) continue
-
-                try {
-                    Logger.debug(TAG, "Parsing incoming packet (length: ${packetStr.length})")
-                    val packet = NetworkPacket.fromJson(packetStr)
-                    Logger.info(TAG, "Received packet over TCP", "type=${packet.type}")
-                    repository.handleIncomingPacket(packet)
-                } catch (e: Exception) {
-                    // NOSLOP_NO_RAW_FRAME_LOG_V1 — the raw frame used to be logged
-                    // here. It lands in the user-exportable log file and can carry
-                    // DM ciphertext, nonces and peer public keys.
-                    Logger.error(TAG, "Failed to parse incoming packet JSON: ${e.message}", "bytes=${packetStr.length}")
                 }
             }
         } catch (e: Exception) {
@@ -165,6 +171,7 @@ class MeshTransport(
             packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" ||
             packet.type == "GROUP_QUERY" || packet.type == "GROUP_SYNC"
 
+        val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isInteractive = packet.type == "CHAT_REACTION" || packet.type == "TYPING" || packet.type == "READ_RECEIPT"
         val isBackground = packet.type == "ANNOUNCE_PEER" || packet.type == "ANNOUNCE_DISCOVERABLE" || packet.type == "USER_EXIT"
 
@@ -174,25 +181,42 @@ class MeshTransport(
             return@withContext pushedToHub
         }
 
-        val acquiredDmSemaphore: Boolean
+        var acquiredDm = false
+        var acquiredMedia = false
+        var acquiredBulk = false
+
         if (isDmHighPriority) {
             dmSemaphore.acquire()
-            acquiredDmSemaphore = true
+            acquiredDm = true
         } else if (isInteractive) {
-            acquiredDmSemaphore = dmSemaphore.tryAcquire()
-            if (!acquiredDmSemaphore && !bulkSemaphore.tryAcquire()) {
+            if (dmSemaphore.tryAcquire()) {
+                acquiredDm = true
+            } else if (bulkSemaphore.tryAcquire()) {
+                acquiredBulk = true
+            } else {
                 Logger.warn(TAG, "Dropping interactive ${packet.type} to $onionAddress: circuits busy")
                 return@withContext pushedToHub
             }
+        } else if (isMediaPacket) {
+            var acquired = false
+            val waitUntilMs = System.currentTimeMillis() + 6000L
+            while (System.currentTimeMillis() < waitUntilMs) {
+                if (mediaSemaphore.tryAcquire()) { acquired = true; break }
+                delay(100)
+            }
+            if (!acquired) {
+                Logger.warn(TAG, "Dropping media ${packet.type} to $onionAddress: media circuits busy")
+                return@withContext pushedToHub
+            }
+            acquiredMedia = true
         } else if (isBackground) {
-            acquiredDmSemaphore = false
             if (!bulkSemaphore.tryAcquire()) {
                 Logger.warn(TAG, "Dropping background ${packet.type} to $onionAddress: bulk circuits busy")
                 return@withContext pushedToHub
             }
+            acquiredBulk = true
         } else {
-            // Bulk sync (posts, comments, media chunks) acquires strictly from bulkSemaphore
-            acquiredDmSemaphore = false
+            // Bulk feed/comment/post sync acquires strictly from bulkSemaphore
             var acquired = false
             val waitUntilMs = System.currentTimeMillis() + 4000L
             while (System.currentTimeMillis() < waitUntilMs) {
@@ -203,14 +227,16 @@ class MeshTransport(
                 Logger.warn(TAG, "Dropping bulk ${packet.type} to $onionAddress: bulk circuits busy")
                 return@withContext pushedToHub
             }
+            acquiredBulk = true
         }
 
         try {
-            val maxAttempts = if (isDmHighPriority) 2 else 1
+            val maxAttempts = if (isDmHighPriority) 3 else 1
             val connectTimeout = when {
-                isDmHighPriority -> 15000
-                isInteractive -> 6000
-                else -> 10000
+                isDmHighPriority -> 25000
+                isInteractive -> 8000
+                isMediaPacket -> 20000
+                else -> 12000
             }
             for (attempt in 1..maxAttempts) {
                 var socket: Socket? = null
@@ -258,7 +284,9 @@ class MeshTransport(
             GossipService.recordSendFailure(onionAddress)
             return@withContext pushedToHub
         } finally {
-            if (acquiredDmSemaphore) dmSemaphore.release() else bulkSemaphore.release()
+            if (acquiredDm) dmSemaphore.release()
+            if (acquiredMedia) mediaSemaphore.release()
+            if (acquiredBulk) bulkSemaphore.release()
         }
     }
 }

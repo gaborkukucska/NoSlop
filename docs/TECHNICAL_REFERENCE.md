@@ -2006,6 +2006,67 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 - **Resolve Permit Priority**: In `YouTubeInternalClient.kt`, background preloads (`isPreload = true`) now use a 2-second timeout on `playerResolveGate` and yield immediately if permits are busy, preventing speculative preloads from locking out the active on-screen video.
 - **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
 
+## 21. Non-Admin Group Chat Parity, Tri-Channel Transport & Video Buffer Resilience (2026-09-09)
+
+### 21.1 Multi-Signer Group Invite & Update Authorization
+Previously, non-admin members could not invite peers to group chats even when `allowMemberInvites` was enabled by the admin:
+1. `MeshPacketVerifier.kt` and `HandshakePacketHandler.handleGroupInvite` strictly verified the signature against `invite.adminPublicKeyB64`. Because non-admins sign with their own private key, incoming invites were rejected with "bad admin signature".
+2. `HandshakePacketHandler.kt` evaluated a pipe-delimited payload `"$groupId|$title|$adminPub|$timestamp"`, whereas `NoSlopRepository.kt` generated signatures using `encodeForSigning`.
+3. `HandshakePacketHandler.resolveUpdateSigner` verified `GROUP_UPDATE` using pipe delimiters only, failing verification on existing members.
+4. `MeshSocialRepository.dispatchPacket` only enqueued `MESSAGE` packets in `pendingOutboxMessages`, causing failed `GROUP_INVITE` and `GROUP_UPDATE` packets to be dropped permanently without retries.
+
+**Implementations Applied:**
+- `MeshPacketVerifier.kt` and `HandshakePacketHandler.handleGroupInvite` inspect candidate signers across both `adminPublicKeyB64` and `invite.members`, verifying against both `encodeForSigning` and legacy pipe payloads.
+- `HandshakePacketHandler.resolveUpdateSigner` and `handleGroupDelete` support both `encodeForSigning` and pipe-delimited payloads.
+- In `NoSlopRepository.updateGroupChat`, non-admin updates retain existing group metadata (`title`, `description`, `avatarB64`, `allowMemberInvites`, `allowMemberSelfRemove`), preventing false unauthorized metadata rejections.
+- In `MeshSocialRepository.dispatchPacket`, `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, and `DELETE_MESSAGE` are stored in the persistent outbox upon delivery failure and flushed on peer connection.
+
+### 21.2 Tri-Channel Transport Concurrency Isolation
+Previously, `MeshTransport` funneled high-volume media chunk downloads and general gossip through a shared `bulkSemaphore(4)`. During large background video transfers, bulk circuits were 100% saturated, while Tor SOCKS sockets suffered from connection timeouts:
+- `dmSemaphore(4)`: Dedicated to real-time communication (`MESSAGE`, `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_QUERY`, `GROUP_SYNC`). Connect timeout increased to 25s with 3 attempts.
+- `bulkSemaphore(4)`: Dedicated to social feed gossip (`POST`, `COMMENT`, `REACTION`, `VOTE`, `INVENTORY_SYNC_REQUEST`, `SYNC_RESPONSE`).
+- `mediaSemaphore(2)`: Dedicated exclusively to chunk-based media transfers (`MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_TRANSFER_ACK`).
+- In `MediaManager.kt`, background chunk downloading is paused/throttled whenever foreground video playback is active (`PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null`), preventing background sync from starving playback bandwidth.
+- `MediaManager` concurrency is capped to 2 connections.
+
+### 21.3 High-Throughput Bounded Incoming Socket Reader
+In `MeshTransport.handleIncomingConnection`, reading socket data 1 character at a time using `reader.read()` executed over 1.4 million iterations for 1MB chunk frames, driving CPU usage and causing 30-second read timeouts.
+- Implemented buffered chunk reading using `BufferedReader` with an 8KB `CharArray` buffer.
+- Maintained the strict 4MB `MAX_PACKET_CHARS` frame ceiling against OOM attacks.
+
+### 21.4 Long Video Buffering & Keep-Alive Tuning
+### 21.5 Decentralized Group Mesh Gossip & Audience Privacy Toggles
+In decentralized group chats with `allowMemberInvites = true`, members may not all be pairwise connected (e.g. Admin is connected to Member A, Member A is connected to Member B, but Admin and Member B are not direct peers).
+- **Decentralized Relay**: `NoSlopRepository.sendGroupMessage` delivers direct E2EE packets to known connected members, and simultaneously broadcasts a `GROUP_MESSAGE` packet across the mesh (hops=6). Intermediate members relay the packet. Any device possessing the group decrypts/displays the message in the group thread, allowing non-connected members to converse freely.
+- **Identity Privacy**: `GROUP_MESSAGE` packets carry display handles and short tripcodes without exposing the author's raw public keys or onion addresses to indirect peers.
+- **Audience Privacy Toggle**: `GroupChatThreadScreen` features an audience selector pill (`All Members 🌐` vs `Friends Only 👥`). Friends-only messages restrict packet transmission to direct contacts (hops=1).
+- **Open Group Warning**: `CreateGroupDialog` alerts users before creating groups with member invites enabled.
+
+### 21.6 Saved List Chronological Ordering & Infinite Pagination
+### 21.7 Open Group Warning Parity on Existing Groups
+In `GroupSettingsModal.kt`, toggling on "Allow members to invite peers" on an existing group now prompts the admin with an explicit confirmation dialog before applying changes, educating that the group becomes discoverable mesh-wide, highlighting the "Friends Only" message audience protection, and confirming admin member-removal authority.
+
+### 21.8 Saved Content Dedicated In-Memory Loader & Full-Text Search
+`loadSavedBatch()` in `NoSlopViewModel.kt` handles `"Saved"` and `"Liked"` requests directly at the top of `loadMoreFeedItems()`:
+- Bypasses `cachedExcludedIds` discovery purges and `searchExhaustedCount` modifier generation.
+- Checks `fullContent` alongside `title`, `author`, and `excerpt`.
+- Strictly sorts items by `saved_at DESC` (newest saved items at the very top).
+- Streams 30-slide batches on scroll, delivering smooth infinite scrolling through all matching saved content.
+- Fixed `cachedExcludedIds` filtering in `NoSlopViewModel.loadMoreFeedItems` so swiped items are not purged from Saved or Liked lists.
+- Added `saved_at` timestamps to `app_settings` upon bookmarking or liking. The Saved list is ordered by `saved_at DESC`, displaying the most recently saved items first.
+- Integrated full query search and 30-slide pagination for the Saved list.
+Videos longer than 3–4 minutes previously stalled on playback due to buffer starvation over Tor:
+1. `DefaultLoadControl` had `minBufferMs = 15s` and `maxBufferMs = 50s`. Once 50s buffered, ExoPlayer stopped reading.
+2. The OkHttp connection pool closed idle sockets after 30 seconds (`keepAliveDuration = 30s`).
+3. Re-establishing the Range request over Tor took 15–20s, by which point the remaining 15s buffer ran out, causing playback to freeze.
+4. `bufferForPlaybackAfterRebufferMs = 6000ms` forced a 6-second wait before playback resumed.
+
+**Implementations Applied:**
+- Raised `minBufferMs` from 15s to 35s in `VideoPlayer.kt` and `PreloadManager.kt`, ensuring ExoPlayer initiates range requests well before buffer exhaustion.
+- Raised `maxBufferMs` from 50s to 120s (2 minutes), holding a deeper buffer over Tor.
+- Reduced `bufferForPlaybackAfterRebufferMs` to 2000ms for fast recovery.
+- Increased OkHttp `ConnectionPool` keep-alive duration in `HttpClientProvider.getOrCreateIsolatedMediaClient` from 30s to 300s (5 minutes), keeping Tor sockets alive across buffer pauses.
+
 ---
 ---
 

@@ -174,7 +174,7 @@ object HttpClientProvider {
                 .proxy(Proxy.NO_PROXY)
                 .socketFactory(socketFactory)
                 .dns(TorDns)
-                .connectionPool(okhttp3.ConnectionPool(4, 30, TimeUnit.SECONDS))
+                .connectionPool(okhttp3.ConnectionPool(4, 300, TimeUnit.SECONDS))
                 .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
                 .connectTimeout(35, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)

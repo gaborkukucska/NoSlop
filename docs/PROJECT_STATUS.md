@@ -1,5 +1,36 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-09) — Decentralized Group Mesh Messaging, Tri-Channel Transport Isolation & Saved Search
+
+* **Decentralized Multi-Hop Group Messaging & Audience Privacy Toggles (`GroupChatThreadScreen.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`, `Packets.kt`)**:
+  * Implemented `GROUP_MESSAGE` mesh gossip packets: group messages now propagate across intermediate connected peers so non-connected members in open groups (e.g. Admin <-> Member A <-> Member B) can converse freely without requiring pairwise direct Tor connections.
+  * Preserved identity privacy: `GROUP_MESSAGE` packets carry display handles and short tripcodes, masking long-term public keys and onion addresses from indirect group members.
+  * Added a **Message Audience** selector pill (`🌐 All Members` vs `👥 Friends Only`) above the group chat input bar. Friends-only messages restrict packet transmission to direct contacts only (`hops = 1`).
+* **Non-Admin Group Invites & Open Group Warning (`GroupSettingsModal.kt`, `DMsTab.kt`, `HandshakePacketHandler.kt`, `MeshPacketVerifier.kt`, `Packets.kt`)**:
+  * Added `allow_member_invites` and `allow_member_self_remove` to `GroupInvitePayload` and `GroupUpdatePayload`, dynamically synchronizing group permission states to all members upon invite acceptance and settings update.
+  * Strictly gated the "Add Member" button on `isAdmin || (group.allowMemberInvites && allowInvites)`, preventing non-admins from inviting peers when member invites are turned off.
+  * Added an **Open Group Warning** confirmation dialog in both `CreateGroupDialog` (`DMsTab.kt`) and `GroupSettingsModal.kt` when enabling member invites, clearly explaining that anyone can invite peers across the mesh, that members can use "Friends Only" messaging, and that the admin retains full member-removal authority.
+  * Extended `MeshPacketVerifier.kt` and `HandshakePacketHandler.handleGroupInvite` with multi-candidate signature verification (supporting both `CryptoService.encodeForSigning` and legacy pipe payloads for admin and member signers).
+  * Restricted `resendGroupInvitesForPeer` in `HandshakePacketHandler.handleAnnouncePeer` strictly to offline-to-online transitions (`wasOffline == true`), eliminating redundant re-sends on 30s heartbeats.
+  * Enqueued `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, and `DELETE_MESSAGE` into `pendingOutboxMessages` on failure, and unblocked the outbox worker for pending invited peers.
+* **Tri-Channel Concurrency Isolation & Buffered Socket Reader (`MeshTransport.kt`, `MediaManager.kt`)**:
+  * Decoupled transport concurrency into three dedicated, non-interfering semaphore pools:
+    * `dmSemaphore(4)`: real-time user communications (`MESSAGE`, `GROUP_MESSAGE`, `GROUP_INVITE`, `GROUP_UPDATE`, `GROUP_DELETE`, `CONNECTION_REQUEST`, `USER_HANDSHAKE`, `DM_SYNC_REQUEST`, `GROUP_QUERY`, `GROUP_SYNC`). Connect timeout raised to 25s with 3 attempts.
+    * `bulkSemaphore(4)`: general social gossip (`POST`, `COMMENT`, `REACTION`, `VOTE`, `INVENTORY_SYNC_REQUEST`, `SYNC_RESPONSE`).
+    * `mediaSemaphore(2)`: dedicated exclusively to chunk-based media transfers (`MEDIA_REQUEST`, `MEDIA_CHUNK`, `MEDIA_RELAY_REQUEST`, `MEDIA_RECOVERY_FOUND`, `MEDIA_TRANSFER_ACK`).
+  * Replaced character-by-character socket reading in `MeshTransport.handleIncomingConnection` with 8KB buffered chunk reading while enforcing the 4MB `MAX_PACKET_CHARS` frame cap, eliminating 30-second `Read timed out` socket stalls during large media chunk receipts.
+  * In `MediaManager.kt`, throttled background chunk sync when foreground video playback or stream resolution is active (`PreloadManager.isVideoActive || PreloadManager.currentlyPlayingUrl != null`), allocating 100% of Tor bandwidth to the active video.
+  * Capped `MediaManager` max concurrency to 2 connections.
+* **Long Video Playback Buffering & Connection Pool Keep-Alive (`VideoPlayer.kt`, `PreloadManager.kt`, `HttpClientProvider.kt`)**:
+  * Increased ExoPlayer buffer duration parameters in `DefaultLoadControl`: raised `minBufferMs` from 15s to 35s and `maxBufferMs` from 50s to 120s (2 minutes), ensuring subsequent stream ranges are requested well before active playback runs dry and eliminating mid-playback stalls on videos longer than 3–4 minutes.
+  * Lowered `bufferForPlaybackAfterRebufferMs` from 6000ms to 2000ms for fast resume on transient buffer dips.
+  * Extended OkHttp `ConnectionPool` keep-alive duration for `getOrCreateIsolatedMediaClient` from 30s to 300s (5 minutes), preventing Tor SOCKS sockets from being dropped while ExoPlayer consumes buffered video.
+* **Saved List Chronological Sorting, Full-Text Search & Continuous Pagination (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`, `Daos.kt`)**:
+  * Fixed `cachedExcludedIds` filtering in `NoSlopViewModel.loadMoreFeedItems` so swiped items are not purged from Saved or Liked lists.
+  * Maintained `savedTimestampsMap` in memory and tracked `saved_at` timestamps in `app_settings` upon bookmarking and liking, strictly sorting Saved items by `saved_at DESC` (most recently saved items first).
+  * Extracted a dedicated `loadSavedBatch` / `processSavedBatch` fast-path with direct SQLite fallback (`feedDao.getSavedItemsList()`), bypassing discovery feed exclusions and internet-search exhaustion loops.
+  * Added full-text search matching across `title`, `author`, `excerpt`, and `fullContent` in Saved search.
+  * Triggered `loadMoreFeedItems` on short lists in `UnifiedFeedTab.kt` (`unifiedItems.size in 1..4 && index == unifiedItems.size - 1`), unlocking continuous pagination even when a search query initially returns fewer than 5 items.
 ## Completed Changes (2026-09-09) — Mesh Empty State, History Search & Pagination, Content Mix Variety & Audio Pipeline
 
 * **Mesh Tab Empty State Default & Button Gating (`UnifiedFeedTab.kt`)**:

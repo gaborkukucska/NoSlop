@@ -30,6 +30,9 @@ interface FeedDao {
     @Query("SELECT * FROM feed_items WHERE isSaved = 1 ORDER BY publishedAt DESC")
     fun getSavedItems(): Flow<List<FeedItem>>
 
+    @Query("SELECT * FROM feed_items WHERE isSaved = 1 ORDER BY publishedAt DESC")
+    suspend fun getSavedItemsList(): List<FeedItem>
+
     // --- NOSLOP_LOCAL_SEARCH_V1 ---
     // Local search over already-synced items — overwhelmingly RSS articles.
     // Instant, keyless, offline, and the only source Search Articles has when

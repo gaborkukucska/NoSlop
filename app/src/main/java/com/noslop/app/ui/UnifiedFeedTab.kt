@@ -1047,8 +1047,10 @@ fun UnifiedFeedTab(
                 key = { index -> if (index in unifiedItems.indices) unifiedItems[index].id else "item_$index" }
             ) { index ->
                 
-                // Trigger infinite load strictly when nearing the bottom of the list
-                if (unifiedItems.size >= 5 && index >= unifiedItems.size - 3) {
+                // Trigger infinite load when nearing the bottom of the list (even on short initial lists)
+                val shouldLoadMore = (unifiedItems.size >= 5 && index >= unifiedItems.size - 3) || 
+                                     (unifiedItems.size in 1..4 && index == unifiedItems.size - 1)
+                if (shouldLoadMore) {
                     LaunchedEffect(index) {
                         viewModel.loadMoreFeedItems(filterMode)
                     }

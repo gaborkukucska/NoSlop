@@ -253,6 +253,72 @@ class DmPacketHandler(
         return true
     }
 
+    suspend fun handleGroupMessage(packet: NetworkPacket): Boolean {
+        val groupMsg = packet.getGroupMessagePayload() ?: return false
+        val group = db.groupChatDao().getGroupChatById(groupMsg.groupId) ?: return false
+
+        // Deduplication: ignore if message already exists locally
+        if (messageDao.hasMessage(groupMsg.id) > 0) return true
+
+        val senderDisplay = if (!groupMsg.senderTripcode.isNullOrBlank()) {
+            "${groupMsg.senderHandle}.${groupMsg.senderTripcode}"
+        } else {
+            groupMsg.senderHandle
+        }
+
+        val msg = ChatMessage(
+            id = groupMsg.id,
+            chatWithPeerPub = groupMsg.groupId,
+            senderPub = senderDisplay,
+            ciphertext = groupMsg.content,
+            nonce = "",
+            timestamp = groupMsg.timestamp,
+            mediaId = groupMsg.mediaId,
+            mediaType = groupMsg.mediaType,
+            replyToMessageId = groupMsg.replyToMessageId
+        )
+        messageDao.insertMessage(msg)
+        repo.triggerDmSync()
+
+        val title = com.noslop.app.util.LanguageManager.translate("New Group Message")
+        val msgBody = com.noslop.app.util.LanguageManager.translate("Message from {author} in {group}")
+            .replace("{author}", groupMsg.senderHandle)
+            .replace("{group}", group.title)
+        val route = "group_chat/${group.groupId}"
+
+        notificationDao.insertNotification(
+            NotificationItem(
+                id = UUID.randomUUID().toString(),
+                type = "DM",
+                title = title,
+                body = msgBody,
+                targetRoute = route,
+                iconType = "group",
+                senderPub = groupMsg.senderHandle
+            )
+        )
+
+        com.noslop.app.util.NotificationHelper.showNotification(
+            context = repo.context,
+            title = title,
+            message = msgBody,
+            deepLinkRoute = route
+        )
+
+        if (groupMsg.mediaMetadata != null) {
+            val onion = groupMsg.mediaMetadata.originNode
+            MediaManager.checkAndAutoDownload(
+                groupMsg.mediaMetadata,
+                "private",
+                packet.senderId,
+                onion
+            )
+        }
+
+        Logger.info(TAG, "Delivered decentralized group message ${groupMsg.id} for group '${group.title}'")
+        return true
+    }
+
     suspend fun handleDmSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val syncReq = packet.getDmSyncRequestPayload() ?: return false
         val peerPub = packet.senderId

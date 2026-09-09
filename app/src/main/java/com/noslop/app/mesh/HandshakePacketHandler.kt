@@ -308,6 +308,7 @@ class HandshakePacketHandler(
                 repo.requestDmSync(peer)
                 if (wasOffline) {
                     repo.requestInventorySync(peer)
+                    resendGroupInvitesForPeer(peer.publicKeyB64, newOnion)
                 }
             }
         }
@@ -406,7 +407,7 @@ class HandshakePacketHandler(
                 val members = parseMembers(group.membersJson)
                 if (members.contains(peerPubKey)) {
                     val timestamp = group.createdAt
-                    val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, group.adminPublicKeyB64, timestamp.toString())
+                    val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(group.groupId, group.title, myKeys.publicKeyB64, timestamp.toString())
                     val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
                     val invitePayload = GroupInvitePayload(
                         groupId = group.groupId,
@@ -415,6 +416,9 @@ class HandshakePacketHandler(
                         members = members,
                         avatarB64 = group.avatarB64,
                         description = group.description,
+                        memberHandles = group.getMemberHandles(),
+                        allowMemberInvites = group.allowMemberInvites,
+                        allowMemberSelfRemove = group.allowMemberSelfRemove,
                         timestamp = timestamp,
                         signature = signature
                     )
@@ -561,8 +565,10 @@ class HandshakePacketHandler(
         val candidates = (listOf(existing.adminPublicKeyB64) + members).distinct()
         for (candidate in candidates) {
             if (candidate.isBlank()) continue
-            val payloadToVerify = "${update.groupId}|$title|$candidate|${update.timestamp}"
-            if (CryptoService.verify(payloadToVerify, update.signature, candidate)) return candidate
+            val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(update.groupId, title, candidate, update.timestamp.toString())
+            val pipePayload = "${update.groupId}|$title|$candidate|${update.timestamp}"
+            if (CryptoService.verify(encodePayload, update.signature, candidate) ||
+                CryptoService.verify(pipePayload, update.signature, candidate)) return candidate
         }
         return null
     }
@@ -570,9 +576,24 @@ class HandshakePacketHandler(
     suspend fun handleGroupInvite(packet: NetworkPacket): Boolean {
         val invite = packet.getGroupInvitePayload() ?: return false
 
-        val payloadToVerify = "${invite.groupId}|${invite.title}|${invite.adminPublicKeyB64}|${invite.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, invite.signature, invite.adminPublicKeyB64)) {
-            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: bad admin signature")
+        val candidates = (listOf(invite.adminPublicKeyB64) + invite.members).distinct()
+        var verifiedSigner: String? = null
+        for (candidate in candidates) {
+            if (candidate.isBlank()) continue
+            val encCand = com.noslop.app.crypto.CryptoService.encodeForSigning(invite.groupId, invite.title, candidate, invite.timestamp.toString())
+            val encAdmin = com.noslop.app.crypto.CryptoService.encodeForSigning(invite.groupId, invite.title, invite.adminPublicKeyB64, invite.timestamp.toString())
+            val pipeCand = "${invite.groupId}|${invite.title}|$candidate|${invite.timestamp}"
+            val pipeAdmin = "${invite.groupId}|${invite.title}|${invite.adminPublicKeyB64}|${invite.timestamp}"
+            if (CryptoService.verify(encCand, invite.signature, candidate) ||
+                CryptoService.verify(encAdmin, invite.signature, candidate) ||
+                CryptoService.verify(pipeCand, invite.signature, candidate) ||
+                CryptoService.verify(pipeAdmin, invite.signature, candidate)) {
+                verifiedSigner = candidate
+                break
+            }
+        }
+        if (verifiedSigner == null) {
+            Logger.warn(TAG, "Rejected GROUP_INVITE ${invite.groupId}: signature matches no admin or group member")
             return false
         }
 
@@ -622,11 +643,11 @@ class HandshakePacketHandler(
         val jsonPayload = com.google.gson.Gson().toJson(invite)
         db.appSettingDao().insertSetting(AppSetting("pending_group_invite_${invite.groupId}", jsonPayload))
 
-        val adminPeer = peerDao.getPeerByPublicKey(invite.adminPublicKeyB64)
-        val adminName = adminPeer?.handle ?: "A contact"
+        val inviterPeer = peerDao.getPeerByPublicKey(verifiedSigner)
+        val inviterName = inviterPeer?.handle ?: invite.memberHandles?.get(verifiedSigner) ?: (if (verifiedSigner == invite.adminPublicKeyB64) "Group Admin" else "A contact")
         val title = com.noslop.app.util.LanguageManager.translate("Group Chat Invite")
         val body = com.noslop.app.util.LanguageManager.translate("{author} invited you to join '{group}'")
-            .replace("{author}", adminName)
+            .replace("{author}", inviterName)
             .replace("{group}", invite.title)
         val route = "group_invite/${invite.groupId}"
 
@@ -706,10 +727,15 @@ class HandshakePacketHandler(
         val handlesMap = existing.getMemberHandles().toMutableMap()
         update.memberHandles?.let { handlesMap.putAll(it) }
 
+        val allowInvites = if (isAdmin && update.allowMemberInvites != null) update.allowMemberInvites else existing.allowMemberInvites
+        val allowSelfRemove = if (isAdmin && update.allowMemberSelfRemove != null) update.allowMemberSelfRemove else existing.allowMemberSelfRemove
+
         val updatedGroup = existing.copy(
             title = updatedTitle,
             description = update.description ?: existing.description,
             avatarB64 = update.avatarB64 ?: existing.avatarB64,
+            allowMemberInvites = allowInvites,
+            allowMemberSelfRemove = allowSelfRemove,
             membersJson = com.google.gson.Gson().toJson(currentMembers.distinct()),
             memberHandlesJson = com.google.gson.Gson().toJson(handlesMap)
         )
@@ -740,8 +766,10 @@ class HandshakePacketHandler(
             Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: not from the stored admin")
             return false
         }
-        val payloadToVerify = "${del.groupId}|delete|${del.adminPublicKeyB64}|${del.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, del.signature, del.adminPublicKeyB64)) {
+        val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(del.groupId, "delete", del.adminPublicKeyB64, del.timestamp.toString())
+        val pipePayload = "${del.groupId}|delete|${del.adminPublicKeyB64}|${del.timestamp}"
+        if (!CryptoService.verify(encodePayload, del.signature, del.adminPublicKeyB64) &&
+            !CryptoService.verify(pipePayload, del.signature, del.adminPublicKeyB64)) {
             Logger.warn(TAG, "Rejected GROUP_DELETE ${del.groupId}: bad admin signature")
             return false
         }

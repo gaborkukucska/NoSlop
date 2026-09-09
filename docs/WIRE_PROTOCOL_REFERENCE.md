@@ -121,6 +121,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
 | 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
+| 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | Masked identity mesh broadcast | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage`; local notification shown, triggers media auto-download |
 
 Notes:
 
@@ -392,6 +393,8 @@ timestamp-based replies leave them `null`).
 | `members` | Array\<String\> | Full member list as Ed25519 public keys |
 | `avatar_b64`? | String | Group picture |
 | `description`? | String | Group description |
+| `allow_member_invites`? | Boolean | Whether non-admin members are permitted to invite peers (default: true) |
+| `allow_member_self_remove`? | Boolean | Whether members may voluntarily leave the group (default: true) |
 | `timestamp` | Long | Epoch milliseconds |
 | `signature` | String | Signature over `groupId\|title\|adminPublicKeyB64\|timestamp` |
 
@@ -411,6 +414,8 @@ packet can never reassign a group's admin.
 | `description`? | String | New description |
 | `added_members`? | Array\<String\> | Members added by this update (a delta, not the full list) |
 | `removed_members`? | Array\<String\> | Members removed by this update |
+| `allow_member_invites`? | Boolean | Updated invite permission flag (admin only) |
+| `allow_member_self_remove`? | Boolean | Updated self-remove permission flag (admin only) |
 | `timestamp` | Long | Epoch milliseconds |
 | `signature` | String | Signature over `groupId\|title\|signerPublicKeyB64\|timestamp` |
 
@@ -472,6 +477,26 @@ the message is deleted via `deleteMessageByIdAndSender`.
 that `authorId` is either the message's `senderPub` (author deleting own
 message) or the group's `adminPublicKeyB64` (admin purging any message).
 The message is deleted via `deleteMessageById` (no sender constraint).
+
+### GROUP_MESSAGE
+**Type:** `GROUP_MESSAGE` · class `GroupMessagePayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | String | Unique message ID (UUID) |
+| `group_id` | String | Target group identifier |
+| `sender_handle` | String | Display name/handle of the author |
+| `sender_tripcode`? | String | Short tripcode fingerprint |
+| `content` | String | Plaintext message body |
+| `timestamp` | Long | Epoch milliseconds |
+| `privacy` | String | `"public"` (relayed mesh-wide, hops=6) or `"friends"` (direct contacts only, hops=1) |
+| `media_id`? | String | Attached media ID, if present |
+| `media_type`? | String | MIME category (`image`, `video`, `file`, `audio`), if present |
+| `media_metadata`? | Object (`MediaMetadata`, §5) | Media descriptor object |
+| `reply_to`? | String | ID of the message being replied to |
+
+Delivers group messages across multi-hop mesh relays to non-connected members
+in open groups without exposing the sender's raw public keys or onion addresses.
 
 ---
 
@@ -656,6 +681,7 @@ and still accurate.
 | `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
+| `GROUP_MESSAGE` | *(identity-masked mesh broadcast; routing validated by group membership)* |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64

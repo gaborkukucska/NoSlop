@@ -323,10 +323,10 @@ object PreloadManager {
         // Generous rebuffer threshold so claimed player never loops on 1.8s stalls
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15000, // min buffer (15s)
-                50000, // max buffer (50s)
+                35000, // min buffer (35s)
+                120000, // max buffer (120s)
                 500,   // buffer for playback (0.5s)
-                6000   // buffer for playback after rebuffer (6s)
+                2000   // buffer for playback after rebuffer (2s)
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()

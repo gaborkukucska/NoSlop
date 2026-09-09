@@ -184,6 +184,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _isSavedPositionLoaded = MutableStateFlow(false)
     val isSavedPositionLoaded: StateFlow<Boolean> = _isSavedPositionLoaded.asStateFlow()
     private val sessionLoadedIds = mutableSetOf<String>()
+    private val savedTimestampsMap = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var lastSearchResultIds = emptySet<String>()
     private val allSearchResultItemIds = mutableSetOf<String>()
     private var searchExhaustedCount = 0
@@ -982,6 +983,62 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun loadSavedBatch(
+        isInitialLoad: Boolean,
+        query: String = activeSearchQuery
+    ) {
+        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+        val inMemorySaved = allFeeds.filter { it.isSaved }
+        
+        if (inMemorySaved.isEmpty() && isInitialLoad) {
+            viewModelScope.launch(Dispatchers.IO) {
+                val dbSaved = repository.getSavedFeedItemsList()
+                withContext(Dispatchers.Main) {
+                    processSavedBatch(dbSaved, currentKeys, isInitialLoad, query)
+                }
+            }
+            return
+        }
+        processSavedBatch(inMemorySaved, currentKeys, isInitialLoad, query)
+    }
+
+    private fun processSavedBatch(
+        savedFeeds: List<FeedItem>,
+        currentKeys: Set<String>,
+        isInitialLoad: Boolean,
+        query: String
+    ) {
+        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val matchedSaved = savedFeeds.filter { item ->
+            if (searchTerms.isEmpty()) true else {
+                val t = item.title.lowercase()
+                val a = item.author?.lowercase() ?: ""
+                val e = item.excerpt?.lowercase() ?: ""
+                val c = item.fullContent?.lowercase() ?: ""
+                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) || c.contains(term) }
+            }
+        }.sortedByDescending { item ->
+            savedTimestampsMap[item.id] ?: item.publishedAt
+        }
+
+        val unconsumed = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentKeys }
+        if (unconsumed.isEmpty()) return
+
+        val batch = unconsumed.take(30).map { UnifiedItem.Feed(it) }
+        sessionLoadedIds.addAll(batch.map { it.id })
+        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+            batch
+        } else {
+            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+        }
+        if (isInitialLoad) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
     fun loadMoreFeedItems(filterMode: String? = null, isInjection: Boolean = false) {
         if (_isOnboardingComplete.value && localKeys.value == null) return
         if (isLoadingMoreFeedItems) return
@@ -1006,6 +1063,12 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 return
             }
             loadHistoryBatch(historyRecords, isInitialLoad, activeSearchQuery)
+            return
+        }
+
+        if (actualFilter == "Liked" || actualFilter == "Saved") {
+            val isInitialLoad = _unifiedFeed.value.isEmpty()
+            loadSavedBatch(isInitialLoad, activeSearchQuery)
             return
         }
 
@@ -1113,8 +1176,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
         }
 
-        // Swiped items are always hidden from clearnet feeds (user explicitly dismissed them)
-        if (cachedExcludedIds.isNotEmpty()) {
+        // Swiped items are hidden from discovery feeds (user dismissed them). NOT applied in Saved, Liked, History, or search lists.
+        if (!isPersistentList && cachedExcludedIds.isNotEmpty()) {
             unseenFeeds = unseenFeeds.filter { it.id !in cachedExcludedIds }
         }
 
@@ -1258,7 +1321,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             
             val batch = mutableListOf<UnifiedItem>()
             
-            if (isSearchActive) {
+            if (actualFilter == "Liked" || actualFilter == "Saved") {
+                val savedFeeds = allFeeds.filter { it.isSaved }
+                val currentLoadedKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+                
+                val searchTerms = activeSearchQuery.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+                val matchedSaved = savedFeeds.filter { item ->
+                    if (searchTerms.isEmpty()) true else {
+                        val t = item.title.lowercase()
+                        val a = item.author?.lowercase() ?: ""
+                        val e = item.excerpt?.lowercase() ?: ""
+                        searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) }
+                    }
+                }.sortedByDescending { item ->
+                    savedTimestampsMap[item.id] ?: item.publishedAt
+                }
+
+                val unconsumedSaved = matchedSaved.filter { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) !in currentLoadedKeys }
+                batch.addAll(unconsumedSaved.take(specificNeeded).map { UnifiedItem.Feed(it) })
+            } else if (isSearchActive) {
                 val searchOrder = lastSearchResultIds.toList()
                 val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
                 val sortedSearch = allMatches.sortedWith(compareBy(
@@ -1276,9 +1357,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val allHistoryItems = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
                     val sortedHistory = allHistoryItems.sortedBy { viewedIdsList.indexOf(it.id) }
                     batch.addAll(sortedHistory.take(specificNeeded))
-                } else if (actualFilter == "Liked" || actualFilter == "Saved") {
-                    val sortedLiked = specificFeeds.sortedByDescending { it.publishedAt }.map { UnifiedItem.Feed(it) }
-                    batch.addAll(sortedLiked.take(specificNeeded))
                 } else {
                     val sortedSpecificFeeds = specificFeeds.sortedByDescending { it.publishedAt }
 
@@ -2094,7 +2172,20 @@ fun toggleAggregator() {
     fun clearAllNotifications() { viewModelScope.launch { repository.clearAllNotifications() } }
 
     fun toggleItemSavedState(id: String, isSaved: Boolean) {
-        viewModelScope.launch { repository.updateSavedState(id, isSaved) }
+        val now = System.currentTimeMillis()
+        if (isSaved) {
+            savedTimestampsMap[id] = now
+        } else {
+            savedTimestampsMap.remove(id)
+        }
+        viewModelScope.launch { 
+            repository.updateSavedState(id, isSaved)
+            if (isSaved) {
+                repository.putAppSetting("saved_at_$id", now.toString())
+            } else {
+                repository.putAppSetting("saved_at_$id", "")
+            }
+        }
     }
 
     fun deleteFeedSource(source: FeedSource) {
@@ -2163,9 +2254,9 @@ fun toggleAggregator() {
         _selectedGroupChatId.value = groupId
     }
 
-    fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null) {
+    fun sendGroupMessage(groupId: String, text: String, media: com.noslop.app.mesh.MediaMetadata? = null, replyToMessageId: String? = null, privacy: String = "public") {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.sendGroupMessage(groupId, text, media, replyToMessageId)
+            repository.sendGroupMessage(groupId, text, media, replyToMessageId, privacy)
         }
     }
 
@@ -2514,7 +2605,12 @@ fun toggleAggregator() {
             markItemReadState(item.id, true)
             recordItemSwiped(item.id)
             repository.reactToFeedItemWithType(item, reactionType)
-            if (reactionType == "like") repository.updateSavedState(item.id, true)
+            if (reactionType == "like") {
+                val now = System.currentTimeMillis()
+                savedTimestampsMap[item.id] = now
+                repository.updateSavedState(item.id, true)
+                repository.putAppSetting("saved_at_${item.id}", now.toString())
+            }
         }
     }
 

@@ -157,9 +157,11 @@ class MeshSocialRepository(
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
                 val hasPending = pendingOutboxMessages.values.any { it.isNotEmpty() }
                 if (hasPending) {
-                    val peers = peerDao.getAllPeersList().filter { it.isTrusted && it.onionAddress.isNotBlank() }
-                    for (peer in peers) {
-                        flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+                    val allPeers = peerDao.getAllPeersList().filter { it.onionAddress.isNotBlank() }
+                    for (peer in allPeers) {
+                        if (peer.isTrusted || pendingOutboxMessages.containsKey(peer.publicKeyB64)) {
+                            flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
+                        }
                     }
                 }
             }
@@ -183,7 +185,9 @@ class MeshSocialRepository(
                         Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
-                            if (packet.type == "MESSAGE") {
+                            val isCriticalOutboxType = packet.type == "MESSAGE" || packet.type == "GROUP_INVITE" ||
+                                packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" || packet.type == "DELETE_MESSAGE"
+                            if (isCriticalOutboxType) {
                                 enqueuePendingDm(packet.targetUserId!!, packet)
                             }
 

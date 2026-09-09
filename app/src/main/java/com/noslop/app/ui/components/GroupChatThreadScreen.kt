@@ -53,7 +53,7 @@ fun GroupChatThreadScreen(
     messages: List<ChatMessage>,
     localKeys: CryptoService.IdentityKeys?,
     viewModel: NoSlopViewModel,
-    onSendMessage: (String, MediaMetadata?, String?) -> Unit,
+    onSendMessage: (String, MediaMetadata?, String?, String) -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler(onBack = onBack)
@@ -69,6 +69,7 @@ fun GroupChatThreadScreen(
     var showClearConfirm by remember { mutableStateOf(false) }
     var selectedMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val isSelectionMode = selectedMessageIds.isNotEmpty()
+    var messagePrivacy by remember { mutableStateOf("public") }
 
     val allPeers by viewModel.peers.collectAsState()
 
@@ -745,6 +746,43 @@ fun GroupChatThreadScreen(
             }
         }
 
+        // Privacy mode selector pill
+        Row(
+            modifier = Modifier.fillMaxWidth().background(SurfaceDark).padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Message Audience:".tr, color = TextMuted, fontSize = 11.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    color = if (messagePrivacy == "public") AccentGreen else PrimaryBlack,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.clickable { messagePrivacy = "public" }
+                ) {
+                    Text(
+                        text = "🌐 All Members".tr,
+                        color = if (messagePrivacy == "public") PrimaryBlack else TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+                Surface(
+                    color = if (messagePrivacy == "friends") AccentGreen else PrimaryBlack,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.clickable { messagePrivacy = "friends" }
+                ) {
+                    Text(
+                        text = "👥 Friends Only".tr,
+                        color = if (messagePrivacy == "friends") PrimaryBlack else TextMuted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+
         // Input bar
         ChatInputBar(
             viewModel = viewModel,
@@ -754,6 +792,7 @@ fun GroupChatThreadScreen(
             onSendMessage = { text ->
                 val fileToProcess = attachedFile
                 val replyId = replyingToMessageId
+                val privacy = messagePrivacy
                 attachedFile = null
                 replyingToMessageId = null
                 if (fileToProcess != null) {
@@ -764,11 +803,11 @@ fun GroupChatThreadScreen(
                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                             isProcessingMedia = false
                             compressionProgress = null
-                            onSendMessage(text, mediaMetadata, replyId)
+                            onSendMessage(text, mediaMetadata, replyId, privacy)
                         }
                     }
                 } else {
-                    onSendMessage(text, null, replyId)
+                    onSendMessage(text, null, replyId, privacy)
                 }
             },
             onLaunchFilePicker = { filePickerLauncher.launch("*/*") },

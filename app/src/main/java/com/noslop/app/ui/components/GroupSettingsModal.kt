@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.People
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -295,7 +296,7 @@ fun GroupSettingsModal(
                                 Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Resend Invites".tr, tint = AccentGreen, modifier = Modifier.size(18.dp))
                             }
                         }
-                        if (isAdmin || allowInvites) {
+                        if (isAdmin || (group.allowMemberInvites && allowInvites)) {
                             IconButton(onClick = { showAddMemberDialog = true }) {
                                 Icon(Icons.Default.PersonAdd, contentDescription = "Add Member".tr, tint = AccentGreen)
                             }
@@ -362,10 +363,54 @@ fun GroupSettingsModal(
             }
         },
         confirmButton = {
+            var showOpenGroupWarning by remember { mutableStateOf(false) }
+
+            if (showOpenGroupWarning) {
+                AlertDialog(
+                    onDismissRequest = { showOpenGroupWarning = false },
+                    containerColor = SurfaceDark,
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Group Warning".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    text = {
+                        Text(
+                            "Allowing members to invite peers will open this group across the mesh network, enabling anyone in the group to add new members. Members can still choose 'Friends Only' messaging to keep their messages private to direct contacts, and as the admin you can always remove any member at any time. Do you want to proceed?".tr,
+                            color = TextLight,
+                            fontSize = 14.sp
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showOpenGroupWarning = false
+                                onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                        ) {
+                            Text("Enable & Save".tr, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showOpenGroupWarning = false }) {
+                            Text("Review Settings".tr, color = TextMuted)
+                        }
+                    }
+                )
+            }
+
             Button(
                 onClick = {
-                    onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
-                    onDismiss()
+                    if (isAdmin && allowInvites && !group.allowMemberInvites) {
+                        showOpenGroupWarning = true
+                    } else {
+                        onUpdateGroup(title, description.ifBlank { null }, avatarB64.ifBlank { null }, allowInvites, allowSelfRemove, membersList)
+                        onDismiss()
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
             ) {
