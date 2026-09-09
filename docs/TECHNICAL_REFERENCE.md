@@ -1947,12 +1947,64 @@ In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDat
 - Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
 - Search results replace the active feed instead of appending to the live feed.
 
+### 20.8 History Filter Chronological Ordering, 30-Slide Batches & Instant Return
+Previously, using the History filter presented several severe defects:
+1. `specificNeeded` evaluated to 3 on `isInitialLoad` when switching to History. Because `UnifiedFeedTab.kt` requires `unifiedItems.size >= 5` to trigger infinite scroll, History was permanently trapped at 3 slides.
+2. `viewedHistoryDao.insertViewedItem` used `OnConflictStrategy.IGNORE`. Re-viewed content never had its `viewedAt` timestamp refreshed.
+3. `sortedHistory` sorted items by `viewedIdsList.indexOf(it.id)`. When an item's ID did not exactly match the stored key representation, `indexOf` returned `-1`, sorting unviewed items to the front ahead of real history.
+4. Dismissing the History filter called `syncFilterMode("Live Feed", forceRefresh = true)`. Passing `forceRefresh = true` bypassed `cachedDefaultFeed`, clobbered `savedFeedItemId`, and fired `refreshFeeds()` over Tor, causing a 20-second delay and returning a brand new feed.
+
+**Implementations Applied:**
+- `ViewedHistoryDao.insertViewedItem` uses `OnConflictStrategy.REPLACE` so every dwell or swipe updates `viewedAt = System.currentTimeMillis()`.
+- `NoSlopViewModel.loadMoreFeedItems()` handles `"History"` with an instant in-memory O(1) map resolution against `viewedHistoryRecords.value` (sorted by `viewedAt DESC`), bypassing all heavy feed filtering, regexes, and network sync.
+- History, Liked, and Saved batches default to 30 items, allowing smooth infinite scrolling past slide 27.
+- Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
+- `LaunchedEffect(filterMode) { lastSettledPage = -1 }` in `UnifiedFeedTab.kt` prevents filter switches from registering false swipe-away events against vacated slides.
+- The "See Old Posts" button on the Mesh "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts` is true.
+
 ### 20.7 Mesh Tab Instant Empty State & Position Restoration on Return
 Previously, toggling to the Mesh tab checked `if (isRefreshing)` before checking for Mesh empty state. Because background clearnet feed sync was running over Tor, `isRefreshing` remained true for up to a minute, displaying "Curating your feed..." over the Mesh tab despite no clearnet feeds belonging to Mesh mode. Additionally, `loadMoreFeedItems()` in `NoSlopViewModel` triggered `refreshFeeds()` whenever `unseenFeeds.isEmpty()`, which was always true on the Mesh tab.
 - `NoSlopViewModel.loadMoreFeedItems()` restricts `isUsingFallback` to feed modes (`actualFilter == "Live Feed" || actualFilter == "Random"`), preventing Mesh switches from firing clearnet sync.
-- `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card with the "See Old Posts" button by default with zero delay.
+- `UnifiedFeedTab.kt` prioritizes `filterMode == "Mesh"` in the empty state container, instantly rendering the "Nothing New Here" card by default with zero delay.
+- The "See Old Posts" button on the "Nothing New Here" card is conditionally rendered only when `viewModel.hasMeshPosts == true`.
 - The tab-switching restore mechanism uses a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)` independent of the one-time cold-start flag, restoring the exact slide position when returning to "All".
 - On tab clicks ("All" / "Mesh"), `lastSettledPage` is reset to -1 so tab switches do not trigger false swipe-away events against the vacated slide.
+
+### 20.8 History Filter Chronological Ordering, In-Memory Fast Path & Search Integration
+Previously, using the History filter presented several severe defects:
+1. `specificNeeded` evaluated to 3 on `isInitialLoad` when switching to History. Because `UnifiedFeedTab.kt` requires `unifiedItems.size >= 5` to trigger infinite scroll, History was permanently trapped at 3 slides.
+2. `viewedHistoryDao.insertViewedItem` used `OnConflictStrategy.IGNORE`. Re-viewed content never had its `viewedAt` timestamp refreshed.
+3. `sortedHistory` sorted items by `viewedIdsList.indexOf(it.id)`. When an item's ID did not exactly match the stored key representation, `indexOf` returned `-1`, sorting unviewed items to the front ahead of real history.
+4. Dismissing the History filter called `syncFilterMode("Live Feed", forceRefresh = true)`. Passing `forceRefresh = true` bypassed `cachedDefaultFeed`, clobbered `savedFeedItemId`, and fired `refreshFeeds()` over Tor, causing a 20-second delay and returning a brand new feed.
+5. In `UnifiedFeedTab.kt`, swiping past an item in History triggered `recordItemSwiped` and `markItemViewed`, re-inserting the slide at the current timestamp and displacing the active list.
+
+**Implementations Applied:**
+- `ViewedHistoryDao.insertViewedItem` uses `OnConflictStrategy.REPLACE` so every dwell or swipe updates `viewedAt = System.currentTimeMillis()`.
+- `NoSlopViewModel.loadMoreFeedItems()` handles `"History"` with an instant in-memory O(1) map resolution against `viewedHistoryRecords.value` (sorted by `viewedAt DESC`), bypassing all heavy feed filtering, regexes, and network sync.
+- `viewedHistoryRecords` uses `SharingStarted.Eagerly` in `NoSlopViewModel.kt`, guaranteeing that history records are immediately active and fresh in memory even without UI subscribers.
+- Real-time search query filtering is integrated into `loadHistoryBatch`, allowing users to search their viewed history by keyword across titles, authors, excerpts, and content.
+- `unconsumed` checks `com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys` and performs a clean return when empty, preventing duplicate re-appending or loopback to slide 0 when scrolling past slide 30.
+- Viewed items (`isRead = 1`) in `feed_items` are protected from deletion in `deleteYouTubeItems`, `deleteExpiredItems`, and `clearUnsavedItems`.
+- `loadHistoryBatch` automatically reconstructs historical YouTube items on the fly from their `yt_VIDEO_ID` stored in `viewed_history` if their rows were purged in earlier versions, enabling continuous infinite scrolling through all historical content.
+- In `UnifiedFeedTab.kt`, `recordItemSwiped` and dwell-time `markItemViewed` are guarded with `if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked")`. Merely browsing historical items does not mutate timestamps or displace active pager items.
+- Dismissing filter chips and clearing modal filters calls `syncFilterMode("Live Feed", forceRefresh = false)`, immediately restoring `cachedDefaultFeed` and scrolling to `savedFeedItemId` with zero delay.
+
+### 20.9 Content Mix Variety, Media Classification & Non-Blocking Background Sync
+Previously, users experienced Live Feeds that quickly degraded into 100% video, with audio showing zero items and images/articles repeating stale content:
+1. `FeedRepository.kt` wrapped background RSS and category sync in `while (currentlyPlayingUrl != null || isVideoActive) { delay(4000L) }`. Because the user is browsing the feed playing videos, this loop spun indefinitely, completely blocking background fetching of RSS articles, NASA images, and Music audio.
+2. In `NoSlopViewModel.kt`, `specificFeeds` for Audio strictly checked `it.mediaType?.contains("audio") == true`. Audio items from the Internet Archive, Openverse, and podcast RSS feeds without explicit `mediaType` fields were rejected and misclassified as articles.
+3. Swiping past audio, image, and article items in the Live Feed placed their IDs into `cachedExcludedIds`. In `NoSlopViewModel.kt`, content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) were subjected to the aggressive `cachedViewedIds + cachedExcludedIds` purge, clearing out all available items and leaving tabs at 0 items or frozen at 3 items.
+
+**Implementations Applied:**
+- Replaced blocking while-loops in `FeedRepository.kt` with non-blocking Tor staggers (`delay(1000ms)`), allowing RSS articles, NASA images, and Music audio to fetch continuously in the background while videos play.
+- Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, ensuring audio tracks (MP3/FLAC/AAC) and images are recognized consistently across the entire pipeline.
+- Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
+- Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
+- Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
+
+### 20.10 Tor Resolve Priority & Bandwidth De-Contention
+- **Resolve Permit Priority**: In `YouTubeInternalClient.kt`, background preloads (`isPreload = true`) now use a 2-second timeout on `playerResolveGate` and yield immediately if permits are busy, preventing speculative preloads from locking out the active on-screen video.
+- **Bandwidth Concentration**: Reduced `MAX_PRELOAD` from 4 to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
 
 ---
 ---

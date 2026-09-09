@@ -667,17 +667,22 @@ object YouTubeInternalClient {
     private const val RESOLVE_BUDGET_MS = 60_000L
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high", canRotateCircuit: Boolean = true): String? {
-        val gotPermit = kotlinx.coroutines.withTimeoutOrNull(RESOLVE_QUEUE_WAIT_MS) {
+        val waitTimeoutMs = if (!canRotateCircuit) 2000L else RESOLVE_QUEUE_WAIT_MS
+        val gotPermit = kotlinx.coroutines.withTimeoutOrNull(waitTimeoutMs) {
             playerResolveGate.acquire()
             true
         } ?: false
 
         if (!gotPermit) {
-            Logger.warn(
-                TAG,
-                "Gave up waiting ${RESOLVE_QUEUE_WAIT_MS / 1000}s for a resolve slot for $videoId — " +
-                    "earlier resolves are still stuck. Reporting unavailable rather than queueing."
-            )
+            if (canRotateCircuit) {
+                Logger.warn(
+                    TAG,
+                    "Gave up waiting ${RESOLVE_QUEUE_WAIT_MS / 1000}s for a resolve slot for $videoId — " +
+                        "earlier resolves are still stuck. Reporting unavailable rather than queueing."
+                )
+            } else {
+                Logger.info(TAG, "Preload resolve slot busy — yielding to active video for $videoId")
+            }
             return null
         }
 

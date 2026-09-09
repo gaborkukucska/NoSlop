@@ -297,8 +297,8 @@ class FeedRepository(
         for (source in rssSources) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null || com.noslop.app.ui.PreloadManager.isVideoActive) {
-                        kotlinx.coroutines.delay(4000L)
+                    if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                        kotlinx.coroutines.delay(1000L) // Stagger requests across Tor
                     }
                     fetchRssSource(source, allNegative)
                 } catch (e: Exception) {
@@ -310,8 +310,8 @@ class FeedRepository(
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null || com.noslop.app.ui.PreloadManager.isVideoActive) {
-                        kotlinx.coroutines.delay(4000L)
+                    if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                        kotlinx.coroutines.delay(1200L)
                     }
                     fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
                 } catch (e: Exception) {
@@ -329,12 +329,8 @@ class FeedRepository(
         for (creator in sampledCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
-                    // Defer if user is actively watching/loading a video
-                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
-                        kotlinx.coroutines.delay(5000L)
-                    }
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                        kotlinx.coroutines.delay(2000L) // Stagger requests across Tor
+                        kotlinx.coroutines.delay(1500L) // Stagger requests across Tor
                     }
                     fetchCreatorVideos(creator)
                 } catch (e: Exception) {

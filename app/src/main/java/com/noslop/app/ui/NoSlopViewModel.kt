@@ -23,6 +23,32 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import kotlinx.coroutines.withContext
 
+fun isAudioFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val url = (item.mediaUrl ?: item.url ?: "").lowercase()
+    return type.contains("audio") || url.endsWith(".mp3") || url.endsWith(".m4a") ||
+        url.endsWith(".ogg") || url.endsWith(".wav") || url.endsWith(".aac") ||
+        url.endsWith(".flac") || url.contains("/audio/") || url.contains("podbean")
+}
+
+fun isVideoFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val url = (item.mediaUrl ?: item.url ?: "").lowercase()
+    return type.contains("video") || url.contains("youtube") || url.contains("youtu.be") ||
+        url.contains("vimeo") || url.endsWith(".mp4") || url.endsWith(".webm") ||
+        url.endsWith(".m3u8") || url.endsWith(".mpd")
+}
+
+fun isImageFeedItem(item: FeedItem): Boolean {
+    val type = item.mediaType?.lowercase() ?: ""
+    val mediaUrl = (item.mediaUrl ?: "").lowercase()
+    return type.contains("image") || (mediaUrl.isNotBlank() && (mediaUrl.endsWith(".jpg") || mediaUrl.endsWith(".jpeg") || mediaUrl.endsWith(".png") || mediaUrl.endsWith(".webp") || mediaUrl.endsWith(".gif")) && item.url.isNullOrBlank())
+}
+
+fun isArticleFeedItem(item: FeedItem): Boolean {
+    return !isVideoFeedItem(item) && !isAudioFeedItem(item) && !isImageFeedItem(item)
+}
+
 sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     abstract val id: String
     data class Feed(val item: FeedItem) : UnifiedItem(item.publishedAt, false) {
@@ -187,6 +213,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     private val _restoreScrollPositionEvent = kotlinx.coroutines.flow.MutableSharedFlow<String>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val restoreScrollPositionEvent: kotlinx.coroutines.flow.SharedFlow<String> = _restoreScrollPositionEvent.asSharedFlow()
+
+    val viewedHistoryRecords: StateFlow<List<ViewedHistoryItem>> = repository.allViewedHistory
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val viewedHistoryIds: StateFlow<Set<String>> = repository.allViewedHistory
         .map { items -> items.map { it.itemId }.toSet() }
@@ -863,6 +892,96 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private fun loadHistoryBatch(
+        historyRecords: List<ViewedHistoryItem>,
+        isInitialLoad: Boolean,
+        query: String = activeSearchQuery
+    ) {
+        val currentKeys = _unifiedFeed.value.map { com.noslop.app.data.getCanonicalItemKey(it) }.toSet()
+        val feedMap = allFeeds.associateBy { it.id }
+        val meshMap = allMeshes.associateBy { it.id }
+        val feedByNormId = allFeeds.associateBy { normalizeFeedItemId(it.id, it.url ?: "") }
+        val feedByCanonKey = allFeeds.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it)) }
+        val meshByCanonKey = allMeshes.associateBy { com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Mesh(it)) }
+
+        val searchTerms = query.trim().lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
+        val matchedHistory = mutableListOf<UnifiedItem>()
+        val seenKeys = mutableSetOf<String>()
+
+        for (rec in historyRecords) {
+            var item: UnifiedItem? = feedMap[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: meshMap[rec.itemId]?.let { UnifiedItem.Mesh(it) }
+                ?: feedByNormId[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: feedByCanonKey[rec.itemId]?.let { UnifiedItem.Feed(it) }
+                ?: meshByCanonKey[rec.itemId]?.let { UnifiedItem.Mesh(it) }
+
+            // Synthesize historical YouTube item if purged from feed_items in an earlier session
+            if (item == null && (rec.itemId.startsWith("yt_") || rec.itemId.startsWith("url_yt_"))) {
+                val videoId = rec.itemId.removePrefix("url_yt_").removePrefix("yt_").substringBefore("&").substringBefore("?")
+                if (videoId.isNotBlank()) {
+                    val synth = FeedItem(
+                        id = "yt_$videoId",
+                        sourceId = "api-yt",
+                        title = "YouTube Video",
+                        url = "https://www.youtube.com/watch?v=$videoId",
+                        author = "YouTube",
+                        publishedAt = rec.viewedAt,
+                        thumbnailUrl = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                        mediaUrl = "https://www.youtube.com/watch?v=$videoId",
+                        mediaType = "video",
+                        apiSource = "youtube",
+                        isRead = true
+                    )
+                    item = UnifiedItem.Feed(synth)
+                }
+            }
+
+            if (item != null) {
+                val cKey = com.noslop.app.data.getCanonicalItemKey(item)
+                if (seenKeys.add(cKey)) {
+                    val matchesSearch = if (searchTerms.isEmpty()) true else {
+                        when (item) {
+                            is UnifiedItem.Feed -> {
+                                val t = item.item.title.lowercase()
+                                val a = item.item.author?.lowercase() ?: ""
+                                val e = item.item.excerpt?.lowercase() ?: ""
+                                searchTerms.all { term -> t.contains(term) || a.contains(term) || e.contains(term) }
+                            }
+                            is UnifiedItem.Mesh -> {
+                                val c = item.post.content.lowercase()
+                                val a = item.post.authorHandle.lowercase()
+                                val t = item.post.clearnetTitle?.lowercase() ?: ""
+                                searchTerms.all { term -> c.contains(term) || a.contains(term) || t.contains(term) }
+                            }
+                            else -> false
+                        }
+                    }
+                    if (matchesSearch) {
+                        matchedHistory.add(item)
+                    }
+                }
+            }
+        }
+
+        val unconsumed = matchedHistory.filter { com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys }
+        if (unconsumed.isEmpty()) {
+            return
+        }
+        val batch = unconsumed.take(30)
+        sessionLoadedIds.addAll(batch.map { it.id })
+        _unifiedFeed.value = if (_unifiedFeed.value.isEmpty()) {
+            batch
+        } else {
+            (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+        }
+        if (isInitialLoad) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
+            }
+        }
+    }
+
     fun loadMoreFeedItems(filterMode: String? = null, isInjection: Boolean = false) {
         if (_isOnboardingComplete.value && localKeys.value == null) return
         if (isLoadingMoreFeedItems) return
@@ -873,12 +992,30 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             _unifiedFeed.value = emptyList()
             currentFilterMode = actualFilter
         }
+
+        if (actualFilter == "History") {
+            val isInitialLoad = _unifiedFeed.value.isEmpty()
+            val historyRecords = viewedHistoryRecords.value
+            if (historyRecords.isEmpty()) {
+                viewModelScope.launch(Dispatchers.IO) {
+                    val dbRecords = repository.getAllViewedHistoryList()
+                    withContext(Dispatchers.Main) {
+                        loadHistoryBatch(dbRecords, isInitialLoad, activeSearchQuery)
+                    }
+                }
+                return
+            }
+            loadHistoryBatch(historyRecords, isInitialLoad, activeSearchQuery)
+            return
+        }
+
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()
         
         val isPersistentList = isSearchActive || actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
-                               actualFilter == "My Content" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
+                               actualFilter == "My Content" || actualFilter == "Videos" || actualFilter == "Audio" ||
+                               actualFilter == "Images" || actualFilter == "Articles" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
         
         val exclusionIds = currentIds + sessionLoadedIds
         val readOrHiddenIds = cachedViewedIds + cachedExcludedIds + exclusionIds
@@ -1020,11 +1157,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        // In feed-centric modes, also exclude viewed items and swiped mesh posts
-        // so the feed feels fresh. NOT applied if fallback is active, in Mesh (unless hiding viewed), or History modes.
-        if (!isUsingFallback && !isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || 
-            actualFilter == "Videos" || actualFilter == "Audio" || 
-            actualFilter == "Images" || actualFilter == "Articles" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
+        // In feed-centric modes (Live Feed & Random), also exclude viewed items and swiped mesh posts
+        // so the feed feels fresh. NOT applied in specific filter tabs (Audio, Images, Articles, Videos) so users can browse all content.
+        if (!isUsingFallback && !isSearchActive && (actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random" || (actualFilter == "Mesh" && !_showOldMeshPosts.value))) {
             val hiddenIds = cachedViewedIds + cachedExcludedIds
             if (hiddenIds.isNotEmpty()) {
                 unseenFeeds = unseenFeeds.filter { it.id !in hiddenIds }
@@ -1091,16 +1226,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val isInitialLoad = _unifiedFeed.value.isEmpty()
-        val specificNeeded = if (isSearchActive) 30 else if (actualFilter == "Mesh" || actualFilter == "My Content") 20 else if (isInitialLoad) 3 else 10
+        val specificNeeded = if (isSpecificFilter || isSearchActive) 30 else if (isInitialLoad) 5 else 10
 
         if (isSpecificFilter || isSearchActive) {
             val specificFeeds = unseenFeeds.filter {
                 if (isSearchActive && !isSpecificFilter) true
                 else when (actualFilter) {
-                    "Videos" -> it.mediaType?.contains("video") == true
-                    "Audio" -> it.mediaType?.contains("audio") == true
-                    "Images" -> it.mediaType?.contains("image") == true
-                    "Articles" -> it.mediaType.isNullOrEmpty()
+                    "Videos" -> isVideoFeedItem(it)
+                    "Audio" -> isAudioFeedItem(it)
+                    "Images" -> isImageFeedItem(it)
+                    "Articles" -> isArticleFeedItem(it)
                     "History" -> true
                     "Liked", "Saved" -> true
                     else -> false
@@ -1274,10 +1409,25 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Filter based on toggles
         // --- NOSLOP_AGE_FLOOR_V1 ---
         // Age ceiling applied per bucket, with the empty-pool floor.
-        val allVideos = if (mixSettings.videoEnabled) recentFeeds.filter { it.mediaType?.contains("video") == true } else emptyList()
-        val allAudios = if (mixSettings.audioEnabled) recentFeeds.filter { it.mediaType?.contains("audio") == true } else emptyList()
-        val allImages = if (mixSettings.imageEnabled) recentFeeds.filter { it.mediaType?.contains("image") == true } else emptyList()
-        val allArticles = if (mixSettings.articleEnabled) recentFeeds.filter { it.mediaType.isNullOrEmpty() } else emptyList()
+        val allVideos = if (mixSettings.videoEnabled) {
+            val fresh = recentFeeds.filter { isVideoFeedItem(it) }
+            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isVideoFeedItem(it) && it.id !in cachedExcludedIds }
+        } else emptyList()
+
+        val allAudios = if (mixSettings.audioEnabled) {
+            val fresh = recentFeeds.filter { isAudioFeedItem(it) }
+            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isAudioFeedItem(it) && it.id !in cachedExcludedIds }
+        } else emptyList()
+
+        val allImages = if (mixSettings.imageEnabled) {
+            val fresh = recentFeeds.filter { isImageFeedItem(it) }
+            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isImageFeedItem(it) && it.id !in cachedExcludedIds }
+        } else emptyList()
+
+        val allArticles = if (mixSettings.articleEnabled) {
+            val fresh = recentFeeds.filter { isArticleFeedItem(it) }
+            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isArticleFeedItem(it) && it.id !in cachedExcludedIds }
+        } else emptyList()
 
         val rawVideos = withAgeFloor(allVideos)
         val rawAudios = withAgeFloor(allAudios)

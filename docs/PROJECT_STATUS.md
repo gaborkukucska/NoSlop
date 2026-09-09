@@ -1,43 +1,31 @@
 # Project Status - NoSlop
 
-## Completed Changes (2026-09-09) — Feed Swipe History, Cold-Start Position Resume, 40+ Creator Variety & Tor Playback Stabilization
+## Completed Changes (2026-09-09) — Mesh Empty State, History Search & Pagination, Content Mix Variety & Audio Pipeline
 
-* **Immediate Swipe-Away History & Multi-Key Exclusion (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`, `EngagementRepository.kt`)**:
-  * Fixed an issue where swiped-away clearnet slides (even if still loading or briefly viewed) were not saved to history and were repeatedly re-served.
-  * `UnifiedFeedTab.kt` detects page transitions using hoisted `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
-  * `EngagementRepository.recordSwipe()` now writes the raw `itemId`, normalized ID (`normId`), and canonical URL/title key (`canonicalKey`) into `swipe_tracker`.
-  * Updated `loadMoreFeedItems()` in `NoSlopViewModel.kt` to check `cachedExcludedIds` and `cachedViewedIds` across all representation keys, preventing swiped or viewed items from resurrecting into the Live Feed.
-* **Mesh Tab Instant "Nothing New Here" Default & Tab-Switch Restore (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
-  * Prioritized `filterMode == "Mesh"` in the empty-feed container of `UnifiedFeedTab.kt`, completely decoupling the Mesh view from `isRefreshing`. Toggling to Mesh now displays "Nothing New Here" and the "See Old Posts" button instantly with zero delay, rather than stalling for 30s behind clearnet background sync.
-  * Restricted `isUsingFallback` in `NoSlopViewModel.loadMoreFeedItems()` to feed modes (`Live Feed` / `Random`), preventing Mesh mode from ever misinterpreting empty clearnet lists as feed exhaustion or triggering redundant clearnet refreshes.
-  * Decoupled `restoreScrollPositionEvent` handling in `UnifiedFeedTab.kt` into a dedicated `LaunchedEffect(restoreItemId, unifiedItems.size)`, guaranteeing that returning from Mesh back to "All" restores the exact slide position instantly.
-  * Reset `lastSettledPage = -1` on All/Mesh toggle clicks so switching tabs never falsely marks the vacated slide as swiped away.
-* **Cold-Start Slide Position Persistence (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
-  * Eliminated cold-start position clobbering: introduced `isSavedPositionLoaded` StateFlow in `NoSlopViewModel.kt` to ensure Compose waits for SQLite to load `saved_feed_active_id`.
-  * Prevented Room's initial empty emission on cold start from clearing the saved feed list by waiting until `feeds.isNotEmpty() || meshes.isNotEmpty()`.
-  * Removed `!isRefreshing` guard from `saveFeedPosition` so active slide positions are preserved even when background feed sync is active.
-  * In `NoSlopViewModel.saveFeedPosition`, centered `itemsToSave` around the active `itemId` rather than naive `takeLast(100)`, ensuring early slides are never dropped from `saved_feed_list`.
-  * Initialized `lastSettledPage` to the restored index on cold start to avoid false swipe triggers on the initial scroll.
-* **Fair 40+ Creator Distribution & Variety (`NoSlopViewModel.kt`, `FeedRepository.kt`)**:
-  * Resolved the bottleneck where only ~10 frequent daily uploaders were ever displayed while 30+ other favorite creators were never shown.
-  * Updated `takeRoundRobin` in `NoSlopViewModel.kt` to shuffle the priority creator queues. Every batch now draws from 5 different creators across the user's entire list of 40+, preventing frequent daily posters from monopolizing 150 consecutive slides.
-  * In `FeedRepository.kt`, randomized `rampUpCreators` and expanded the background sample to 8 creators per sync so all 40+ channels regularly refresh.
-* **Tor Video Resolution & Playback Hardening (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `TorService.kt`)**:
-  * **Fast-fail age-restricted videos**: Inspected `playabilityStatus.reason` in `YouTubeInternalClient.kt` for "age", "inappropriate", or "private" keywords to bail out in 0.1s instead of wasting 40s hopping 6 circuits.
-  * **Fast-fail dead circuits on timeout**: Immediately advance circuit isolation nonces on socket timeouts (`Read timed out`), jumping to a fresh circuit without trying other configs on the same stalled socket.
-  * **Aligned timeouts for Tor circuit construction**: Set 20s connect/read timeouts and 25s call timeout in `playerClient()`, providing Tor sufficient time (14–18s) to build fresh 3-hop circuits on mobile networks.
-  * **Bypassed dead Invidious fallback**: Bypassed dead public Invidious and Piped instances over Tor, preventing 50s socket hangs.
-  * **Bandwidth de-duplication**: When `ExoVideoPlayer` mounts a fresh player, it immediately cancels any duplicate background `doWarmUp` download in `PreloadManager` for that URL, preventing two ExoPlayers from competing for the same Tor bandwidth.
-  * **Dedicated visible player resolution**: Restricted `VideoPlayer` network resolution to `isVisible == true` so off-screen next slides do not steal bandwidth or lock resolve mutexes.
-  * **Eliminated false "no traffic" popup**: Removed false-alarm `setTorStatusMessage` triggers from background offline-peer checks in `TorService.kt`, and auto-cleared `torBlockedMessage` whenever video progress is made.
-* **Background Feed Sync Coordination (`FeedRepository.kt`, `PreloadManager.kt`, `UnifiedFeedTab.kt`)**:
-  * Introduced `isVideoActive` in `PreloadManager.kt`. `FeedRepository.kt` pauses Phase 2/3 background RSS, category, and creator sync while videos are actively resolving, buffering, or playing.
-  * Made Phase 2 & 3 background sync asynchronous so `refreshFeeds()` returns immediately after Phase 1 Ramp-Up, and added an auto-dismiss timeout (max 5s) for the "Fetching fresh content..." banner.
-* **Search Modal Query & Relevance Alignment (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
-  * Allowed custom search execution even when background feed sync is running (`isRefreshingFeeds`).
-  * Preserved `activeSearchQuery` in `syncFilterMode()` during search mode.
-  * Updated search feed sorting to prioritize videos at the top and preserve exact search API relevance order (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
-  * Replaced the feed on search results instead of appending to the live feed.
+* **Mesh Tab Empty State Default & Button Gating (`UnifiedFeedTab.kt`)**:
+  * Prioritized `(filterMode == "Mesh" || filterMode == "P2P Mesh")` in the empty-feed container of `UnifiedFeedTab.kt`, ensuring that the "Nothing New Here" card with the "See Old Posts" button is the default empty state with zero delay.
+  * Gated the "See Old Posts" button on `viewModel.hasMeshPosts == true` so fresh devices without mesh posts see "No posts have been received from the mesh network yet." without the button.
+  * Decoupled the Mesh view from `isRefreshing`, completely eliminating "Curating your feed..." when switching to the Mesh tab.
+* **History Filter Ordering, Search Integration & Pagination (`NoSlopViewModel.kt`, `Daos.kt`, `EngagementRepository.kt`, `UnifiedFeedTab.kt`)**:
+  * Switched `ViewedHistoryDao.insertViewedItem` from `OnConflictStrategy.IGNORE` to `REPLACE`, ensuring that re-viewing or re-dwelling on content refreshes its `viewedAt` timestamp to the current time.
+  * Added `getAllViewedItemsList()` in `ViewedHistoryDao`, `EngagementRepository`, and `NoSlopRepository` for reliable retrieval of all history items from SQLite.
+  * Made `viewedHistoryRecords` in `NoSlopViewModel.kt` use `SharingStarted.Eagerly` so in-memory history records are always active and populated, even without direct Compose UI subscribers.
+  * Implemented fast chronological `loadHistoryBatch` in `NoSlopViewModel.kt`, strictly sorting history by `viewedAt DESC` using O(1) in-memory maps.
+  * Integrated real-time query filtering into `loadHistoryBatch`, allowing users to search their viewed history by keyword across titles, authors, excerpts, and content.
+  * Implemented canonical key de-duplication (`com.noslop.app.data.getCanonicalItemKey(it) !in currentKeys`) and clean pagination stops, eliminating duplicate re-appending or loopback to slide 0 when scrolling past slide 30.
+  * Protected viewed items (`isRead = 1`) in `feed_items` from deletion during feed resets/cleanups (`deleteYouTubeItems`, `deleteExpiredItems`, `clearUnsavedItems`) and added on-the-fly synthesis in `loadHistoryBatch` for historical YouTube items whose rows were previously purged, unlocking complete infinite scroll through all past viewed history.
+  * In `UnifiedFeedTab.kt`, guarded swipe-away tracking (`recordItemSwiped`) and dwell-time marking (`markItemViewed`) with `if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked")`, ensuring that browsing past historical items does not mutate SQLite timestamps or displace active pager items.
+  * Reset `lastSettledPage = -1` on all filter mode changes, preventing false swipe-away events against vacated slides during filter changes.
+  * Avoided `forceRefresh = true` on filter dismissals and modal clear-alls so returning to "Live Feed" immediately restores `cachedDefaultFeed` and scrolls to `savedFeedItemId` with 0ms delay.
+* **Content Mix Variety & Unblocked RSS/Audio Background Sync (`FeedRepository.kt`, `NoSlopViewModel.kt`)**:
+  * Unblocked Phase 2 RSS feeds and API categories (Music, Art, Photography) in `FeedRepository.kt` by replacing infinite video-idle loops (`while (currentlyPlayingUrl != null || isVideoActive)`) with non-blocking Tor staggers (`delay(1000ms)`).
+  * Unified media detection helpers (`isAudioFeedItem`, `isVideoFeedItem`, `isImageFeedItem`, `isArticleFeedItem`) in `NoSlopViewModel.kt`, accurately classifying audio tracks (Internet Archive, Openverse, podcasts) and images across both the ViewModel and `UnifiedFeedTab.kt`.
+  * Raised batch size for all specific filters (`Videos`, `Audio`, `Images`, `Articles`, `Mesh`, `History`, `Liked`, `Saved`) from 3 to 30, unblocking infinite scrolling past slide 27.
+  * Exempted specific content-type filter tabs (`Videos`, `Audio`, `Images`, `Articles`) from the aggressive `cachedViewedIds` purge, restoring full browsing capability in those tabs.
+  * Added fallback bucket selection in `NoSlopViewModel.loadMoreFeedItems()` so that if all fresh audio, images, or articles in the database have been viewed, the Live Feed interleaver falls back to un-swiped items from the library instead of starving the bucket and backfilling with 100% video.
+* **Tor Video Playback Optimization (`YouTubeInternalClient.kt`, `PreloadManager.kt`, `VideoPlayer.kt`)**:
+  * Fast-failed background preload resolve permits in `YouTubeInternalClient.kt` (2s timeout), prioritizing the active on-screen video.
+  * Tuned `MAX_PRELOAD` to 2 in `PreloadManager.kt`, focusing Tor connection bandwidth on the active and immediate next slide for instant startup on swipe.
 
 ## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
 

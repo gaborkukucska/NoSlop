@@ -69,19 +69,19 @@ interface FeedDao {
     @Query("UPDATE feed_items SET isSaved = :isSaved WHERE id = :id")
     suspend fun updateSavedState(id: String, isSaved: Boolean)
 
-    @Query("DELETE FROM feed_items WHERE isSaved = 0 AND publishedAt < :beforeTimestamp")
+    @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0 AND publishedAt < :beforeTimestamp")
     suspend fun deleteExpiredItems(beforeTimestamp: Long)
 
     @Query("DELETE FROM feed_items WHERE sourceId LIKE 'api_%'")
     suspend fun clearApiItems()
 
-    @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%'")
+    @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%' AND isSaved = 0 AND isRead = 0")
     suspend fun deleteYouTubeItems()
 
     @Query("DELETE FROM feed_items WHERE isSaved = 0 AND (author = :author OR author LIKE '%' || :author || '%')")
     suspend fun deleteItemsByAuthor(author: String)
 
-    @Query("DELETE FROM feed_items WHERE isSaved = 0")
+    @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0")
     suspend fun clearUnsavedItems()
 
     @Query("DELETE FROM feed_sources WHERE feedType = 'api'")
@@ -407,7 +407,10 @@ interface ViewedHistoryDao {
     @Query("SELECT * FROM viewed_history ORDER BY viewedAt DESC")
     fun getAllViewedItems(): Flow<List<ViewedHistoryItem>>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Query("SELECT * FROM viewed_history ORDER BY viewedAt DESC")
+    suspend fun getAllViewedItemsList(): List<ViewedHistoryItem>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertViewedItem(item: ViewedHistoryItem)
 
     @Query("SELECT COUNT(*) FROM viewed_history")

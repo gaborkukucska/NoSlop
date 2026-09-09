@@ -642,10 +642,12 @@ fun UnifiedFeedTab(
     val isRefreshing by viewModel.isRefreshingFeeds.collectAsState()
     val unreadNotifs by viewModel.unreadNotificationCount.collectAsState()
     val viewedHistoryIds by viewModel.viewedHistoryIds.collectAsState()
+    val viewedHistoryRecords by viewModel.viewedHistoryRecords.collectAsState()
     val localKeys by viewModel.localKeys.collectAsState()
     val showOldMeshPosts by viewModel.showOldMeshPosts.collectAsState()
 
     var filterMode by remember { mutableStateOf("Live Feed") }
+    var lastSettledPage by remember { mutableStateOf(-1) }
     var searchQuery by remember { mutableStateOf("") }
     var sharedItem by remember { mutableStateOf<UnifiedItem?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
@@ -687,7 +689,7 @@ fun UnifiedFeedTab(
         }
     }
 
-    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, showOldMeshPosts) {
+    val unifiedItems = remember(unifiedFeed, filterMode, searchQuery, injectedTutStep, viewedHistoryIds, viewedHistoryRecords, showOldMeshPosts) {
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val filtered = unifiedFeed.filter { item ->
@@ -700,7 +702,7 @@ fun UnifiedFeedTab(
 
             val matchesMode = when (filterMode) {
                 "Live Feed" -> true
-                "History" -> item.id in viewedHistoryIds
+                "History" -> true
                 "Liked", "Saved" -> item is UnifiedItem.Feed && item.item.isSaved
                 "Videos" -> isVideoItem(item)
                 "Images" -> isImageItem(item)
@@ -740,6 +742,10 @@ fun UnifiedFeedTab(
     val preloadScope = rememberCoroutineScope()
 
     // Pager scroll reset is handled reliably via viewModel.scrollToTopEvent
+
+    LaunchedEffect(filterMode) {
+        lastSettledPage = -1
+    }
 
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
@@ -789,7 +795,6 @@ fun UnifiedFeedTab(
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     var hasRestoredInitialPosition by remember { mutableStateOf(false) }
-    var lastSettledPage by remember { mutableStateOf(-1) }
     val isSavedPositionLoaded by viewModel.isSavedPositionLoaded.collectAsState()
     val savedTargetId by viewModel.savedActiveItemId.collectAsState()
     
@@ -847,9 +852,11 @@ fun UnifiedFeedTab(
                     viewModel.markItemReadState(currentItem.item.id, true)
                 }
 
-                // If user dwells on the slide for 4s without swiping, mark it as viewed
-                kotlinx.coroutines.delay(4000L)
-                viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
+                // If user dwells on the slide for 4s without swiping, mark it as viewed (Live Feed modes only)
+                if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
+                    kotlinx.coroutines.delay(4000L)
+                    viewModel.markItemViewed(currentItem.id, currentItem.isMesh)
+                }
             }
         }
     }
@@ -917,14 +924,16 @@ fun UnifiedFeedTab(
     LaunchedEffect(pagerState.settledPage, hasRestoredInitialPosition) {
         val currentPage = pagerState.settledPage
         if (hasRestoredInitialPosition && lastSettledPage >= 0 && lastSettledPage in unifiedItems.indices && lastSettledPage != currentPage) {
-            val leftItem = unifiedItems[lastSettledPage]
-            if (leftItem is UnifiedItem.Feed) {
-                viewModel.markItemReadState(leftItem.item.id, true)
-                viewModel.markItemViewed(leftItem.id, isMesh = false)
-                viewModel.recordItemSwiped(leftItem.id)
-            } else if (leftItem is UnifiedItem.Mesh) {
-                viewModel.markItemViewed(leftItem.id, isMesh = true)
-                viewModel.recordItemSwiped(leftItem.id)
+            if (filterMode != "History" && filterMode != "Saved" && filterMode != "Liked") {
+                val leftItem = unifiedItems[lastSettledPage]
+                if (leftItem is UnifiedItem.Feed) {
+                    viewModel.markItemReadState(leftItem.item.id, true)
+                    viewModel.markItemViewed(leftItem.id, isMesh = false)
+                    viewModel.recordItemSwiped(leftItem.id)
+                } else if (leftItem is UnifiedItem.Mesh) {
+                    viewModel.markItemViewed(leftItem.id, isMesh = true)
+                    viewModel.recordItemSwiped(leftItem.id)
+                }
             }
         }
         if (hasRestoredInitialPosition && currentPage in unifiedItems.indices) {
@@ -958,23 +967,29 @@ fun UnifiedFeedTab(
 
         if (unifiedItems.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                if (filterMode == "Mesh") {
+                if (filterMode == "Mesh" || filterMode == "P2P Mesh") {
                     if (!showOldMeshPosts) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                             Icon(Icons.Default.Hub, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(64.dp))
                             Spacer(modifier = Modifier.height(16.dp))
                             Text("Nothing New Here".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("You're all caught up on mesh posts.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Button(
-                                onClick = { viewModel.setShowOldMeshPosts(true) },
-                                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("See Old Posts".tr, fontWeight = FontWeight.Bold)
+                            Text(
+                                if (viewModel.hasMeshPosts) "You're all caught up on mesh posts.".tr
+                                else "No posts have been received from the mesh network yet.".tr,
+                                color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall
+                            )
+                            if (viewModel.hasMeshPosts) {
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Button(
+                                    onClick = { viewModel.setShowOldMeshPosts(true) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("See Old Posts".tr, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
                     } else {
@@ -985,6 +1000,30 @@ fun UnifiedFeedTab(
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("No posts have been received from the mesh network yet.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
                         }
+                    }
+                } else if (filterMode == "History") {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.History, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No History Yet".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Content you view will appear here chronologically.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (filterMode == "Liked" || filterMode == "Saved") {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Bookmark, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No Saved Items".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Items you save or like will appear here.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }
+                } else if (filterMode == "My Content") {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No Broadcasts Yet".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Your mesh posts will appear here.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
                     }
                 } else if (isRefreshing) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1184,13 +1223,14 @@ fun UnifiedFeedTab(
                                     .size(14.dp)
                                     .clickable {
                                         if (isActiveTab) {
+                                            lastSettledPage = -1
                                             filterMode = "Live Feed"
                                             searchQuery = ""
                                             if (searchResultsActive) {
                                                 searchResultsActive = false
                                                 viewModel.clearSearchAndRestoreFeed()
                                             } else {
-                                                viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                                viewModel.syncFilterMode("Live Feed", forceRefresh = false)
                                             }
                                         }
                                     }
@@ -1279,6 +1319,7 @@ fun UnifiedFeedTab(
                                     viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                                 }
                                 
+                                lastSettledPage = -1
                                 searchQuery = q
                                 filterMode = localFilterMode
                                 
@@ -1291,7 +1332,7 @@ fun UnifiedFeedTab(
                                         viewModel.clearSearchAndRestoreFeed()
                                     } else {
                                         // Only sync filter mode if not clearing search
-                                        viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
+                                        viewModel.syncFilterMode(localFilterMode, forceRefresh = false)
                                     }
                                 }
                                 showSearchModal = false
@@ -1460,6 +1501,7 @@ fun UnifiedFeedTab(
                             viewModel.saveFeedPosition(unifiedItems[pagerState.currentPage].id)
                         }
                         
+                        lastSettledPage = -1
                         searchQuery = q
                         filterMode = localFilterMode
                         
@@ -1472,7 +1514,7 @@ fun UnifiedFeedTab(
                                 viewModel.clearSearchAndRestoreFeed()
                             } else {
                                 // Only sync filter mode if not clearing search
-                                viewModel.syncFilterMode(localFilterMode, forceRefresh = true)
+                                viewModel.syncFilterMode(localFilterMode, forceRefresh = false)
                             }
                         }
                         showSearchModal = false 
@@ -1486,6 +1528,7 @@ fun UnifiedFeedTab(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = { 
+                            lastSettledPage = -1
                             localSearchQuery = ""
                             localFilterMode = "Live Feed"
                             searchQuery = ""
@@ -1494,7 +1537,7 @@ fun UnifiedFeedTab(
                                 searchResultsActive = false
                                 viewModel.clearSearchAndRestoreFeed()
                             } else {
-                                viewModel.syncFilterMode("Live Feed", forceRefresh = true)
+                                viewModel.syncFilterMode("Live Feed", forceRefresh = false)
                             }
                             showSearchModal = false 
                         },

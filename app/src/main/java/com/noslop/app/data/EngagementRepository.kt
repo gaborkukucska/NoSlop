@@ -121,18 +121,19 @@ class EngagementRepository(
      * History items are never removed (except when the cap is reached, oldest are pruned).
      */
     suspend fun markAsViewed(itemId: String, itemType: String, url: String? = null, canonicalKey: String? = null) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
         val normId = normalizeFeedItemId(itemId, url ?: "")
         viewedHistoryDao.insertViewedItem(
-            ViewedHistoryItem(itemId = itemId, itemType = itemType)
+            ViewedHistoryItem(itemId = itemId, itemType = itemType, viewedAt = now)
         )
         if (normId.isNotBlank() && normId != itemId) {
             viewedHistoryDao.insertViewedItem(
-                ViewedHistoryItem(itemId = normId, itemType = itemType)
+                ViewedHistoryItem(itemId = normId, itemType = itemType, viewedAt = now)
             )
         }
         if (!canonicalKey.isNullOrBlank() && canonicalKey != itemId && canonicalKey != normId) {
             viewedHistoryDao.insertViewedItem(
-                ViewedHistoryItem(itemId = canonicalKey, itemType = itemType)
+                ViewedHistoryItem(itemId = canonicalKey, itemType = itemType, viewedAt = now)
             )
         }
         // Prune oldest items if we exceed the history limit
@@ -150,6 +151,10 @@ class EngagementRepository(
 
     /** Reactive flow of all viewed history items (for the History filter UI). */
     val allViewedHistory: Flow<List<ViewedHistoryItem>> = viewedHistoryDao.getAllViewedItems()
+
+    suspend fun getAllViewedHistoryList(): List<ViewedHistoryItem> = withContext(Dispatchers.IO) {
+        viewedHistoryDao.getAllViewedItemsList()
+    }
 
     // --- Swipe Tracking ---
 
