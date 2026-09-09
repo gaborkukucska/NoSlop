@@ -7,6 +7,7 @@ import com.noslop.app.feeds.FeedParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -266,9 +267,10 @@ class FeedRepository(
             })
         }
 
-        // Fast ramp-up: fetch first 2 creators immediately so user has their favorite creator videos right away
-        val rampUpCreators = creatorKeywordList.take(2)
-        val remainingCreators = creatorKeywordList.drop(2)
+        // Fast ramp-up: randomize creators so different channels from the user's 40+ list get refreshed
+        val shuffledCreators = creatorKeywordList.shuffled()
+        val rampUpCreators = shuffledCreators.take(3)
+        val remainingCreators = shuffledCreators.drop(3)
         for (creator in rampUpCreators) {
             rampUpJobs.add(async(dispatcher) {
                 _feedBuildStatus.value = "Preparing your feed..."
@@ -295,6 +297,9 @@ class FeedRepository(
         for (source in rssSources) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null || com.noslop.app.ui.PreloadManager.isVideoActive) {
+                        kotlinx.coroutines.delay(4000L)
+                    }
                     fetchRssSource(source, allNegative)
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Background RSS fetch failed for ${source.title}: ${e.message}")
@@ -305,6 +310,9 @@ class FeedRepository(
         for (category in activeCategories) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null || com.noslop.app.ui.PreloadManager.isVideoActive) {
+                        kotlinx.coroutines.delay(4000L)
+                    }
                     fetchApiCategory(category, explicitApiSources, userCategories, langPref, allNegative, apiKeyRepo)
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Background API category fetch failed for $category: ${e.message}")
@@ -312,10 +320,22 @@ class FeedRepository(
             })
         }
 
-        // --- Phase 3: Creator Specific API searches for all remaining creators ---
-        for (creator in remainingCreators) {
+        // --- Phase 3: Creator Specific API searches (staggered to protect Tor bandwidth) ---
+        val sampledCreators = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+            remainingCreators.take(8)
+        } else {
+            remainingCreators
+        }
+        for (creator in sampledCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
+                    // Defer if user is actively watching/loading a video
+                    while (com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
+                        kotlinx.coroutines.delay(5000L)
+                    }
+                    if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
+                        kotlinx.coroutines.delay(2000L) // Stagger requests across Tor
+                    }
                     fetchCreatorVideos(creator)
                 } catch (e: Exception) {
                     Logger.warn(TAG, "Background creator fetch failed for $creator: ${e.message}")
@@ -323,13 +343,21 @@ class FeedRepository(
             })
         }
 
-        try {
-            kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
-        } finally {
-            isSyncRunning.set(false)
-            _feedBuildStatus.value = ""
+        // Phase 1 finished: initial content is ready for UI. Unblock callers immediately.
+        isSyncRunning.set(false)
+        _feedBuildStatus.value = ""
+
+        // Run Phase 2 & 3 in background so long while-loops waiting for video idle do not block UI refresh state
+        kotlinx.coroutines.CoroutineScope(dispatcher + kotlinx.coroutines.SupervisorJob()).launch {
+            try {
+                kotlinx.coroutines.awaitAll(*backgroundJobs.toTypedArray())
+            } catch (e: Exception) {
+                Logger.warn(TAG, "Background sync exception: ${e.message}")
+            } finally {
+                _feedBuildStatus.value = ""
+            }
+            Logger.info(TAG, "Feed synchronization completed.")
         }
-        Logger.info(TAG, "Feed synchronization completed.")
     }
 
     private suspend fun fetchRssSource(source: FeedSource, allNegative: List<String>) {

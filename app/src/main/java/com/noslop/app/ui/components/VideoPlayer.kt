@@ -662,12 +662,18 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, activeVisible) {
-        if (!activeVisible) return@LaunchedEffect
-        // On URL change or retry, resolve the source. But try the fast path first:
-        // if PreloadManager already resolved this URL, sourceCache will have it instantly.
+    LaunchedEffect(url, retryTrigger, mediaSettings.videoQuality, isVisible, activeVisible) {
+        // Offscreen next slide is warmed by PreloadManager; VideoPlayer only resolves for the visible slide
+        if (!isVisible && !activeVisible) return@LaunchedEffect
         val forceRefresh = retryTrigger > 0
         if (forceRefresh) source = null
+        // If this slide is merely next but not visible, only check existing cache without triggering network resolves
+        if (!isVisible && activeVisible) {
+            val cached = sourceCache["$url||${mediaSettings.videoQuality.ifBlank { "medium" }}"]?.takeIf { it.stalenessReason() == null }?.source
+            if (cached != null) source = cached
+            return@LaunchedEffect
+        }
+        com.noslop.app.ui.PreloadManager.isVideoActive = true
         Logger.info("VIDEO", "Resolving source for: $url (retry: $retryTrigger)")
         val resolvedSource = resolveSource(url, forceRefresh = forceRefresh, context = context)
         source = resolvedSource
@@ -724,6 +730,7 @@ fun VideoPlayer(
                                 retryTrigger++
                             },
                             onReady = {
+                                com.noslop.app.tor.TorService.setTorStatusMessage(null)
                                 isVideoReady = true
                                 directPlaybackFailed = false
                             },
@@ -813,9 +820,15 @@ fun VideoPlayer(
                         androidx.compose.ui.graphics.BlendMode.Darken
                     )
                 )
-                // Proper, uncropped thumbnail in front
+                // Proper, uncropped thumbnail in front with crossfade
+                val thumbModel = remember(thumbnailUrl, decodedB64) {
+                    coil.request.ImageRequest.Builder(context)
+                        .data(thumbnailUrl ?: decodedB64)
+                        .crossfade(true)
+                        .build()
+                }
                 AsyncImage(
-                    model = thumbnailUrl ?: decodedB64,
+                    model = thumbModel,
                     contentDescription = "Video Thumbnail".tr,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
@@ -1231,6 +1244,8 @@ private fun ExoVideoPlayer(
                         seekTo(resumeMs)
                     }
 
+                    // Cancel redundant background prewarm for this exact URL to prevent bandwidth contention
+                    com.noslop.app.ui.PreloadManager.invalidate(rawUrl)
                     com.noslop.app.ui.PreloadManager.currentlyPlayingUrl = rawUrl
                     addListener(object : androidx.media3.common.Player.Listener {
                         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -1287,6 +1302,7 @@ private fun ExoVideoPlayer(
             }
             player.release()
             exoPlayer = null
+            com.noslop.app.ui.PreloadManager.isVideoActive = false
         }
     }
 

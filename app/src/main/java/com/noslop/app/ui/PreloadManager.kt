@@ -94,6 +94,8 @@ object PreloadManager {
     private val cancelledTasks = ConcurrentHashMap.newKeySet<String>()
     @Volatile
     var currentlyPlayingUrl: String? = null
+    @Volatile
+    var isVideoActive: Boolean = false
 
     // LinkedHashMap is not thread-safe, but preloadedPlayers is only ever accessed
     // from the main thread: preWarm() is called via launch{} from a Composable
@@ -163,6 +165,8 @@ object PreloadManager {
     @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun preWarm(context: Context, rawUrl: String, forcedResolvedUrl: String? = null) {
         if (rawUrl.isBlank()) return
+        val cleanUrl = rawUrl.trim()
+        if (cleanUrl.isEmpty()) return
         if (rawUrl == currentlyPlayingUrl) {
             Logger.info("PRELOAD", "Skipping preWarm for actively playing video: $rawUrl")
             return

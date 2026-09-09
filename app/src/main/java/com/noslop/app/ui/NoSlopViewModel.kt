@@ -169,7 +169,13 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             cachedDefaultFeed = _unifiedFeed.value.toList()
             
             viewModelScope.launch {
-                val itemsToSave = cachedDefaultFeed.takeLast(100)
+                val currentIdx = cachedDefaultFeed.indexOfFirst { it.id == itemId }
+                val itemsToSave = if (cachedDefaultFeed.size > 100 && currentIdx >= 0) {
+                    val start = maxOf(0, currentIdx - 30)
+                    cachedDefaultFeed.subList(start, minOf(cachedDefaultFeed.size, start + 100))
+                } else {
+                    cachedDefaultFeed.take(100)
+                }
                 val ids = itemsToSave.map { it.id }.joinToString(",")
                 val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
                 repository.putAppSetting("saved_feed_list", ids)
@@ -606,6 +612,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                                 if (restoredFeed.size < 5) {
                                     loadMoreFeedItems("Live Feed")
                                 }
+                            } else if (feeds.isEmpty() && meshes.isEmpty()) {
+                                // Room DB emission on cold start is still initial empty emission; wait for DB data
+                                return@collect
                             } else {
                                 loadMoreFeedItems()
                             }
@@ -640,7 +649,6 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
 
     fun searchAndCreateCustomFeed(query: String, filterMode: String?) {
         if (query.isBlank()) return
-        if (_isRefreshingFeeds.value) return 
         _isRefreshingFeeds.value = true
         viewModelScope.launch {
             try {
@@ -687,8 +695,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
 
             if (mode == "Live Feed") {
-                activeSearchQuery = ""
-                isSearchModeActive = false
+                if (!isSearchModeActive) {
+                    activeSearchQuery = ""
+                }
                 if (cachedDefaultFeed.isNotEmpty() && !forceRefresh) {
                     _unifiedFeed.value = cachedDefaultFeed.toList()
                     sessionLoadedIds.clear()
@@ -788,10 +797,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         if (groups.isEmpty()) return emptyList()
 
-        // Stable partition: priority groups first, original order otherwise.
-        val queues = groups.values.sortedByDescending { group ->
-            if (group.any(isPriority)) 1 else 0
-        }
+        // Fair creator distribution: partition priority creators and shuffle them so all 40+ creators rotate
+        val priorityGroups = groups.values.filter { it.any(isPriority) }.shuffled()
+        val otherGroups = groups.values.filter { !it.any(isPriority) }
+        val queues = priorityGroups + otherGroups
 
         val result = mutableListOf<T>()
         var round = 0
@@ -868,7 +877,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()
         
-        val isPersistentList = actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
+        val isPersistentList = isSearchActive || actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
                                actualFilter == "My Content" || (actualFilter == "Mesh" && _showOldMeshPosts.value)
         
         val exclusionIds = currentIds + sessionLoadedIds
@@ -1114,8 +1123,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             val batch = mutableListOf<UnifiedItem>()
             
             if (isSearchActive) {
+                val searchOrder = lastSearchResultIds.toList()
                 val allMatches = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
-                batch.addAll(allMatches.sortedByDescending { it.timestamp }.take(specificNeeded))
+                val sortedSearch = allMatches.sortedWith(compareBy(
+                    // 1. Videos have top priority in search results
+                    { !(it is UnifiedItem.Feed && it.item.mediaType?.contains("video") == true) },
+                    // 2. Exact search API relevance rank
+                    { val idx = searchOrder.indexOf(it.id); if (idx >= 0) idx else Int.MAX_VALUE },
+                    // 3. Fallback timestamp
+                    { -it.timestamp }
+                ))
+                batch.addAll(sortedSearch.take(specificNeeded))
             } else {
                 if (actualFilter == "History") {
                     val viewedIdsList = viewedHistoryIds.value.toList()
@@ -1155,8 +1173,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             } else {
-                // If switching filters, replace feed directly with new batch rather than appending
-                _unifiedFeed.value = if (actualFilter == "Mesh" || actualFilter == "My Content" || currentFilterMode != "Live Feed") {
+                // If switching filters or searching, replace feed directly with new batch rather than appending
+                _unifiedFeed.value = if (isSearchActive || actualFilter == "Mesh" || actualFilter == "My Content" || currentFilterMode != "Live Feed") {
                     batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
                 } else {
                     (_unifiedFeed.value + batch).distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }

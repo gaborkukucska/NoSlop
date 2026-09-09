@@ -1,22 +1,38 @@
 # Project Status - NoSlop
 
-## Completed Changes (2026-09-07) — Feed Swipe History Tracking, Slide Position Persistence & Playback Tuning
+## Completed Changes (2026-09-09) — Feed Swipe History, Cold-Start Position Resume, 40+ Creator Variety & Tor Playback Stabilization
 
-* **Immediate Swipe-Away History & Feed Exclusion (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`, `EngagementRepository.kt`)**:
+* **Immediate Swipe-Away History & Multi-Key Exclusion (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`, `EngagementRepository.kt`)**:
   * Fixed an issue where swiped-away clearnet slides (even if still loading or briefly viewed) were not saved to history and were repeatedly re-served.
-  * Capturing page transitions in `UnifiedFeedTab.kt` now immediately calls `markItemReadState(id, true)`, `markItemViewed(id, isMesh = false)`, and `recordItemSwiped(id)`.
-  * Updated `recordSwipe()` in `EngagementRepository.kt` to record the raw ID, normalized ID (`normId`), and canonical URL/title key (`canonicalKey`) into `swipe_tracker`, excluding swiped items across all of their key representations in `cachedExcludedIds`.
-  * Patched `unseenFeeds` filtering and fallback in `NoSlopViewModel.kt` to enforce `cachedExcludedIds` and `cachedViewedIds` across all representation keys, preventing swiped or viewed items from resurrecting into the Live Feed.
+  * `UnifiedFeedTab.kt` detects page transitions using hoisted `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+  * `EngagementRepository.recordSwipe()` now writes the raw `itemId`, normalized ID (`normId`), and canonical URL/title key (`canonicalKey`) into `swipe_tracker`.
+  * Updated `loadMoreFeedItems()` in `NoSlopViewModel.kt` to check `cachedExcludedIds` and `cachedViewedIds` across all representation keys, preventing swiped or viewed items from resurrecting into the Live Feed.
 * **Cold-Start Slide Position Persistence (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
-  * Fixed a race condition where the feed page position was lost on app close and restart: introduced `isSavedPositionLoaded` StateFlow in `NoSlopViewModel.kt` to guarantee Compose waits for SQLite to load `saved_feed_active_id`.
-  * `UnifiedFeedTab.kt` now waits for `isSavedPositionLoaded == true` and non-empty `unifiedItems` before evaluating restore targets, preventing startup page 0 composition from clobbering `saved_feed_active_id`.
-  * Preserved `savedActiveId` in `restoredFeed` on cold-start even if other historical items are excluded.
-* **YouTube Playback & Stream Resolution over Tor (`YouTubeInternalClient.kt`, `VideoPlayer.kt`)**:
-  * Prioritized `ANDROID_VR` in InnerTube configs right after `ANDROID`: `ANDROID_VR` serves progressive 360p muxed `itag=18` streams without requiring BotGuard / PoToken attestation.
-  * Raised `EXIT_BLOCKED_THRESHOLD` from 2 to 3 so `ANDROID_VR` gets a chance on the current circuit before advancing circuit isolation nonces.
-  * Increased Tor InnerTube resolve `maxAttempts` from 3 to 4, significantly improving resolution success across Tor exits.
-  * Filtered out Invidious `.onion` stream fallback URLs in `YouTubeInternalClient.kt` to prevent severe 2004 timeouts over mobile Tor.
-  * In `VideoPlayer.kt`, guarded `PlaybackPositionStore.save()` in `onDispose` with `currentPosition >= 8000L` to prevent micro-seeks on short-lived or swiped slides.
+  * Eliminated cold-start position clobbering: introduced `isSavedPositionLoaded` StateFlow in `NoSlopViewModel.kt` to ensure Compose waits for SQLite to load `saved_feed_active_id`.
+  * Prevented Room's initial empty emission on cold start from clearing the saved feed list by waiting until `feeds.isNotEmpty() || meshes.isNotEmpty()`.
+  * Removed `!isRefreshing` guard from `saveFeedPosition` so active slide positions are preserved even when background feed sync is active.
+  * In `NoSlopViewModel.saveFeedPosition`, centered `itemsToSave` around the active `itemId` rather than naive `takeLast(100)`, ensuring early slides are never dropped from `saved_feed_list`.
+  * Initialized `lastSettledPage` to the restored index on cold start to avoid false swipe triggers on the initial scroll.
+* **Fair 40+ Creator Distribution & Variety (`NoSlopViewModel.kt`, `FeedRepository.kt`)**:
+  * Resolved the bottleneck where only ~10 frequent daily uploaders were ever displayed while 30+ other favorite creators were never shown.
+  * Updated `takeRoundRobin` in `NoSlopViewModel.kt` to shuffle the priority creator queues. Every batch now draws from 5 different creators across the user's entire list of 40+, preventing frequent daily posters from monopolizing 150 consecutive slides.
+  * In `FeedRepository.kt`, randomized `rampUpCreators` and expanded the background sample to 8 creators per sync so all 40+ channels regularly refresh.
+* **Tor Video Resolution & Playback Hardening (`YouTubeInternalClient.kt`, `VideoPlayer.kt`, `TorService.kt`)**:
+  * **Fast-fail age-restricted videos**: Inspected `playabilityStatus.reason` in `YouTubeInternalClient.kt` for "age", "inappropriate", or "private" keywords to bail out in 0.1s instead of wasting 40s hopping 6 circuits.
+  * **Fast-fail dead circuits on timeout**: Immediately advance circuit isolation nonces on socket timeouts (`Read timed out`), jumping to a fresh circuit without trying other configs on the same stalled socket.
+  * **Aligned timeouts for Tor circuit construction**: Set 20s connect/read timeouts and 25s call timeout in `playerClient()`, providing Tor sufficient time (14–18s) to build fresh 3-hop circuits on mobile networks.
+  * **Bypassed dead Invidious fallback**: Bypassed dead public Invidious and Piped instances over Tor, preventing 50s socket hangs.
+  * **Bandwidth de-duplication**: When `ExoVideoPlayer` mounts a fresh player, it immediately cancels any duplicate background `doWarmUp` download in `PreloadManager` for that URL, preventing two ExoPlayers from competing for the same Tor bandwidth.
+  * **Dedicated visible player resolution**: Restricted `VideoPlayer` network resolution to `isVisible == true` so off-screen next slides do not steal bandwidth or lock resolve mutexes.
+  * **Eliminated false "no traffic" popup**: Removed false-alarm `setTorStatusMessage` triggers from background offline-peer checks in `TorService.kt`, and auto-cleared `torBlockedMessage` whenever video progress is made.
+* **Background Feed Sync Coordination (`FeedRepository.kt`, `PreloadManager.kt`, `UnifiedFeedTab.kt`)**:
+  * Introduced `isVideoActive` in `PreloadManager.kt`. `FeedRepository.kt` pauses Phase 2/3 background RSS, category, and creator sync while videos are actively resolving, buffering, or playing.
+  * Made Phase 2 & 3 background sync asynchronous so `refreshFeeds()` returns immediately after Phase 1 Ramp-Up, and added an auto-dismiss timeout (max 5s) for the "Fetching fresh content..." banner.
+* **Search Modal Query & Relevance Alignment (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Allowed custom search execution even when background feed sync is running (`isRefreshingFeeds`).
+  * Preserved `activeSearchQuery` in `syncFilterMode()` during search mode.
+  * Updated search feed sorting to prioritize videos at the top and preserve exact search API relevance order (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
+  * Replaced the feed on search results instead of appending to the live feed.
 
 ## Completed Changes (2026-09-07) — Direct Message Fast-Lane, Missed Message Catch-up & Presence Stabilization
 

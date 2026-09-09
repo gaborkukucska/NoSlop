@@ -127,8 +127,9 @@ object YouTubeInternalClient {
         com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
             .newBuilder()
             .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
-            .callTimeout(20, TimeUnit.SECONDS)
-            .connectTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(25, TimeUnit.SECONDS)
+            .connectTimeout(20, TimeUnit.SECONDS)
+            .readTimeout(20, TimeUnit.SECONDS)
             .build()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -497,8 +498,8 @@ object YouTubeInternalClient {
     // --- NOSLOP_GEO_LOCK_V1 ---
     private val GEO_LOCK_PATTERN = Regex("[?&]gcr=([a-zA-Z]{2})(?:&|$)")
 
-    // Fast-fail to a fresh circuit after 3 clients return LOGIN_REQUIRED on the same exit
-    private const val EXIT_BLOCKED_THRESHOLD = 3
+    // Evaluate up to 2 configs before advancing circuit nonce
+    private const val EXIT_BLOCKED_THRESHOLD = 2
 
     private fun extractFormatStreamUrl(obj: JsonObject): Pair<String, Int>? {
         val itag = obj.get("itag")?.asInt ?: 18
@@ -754,7 +755,7 @@ object YouTubeInternalClient {
         
         var streamNonce = videoStreamNonces.compute(videoId) { _, n -> if (n != null) n + 1 else 0 }
         var attempt = 0
-        val maxAttempts = if (isTor) 4 else 1
+        val maxAttempts = if (isTor) 6 else 1
 
         while (attempt < maxAttempts) {
             attempt++
@@ -811,8 +812,12 @@ object YouTubeInternalClient {
                             val root = gson.fromJson(bodyStr, JsonObject::class.java)
                             val playability = root.getAsJsonObject("playabilityStatus")?.get("status")?.asString
                             
-                            if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE") {
-                                Logger.warn(TAG, "Video $videoId is permanently unplayable: $playability. Bailing immediately.")
+                            val reason = root.getAsJsonObject("playabilityStatus")?.get("reason")?.asString ?: ""
+                            val isAgeOrPrivate = reason.contains("age", ignoreCase = true) || 
+                                reason.contains("inappropriate", ignoreCase = true) || 
+                                reason.contains("private", ignoreCase = true)
+                            if (playability == "LIVE_STREAM_OFFLINE" || playability == "UNPLAYABLE" || isAgeOrPrivate) {
+                                Logger.warn(TAG, "Video $videoId is permanently unplayable ($playability / $reason). Bailing immediately.")
                                 response.close()
                                 return@withContext null
                             }
@@ -895,15 +900,23 @@ object YouTubeInternalClient {
                     }
                     response.close()
                 } catch (e: Exception) {
+                    val isTimeout = e is java.net.SocketTimeoutException || e.message?.contains("timed out", ignoreCase = true) == true
                     Logger.warn(TAG, "resolveStreamUrl failed for client ${config.clientName}: ${e.message}")
+                    if (isTimeout && isTor) {
+                        Logger.warn(TAG, "Circuit $currentStreamId timed out — immediately escaping to fresh circuit")
+                        streamNonce = videoStreamNonces.compute(videoId) { _, n -> (n ?: 0) + 1 }
+                        break
+                    }
                 }
             }
         }
         
-        // Decentralized Invidious / Piped failover (skip onion streams as they stall ExoPlayer over Tor)
-        val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
-        if (fallbackStream != null && !fallbackStream.contains(".onion")) {
-            return@withContext fallbackStream
+        // Do NOT call Invidious over Tor: public instances are dead/blocked in 2026 and waste 50s stalling Tor
+        if (!isTor) {
+            val fallbackStream = InvidiousApiClient.resolveStreamUrl(videoId, quality)
+            if (fallbackStream != null) {
+                return@withContext fallbackStream
+            }
         }
 
         return@withContext null

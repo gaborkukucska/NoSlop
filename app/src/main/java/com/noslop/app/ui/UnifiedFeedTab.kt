@@ -746,7 +746,9 @@ fun UnifiedFeedTab(
         if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
             forceScrollToTop = true
         }
-        viewModel.syncFilterMode(filterMode)
+        if (searchQuery.isBlank()) {
+            viewModel.syncFilterMode(filterMode)
+        }
     }
 
     LaunchedEffect(unifiedItems) {
@@ -772,14 +774,22 @@ fun UnifiedFeedTab(
         }
     }
 
-    LaunchedEffect(isRefreshing) {
+    LaunchedEffect(isRefreshing, isResettingFeed) {
         if (!isRefreshing && isResettingFeed) {
+            isResettingFeed = false
+        }
+    }
+
+    LaunchedEffect(isResettingFeed) {
+        if (isResettingFeed) {
+            kotlinx.coroutines.delay(5000L)
             isResettingFeed = false
         }
     }
 
     var restoreItemId by remember { mutableStateOf<String?>(null) }
     var hasRestoredInitialPosition by remember { mutableStateOf(false) }
+    var lastSettledPage by remember { mutableStateOf(-1) }
     val isSavedPositionLoaded by viewModel.isSavedPositionLoaded.collectAsState()
     val savedTargetId by viewModel.savedActiveItemId.collectAsState()
     
@@ -797,6 +807,7 @@ fun UnifiedFeedTab(
                 val index = unifiedItems.indexOfFirst { it.id == activeRestoreTarget }
                 if (index >= 0) {
                     pagerState.scrollToPage(index)
+                    lastSettledPage = index
                     hasRestoredInitialPosition = true
                     restoreItemId = null
                 } else {
@@ -820,7 +831,7 @@ fun UnifiedFeedTab(
 
             if (currentItem !is UnifiedItem.Tutorial) {
                 // Only save position AFTER initial restore has completed so startup page 0 never clobbers saved state
-                if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive && !isRefreshing) {
+                if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive) {
                     viewModel.saveFeedPosition(currentItem.id)
                 }
 
@@ -895,7 +906,6 @@ fun UnifiedFeedTab(
         }
     }
 
-    var lastSettledPage by remember { mutableStateOf(-1) }
     LaunchedEffect(pagerState.settledPage, hasRestoredInitialPosition) {
         val currentPage = pagerState.settledPage
         if (hasRestoredInitialPosition && lastSettledPage >= 0 && lastSettledPage in unifiedItems.indices && lastSettledPage != currentPage) {
@@ -1923,17 +1933,16 @@ fun UnifiedFeedTab(
 private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.Context): Pair<String, String?>? {
     return when (item) {
         is UnifiedItem.Feed -> {
-            val targetUrl = item.item.mediaUrl ?: item.item.url ?: return null
+            val rawUrl = (item.item.mediaUrl ?: item.item.url)?.trim()?.takeIf { it.isNotBlank() } ?: return null
             if (item.item.mediaType == "video" || item.item.mediaType == "audio" || isAudioItem(item) || isVideoItem(item)) {
-                val stableKey = item.item.mediaUrl ?: item.item.url ?: return null
-                Pair(stableKey, null)
+                Pair(rawUrl, null)
             } else null
         }
         is UnifiedItem.Mesh -> {
             val type = item.post.mediaType ?: item.post.clearnetMediaType
             if (type == "video" || type == "audio" || isAudioItem(item) || isVideoItem(item)) {
-                val resolvedUrl = resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl ?: return null
-                val rawUrl = item.post.mediaUrl ?: item.post.clearnetUrl ?: return null
+                val resolvedUrl = (resolveMediaUrl(item.post.mediaUrl, context) ?: item.post.clearnetUrl)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+                val rawUrl = (item.post.mediaUrl ?: item.post.clearnetUrl)?.trim()?.takeIf { it.isNotBlank() } ?: return null
                 val forced = if (resolvedUrl != rawUrl) resolvedUrl else null
                 Pair(rawUrl, forced)
             } else null

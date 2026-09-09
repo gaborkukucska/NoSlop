@@ -1905,27 +1905,49 @@ The recipient queries `MessageDao.getMessagesSentAfter(...)` and replays any mis
 - `ANNOUNCE_PEER` signature verification accepts both `CryptoService.encodeForSigning` and legacy pipe payloads, ensuring peers are accurately marked `isOnline = true`.
 - Typing indicators feature a 6-second auto-expiration guard, immediate dismissal upon message delivery, and a 4-second client-side idle debounce.
 
-## 20. Feed Engagement Tracking, Slide Position Persistence & Playback Hardening (2026-09-07)
+## 20. Feed Engagement Tracking, Slide Position Persistence & Playback Hardening (2026-09-09)
 
-### 20.1 Swipe-Away Transition Hook & Multi-Key Exclusion
+### 20.1 Immediate Swipe-Away History & Multi-Key Exclusion
 Previously, swiping away a slide only invoked `markItemViewed` if a 4-second dwell timer elapsed. If a user swiped away while the card was loading or within 3 seconds, the item remained unread (`isRead = false`), was never registered in `swipe_tracker`, and was omitted from `cachedExcludedIds`.
-- `UnifiedFeedTab.kt` now tracks page transitions using `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
-- `EngagementRepository.recordSwipe()` now writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
+- `UnifiedFeedTab.kt` tracks page transitions using hoisted `lastSettledPage`: whenever `lastSettledPage != pagerState.settledPage`, the vacated slide is immediately marked read (`markItemReadState`), added to viewed history (`markItemViewed`), and recorded in the swipe tracker (`recordItemSwiped`).
+- `EngagementRepository.recordSwipe()` writes the raw `itemId`, normalized ID (`normId`), and canonical key (`canonicalKey`) into `swipe_tracker`.
 - `NoSlopViewModel.loadMoreFeedItems()` filters candidates against `cachedExcludedIds` across raw, normalized, and canonical keys, ensuring swiped items are permanently excluded from the Live Feed.
 
-### 20.2 Cold-Start Slide Position Race Condition Elimination
-`UnifiedFeedTab.kt` previously initialized `hasRestoredInitialPosition = true` on the first frame if `savedTargetId` was null. Because `NoSlopViewModel` loads `saved_feed_active_id` asynchronously from Room on `Dispatchers.IO`, `savedTargetId` was momentarily null during early composition. Consequently, `LaunchedEffect(pagerState.settledPage)` at page 0 immediately executed `saveFeedPosition(item0.id)`, overwriting the persisted active ID.
+### 20.2 Cold-Start Slide Position Persistence & Race Condition Elimination
+`UnifiedFeedTab.kt` previously initialized `hasRestoredInitialPosition = true` on the first frame if `savedTargetId` was null. Because `NoSlopViewModel` loads `saved_feed_active_id` asynchronously from Room on `Dispatchers.IO`, `savedTargetId` was momentarily null during early composition. Additionally, Room's initial empty emission on cold start caused `NoSlopViewModel` to fall into `else { loadMoreFeedItems() }`, discarding `saved_feed_list`.
 - `isSavedPositionLoaded` StateFlow in `NoSlopViewModel` indicates when Room DB retrieval is complete.
+- `NoSlopViewModel` ignores Room's initial empty emission (`feeds.isEmpty() && meshes.isEmpty()`), waiting for disk contents to emit before building `restoredFeed`.
 - `UnifiedFeedTab.kt` gates position restoration on `isSavedPositionLoaded == true`, scrolling to the saved target via `pagerState.scrollToPage(index)` before permitting any position saves.
-- `restoredFeed` preserves `savedActiveId` on cold start even if other items in `saved_feed_list` are excluded.
+- `saveFeedPosition` centers `itemsToSave` around the active `itemId` rather than naive `takeLast(100)`, ensuring early slides are never dropped from `saved_feed_list`.
+- `lastSettledPage` is initialized to the restored index on cold start to avoid false swipe triggers on the initial scroll.
 
-### 20.3 Tor Video Resolution & Playback Tuning
-- **Attestation Gate Bypass (`ANDROID_VR`)**: Placed `ANDROID_VR` second in `YouTubeInternalClient.configs`. Unlike standard `ANDROID` which requires PoToken / BotGuard, `ANDROID_VR` serves progressive 360p `itag=18` streams without attestation checks.
-- **Circuit Hopping Threshold**: Raised `EXIT_BLOCKED_THRESHOLD` to 3 so `ANDROID_VR` is evaluated on the active Tor circuit before triggering circuit nonce advancement.
-- **Tor Circuit Attempts**: Raised `maxAttempts` over Tor from 3 to 4.
-- **Onion Stream Rejection**: Filtered out Invidious `.onion` stream fallback URLs in `YouTubeInternalClient.kt` to avoid high-latency double-hop timeouts (`code=2004`).
-- **Micro-Seek Elimination on Dispose**: Guarded `PlaybackPositionStore.save()` in `VideoPlayer.onDispose` to ignore positions `< 8000ms`, preventing short-lived or swiped slides from forcing Range requests over Tor.
+### 20.3 Fair Round-Robin Creator Variety for 40+ Channels
+In `takeRoundRobin()`, sorting priority creator queues strictly by `effectiveDate` descending caused ~10 frequent daily uploaders to permanently occupy the top positions of `rawVideos`. Because each batch requested only 5 videos, the other 30+ creators were never reached until all 15 videos from the first 10 creators were consumed (~150 slides).
+- `NoSlopViewModel.takeRoundRobin()` partitions and shuffles priority creator queues so every batch draws from 5 different creators across the user's entire list of 40+.
+- `FeedRepository.kt` randomizes `rampUpCreators` and expands the background creator sample to 8 channels per sync.
 
+### 20.4 Tor Stream Resolution, Age-Gate Fast-Fail & Circuit Hopping
+- **Age-Gate Fast-Fail**: `YouTubeInternalClient.kt` inspects `playabilityStatus.reason` for *"age"*, *"inappropriate"*, or *"private"*, bailing out in 0.1s instead of wasting 40s hopping 6 circuits for videos that require Google account authentication.
+- **Fast-fail Dead Circuits**: On `SocketTimeoutException` (`Read timed out`), `YouTubeInternalClient` immediately increments `streamNonce` to jump to a fresh Tor circuit.
+- **Circuit Construction Timeouts**: Set 20s connect/read timeouts and 25s call timeout in `playerClient()`, providing Tor sufficient time (14–18s) to build fresh 3-hop circuits on mobile networks.
+- **Dead Invidious Fallback Elimination**: Bypassed dead public Invidious and Piped instances over Tor, eliminating 50s socket exhaustion.
+- **Bandwidth Contention Prevention**: When `VideoPlayer` mounts a fresh player, it immediately cancels any duplicate background `doWarmUp` download in `PreloadManager` for that URL.
+- **Dedicated Visible Player Resolution**: Restricted `VideoPlayer` network resolution to `isVisible == true` so off-screen next slides do not steal bandwidth or lock resolve mutexes.
+- **False-Alarm Banner Elimination**: Removed false-alarm `setTorStatusMessage` triggers from background offline-peer checks in `TorService.kt`, and auto-cleared `torBlockedMessage` on media progress (`noteMediaProgress()`) and playback readiness.
+
+### 20.5 Background Feed Sync Throttling & Banner Auto-Dismissal
+- `PreloadManager.kt` maintains `isVideoActive` while videos are resolving, buffering, or playing.
+- `FeedRepository.kt` pauses Phase 2 and 3 background RSS, category, and creator sync while `isVideoActive || currentlyPlayingUrl != null`, giving foreground playback 100% of Tor's bandwidth.
+- Phase 2 & 3 background sync executes asynchronously so `refreshFeeds()` returns immediately after Phase 1 Ramp-Up.
+- Added a 5-second auto-dismiss timeout to `isResettingFeed` in `UnifiedFeedTab.kt` so the "Fetching fresh content..." banner never gets stuck on screen.
+
+### 20.6 Search Relevance & Concurrency Unblocking
+- `NoSlopViewModel.searchAndCreateCustomFeed()` runs even when background feed sync is active (`isRefreshingFeeds`).
+- `syncFilterMode()` preserves `activeSearchQuery` during active searches.
+- Search feed sorting prioritizes videos at the top and preserves exact relevance order from the search API (`lastSearchResultIds`), preventing date-disparity from burying videos beneath generic Wikipedia articles.
+- Search results replace the active feed instead of appending to the live feed.
+
+---
 ---
 
 **Related docs**: [WIRE_PROTOCOL_REFERENCE.md](WIRE_PROTOCOL_REFERENCE.md) for

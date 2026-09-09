@@ -132,6 +132,9 @@ object TorService {
      */
     fun noteMediaProgress() {
         lastMediaProgressAtMs = System.currentTimeMillis()
+        if (_torBlockedMessage.value != null) {
+            _torBlockedMessage.value = null
+        }
     }
 
     private fun mediaIsStreaming(): Boolean =
@@ -732,8 +735,8 @@ object TorService {
                 val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress(PROXY_HOST, SOCKS_PORT))
                 val client = OkHttpClient.Builder()
                     .proxy(proxy)
-                    .connectTimeout(10, TimeUnit.SECONDS)
-                    .readTimeout(10, TimeUnit.SECONDS)
+                    .connectTimeout(18, TimeUnit.SECONDS)
+                    .readTimeout(18, TimeUnit.SECONDS)
                     .build()
                 val request = Request.Builder()
                     .url("https://check.torproject.org/api/ip")
@@ -765,13 +768,6 @@ object TorService {
                     }
                 } catch (e2: Exception) {
                     Logger.warn(TAG, "Tor check fallback failed (${e2.message}).")
-                    // Only set error status if Tor was supposed to be fully ready
-                    if (_torState.value == TorState.READY) {
-                        setTorStatusMessage(
-                            "Tor is connected but no traffic is getting through. " +
-                                "Check the device's internet connection."
-                        )
-                    }
                     Pair(false, "Tor connectivity check failed: ${e2.message}")
                 }
             }

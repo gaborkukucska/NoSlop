@@ -161,7 +161,7 @@ fun FullScreenFeedCard(
                     var newlyDownloaded by remember { mutableStateOf(false) }
                     val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, item.mediaType ?: "video"))
                     val canPlay = isDownloaded || !isMesh || item.url != null
-                    val stableKeyForRestore = item.mediaUrl ?: item.url
+                    val stableKeyForRestore = (item.mediaUrl ?: item.url)?.trim()?.takeIf { it.isNotBlank() }
 
                     if (canPlay) {
                         VideoPlayer(url = resolvedUrl, isVisible = isVisible, isNextSlide = isNextSlide, thumbnailUrl = item.thumbnailUrl, stableKey = stableKeyForRestore)

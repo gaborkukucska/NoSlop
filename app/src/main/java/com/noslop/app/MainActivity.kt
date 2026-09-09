@@ -109,17 +109,20 @@ class MainActivity : ComponentActivity() {
                                 // Caught timeout or deliberate success cancellation
                             }
                             
-                            // 3. Pre-warm Slide 1 media before dropping splash screen
-                            if (firstPreloadUrl != null && firstPreloadUrl!!.isNotBlank()) {
+                            // 3. Pre-warm Slide 1 media in background (never cancel mid-flight on timeout)
+                            if (!firstPreloadUrl.isNullOrBlank()) {
                                 splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Preparing first video...")
-                                try {
-                                    kotlinx.coroutines.withTimeout(8000L) {
-                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, firstPreloadUrl!!)
-                                        com.noslop.app.ui.PreloadManager.waitForPreload(firstPreloadUrl!!)
-                                    }
-                                } catch (e: Exception) {
-                                    // Timeout on preload
+                                val targetUrl = firstPreloadUrl!!
+                                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                    try {
+                                        com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, targetUrl)
+                                    } catch (_: Exception) {}
                                 }
+                                try {
+                                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
+                                        com.noslop.app.ui.PreloadManager.waitForPreload(targetUrl)
+                                    }
+                                } catch (_: Exception) {}
                             }
                             
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
