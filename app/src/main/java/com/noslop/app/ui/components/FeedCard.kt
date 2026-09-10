@@ -821,47 +821,13 @@ fun FullScreenMeshCardV2(
                                         Spacer(modifier = Modifier.height(12.dp))
                                         Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                     }
-                                    
+
                                     if (isTrusted && peer?.isTemporary == true) {
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Box(
                                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-
-                                        val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
-                                        val userPosts = authorPosts.filter { it.authorPublicKeyB64 == post.authorPublicKeyB64 }
-                                        if (userPosts.isNotEmpty()) {
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                            Text("Creator Content".tr, color = TextLight, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                            Spacer(modifier = Modifier.height(8.dp))
-                                            androidx.compose.foundation.lazy.LazyColumn(
-                                                modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
-                                            ) {
-                                                items(userPosts) { userPost ->
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxWidth()
-                                                            .padding(vertical = 4.dp)
-                                                            .background(SurfaceDark.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                                            .border(1.dp, PrimaryBlack, RoundedCornerShape(8.dp))
-                                                            .clickable {
-                                                                showUserInfoDialog = false
-                                                                onNavigateToFilter("Author:${post.authorPublicKeyB64}")
-                                                            }
-                                                            .padding(12.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = userPost.content.take(100).replace("\n", " ") + if (userPost.content.length > 100) "..." else "",
-                                                            color = TextLight,
-                                                            fontSize = 12.sp,
-                                                            maxLines = 2,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                    }
-                                                }
-                                            }
                                         }
                                     } else if (isTrusted) {
                                         Spacer(modifier = Modifier.height(8.dp))
@@ -870,6 +836,21 @@ fun FullScreenMeshCardV2(
                                         ) {
                                             Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
+                                    }
+
+                                    val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+                                    val userPosts = remember(authorPosts, post.authorPublicKeyB64) {
+                                        authorPosts.filter { it.authorPublicKeyB64 == post.authorPublicKeyB64 && !it.isOrphaned }
+                                    }
+                                    if (userPosts.isNotEmpty()) {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        PeerMeshContentList(
+                                            posts = userPosts,
+                                            onPostClick = { clickedPost ->
+                                                showUserInfoDialog = false
+                                                viewModel?.viewAuthorPosts(post.authorPublicKeyB64, clickedPost.id)
+                                            }
+                                        )
                                     }
 
                                     if (!isSelf && !isTrusted && targetOnion != null) {

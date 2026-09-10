@@ -58,6 +58,9 @@ fun QRShareSheet(
     localKeys: CryptoService.IdentityKeys,
     dmStep: Int = 4,
     viewModel: com.noslop.app.ui.NoSlopViewModel? = null,
+    title: String = "My Contact Card".tr,
+    subtitle: String? = null,
+    isCreator: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -65,12 +68,15 @@ fun QRShareSheet(
 
     // Prepare JSON payload for the QR code
     val qrPayload = remember(localKeys) {
-        val payloadMap = mapOf(
+        val payloadMap = mutableMapOf(
             "handle" to localKeys.displayName,
             "publicKey" to localKeys.publicKeyB64,
             "encPublicKey" to localKeys.encPublicKeyB64,
             "onionAddress" to localKeys.onionAddress
         )
+        if (isCreator) {
+            payloadMap["isCreator"] = "true"
+        }
         Gson().toJson(payloadMap)
     }
 
@@ -121,7 +127,7 @@ fun QRShareSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "My Contact Card".tr,
+                        text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = TextLight
@@ -165,7 +171,7 @@ fun QRShareSheet(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 Text(
-                    text = "Companion nodes can scan this QR code or use your raw identity string to handshake and synchronize with you over Tor SOCKS5.".tr,
+                    text = subtitle ?: "Companion nodes can scan this QR code or use your raw identity string to handshake and synchronize with you over Tor SOCKS5.".tr,
                     style = MaterialTheme.typography.bodySmall,
                     color = TextMuted,
                     textAlign = TextAlign.Center,

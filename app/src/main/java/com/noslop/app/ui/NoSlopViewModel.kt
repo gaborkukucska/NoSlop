@@ -101,6 +101,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Anonymous")
 
+    private val _navigationTabEvent = kotlinx.coroutines.flow.MutableSharedFlow<Int>(replay = 0, extraBufferCapacity = 1)
+    val navigationTabEvent = _navigationTabEvent.asSharedFlow()
+
+    fun selectTab(tabIndex: Int) {
+        _navigationTabEvent.tryEmit(tabIndex)
+    }
+
+    private val _currentFilterModeFlow = MutableStateFlow("Live Feed")
+    val currentFilterModeFlow: StateFlow<String> = _currentFilterModeFlow.asStateFlow()
+
     private val _feedTutorialStep = MutableStateFlow<Int>(-1)
     val feedTutorialStep: StateFlow<Int> = _feedTutorialStep.asStateFlow()
 
@@ -450,6 +460,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _isOnboardingComplete.value = repository.isOnboardingComplete()
             repository.ensureDefaultApiSourcesExist()
+            repository.ensureDefaultDiscoverableNode()
             val recovered = repository.recoverSourcesAfterMigration()
             if (recovered) {
                 _selectedInterests.value = repository.getUserSelectedCategories()
@@ -718,6 +729,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         if (currentFilterMode != mode || forceRefresh) {
             val previousMode = currentFilterMode
             currentFilterMode = mode
+            _currentFilterModeFlow.value = mode
 
             // Cache Live Feed before leaving it so toggling back is instantaneous
             if (previousMode == "Live Feed" && _unifiedFeed.value.isNotEmpty() && !isSearchModeActive) {
@@ -1072,6 +1084,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        if (actualFilter.startsWith("Author:")) {
+            val authorPub = actualFilter.substringAfter("Author:")
+            val authorMeshes = allMeshes.filter { it.authorPublicKeyB64 == authorPub && !it.isOrphaned }
+                .sortedByDescending { it.timestamp }
+            val batch = authorMeshes.map { UnifiedItem.Mesh(it) }
+            sessionLoadedIds.addAll(batch.map { it.id })
+            _unifiedFeed.value = batch.distinctBy { com.noslop.app.data.getCanonicalItemKey(it) }
+            return
+        }
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
         val isSearchActive = activeSearchQuery.isNotBlank()
@@ -1306,6 +1327,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
             val specificMeshes = unseenMeshes.filter {
                 if (isSearchActive && !isSpecificFilter) true
+                else if (actualFilter.startsWith("Author:")) true
                 else when (actualFilter) {
                     "Mesh" -> true
                     "My Content" -> it.authorPublicKeyB64 == localPubKey
@@ -1357,6 +1379,9 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val allHistoryItems = specificFeeds.map { UnifiedItem.Feed(it) } + specificMeshes.map { UnifiedItem.Mesh(it) }
                     val sortedHistory = allHistoryItems.sortedBy { viewedIdsList.indexOf(it.id) }
                     batch.addAll(sortedHistory.take(specificNeeded))
+                } else if (actualFilter.startsWith("Author:")) {
+                    val sortedAuthorMeshes = specificMeshes.sortedByDescending { it.timestamp }
+                    batch.addAll(sortedAuthorMeshes.map { UnifiedItem.Mesh(it) })
                 } else {
                     val sortedSpecificFeeds = specificFeeds.sortedByDescending { it.publishedAt }
 
@@ -2127,46 +2152,44 @@ fun toggleAggregator() {
         viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "4") }
     }
 
-    fun saveGroundZeroQrToGallery(context: Context) {
+    suspend fun ensureBurnableIdentity(): CryptoService.IdentityKeys {
+        var burnable = repository.getBurnableIdentity()
+        if (burnable == null) {
+            burnable = repository.generateBurnableIdentity()
+            val mainIdentity = repository.getLocalIdentity()
+            if (mainIdentity != null) {
+                com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, burnable.privateKeyB64)
+            }
+        }
+        return burnable
+    }
+
+    fun viewAuthorPosts(authorPub: String, targetPostId: String? = null) {
         viewModelScope.launch {
-            val hasSaved = repository.getAppSetting("ground_zero_qr_saved") == "true"
-            if (!hasSaved) {
-                try {
-                    val resId = context.resources.getIdentifier("ground_zero_qr", "drawable", context.packageName)
-                    if (resId == 0) {
-                        com.noslop.app.debug.Logger.warn("VM", "ground_zero_qr drawable not found, skipping gallery export.")
-                        return@launch
-                    }
-                    val bitmap = android.graphics.BitmapFactory.decodeResource(context.resources, resId)
-                    if (bitmap == null) return@launch
-                    
-                    val resolver = context.contentResolver
-                    val values = android.content.ContentValues().apply {
-                        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "NoSlop_GroundZero.png")
-                        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/png")
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                            put(android.provider.MediaStore.Images.Media.IS_PENDING, 1)
-                        }
-                    }
-                    val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-                    if (uri != null) {
-                        resolver.openOutputStream(uri)?.use { out ->
-                            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
-                        }
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                            values.clear()
-                            values.put(android.provider.MediaStore.Images.Media.IS_PENDING, 0)
-                            resolver.update(uri, values, null, null)
-                        }
-                        repository.putAppSetting("ground_zero_qr_saved", "true")
-                    }
-                } catch (e: Exception) {
-                    com.noslop.app.debug.Logger.error("VM", "Failed to save Ground Zero QR: ${e.message}")
-                }
+            if (currentFilterMode == "Live Feed" && !isSearchModeActive && _unifiedFeed.value.isNotEmpty()) {
+                cachedDefaultFeed = _unifiedFeed.value.toList()
+            }
+            val filter = "Author:$authorPub"
+            currentFilterMode = filter
+            _currentFilterModeFlow.value = filter
+            _unifiedFeed.value = emptyList()
+            sessionLoadedIds.clear()
+            loadMoreFeedItems(filter)
+            selectTab(0)
+            if (targetPostId != null) {
+                kotlinx.coroutines.delay(100)
+                _restoreScrollPositionEvent.emit(targetPostId)
+            } else {
+                kotlinx.coroutines.delay(50)
+                _scrollToTopEvent.emit(Unit)
             }
         }
     }
 
+    fun getPeerHandle(pubKey: String): String? {
+        return peers.value.find { it.publicKeyB64 == pubKey }?.handle
+            ?: allMeshes.find { it.authorPublicKeyB64 == pubKey }?.authorHandle
+    }
     fun markNotificationAsRead(id: String) { viewModelScope.launch { repository.markNotificationAsRead(id) } }
     fun markAllNotificationsAsRead() { viewModelScope.launch { repository.markAllNotificationsAsRead() } }
     fun clearAllNotifications() { viewModelScope.launch { repository.clearAllNotifications() } }
@@ -2384,7 +2407,7 @@ fun toggleAggregator() {
                 broadcastDiscoverable()
             } else {
                 val burnable = repository.getBurnableIdentity()
-                if (burnable != null) {
+                if (burnable != null && !_isCreatorEnabled.value) {
                     val timestamp = System.currentTimeMillis()
                     val payload = com.noslop.app.crypto.CryptoService.encodeForSigning(burnable.publicKeyB64, timestamp.toString())
                     val signature = com.noslop.app.crypto.CryptoService.sign(payload, burnable.privateKeyB64)

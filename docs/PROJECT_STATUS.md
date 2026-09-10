@@ -1,5 +1,37 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-10) — Peer Mesh Content In Modals, Creator Studio Severable ID, Tor 40% Recovery & Dual-Identity Broadcasts
+
+* **Peer Mesh Content List in User Info Modals (`PeerItem.kt`, `FeedCard.kt`, `DMsTab.kt`)**:
+  * Implemented `PeerMeshContentList`: User Info / Contact Card modals across Feed and DMs now render a scrollable list of the user's mesh broadcasts with rich media thumbnails (Base64 bitmaps, Coil web/clearnet images, or category type icons), timestamps, and two-line body excerpts.
+  * Added full Markdown rendering to broadcast body excerpts in `PeerMeshContentList` using `MarkdownUtils.parseMarkdown(...)`.
+* **Direct Filtered Author Feed Navigation & Scroll Positioning (`UnifiedFeedTab.kt`, `NoSlopViewModel.kt`)**:
+  * Extracted an O(1) `Author:$authorPub` fast-path loader at the top of `loadMoreFeedItems()` in `NoSlopViewModel.kt` (matching `History` and `Saved`), bypassing discovery deduplication and viewed-ID purges so all broadcasts by the author load chronologically.
+  * Tapping any broadcast in `PeerMeshContentList` dismisses the modal, navigates to the Feed tab, populates the author's feed, and scrolls directly to the tapped post index via `_restoreScrollPositionEvent`.
+  * Displayed active filter label as `@handle` with 1-tap dismissal restoring the default Live Feed, and guarded `forceScrollToTop` against clobbering author slide positioning.
+* **Creator Mode Severable Identity Architecture & Studio Sharing (`CreatorStudioTab.kt`, `SettingsTab.kt`, `QRShareSheet.kt`)**:
+  * Added a dedicated **Creator ID 🪪** action to `CreatorStudioTab.kt`. Creators can now inspect, copy, and share their severable burnable identity (`burnableKeys`) via `QRShareSheet` without exposing their personal primary identity.
+  * Un-nested Creator Node controls from `if (isDiscoverableEnabled)` in `SettingsTab.kt`, making Creator Node settings independently accessible when Discoverability is turned off.
+  * Added a confirmation warning dialog before disabling Creator Mode, educating that peers who connected via the secondary Creator ID will permanently lose connectivity.
+  * Preserved Creator Identity when Discoverability is toggled off in `NoSlopViewModel.kt`, suppressing premature `USER_EXIT` broadcasts while Creator Mode remains active.
+* **Built-in Official NoSlop Creator Node & In-App Browser Reader (`NoSlopRepository.kt`, `DMsTab.kt`, `PeerItem.kt`, `FeedCard.kt`)**:
+  * Seeded the official NoSlop creator node into `PeerDao` (`ensureDefaultDiscoverableNode`) using actual cryptographic keys and dynamically derived tripcodes (`fnozdo...`).
+  * Filtered out the creator's own node from their own "DISCOVERABLE NODES" list.
+  * Removed hardcoded Stripe donation links from default seeding (`fundMeLink = null`), ensuring donation links populate dynamically from authentic node broadcasts.
+  * Added a clickable `$` coin badge and donation link across User Info modals that opens the donation URL in the in-app `ArticleWebViewDialog`.
+* **Tor Daemon Recovery & 40% (`loading_keys`) Hang Fix (`TorService.kt`)**:
+  * Implemented `stopTor(context)` sending `SIGNAL HALT` to the Tor control channel (terminating the native C `libtor.so` binary) and `ACTION_STOP` intent to the Android service, verifying socket release on port 9050 before restarting.
+  * Added reliable cache clearing on `forceRestart`, wiping stale consensus and authority certificates from `app_TorService/data/`.
+  * Appended `ClientPreferIPv6ORPort 0` to `torrc` to prioritize IPv4 directory authority and relay connections on mobile carriers.
+* **Handshake Signature Verification Parity & Creator Auto-Accept (`HandshakePacketHandler.kt`)**:
+  * Upgraded `handleConnectionRequest` and `handleUserHandshake` in `HandshakePacketHandler.kt` to dual-mode signature verification (supporting length-prefixed `CryptoService.encodeForSigning` alongside legacy pipe fallbacks).
+  * Aligned the creator node setting key to `"is_creator_enabled"`, restoring automated handshake acceptance for creator nodes.
+  * Fixed `handleAnnounceDiscoverable` regression that improperly flipped temporary contacts to permanent upon receiving presence heartbeats.
+* **Dual-Identity Targeted Broadcast Routing (`MeshSocialRepository.kt`, `GossipService.kt`, `UnifiedFeedTab.kt`)**:
+  * Configured `composeAndBroadcastPost` to author and sign posts with the Creator identity (`getBurnableIdentity()`) when Creator Mode is active.
+  * Added recipient-aware `senderId` stamping in `GossipService.broadcast`, stamping `burnable.publicKeyB64` for followers and `main.publicKeyB64` for personal friends so broadcasts pass firewalls for both peer types.
+  * Updated `isOwnPost` in `UnifiedFeedTab.kt` to recognize both main and burnable identities under "My Content".
+
 ## Completed Changes (2026-09-09) — Decentralized Group Mesh Messaging, Tri-Channel Transport Isolation & Saved Search
 
 * **Decentralized Multi-Hop Group Messaging & Audience Privacy Toggles (`GroupChatThreadScreen.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`, `Packets.kt`)**:

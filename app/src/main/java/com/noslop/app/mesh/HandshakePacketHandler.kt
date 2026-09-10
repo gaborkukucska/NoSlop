@@ -26,14 +26,20 @@ class HandshakePacketHandler(
         }
         
         val signature = packet.signature ?: return false
-        var payloadToVerify = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
+        val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            connPay.fromUserId, connPay.fromUsername, connPay.fromHomeNode, connPay.timestamp.toString(),
+            connPay.authorAvatarB64, connPay.bio.takeIf { !it.isNullOrBlank() }
+        )
+        var pipePayload = "${connPay.fromUserId}|${connPay.fromUsername}|${connPay.fromHomeNode}|${connPay.timestamp}"
         if (connPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${connPay.authorAvatarB64}"
+            pipePayload += "|${connPay.authorAvatarB64}"
         }
         if (!connPay.bio.isNullOrBlank()) {
-            payloadToVerify += "|${connPay.bio}"
+            pipePayload += "|${connPay.bio}"
         }
-        if (!CryptoService.verify(payloadToVerify, signature, connPay.fromUserId)) {
+        if (!CryptoService.verify(encodePayload, signature, connPay.fromUserId) &&
+            !CryptoService.verify(pipePayload, signature, connPay.fromUserId)) {
+            Logger.warn(TAG, "Rejected CONNECTION_REQUEST: signature verification failed for ${connPay.fromUserId}")
             return false
         }
         
@@ -97,7 +103,8 @@ class HandshakePacketHandler(
         )
         peerDao.insertPeer(peer)
         
-        val isLocalCreator = db.appSettingDao().getSetting("is_creator") == "true"
+        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
+                             db.appSettingDao().getSetting("is_creator") == "true"
         if (isLocalCreator) {
             val now = System.currentTimeMillis()
             val limits = autoAcceptRateLimits.getOrPut("auto_accept") { mutableListOf() }
@@ -160,16 +167,25 @@ class HandshakePacketHandler(
         val handPay = packet.getUserHandshakePayload() ?: return false
         val signature = packet.signature ?: return false
         val myPubKey = repo.getLocalIdentity()?.publicKeyB64
-        if (myPubKey == handPay.fromUserId) return false
+        val myBurnablePubKey = repo.getBurnableIdentity()?.publicKeyB64
+        if (myPubKey == handPay.fromUserId || myBurnablePubKey == handPay.fromUserId) return false
 
-        var payloadToVerify = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
+        val encodePayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            handPay.fromUserId, handPay.fromUsername, handPay.fromHomeNode, handPay.timestamp.toString(),
+            handPay.authorAvatarB64, handPay.bio.takeIf { !it.isNullOrBlank() }
+        )
+        var pipePayload = "${handPay.fromUserId}|${handPay.fromUsername}|${handPay.fromHomeNode}|${handPay.timestamp}"
         if (handPay.authorAvatarB64 != null) {
-            payloadToVerify += "|${handPay.authorAvatarB64}"
+            pipePayload += "|${handPay.authorAvatarB64}"
         }
         if (!handPay.bio.isNullOrBlank()) {
-            payloadToVerify += "|${handPay.bio}"
+            pipePayload += "|${handPay.bio}"
         }
-        if (!CryptoService.verify(payloadToVerify, signature, handPay.fromUserId)) return false
+        if (!CryptoService.verify(encodePayload, signature, handPay.fromUserId) &&
+            !CryptoService.verify(pipePayload, signature, handPay.fromUserId)) {
+            Logger.warn(TAG, "Rejected USER_HANDSHAKE: signature verification failed for ${handPay.fromUserId}")
+            return false
+        }
 
         val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
         if (peer == null) {
@@ -376,7 +392,7 @@ class HandshakePacketHandler(
             peerDao.insertPeer(peer.copy(
                 handle = handleToUse,
                 onionAddress = announcePay.onionAddress,
-                isTemporary = if (peer.isTrusted) false else true,
+                isTemporary = peer.isTemporary,
                 isDiscoverable = true,
                 isCreator = announcePay.isCreator,
                 fundMeLink = announcePay.fundMeLink,

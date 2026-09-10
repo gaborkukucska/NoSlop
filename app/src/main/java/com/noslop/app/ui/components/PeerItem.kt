@@ -22,6 +22,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -44,7 +46,8 @@ fun PeerItem(
     peer: Peer, 
     lastMsg: ChatMessage?, 
     viewModel: NoSlopViewModel,
-    onLongPress: (() -> Unit)? = null
+    onLongPress: (() -> Unit)? = null,
+    onNavigateToAuthorFeed: ((String, String) -> Unit)? = null
 ) {
     var showContactCard by remember { mutableStateOf(false) }
 
@@ -134,7 +137,9 @@ fun PeerItem(
             peer = peer,
             onDismiss = { showContactCard = false },
             onDelete = { viewModel.removePeer(peer.publicKeyB64) },
-            onConnect = { viewModel.acceptHandshake(peer) }
+            onConnect = { viewModel.acceptHandshake(peer) },
+            viewModel = viewModel,
+            onNavigateToAuthorFeed = onNavigateToAuthorFeed
         )
     }
 }
@@ -180,11 +185,116 @@ private fun PeerAvatar(peer: Peer, size: Int, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ContactCardDialog(
+fun PeerMeshContentList(
+    posts: List<com.noslop.app.data.MeshPost>,
+    onPostClick: (com.noslop.app.data.MeshPost) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (posts.isEmpty()) return
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Mesh Broadcasts ({count})".tr.replace("{count}", posts.size.toString()),
+            color = TextLight,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        androidx.compose.foundation.lazy.LazyColumn(
+            modifier = Modifier.fillMaxWidth().heightIn(max = 220.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(posts, key = { it.id }) { post ->
+                val thumbB64 = post.thumbnailB64
+                val thumbBitmap = remember(thumbB64) {
+                    if (thumbB64 != null) {
+                        try {
+                            val bytes = android.util.Base64.decode(thumbB64, android.util.Base64.DEFAULT)
+                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                        } catch (_: Exception) { null }
+                    } else null
+                }
+
+                val effectiveMediaType = post.mediaType ?: post.clearnetMediaType
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(SurfaceDark.copy(alpha = 0.8f))
+                        .border(1.dp, BorderSubtle.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .clickable { onPostClick(post) }
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(PrimaryBlack),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (thumbBitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = thumbBitmap,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else if (!post.clearnetThumbnailUrl.isNullOrBlank()) {
+                            coil.compose.AsyncImage(
+                                model = post.clearnetThumbnailUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+                        } else {
+                            val icon = if (effectiveMediaType == "video") Icons.Default.PlayArrow else Icons.Default.Info
+                            Icon(icon, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        val rawText = post.clearnetTitle?.takeIf { it.isNotBlank() }
+                            ?: post.content.takeIf { it.isNotBlank() }
+                            ?: "Mesh Broadcast"
+                        val cleanLine = rawText.lines().joinToString(" ").trim()
+                        val annotatedContent = remember(cleanLine) {
+                            com.noslop.app.util.MarkdownUtils.parseMarkdown(cleanLine)
+                        }
+                        Text(
+                            text = annotatedContent,
+                            color = TextLight,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(post.timestamp))
+                        Text(
+                            text = dateStr,
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ContactCardDialog(
     peer: Peer,
     onDismiss: () -> Unit,
     onDelete: () -> Unit,
-    onConnect: () -> Unit = {}
+    onConnect: () -> Unit = {},
+    viewModel: NoSlopViewModel? = null,
+    onNavigateToAuthorFeed: ((String, String) -> Unit)? = null
 ) {
     var showDeleteConfirmation by remember { mutableStateOf(false) }
 
@@ -257,6 +367,54 @@ private fun ContactCardDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+
+                if (peer.isCreator) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    if (!peer.fundMeLink.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AccentGreen.copy(alpha = 0.1f))
+                                .clickable { activeDonationUrl = peer.fundMeLink }
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Surface(
+                                shape = CircleShape,
+                                color = AccentGreen.copy(alpha = 0.25f),
+                                border = BorderStroke(1.dp, AccentGreen),
+                                modifier = Modifier.size(20.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${"Support:".tr} ${peer.fundMeLink}",
+                                color = AccentGreen,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                if (activeDonationUrl != null) {
+                    com.noslop.app.ui.ArticleWebViewDialog(
+                        url = activeDonationUrl!!,
+                        title = "${"Support".tr} ${peer.handle}",
+                        onDismiss = { activeDonationUrl = null }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
                 // Trust badge
                 if (peer.isTrusted && peer.isTemporary) {
                     Row(
@@ -351,6 +509,26 @@ private fun ContactCardDialog(
                         fontSize = 11.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+                val userPosts = remember(authorPosts, peer.publicKeyB64) {
+                    authorPosts.filter { it.authorPublicKeyB64 == peer.publicKeyB64 && !it.isOrphaned }
+                }
+
+                if (userPosts.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    PeerMeshContentList(
+                        posts = userPosts,
+                        onPostClick = { clickedPost ->
+                            onDismiss()
+                            if (onNavigateToAuthorFeed != null) {
+                                onNavigateToAuthorFeed(peer.publicKeyB64, clickedPost.id)
+                            } else {
+                                viewModel?.viewAuthorPosts(peer.publicKeyB64, clickedPost.id)
+                            }
+                        }
                     )
                 }
 

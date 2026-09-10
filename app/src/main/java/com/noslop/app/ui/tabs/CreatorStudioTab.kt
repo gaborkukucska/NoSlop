@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.theme.*
 import com.noslop.app.util.tr
@@ -59,6 +60,10 @@ fun CreatorStudioTab(
     }
 
     var isRefreshing by remember { mutableStateOf(false) }
+    var showCreatorIdSheet by remember { mutableStateOf(false) }
+    var burnableIdentity by remember { mutableStateOf<com.noslop.app.crypto.CryptoService.IdentityKeys?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val handle by viewModel.localHandle.collectAsState()
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -110,17 +115,35 @@ fun CreatorStudioTab(
                         Text("Active & Publishing Ready".tr, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextLight)
                     }
                 }
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = AccentGreen.copy(alpha = 0.2f)
-                ) {
-                    Text(
-                        "AI Queue: {count}".tr.replace("{count}", queuedItems.size.toString()),
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        fontSize = 11.sp,
-                        color = AccentGreen,
-                        fontWeight = FontWeight.Bold
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                burnableIdentity = viewModel.ensureBurnableIdentity()
+                                showCreatorIdSheet = true
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Creator ID 🪪".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = AccentGreen.copy(alpha = 0.2f)
+                    ) {
+                        Text(
+                            "AI Queue: {count}".tr.replace("{count}", queuedItems.size.toString()),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            fontSize = 11.sp,
+                            color = AccentGreen,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }
@@ -156,6 +179,13 @@ fun CreatorStudioTab(
                     StudioItemCard(
                         item = item,
                         onPublish = { publishedItem ->
+                            val tagsStr = if (publishedItem.tags.isNotEmpty()) "\n\n" + publishedItem.tags.joinToString(" ") { "#$it" } else ""
+                            val fullPostContent = (publishedItem.title + "\n\n" + publishedItem.description + tagsStr).trim()
+                            viewModel.composeAndBroadcastPost(
+                                content = fullPostContent,
+                                mediaMetadata = null,
+                                privacy = "public"
+                            )
                             queuedItems = queuedItems.filter { it.id != publishedItem.id }
                             android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Published '{title}' to Mesh!").replace("{title}", publishedItem.title), android.widget.Toast.LENGTH_SHORT).show()
                         },
@@ -166,6 +196,17 @@ fun CreatorStudioTab(
                 }
             }
         }
+    }
+
+    if (showCreatorIdSheet && burnableIdentity != null) {
+        com.noslop.app.ui.QRShareSheet(
+            handle = handle,
+            localKeys = burnableIdentity!!,
+            title = "Creator Contact Card".tr,
+            subtitle = "Fans and peers can scan this QR code to connect with your Creator Node. This connection uses your severable secondary Tor address, keeping your personal identity private.".tr,
+            isCreator = true,
+            onDismiss = { showCreatorIdSheet = false }
+        )
     }
 }
 

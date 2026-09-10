@@ -731,7 +731,14 @@ object GossipService {
             }
             
             scope.launch {
-                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
+                val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
+                val peerSenderId = if (peerIdentitySetting == "burnable") {
+                    tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
+                } else {
+                    tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId
+                }
+                val outboundPacket = if (packet.senderId != peerSenderId) packet.copy(senderId = peerSenderId) else packet
+                val success = tx.sendPacket(peer.onionAddress, Constants.MESH_PORT, outboundPacket)
                 if (success) {
                     recordSendSuccess(peer.onionAddress)
                 } else {

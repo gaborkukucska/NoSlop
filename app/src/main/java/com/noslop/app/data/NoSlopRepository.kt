@@ -1464,6 +1464,64 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun ensureDefaultApiSourcesExist() = feedRepository.ensureDefaultApiSourcesExist()
 
+    suspend fun ensureDefaultDiscoverableNode() = withContext(Dispatchers.IO) {
+        // Clean up any placeholder peer from earlier development
+        val oldPlaceholder = peerDao.getPeerByPublicKey("official_noslop_creator_node_key")
+        if (oldPlaceholder != null) {
+            peerDao.deletePeer(oldPlaceholder)
+        }
+
+        val myKeys = getLocalIdentity()
+        val burnable = getBurnableIdentity()
+        // If this device IS the official creator node, do not seed as a peer
+        if (myKeys?.publicKeyB64 == OFFICIAL_CREATOR_PUBKEY || burnable?.publicKeyB64 == OFFICIAL_CREATOR_PUBKEY) {
+            return@withContext
+        }
+
+        val pubBytes = try {
+            android.util.Base64.decode(OFFICIAL_CREATOR_PUBKEY, android.util.Base64.DEFAULT)
+        } catch (_: Exception) { null }
+        val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "noslop"
+
+        val existing = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
+        if (existing != null && existing.fundMeLink == "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00") {
+            peerDao.insertPeer(existing.copy(fundMeLink = null))
+        }
+        if (existing == null) {
+            peerDao.insertPeer(
+                Peer(
+                    publicKeyB64 = OFFICIAL_CREATOR_PUBKEY,
+                    handle = "NoSlop",
+                    tripcode = tripcode,
+                    onionAddress = OFFICIAL_CREATOR_ONION,
+                    encPublicKeyB64 = OFFICIAL_CREATOR_ENC_PUBKEY,
+                    isTrusted = false,
+                    isDiscoverable = true,
+                    isCreator = true,
+                    fundMeLink = null,
+                    bio = "Official NoSlop Creator Node — The unfiltered pulse of the mesh.",
+                    lastSeenAt = System.currentTimeMillis()
+                )
+            )
+            Logger.info("REPOSITORY", "Seeded official NoSlop Creator Node ($tripcode) into discoverable peers")
+        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY) {        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY) {
+            peerDao.insertPeer(
+                existing.copy(
+                    onionAddress = OFFICIAL_CREATOR_ONION,
+                    encPublicKeyB64 = OFFICIAL_CREATOR_ENC_PUBKEY,
+                    isDiscoverable = true,
+                    isCreator = true
+                )
+            )
+        }
+    }
+
+    companion object {
+        const val OFFICIAL_CREATOR_PUBKEY = "MCowBQYDK2VwAyEAK12RuYO4u9W6tuUc2Hr7ZkcYTuUs6QSR8P4ePGKKWXg="
+        const val OFFICIAL_CREATOR_ONION = "fnozdomdxc55lovw4uonq6x3mzdrqtxfftuqjepq7ypdyyuklf4i7cqd.onion"
+        const val OFFICIAL_CREATOR_ENC_PUBKEY = "MCowBQYDK2VuAyEAfFAMyI71qis42am7fyx0L8Th/giuitRXwFfSEmnX/Ws="
+    }
+
     suspend fun recoverSourcesAfterMigration(): Boolean = feedRepository.recoverSourcesAfterMigration()
 
     suspend fun refreshFeeds() = feedRepository.refreshFeeds()

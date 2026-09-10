@@ -280,6 +280,28 @@ object TorService {
         }
     }
 
+    fun stopTor(context: Context) {
+        Logger.info(TAG, "Stopping Tor daemon...")
+        bootstrapJob?.cancel()
+        _torState.value = TorState.IDLE
+        try {
+            TorControlChannel.open(connectTimeoutMs = 800, readTimeoutMs = 800)?.use { ch ->
+                ch.send("SIGNAL HALT")
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val stopIntent = android.content.Intent(context, org.torproject.jni.TorService::class.java).apply {
+                action = "org.torproject.android.intent.action.STOP"
+            }
+            context.stopService(stopIntent)
+        } catch (_: Exception) {}
+
+        try {
+            context.unregisterReceiver(torStatusReceiver)
+        } catch (_: Exception) {}
+    }
+
     /**
      * Start the embedded Tor daemon via OrbotHelper (tor-android).
      * OrbotHelper.init() registers a broadcast receiver that fires when the
@@ -297,14 +319,34 @@ object TorService {
         forceRestart: Boolean = false
     ) {
         if (forceRestart) {
-            Logger.info(TAG, "Force restart requested. Resetting Tor bootstrap state and data...")
-            bootstrapJob?.cancel()
-            _torState.value = TorState.IDLE
+            Logger.info(TAG, "Force restart requested. Terminating Tor daemon and purging stale cache...")
+            stopTor(context)
+            // Wait up to 2 seconds for Tor process and port 9050 to fully close
+            var waitCount = 0
+            while (waitCount < 10) {
+                val stillOpen = try {
+                    Socket().use { s ->
+                        s.connect(InetSocketAddress(PROXY_HOST, SOCKS_PORT), 150)
+                        true
+                    }
+                } catch (_: Exception) { false }
+                if (!stillOpen) break
+                try { Thread.sleep(200) } catch (_: Exception) {}
+                waitCount++
+            }
+
             try {
-                // Delete Tor data directory on force restart to clear corrupt consensus or stuck states
                 val torrcDir = org.torproject.jni.TorService.getTorrc(context).parentFile
                 if (torrcDir != null && torrcDir.exists()) {
-                    torrcDir.listFiles()?.forEach { if (it.name != "torrc") it.deleteRecursively() }
+                    val dataDir = java.io.File(torrcDir, "data")
+                    if (dataDir.exists()) {
+                        dataDir.listFiles()?.forEach { file ->
+                            // Keep hidden service keys, purge cached consensus, certs and lock files
+                            if (!file.name.startsWith("hs_") && file.name != "hostname") {
+                                file.deleteRecursively()
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Logger.warn(TAG, "Failed to clear Tor data directory: ${e.message}")
@@ -549,6 +591,7 @@ object TorService {
 
             val content = buildString {
                 append("SocksPort $SOCKS_PORT IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth\n")
+                append("ClientPreferIPv6ORPort 0\n")
                 append(TorControlChannel.torrcLines())
                 // Left at 0 deliberately: tor-android's own control connection
                 // authenticates with empty credentials, and enabling cookie auth

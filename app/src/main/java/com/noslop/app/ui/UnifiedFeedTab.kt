@@ -262,6 +262,12 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
         label = "uiAlpha"
     )
 
+    LaunchedEffect(Unit) {
+        viewModel.navigationTabEvent.collect { tab ->
+            selectedTab = tab
+        }
+    }
+
     LaunchedEffect(initialRoute) {
         if (initialRoute != null) {
             val routeClean = initialRoute.substringBeforeLast("-")
@@ -664,12 +670,27 @@ fun UnifiedFeedTab(
 
 
 
+    val vmFilterMode by viewModel.currentFilterModeFlow.collectAsState()
+    LaunchedEffect(vmFilterMode) {
+        if (filterMode != vmFilterMode) {
+            filterMode = vmFilterMode
+        }
+    }
+
     val activeFilterLabel = remember(filterMode, searchQuery) {
         buildString {
-            if (filterMode != "Live Feed" && filterMode != "Mesh") append(filterMode)
+            if (filterMode != "Live Feed" && filterMode != "Mesh") {
+                if (filterMode.startsWith("Author:")) {
+                    val authorPub = filterMode.substringAfter("Author:")
+                    val authorName = viewModel.getPeerHandle(authorPub) ?: "Author"
+                    append("@" + authorName)
+                } else {
+                    append(filterMode)
+                }
+            }
             if (searchQuery.isNotBlank()) {
                 if (isNotEmpty()) append(" · ")
-                append("\"$searchQuery\"")
+                append('"' + searchQuery + '"')
             }
         }
     }
@@ -693,10 +714,10 @@ fun UnifiedFeedTab(
         if (injectedTutStep == null) return@remember emptyList<UnifiedItem>()
         val step = injectedTutStep!!
         val filtered = unifiedFeed.filter { item ->
-            val isOwnPost = item is UnifiedItem.Mesh && item.post.authorPublicKeyB64 == localKeys?.publicKeyB64
+            val isOwnPost = item is UnifiedItem.Mesh && (item.post.authorPublicKeyB64 == localKeys?.publicKeyB64 || item.post.authorPublicKeyB64 == viewModel.burnableKeys.value?.publicKeyB64)
             if (filterMode == "My Content") {
                 if (!isOwnPost) return@filter false
-            } else if (isOwnPost) {
+            } else if (isOwnPost && !filterMode.startsWith("Author:")) {
                 return@filter false
             }
 
@@ -749,7 +770,7 @@ fun UnifiedFeedTab(
 
     LaunchedEffect(filterMode, searchQuery) {
         viewModel.updateActiveSearchQuery(searchQuery)
-        if (filterMode != "Live Feed" || searchQuery.isNotBlank()) {
+        if (!filterMode.startsWith("Author:") && (filterMode != "Live Feed" || searchQuery.isNotBlank())) {
             forceScrollToTop = true
         }
         if (searchQuery.isBlank()) {
@@ -1017,7 +1038,14 @@ fun UnifiedFeedTab(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Items you save or like will appear here.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
                     }
-                } else if (filterMode == "My Content") {
+                } else if (filterMode.startsWith("Author:")) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
+                        Icon(Icons.Default.Person, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text("No Posts Found".tr, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("No mesh broadcasts found for this user.".tr, color = TextMuted, textAlign = TextAlign.Center, style = MaterialTheme.typography.bodySmall)
+                    }                } else if (filterMode == "My Content") {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Icon(Icons.Default.Person, contentDescription = null, tint = TextMuted, modifier = Modifier.size(64.dp))
                         Spacer(modifier = Modifier.height(16.dp))

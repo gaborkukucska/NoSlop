@@ -70,10 +70,6 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val dmStep by viewModel.dmTutorialStep.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(Unit) {
-        viewModel.saveGroundZeroQrToGallery(context)
-    }
-
     // Auto-complete DM tutorial if the user already has connections (e.g. restored from backup)
     // or if they successfully add a peer during the tutorial itself.
     LaunchedEffect(peers.size, dmStep) {
@@ -226,6 +222,13 @@ fun DMsTab(viewModel: NoSlopViewModel) {
 
 
             val discoverablePeers by viewModel.discoverablePeers.collectAsState()
+            val burnableKeys by viewModel.burnableKeys.collectAsState()
+            val visibleDiscoverablePeers = remember(discoverablePeers, localKeys, burnableKeys) {
+                discoverablePeers.filter {
+                    it.publicKeyB64 != localKeys?.publicKeyB64 &&
+                    it.publicKeyB64 != burnableKeys?.publicKeyB64
+                }
+            }
             val groupChats by viewModel.groupChats.collectAsState()
             val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable && it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
@@ -430,10 +433,46 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 if (!peer.fundMeLink.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("${"Support:".tr} ${peer.fundMeLink}", color = TextLight, fontSize = 12.sp)
-                                }
-                            }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(AccentGreen.copy(alpha = 0.1f))
+                                            .clickable { activeDonationUrl = peer.fundMeLink }
+                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = AccentGreen.copy(alpha = 0.25f),
+                                            border = BorderStroke(1.dp, AccentGreen),
+                                            modifier = Modifier.size(20.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "${"Support:".tr} ${peer.fundMeLink}",
+                                            color = AccentGreen,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    if (activeDonationUrl != null) {
+                                        com.noslop.app.ui.ArticleWebViewDialog(
+                                            url = activeDonationUrl!!,
+                                            title = "${"Support".tr} ${peer.handle}",
+                                            onDismiss = { activeDonationUrl = null }
+                                        )
+                                    }
+                                }                            }
 
                             if (isTrusted && peer.isTemporary) {
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -450,7 +489,21 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-                            
+
+                            val authorPosts by viewModel.meshPosts.collectAsState(initial = emptyList())
+                            val userPosts = remember(authorPosts, peer.publicKeyB64) {
+                                authorPosts.filter { it.authorPublicKeyB64 == peer.publicKeyB64 && !it.isOrphaned }
+                            }
+                            if (userPosts.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                PeerMeshContentList(
+                                    posts = userPosts,
+                                    onPostClick = { clickedPost ->
+                                        selectedDiscoverableNode = null
+                                        viewModel.viewAuthorPosts(peer.publicKeyB64, clickedPost.id)
+                                    }
+                                )
+                            }
                             val targetOnion = peer.onionAddress
                             if (!isTrusted && targetOnion.isNotBlank()) {
                                 Spacer(modifier = Modifier.height(24.dp))
@@ -532,7 +585,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             PeerItem(
                                 peer = peer, 
                                 lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
-                                viewModel = viewModel
+                                viewModel = viewModel,
+                                onNavigateToAuthorFeed = { authorPub, postId ->
+                                    viewModel.viewAuthorPosts(authorPub, postId)
+                                }
                             )
                         }
                     }
@@ -553,7 +609,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     }
                 }
                 
-                if (discoverablePeers.isNotEmpty()) {
+                if (visibleDiscoverablePeers.isNotEmpty()) {
                     item {
                         Text(
                             text = "DISCOVERABLE NODES".tr,
@@ -568,7 +624,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
                         ) {
-                            items(discoverablePeers, key = { it.publicKeyB64 }) { peer ->
+                            items(visibleDiscoverablePeers, key = { it.publicKeyB64 }) { peer ->
                                 Card(
                                     modifier = Modifier.width(140.dp).clickable { selectedDiscoverableNode = peer },
                                     colors = CardDefaults.cardColors(containerColor = SurfaceDark),
@@ -668,7 +724,10 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             peer = peer, 
                             lastMsg = conversations.find { it.chatWithPeerPub == peer.publicKeyB64 }, 
                             viewModel = viewModel,
-                            onLongPress = { peerToAssignFolder = peer }
+                            onLongPress = { peerToAssignFolder = peer },
+                            onNavigateToAuthorFeed = { authorPub, postId ->
+                                viewModel.viewAuthorPosts(authorPub, postId)
+                            }
                         )
                     }
                 }
@@ -694,7 +753,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         if (dmStep == 0) {
             TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID".tr, onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 2) {
-            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer\n(Optional: scan Gabby's QR from gallery to connect with the dev)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer (Scan with camera or select from gallery)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
         }
 
         // Render dialogs

@@ -141,9 +141,13 @@ Notes:
 - Row 15 (`IDENTITY_UPDATE`): the payload's field is named `handle` (not
   `displayName`), and the signed string uses that same field name —
   `userId|handle|timestamp`.
-- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) verify the signature
-  on receipt covering `fromUserId|fromUsername|fromHomeNode|timestamp`
-  (+ optional `authorAvatarB64` and `bio`). The verification gap has been closed.
+- Rows 3–4 (`CONNECTION_REQUEST`/`USER_HANDSHAKE`) verify signatures
+  on receipt using dual-mode verification: length-prefixed `CryptoService.encodeForSigning`
+  as primary, with fallback to legacy pipe-delimited strings (`fromUserId|fromUsername|fromHomeNode|timestamp`
+  + optional `authorAvatarB64` and `bio`).
+- On multi-identity Creator Nodes, outbound `POST` broadcasts dynamically stamp `senderId`
+  with either the burnable identity public key (for temporary follower contacts) or main identity public key
+  (for personal contacts), ensuring recipient firewalls accept the packet.
 - Rows 21–23 (the `GROUP_*` family): all three carry a signature and all
   three verify it. `GROUP_INVITE` and `GROUP_DELETE` verify against the
   `adminPublicKeyB64` in the payload, and `GROUP_DELETE` additionally

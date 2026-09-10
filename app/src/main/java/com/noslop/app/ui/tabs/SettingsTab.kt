@@ -943,51 +943,93 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     )
                                 )
                             }
-                            
-                            if (isDiscoverableEnabled) {
-                                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
-                                
-                                val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
-                                Row(
-                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
-                                        Text("Creator Node".tr, fontWeight = FontWeight.Bold, color = TextLight)
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+
+                            val isCreatorEnabled by viewModel.isCreatorEnabled.collectAsState()
+                            var showCreatorDisableWarning by remember { mutableStateOf(false) }
+
+                            if (showCreatorDisableWarning) {
+                                AlertDialog(
+                                    onDismissRequest = { showCreatorDisableWarning = false },
+                                    containerColor = SurfaceDark,
+                                    title = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Warning, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(24.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Disable Creator Mode?".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    text = {
                                         Text(
-                                            "Automatically accept connections and lock your media from being purged by auto-cleanup.".tr,
-                                            style = MaterialTheme.typography.bodySmall,
+                                            "Disabling Creator Mode will disconnect your severable Creator ID. Any peers or followers who connected to your node using your Creator ID will permanently lose connection with you. Are you sure you want to proceed?".tr,
                                             color = TextMuted
                                         )
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showCreatorDisableWarning = false
+                                                viewModel.setCreatorEnabled(false)
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                        ) {
+                                            Text("Disable Creator Mode".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showCreatorDisableWarning = false }) {
+                                            Text("Keep Active".tr, color = AccentGreen)
+                                        }
                                     }
-                                    Switch(
-                                        checked = isCreatorEnabled,
-                                        onCheckedChange = { viewModel.setCreatorEnabled(it) },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = PrimaryBlack,
-                                            checkedTrackColor = AccentGreen,
-                                            uncheckedThumbColor = TextMuted,
-                                            uncheckedTrackColor = SurfaceDark
-                                        )
-                                    )
-                                }
+                                )
+                            }
 
-                                if (isCreatorEnabled) {
-                                    val creatorFundMeLink by viewModel.creatorFundMeLink.collectAsState()
-                                    OutlinedTextField(
-                                        value = creatorFundMeLink,
-                                        onValueChange = { viewModel.setCreatorFundMeLink(it) },
-                                        label = { Text("Donation Link (Optional)".tr) },
-                                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedBorderColor = AccentGreen,
-                                            unfocusedBorderColor = BorderSubtle,
-                                            focusedTextColor = TextLight,
-                                            unfocusedTextColor = TextLight
-                                        )
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Creator Node".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Automatically accept connections and lock your media from being purged by auto-cleanup.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
                                     )
                                 }
+                                Switch(
+                                    checked = isCreatorEnabled,
+                                    onCheckedChange = {
+                                        if (!it) {
+                                            showCreatorDisableWarning = true
+                                        } else {
+                                            viewModel.setCreatorEnabled(true)
+                                        }
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+
+                            if (isCreatorEnabled) {
+                                val creatorFundMeLink by viewModel.creatorFundMeLink.collectAsState()
+                                OutlinedTextField(
+                                    value = creatorFundMeLink,
+                                    onValueChange = { viewModel.setCreatorFundMeLink(it) },
+                                    label = { Text("Donation Link (Optional)".tr) },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = AccentGreen,
+                                        unfocusedBorderColor = BorderSubtle,
+                                        focusedTextColor = TextLight,
+                                        unfocusedTextColor = TextLight
+                                    )
+                                )
                             }
                         }
                     }

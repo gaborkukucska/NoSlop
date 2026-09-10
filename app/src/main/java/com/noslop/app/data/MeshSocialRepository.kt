@@ -446,7 +446,8 @@ class MeshSocialRepository(
         clearnetMediaType: String? = null,
         postIdOverride: String? = null
     ): MeshPost? = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext null
+        val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
+        val myKeys = (if (isCreator) getBurnableIdentity() else null) ?: getLocalIdentity() ?: return@withContext null
         val handle = getLocalHandle()
         val timestamp = System.currentTimeMillis()
         val id = postIdOverride ?: UUID.randomUUID().toString()
