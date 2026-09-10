@@ -260,7 +260,7 @@ fun PeerMeshContentList(
                     Column(modifier = Modifier.weight(1f)) {
                         val rawText = post.clearnetTitle?.takeIf { it.isNotBlank() }
                             ?: post.content.takeIf { it.isNotBlank() }
-                            ?: "Mesh Broadcast"
+                            ?: "Mesh Broadcast".tr
                         val cleanLine = rawText.lines().joinToString(" ").trim()
                         val annotatedContent = remember(cleanLine) {
                             com.noslop.app.util.MarkdownUtils.parseMarkdown(cleanLine)

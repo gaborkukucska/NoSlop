@@ -605,7 +605,7 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
             },
             text = {
                 Column {
-                    Text("Version ${updateInfo!!.latestVersion} is out! (You have ${updateInfo!!.currentVersion})", color = TextLight)
+                    Text("Version {latest} is out (you have {current}).".tr.replace("{latest}", updateInfo!!.latestVersion).replace("{current}", updateInfo!!.currentVersion), color = TextLight)
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("We strongly recommend updating to the latest version to ensure security and mesh stability.".tr, color = TextMuted, style = MaterialTheme.typography.bodySmall)
                 }
@@ -682,7 +682,7 @@ fun UnifiedFeedTab(
             if (filterMode != "Live Feed" && filterMode != "Mesh") {
                 if (filterMode.startsWith("Author:")) {
                     val authorPub = filterMode.substringAfter("Author:")
-                    val authorName = viewModel.getPeerHandle(authorPub) ?: "Author"
+                    val authorName = viewModel.getPeerHandle(authorPub) ?: com.noslop.app.util.LanguageManager.translate("Author")
                     append("@" + authorName)
                 } else {
                     append(filterMode)
@@ -1757,7 +1757,7 @@ fun UnifiedFeedTab(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen)
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Attached: ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                Text("${"Attached:".tr} ${attachedFile!!.name}", color = TextLight, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                                 IconButton(onClick = { if (!isBusy) attachedFile = null }, enabled = !isBusy) { Icon(Icons.Default.Delete, contentDescription = "Remove".tr, tint = if (isBusy) TextMuted else DestructiveRed) }
                             }
                         }
@@ -1805,7 +1805,7 @@ fun UnifiedFeedTab(
                                         }
                                     }, 
                                     enabled = !isBusy,
-                                    label = { Text(priv.replaceFirstChar { it.uppercase() }) }, 
+                                    label = { Text(if (priv == "public") "Public".tr else "Friends".tr) }, 
                                     colors = FilterChipDefaults.filterChipColors(selectedContainerColor = AccentGreen, selectedLabelColor = PrimaryBlack, labelColor = TextMuted)
                                 )
                             }

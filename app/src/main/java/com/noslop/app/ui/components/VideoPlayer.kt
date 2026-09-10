@@ -1328,6 +1328,27 @@ private fun ExoVideoPlayer(
     var isFastForwarding by remember { mutableStateOf(false) }
     var seekIndicator by remember { mutableStateOf<String?>(null) }
 
+    val isActivelyPlaying = isVisible && isPlaying && !hasError
+    val activity = remember(context) {
+        var ctx = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) return@remember ctx
+            ctx = ctx.baseContext
+        }
+        null
+    }
+
+    DisposableEffect(isActivelyPlaying) {
+        if (isActivelyPlaying) {
+            activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     LaunchedEffect(seekIndicator) {
         if (seekIndicator != null) {
             kotlinx.coroutines.delay(800)
@@ -1398,12 +1419,14 @@ private fun ExoVideoPlayer(
                         player = exoPlayer
                         useController = false
                         useArtwork = false
+                        keepScreenOn = isActivelyPlaying
                         resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
                 },
                 update = { view ->
                     val temp = videoSizeState
                     view.player = exoPlayer
+                    view.keepScreenOn = isActivelyPlaying
                     view.resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
                     if (temp.width > 0 && temp.height > 0) {
                         view.requestLayout()
@@ -1501,12 +1524,34 @@ private fun ExoVideoPlayer(
 
 @Composable
 private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, onRetry: () -> Unit, onReady: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var webError by remember { mutableStateOf<String?>(null) }
     var currentIsVisible by remember { mutableStateOf(isVisible) }
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     var isFastForwarding by remember { mutableStateOf(false) }
     var seekIndicator by remember { mutableStateOf<String?>(null) }
+
+    val isActivelyPlaying = isVisible && (webError == null)
+    val activity = remember(context) {
+        var ctx = context
+        while (ctx is android.content.ContextWrapper) {
+            if (ctx is android.app.Activity) return@remember ctx
+            ctx = ctx.baseContext
+        }
+        null
+    }
+
+    DisposableEffect(isActivelyPlaying) {
+        if (isActivelyPlaying) {
+            activity?.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            activity?.window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     LaunchedEffect(isVisible) {
         currentIsVisible = isVisible
@@ -1558,6 +1603,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                         }
                     }.apply {
                         webViewRef = this
+                        keepScreenOn = isActivelyPlaying
                         setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                         layoutParams = android.view.ViewGroup.LayoutParams(
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1783,6 +1829,7 @@ private fun EmbedWebViewPlayer(url: String, rawUrl: String, isVisible: Boolean, 
                     }
                 },
                 update = { view ->
+                    view.keepScreenOn = isActivelyPlaying
                     val js = if (isVisible) {
                         """
                         if (typeof player !== 'undefined' && player.playVideo) {
