@@ -5,180 +5,142 @@
 </p>
 
 <p align="center">
-  <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge">
-  <img alt="Status" src="https://img.shields.io/badge/Status-Iteration_3_Live-orange?style=for-the-badge">
-  <img alt="Network" src="https://img.shields.io/badge/Network-HUBs_/_HAI--Net-blue?style=for-the-badge">
+  <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=android">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.5.0--alpha-orange?style=for-the-badge">
+  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25_Tor_Only-blueviolet?style=for-the-badge&logo=torproject">
+  <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
 </p>
 
 ---
 
-## What is NoSlop?
+## 💡 What is NoSlop?
 
-**NoSlop** is a privacy-first Android app for consuming content and communicating with people — without servers, trackers, or algorithmic manipulation. (A Kotlin Multiplatform port lives in `mvp/` but is not yet part of the build; `app/` is what ships.)
+**NoSlop** is a sovereign, privacy-first Android application that combines a **tracker-free content aggregator** with a **serverless, end-to-end encrypted social mesh** running entirely over [Tor](https://www.torproject.org/).
 
-It combines a **tracker-free content aggregator** (RSS/Atom from YouTube, TikTok, and the open web) with a **serverless encrypted social layer** powered by Tor and our daisy-chain-gossip framework. Your identity is a cryptographic keypair that lives only on your device — no account, no email, no phone number.
+There are **no accounts**, **no emails**, **no phone numbers**, and **zero algorithmic slop**. Your identity is an Ed25519/X25519 cryptographic keypair generated on your device. Consuming content from the open web and connecting with friends or creators happens directly through peer-to-peer Tor hidden services (`.onion`).
 
-**Tor routing.** Mesh traffic always goes over Tor — there is no clearnet path for it. Feed, media, search and stream-resolution traffic is routed through Tor whenever the *Route clearnet through Tor* setting is on, which is the default; turning it off is a deliberate user choice. This now includes the update check against `noslop.me` / the GitHub releases API and the APK download itself: both wait for Tor to finish bootstrapping and abort rather than fall back to a direct connection. If Tor never comes up, the update check is skipped and told to you, not silently routed around.
-
----
-
-## Reasons to stop the slop with NoSlop
-
-- **Background Playback** — Keep listening to content seamlessly without keeping the app open. NoSlop fully supports background playback out of the box.
-- **No Advertisements** — Say goodbye to annoying banners and video interruptions. Your messaging and content experience on NoSlop is 100% ad-free, always.
-- **Complete Feed Control** — No obscure algorithms. You curate your content, you organize your sources, you decide what you see. Total chronological freedom.
-- **P2P Mesh Engagement** — Connect locally and globally with peers. Bypass central platforms and establish direct, censorship-resistant connections.
-- **Secure Direct Messaging** — End-to-end encrypted communications over our peer-to-peer mesh. Your conversations are mathematically secure and truly private.
+> 📖 **Deep Technical Details:** All cryptographic derivations, transport architectures, and protocol specifications live in [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) and [docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md).
 
 ---
 
-## Features
+## ⚡ Why Stop the Slop?
 
-### In-App OTA Updates
-NoSlop bypasses centralized app stores entirely. It includes a robust over-the-air (OTA) auto-update system that:
-- Automatically detects new releases from GitHub.
-- Prominently alerts you via a dedicated banner in the Settings tab, persisting until updated.
-- Handles Android 8.0+ `REQUEST_INSTALL_PACKAGES` permissions natively, with fallback options to "Just Download APK" if system permission dialogs fail.
-- Downloads the APK over the app's own OkHttp client with live progress toasts, bypassing the unreliable Android `DownloadManager` and DoH CDN redirect issues. Over Tor when Tor routing is on.
-- Verifies the download against the SHA-256 checksum published with the release before handing it to the installer, and refuses to install on a mismatch, on a truncated file, or when the server returns HTML instead of an APK.
-
-### Immersive Snapping Feed
-
-A vertical feed purpose-built for signal-to-noise ratio.
-
-- **Blurred media fill** — images display uncropped with a blurred background fill. No black bars, no letterboxing.
-- **Segmented article reader** — long articles are automatically split into paged segments. Side-swipe to read like a book.
-- **Media playback** — seamless native audio and video streaming (HLS/m3u8, MP4, MP3, Archive.org, Invidious direct fallback, etc.) from clearnet sources with dynamic ahead-of-time preloading for instant playback without signing in or being tracked.
-- **Immersive landscape mode** — rotate your device horizontally to automatically hide the UI, allowing edge-to-edge viewing for video and image content.
-- **3-Tier Priority Curation** — choose from 14+ categories (Technology, Science, Privacy & Security, Gaming, Art, Music, and more) and specify your favorite creators during onboarding. NoSlop pre-loads curated RSS/Atom feeds and strictly prioritizes your feed chronologically in three tiers: `Creators > Chosen Categories > Trending Fallback`, guaranteeing a perfectly tailored experience from the first swipe.
-- **3-Tier Categorized Reaction System** — express nuanced feedback across 20 distinct reaction icons cleanly organized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Neutral / Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫). Neutral/expressive reactions (e.g. `sad`, `angry`, `thinking`) provide nuanced emotion without counting as downvotes or penalizing content.
-- **Channel / Creator Banning via 🚫 Reaction** — tap the `noslop` 🚫 reaction on any slide to instantly blacklist the creator/channel. Banned channels are immediately purged from the active feed and permanently excluded from future feed aggregation and search results. Manage banned creators anytime via chip lists in Content Preferences or the interactive Channel Preference Modal.
-- **Channel Creation Cut-Off Date Filter** — set a Year / Month cut-off date (e.g., Exclude channels created after January 2022) in Settings to drop modern automated content farms. Explicit channel and creator searches remain exempt so you can still discover new creators manually.
-- **Save For Later & Saved Filter** — bookmark feed slides with a single tap of the Save icon on feed cards. Access all bookmarked content reliably via the dedicated **Saved** feed filter.
-- **Interactive Channel Preference Modal** — tap any creator/channel name on feed cards to inspect their status, 1-tap add/remove creator preferences, or ban/unban the channel.
-- **Dynamic Search Cloud & Soft Keyboard Support** — real-time search suggestion cloud appears dynamically as you type ( querying local sources + live YouTube channel search API). Modal adjusts with soft keyboard IME padding to remain scrollable.
-
-### Serverless Social Mesh
-
-Direct peer-to-peer communication over the HUBs / HAI-Net gossip network. No central server is ever involved.
-
-- **Home HUBs** — Your dedicated local home lab serves as the ultimate backup of your mesh Identity, all your data, and your media. It ensures your presence is maintained even when your mobile device is offline. Deploy a new Home Hub directly from the NoSlop app's HUBs tab over SSH, or seamlessly auto-discover and cryptographically link to an existing one on your local network. **Deploying via the NoSlop app is currently the recommended way to set up a single-device HAI-Net system** *(multi-device deployment support is coming later)*. Once linked, the Hub serves as your master SQLite database, bi-directionally syncing historical DMs, mesh broadcasts, and contacts to your device. **If your hardware permits, the Hub also provides a completely private LLM assistant (Admin AI) equipped with an almost working project and LLM management harness!** You can converse with this AI securely from NoSlop using standard End-to-End Encrypted DMs. NoSlop safely detects deployment collisions and provides options to sign in, reset identity, or wipe.
-- **Discoverable Mode & Creator Nodes** — Toggle Discoverable Mode in Settings to broadcast your ephemeral identity (burnable onion address) across the mesh up to 6 hops away, allowing anyone to find you without a QR code. Enable Creator Node to automatically accept incoming connections, permanently lock your media from local cache purging, and optionally broadcast your donation link.
-- **Cryptographically signed posts** — every mesh broadcast is signed with your Ed25519 key, and receivers reject anything whose signature doesn't reconstruct. This covers posts, edits, deletions, comments, reactions, votes, follows, handshakes, presence announcements, identity updates and the whole group-chat family. The two ephemeral signals, `TYPING` and `READ_RECEIPT`, are deliberately unsigned — they carry no durable state — so treat a typing indicator as a hint, not as proof of who is at the other end.
-- **End-to-end encrypted DMs** — direct messages use X25519 key agreement, derived via SHA3-256 into a ChaCha20-Poly1305 key (see [TECHNICAL_REFERENCE.md §3.5](docs/TECHNICAL_REFERENCE.md#35-direct-message-encryption) for the exact derivation). Only you and your contact can read them. Note that this is a static key agreement with no ratchet, so there is no forward secrecy — see [TECHNICAL_REFERENCE.md §3.5.1](docs/TECHNICAL_REFERENCE.md#351-group-message-fan-out).
-- **Group chats** — end-to-end encrypted group threads over the same mesh. There is no shared group key: each message is encrypted once per member with that member's X25519 key and fanned out, so adding or removing someone needs no key rotation. Group membership changes are signed and authorised on receipt — only the admin can rename a group or change its picture, members can invite only if the group allows it, and a member can only remove themselves. Removals propagate as real deltas, so a removed member disappears from every peer's copy of the group.
-- **Cryptographic QR authentication** — scan a contact's QR code to exchange public keys and onion addresses, or scan your Hub's Web UI QR code to instantly verify ownership and sign in securely via an Ed25519 challenge-response.
-- **Gossip propagation with firewall** — packets carry a hop counter (TTL = 6), duplicates are dropped by packet ID via an LRU cache, and packets from peers you have not trusted are dropped outright. A per-sender rate limit of 20 packets per 10-second window covers the flood-prone types: posts, comments, reactions and votes. Media, sync, DM and handshake traffic is deliberately exempt so that a large media transfer or a reconnect burst is not mistaken for an attack — which does mean the rate limiter is not, on its own, a defence against a trusted peer that turns hostile.
-- **Granular mesh filters** — control exactly which content types are pushed to and pulled from the mesh. Toggle incoming and outgoing traffic independently for reactions, comments, text posts, clearnet shares, images, and videos. Filters are network-only — your local data is always preserved, and interactions on content you already track are never blocked.
-
-### Clearnet-to-Mesh Broadcasts
-
-NoSlop is the bridge between the open web and your private mesh. Consuming content from your aggregated clearnet feed isn't a passive act — it's a gateway into community.
-
-When you **like**, **share**, or **comment** on any clearnet item in your feed, NoSlop transforms that interaction into a **mesh broadcast**. The original URL and title are signed with your Ed25519 key and gossiped to your peers as a `POST` packet with embedded `clearnet_url` and `clearnet_title` fields. From that moment, the content lives in two worlds simultaneously: on the clearnet where it originated, and on the mesh where it travels under your identity.
-
-All subsequent interactions — reactions, comments, replies — happen entirely on the mesh between you and your connections. No clearnet platform sees the engagement. No algorithm counts the signal. The conversation belongs to your network.
-
-This is how NoSlop unites entertainment, community, and communication in one place:
-
-- **Entertainment** — your curated clearnet feed surfaces the best of the open web, tracker-free.
-- **Community** — a single tap broadcasts that content into your mesh, making it a shared reference point for your circle.
-- **Communication** — every reply, comment, and reaction threads through the gossip protocol, end-to-end encrypted where needed, and fully offline-capable.
-
-> 🌉 **The Bridge in Action:** The clearnet interaction-to-broadcast pipeline is fully live. Liking, sharing, or commenting on a clearnet item creates a deterministic SHA3-256-derived mesh anchor post for that URL. `REACTION` packets are signed, gossiped, and toggleable. Peers see rich clearnet preview cards seamlessly mixed into their feed alongside native mesh posts, complete with live reaction counts and a "View on Clearnet" button.
+* 🎧 **Background Playback Out-of-the-Box** — Stream videos and audio seamlessly while browsing other tabs or with your screen locked.
+* 🚫 **100% Ad & Tracker-Free** — Zero banners, zero tracking scripts, zero sponsored interruptions. Always.
+* 🎯 **Total Feed Sovereignty** — Strict chronological curation. You decide your content mix, your sources, and your priorities.
+* 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.
+* 🔒 **Mathematical Privacy** — E2EE Direct Messages (X25519 + ChaCha20-Poly1305) and multi-member mesh group chats.
+* 🧅 **Strict Tor-Routed Anonymity** — All network traffic routes through an embedded Tor SOCKS5 daemon with dedicated per-stream circuit isolation.
 
 ---
 
-### Sovereign Identity
+## ✨ Core Features
 
-Your identity is generated locally and never leaves your device unless you export it yourself.
+### 📱 Immersive Snapping Feed
 
-- **Ed25519 + X25519 keypair** — one key for signing, one for encryption. Generated on-device using Lazysodium (libsodium) with a Bouncy Castle fallback for maximum compatibility across all Android versions (API 24+).
-- **Tor v3 onion address** — your identity includes a native `.onion` address derived from your Ed25519 key, making you directly reachable over Tor without a relay.
-- **Word Cloud** — your identity is backed up by a 12-word mnemonic drawn from a 2053-word list, seeded via PBKDF2-HMAC-SHA512. It is BIP-39-*shaped* but not BIP-39-compatible: the wordlist differs from the standard one and there is no checksum word, so it will not restore in a BIP-39 wallet and a typo produces a wrong key rather than an error. Tap to copy, write it down, and store it somewhere you trust.
-- **Tripcode** — a 6-character Base32 shortcode derived from SHA3-256 of your public key. A human-readable fingerprint that others can verify at a glance.
-- **Encrypted key storage** — private keys live in `EncryptedSharedPreferences`, wrapped by an AES-256-GCM master key held in the Android Keystore (hardware-backed where the device supports it). Android's Keystore cannot perform Ed25519 or X25519 operations, so NoSlop does unwrap the raw key material in memory to sign and to decrypt. If the Keystore is unavailable, the app falls back to a locally-derived AES-GCM store and warns you in Settings that it is running degraded.
-- **AES-encrypted backup** — export your database, media and settings into an AES-256-GCM archive keyed from your Word Cloud mnemonic. Note that the identity keystore file inside the archive is sealed by a device-bound key, so a backup restores fully on the *same* device; on a new device your data comes back but the identity must be re-derived from the mnemonic.
+A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 
-### Tor-Routed Networking
-
-**By default**, all outbound traffic — feed fetches, mesh messages, media requests — is routed through an embedded Tor SOCKS5 proxy running locally on port 9050. Clearnet media can optionally be toggled to bypass Tor for speed in Settings; mesh traffic remains strictly Tor-routed regardless.
-
-- Tor circuits are built before any data is sent. The app surfaces a clear status indicator so you always know if Tor is connected.
-- Your real IP address is never exposed to feed servers, peers, or anyone on the network.
-- Hidden service registration gives your node a stable `.onion` address for inbound peer connections.
-- **Tor-friendly API Proxies** — Search and metadata APIs (YouTube, Reddit, Jamendo) can be routed through an open-source Cloudflare Worker proxy (`yt-proxy.megadreamland.workers.dev`), which sidesteps the IP blocks these platforms apply to Tor exit nodes. Be clear-eyed about what this is: one operator-run endpoint that sees the *content* of proxied queries, though never your IP, since the request still leaves your device over Tor. It is also a single point of failure, and one shared egress is increasingly more flagged than a fresh Tor exit — so NoSlop cools the proxy off and retries direct over Tor whenever it starts serving refusals. Media stream bytes never go through it, and neither does stream resolution: a
-googlevideo URL is IP-locked to whoever requested it, so resolving through the
-proxy produced URLs that could not be fetched over Tor. Search and metadata
-only.
+* 🎬 **Universal Media Playback** — Native audio & video streaming (HLS, MP4, WebM, MP3, Archive.org, and direct streams) with dynamic ahead-of-time Tor preloading.
+* 🖥️ **Immersive Landscape Mode** — Rotate your device horizontally to automatically hide navigation and overlays for edge-to-edge viewing.
+* 📖 **Segmented Article Reader** — Multi-page horizontal book-style reader with asynchronous OpenGraph lead image resolution and full Markdown support.
+* 🎛️ **3-Tier Priority Curation** — Strictly orders content chronologically in three tiers: `Favorite Creators > Selected Topics > Fallback Discoveries`.
+* 🏷️ **3-Tier Nuanced Reactions** — 20 expressive reactions categorized into **Positive** (❤️ 👍 😂 🔥 😮 🎉 💡 👏 💎), **Expressive** (😢 😡 😱 🤔 🤯 🧘), and **Negative** (👎 💩 🤮 🤡 🚫).
+* 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
+* 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
+* 🔖 **Saved & History Feeds** — Bookmark items with 1 tap; browse your full chronological history with instant full-text search.
 
 ---
 
-## Tech Stack
+### 🕸️ Serverless Social Mesh (HAI-Net)
 
-| Layer | Technology |
+Direct peer-to-peer communication over the HAI-Net gossip network — no central server ever exists:
+
+* 📬 **End-to-End Encrypted DMs** — Mathematically secure messaging via X25519 key agreement and ChaCha20-Poly1305 AEAD.
+* 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
+* 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts without leaking their personal identity.
+* 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
+* 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
+* 🛡️ **Gossip Firewall & Mesh Filters** — 6-hop flood routing with LRU deduplication, packet verification, and granular toggles for incoming and outgoing media types.
+
+---
+
+### 🔑 Sovereign Cryptographic Identity
+
+* 🔐 **Ed25519 + X25519 Keys** — Generated locally using Lazysodium (libsodium) with Bouncy Castle fallback.
+* 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
+* 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts.
+* ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
+* 🪪 **Human-Readable Tripcode** — 6-character Base32 visual verification fingerprint (`@handle.tripcode`).
+
+---
+
+### 🧅 Tor-Routed Networking
+
+* 🛡️ **Default Tor Routing** — Outbound feed fetches, media streams, API requests, and mesh packets route through an embedded local Tor daemon.
+* 🔄 **SOCKS5 Stream Isolation** — Per-stream Tor isolation (`IsolateSOCKSAuth`) assigns unique circuits and exit nodes to distinct media streams, guaranteeing exit affinity and eliminating Google IP-lock stalls.
+* 🔁 **Graceful Exit Hopping** — Nonce-bumping hops Tor exits upon provider blocks without process-wide circuit disruption.
+* 📲 **Peerless OTA Updates** — Automated background update detection with SHA-256 cryptographic checksum verification before installation.
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technologies |
 |---|---|
-| UI | Jetpack Compose (Material Design 3) |
-| Media | Media3 / ExoPlayer, WebView, Coil |
-| Content | OkHttp, Gson, custom RSS/Atom parser |
-| Networking | Embedded Tor SOCKS5 daemon (onion-routed), OkHttp |
-| Signing | Ed25519 (Bouncy Castle lightweight API / Lazysodium key generation) |
-| Key exchange | X25519 |
-| Encryption | ChaCha20-Poly1305 (DMs), AES-256-GCM (backup, CBC read-only for legacy archives) |
-| Storage | Room (SQLite) + EncryptedSharedPreferences |
-| Background sync | WorkManager (Android) |
-| Camera | CameraX |
+| **UI** | Jetpack Compose (Material Design 3), Compose Animation, Markdown Spans |
+| **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
+| **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
+| **Cryptography** | Ed25519 (Lazysodium / Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
+| **Persistence** | Room (SQLite), EncryptedSharedPreferences (Hardware Keystore backed) |
+| **Hardware** | CameraX (QR scanning & media capture), ZXing |
+| **Background** | Android WorkManager & Foreground Services |
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
-1. **Build from source** — follow [docs/BUILD.md](docs/BUILD.md). The canonical codebase is `app/`; `settings.gradle.kts` includes `:app` only.
-2. **Run the onboarding flow** — 9 steps: set your language, generate your Word Cloud, pick your interests and creators, choose content sources, set your content mix ratios, and optionally deploy a HAI-Net Hub.
-3. **Browse** — your feed populates immediately from the curated sources matching your interests. No account, no wait.
+1. **Build from source** — Follow the step-by-step compilation guide in [docs/BUILD.md](docs/BUILD.md).
+2. **Complete Onboarding** — Set your language, record your 12-word Word Cloud mnemonic, select your favorite topics and creators, tune your content mix, and begin browsing!
+3. **Connect with Peers** — Share your Contact Card QR code or Creator ID to start building your mesh circle.
 
 ---
 
-## Your Responsibilities
+## 📚 Documentation Index
 
-- **Open Source & Your Responsibility** — NoSlop is well-built open-source software with all functionalities in open code. Therefore, all responsibilities for its use fall entirely on you, the user.
-- **No Server & No Automatic Backups** — Because there is no central server, there is NO cloud data backup. You must back up your identity and data yourself using the built-in export function.
-- **Content Filtering** — While we do compile with some negative keywords to avoid certain content (see the repo), you should also set up your own negative keywords to avoid unwanted content in your feed.
-- **Bring Your Own Network** — NoSlop is much better with friends, HOWEVER, it holds no user directory whatsoever. You must manually add peers to build your mesh. It is entirely up to you.
-- **Installing the APK** — Android will likely show security warnings about installing apps from unknown sources since this is downloaded directly and not from the Play Store. You will likely need to search your phone's settings for `unknown` to find the 'Install unknown apps' section and allow installing from unknown sources to be able to install this app.
+* 🏗️ **[docs/BUILD.md](docs/BUILD.md)** — Compilation instructions and signing configuration.
+* 📡 **[docs/WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — Complete 24-packet HAI-Net wire protocol catalog and payload schemas.
+* 🔬 **[docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — Deep technical specification (crypto derivations, Tor internals, SOCKS5 isolation, media pipelines).
+* 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Detailed technical milestone changelog and completed audit resolutions.
+* 🌍 **[docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — Guide for community localization and language JSON files.
+* 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
+* 🏠 **[docs/HUB_INTEGRATION_PLAN.md](docs/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
+* 🛠️ **[docs/SUPPORT.md](docs/SUPPORT.md)** — Backup/restore guides, troubleshooting, and operations.
+* 🐞 **[docs/DEBUG.md](docs/DEBUG.md)** — Extracting structured diagnostic logs.
+
+---
+
+## ⚖️ User Responsibilities
+
+* 📦 **Decentralized & Serverless** — There is no central server, corporate account, or cloud backup. Always back up your 12-word Word Cloud.
+* 🤝 **Bring Your Own Network** — NoSlop does not maintain public user directories. Direct peer connections are formed deliberately by exchanging QR codes or onion addresses.
+* 📲 **Direct Installation** — Because NoSlop bypasses centralized app stores, you must allow installation of unknown apps on Android.
 
 ---
 
 ## 💖 Support the Vision
 
-NoSlop is entirely free, open-source, and devoid of trackers and advertisements. If you find value in a private, serverless communication tool, please consider supporting the sole developer!
+NoSlop is 100% free, open-source, tracker-free, and advertisement-free. If you find value in serverless, sovereign communication, consider supporting independent development:
 
-🪙 ☕ 🍱 [Toss me a coin, buy me a chai or even a meal](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00)
-
----
-
-## Documentation
-
-- 🏗️ **[BUILD.md](docs/BUILD.md)** — how to compile and install NoSlop.
-- 🌍 **[TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — how to translate the app to your language.
-- 📉 **[PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — latest technical milestones and known issues.
-- 📡 **[WIRE_PROTOCOL_REFERENCE.md](docs/WIRE_PROTOCOL_REFERENCE.md)** — the complete HAI-Net wire protocol reference (supersedes the old packet schema docs).
-- 🔬 **[TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md)** — deep technical reference: crypto derivations, gossip pipeline internals, media/Tor internals, build config.
-- 🏠 **[HUB_INTEGRATION_PLAN.md](docs/HUB_INTEGRATION_PLAN.md)** — phased plan for the upcoming Home HUB architecture.
-- 🔀 **[MIGRATION.md](docs/MIGRATION.md)** & **[KMP_PARITY_PLAN.md](docs/KMP_PARITY_PLAN.md)** — architecture shift and parity details for the Kotlin Multiplatform migration.
-- 🛡️ **[PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — clear breakdown of data sovereignty and privacy expectations.
-- 🐞 **[DEBUG.md](docs/DEBUG.md)** — how to extract and read system logs.
-- 🛠️ **[SUPPORT.md](docs/SUPPORT.md)** — operations guide, backup/restore, and troubleshooting.
-- 🔭 **[GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md)** — feature gaps vs. gChat/HAI-Net (presence, group chats, hash-based sync, etc.) and a backlog checklist.
+🪙 ☕ 🍱 **[Toss me a coin or buy me a meal](https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00)**
 
 ---
 
-## About
+## 🌐 About
 
-NoSlop is part of the [HAI-Net Initiative](https://hai-net.com) — building tools where AI and open networks work for people, not corporations.
+NoSlop is part of the **[HAI-Net Initiative](https://hai-net.com)** — building open networks where tools serve people, not corporate algorithms.
 
-Licensed under **AGPL-3.0**. Fork it. Run it. Own it.
+Licensed under **[AGPL-3.0](LICENSE.md)**. Fork it. Run it. Own it.
 
 <p align="center">
   ✨ <em><a href="https://gaborkukucska.com">Dreamed up by Gabby</a></em>
