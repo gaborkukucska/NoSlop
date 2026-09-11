@@ -1180,7 +1180,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        com.noslop.app.net.SshDeployer.clearPinnedHostKey(context)
+                                        com.noslop.app.net.SshDeployer.clearPinnedHostKey(null)
                                         android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Pinned SSH host keys cleared"), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                     .padding(16.dp),

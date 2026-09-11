@@ -45,6 +45,8 @@ fun MetricCard(value: String, label: String, modifier: Modifier = Modifier) {
 @Composable
 fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialScanMode: String? = null) {
     val hubDeploymentStatus by viewModel.hubDeploymentStatus.collectAsState()
+    var hostKeyPromptData by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var hostKeyContinuation by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
 
     // Active Dashboard View (Native Compose)
     if (!hubDeploymentStatus.isNullOrBlank()) {
@@ -178,6 +180,45 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
             Spacer(modifier = Modifier.weight(1f))
         }
 
+        if (hostKeyPromptData != null) {
+            AlertDialog(
+                onDismissRequest = {
+                    hostKeyContinuation?.invoke(false)
+                    hostKeyPromptData = null
+                    hostKeyContinuation = null
+                },
+                containerColor = SurfaceDark,
+                title = { Text("Verify SSH Host Key".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text("Connecting to ${hostKeyPromptData!!.first} for the first time.".tr, color = TextMuted)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Fingerprint:".tr, color = AccentGreen, fontWeight = FontWeight.Bold)
+                        Text(hostKeyPromptData!!.second, color = TextLight, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Your private identity will be sent to this host. Confirm you trust this machine.".tr, color = TextMuted, fontSize = 12.sp)
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            hostKeyContinuation?.invoke(true)
+                            hostKeyPromptData = null
+                            hostKeyContinuation = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) { Text("Trust & Pin".tr, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        hostKeyContinuation?.invoke(false)
+                        hostKeyPromptData = null
+                        hostKeyContinuation = null
+                    }) { Text("Reject".tr, color = DestructiveRed) }
+                }
+            )
+        }
+
         if (showUpdateDialog) {
             val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
             AlertDialog(
@@ -266,7 +307,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                                             onHostKeyPrompt = { host, fp ->
                                                 kotlinx.coroutines.suspendCancellableCoroutine { cont ->
                                                     hostKeyPromptData = host to fp
-                                                    hostKeyContinuation = { approved -> cont.resume(approved, onCancellation = null) }
+                                                    hostKeyContinuation = { approved: Boolean -> cont.resume(approved, onCancellation = null) }
                                                 }
                                             }
                                         )
@@ -307,8 +348,6 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
     var isDeploying by remember { mutableStateOf(false) }
     var deployResult by remember { mutableStateOf<String?>(null) }
     var deployError by remember { mutableStateOf<String?>(null) }
-    var hostKeyPromptData by remember { mutableStateOf<Pair<String, String>?>(null) }
-    var hostKeyContinuation by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
 
     var showSetupDialog by remember { mutableStateOf(false) }
     var showLinkDialog by remember { mutableStateOf(false) }
@@ -348,7 +387,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                 onHostKeyPrompt = { host, fp ->
                     kotlinx.coroutines.suspendCancellableCoroutine { cont ->
                         hostKeyPromptData = host to fp
-                        hostKeyContinuation = { approved -> cont.resume(approved, onCancellation = null) }
+                        hostKeyContinuation = { approved: Boolean -> cont.resume(approved, onCancellation = null) }
                     }
                 }
             )

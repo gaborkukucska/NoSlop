@@ -1,7 +1,9 @@
 // FILE: app/src/main/java/com/noslop/app/ui/tabs/CreatorStudioTab.kt
 package com.noslop.app.ui.tabs
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
