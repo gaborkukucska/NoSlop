@@ -5,6 +5,10 @@ plugins {
     alias(libs.plugins.google.devtools.ksp)
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 android {
     namespace = "com.noslop.app"
     compileSdk = 35
@@ -174,6 +178,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    testImplementation("androidx.room:room-testing:2.7.0")
 
     // --- Security: EncryptedSharedPreferences for private key storage ---
     implementation(libs.androidx.security.crypto)
