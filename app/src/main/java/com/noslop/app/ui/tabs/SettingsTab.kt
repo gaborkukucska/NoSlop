@@ -1383,7 +1383,17 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             onClick = {
                                                 showImportWarning = false
                                                 importStatus = "Importing..."
-                                                viewModel.importBackupFromUri(context, mnemonicInput, pendingImportUri!!) { success ->
+                                                val uriToImport = pendingImportUri!!
+                                                val mnemonicToUse = mnemonicInput
+                                                viewModel.importBackupFromUri(
+                                                    context,
+                                                    mnemonicToUse,
+                                                    uriToImport,
+                                                    allowLegacyUnauthenticated = false,
+                                                    onLegacyDetected = {
+                                                        importStatus = "Legacy archive detected. Requires confirmation."
+                                                    }
+                                                ) { success ->
                                                     if (!success) {
                                                         importStatus = "Import failed. Check password and file."
                                                     }

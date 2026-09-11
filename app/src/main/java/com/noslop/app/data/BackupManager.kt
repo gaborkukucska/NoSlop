@@ -49,6 +49,8 @@ import javax.crypto.spec.SecretKeySpec
  * the decrypted zip to a temp file, and unzip ONLY after doFinal() has returned
  * without throwing. A tampered archive is deleted before a single entry is read.
  */
+class LegacyBackupConfirmationRequiredException : Exception("Legacy unauthenticated backup archive detected")
+
 object BackupManager {
     private const val TAG = "BACKUP_MANAGER"
     private const val DB_NAME = "mesh.db"
@@ -186,7 +188,12 @@ object BackupManager {
         }
     }
 
-    fun importData(context: Context, mnemonic: String, sourceStream: InputStream): Boolean {
+    fun importData(
+        context: Context,
+        mnemonic: String,
+        sourceStream: InputStream,
+        allowLegacyUnauthenticated: Boolean = false
+    ): Boolean {
         Logger.info(TAG, "Starting data import...")
         lastRestoreNeedsIdentityRecovery = false
         val tempZip = File(context.cacheDir, "noslop_restore.zip")
@@ -196,8 +203,6 @@ object BackupManager {
 
             val input = BufferedInputStream(sourceStream)
 
-            // Peek the first 16 bytes: either "NSG1" + 12-byte GCM IV, or a
-            // 16-byte CBC IV from a legacy archive.
             val header = ByteArray(16)
             if (!readFully(input, header)) {
                 Logger.error(TAG, "Import failed: backup file is too small to contain a header")
@@ -214,7 +219,12 @@ object BackupManager {
                 cipher = Cipher.getInstance("AES/GCM/NoPadding")
                 cipher.init(Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, iv))
             } else {
-                Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive...")
+                // P1-10: Reject unauthenticated legacy archives unless user explicitly confirmed
+                if (!allowLegacyUnauthenticated) {
+                    Logger.warn(TAG, "Legacy unauthenticated archive detected. Raising confirmation required.")
+                    throw LegacyBackupConfirmationRequiredException()
+                }
+                Logger.info(TAG, "Decrypting legacy AES-256-CBC backup archive (user confirmed)...")
                 cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
                 cipher.init(Cipher.DECRYPT_MODE, key, IvParameterSpec(header))
             }

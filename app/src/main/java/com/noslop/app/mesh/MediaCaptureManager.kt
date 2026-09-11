@@ -166,52 +166,7 @@ class MediaCaptureManager(private val context: Context) {
         recording = null
     }
 
-    /**
-     * Start recording real audio.
-     */
-    fun startAudioRecording() {
-        try {
-            audioFile = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_MUSIC),
-                SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(System.currentTimeMillis()) + ".m4a"
-            )
-            
-            mediaRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(context)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setOutputFile(audioFile!!.absolutePath)
-                prepare()
-                start()
-            }
-            Logger.info(TAG, "Audio recording started")
-        } catch (e: Exception) {
-            Logger.error(TAG, "Audio recording failed: ${e.message}")
-        }
-    }
 
-    /**
-     * Stop audio recording and return the file.
-     */
-    fun stopAudioRecording(): File? {
-        return try {
-            mediaRecorder?.apply {
-                stop()
-                release()
-            }
-            mediaRecorder = null
-            Logger.info(TAG, "Audio recording stopped: ${audioFile?.absolutePath}")
-            audioFile
-        } catch (e: Exception) {
-            Logger.error(TAG, "Stop audio recording failed: ${e.message}")
-            null
-        }
-    }
 
     fun stopCamera() {
         try {

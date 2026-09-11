@@ -267,25 +267,7 @@ object MediaManager {
         }
     }
 
-    fun cacheCreatorMedia(source: File, type: String?, id: String): File? {
-        val repo = repository ?: return null
-        return try {
-            val destDir = getMediaDirectory(type)
-            val destFile = File(destDir, id)
-            if (source.canonicalPath != destFile.canonicalPath) {
-                source.copyTo(destFile, overwrite = true)
-            }
-            // Update timestamp
-            destFile.setLastModified(System.currentTimeMillis())
-            // Drop a sentinel file to lock creator media
-            File(destDir, "$id.creator_locked").createNewFile()
-            Logger.info(TAG, "Cached and locked creator media: $id")
-            destFile
-        } catch (e: Exception) {
-            Logger.error(TAG, "Failed to cache creator media", e.message)
-            null
-        }
-    }
+
 
     fun isMediaDownloaded(id: String, type: String?): Boolean {
         return getLocalFile(id, type) != null

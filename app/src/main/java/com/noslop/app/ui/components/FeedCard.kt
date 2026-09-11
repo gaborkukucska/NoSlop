@@ -88,38 +88,6 @@ private fun getSourceLabel(item: FeedItem): String {
 private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
 @Composable
-fun FullScreenImage(url: String) {
-    val context = LocalContext.current
-    val mediaSettings by com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.collectAsState()
-    val request = coil.request.ImageRequest.Builder(context)
-        .data(url)
-        .apply {
-            // --- NOSLOP_IMAGE_SOURCES_V1 --- see MediaComponents: "high" is the
-            // default and had no size ceiling, so originals decoded full-res.
-            when (mediaSettings.imageQuality) {
-                "low" -> size(640)
-                "medium" -> size(960)
-                else -> size(1600)
-            }
-        }
-        .memoryCacheKey(url + "_" + mediaSettings.imageQuality)
-        .diskCacheKey(url + "_" + mediaSettings.imageQuality)
-        .build()
-
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        coil.compose.AsyncImage(
-            model = request,
-            contentDescription = null,
-            modifier = Modifier.fillMaxWidth().aspectRatio(1f),
-            contentScale = ContentScale.Fit
-        )
-    }
-}
-
-@Composable
 fun FullScreenFeedCard(
     item: FeedItem, 
     isVisible: Boolean = true, 
