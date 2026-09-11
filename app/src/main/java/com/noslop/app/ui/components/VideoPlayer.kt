@@ -1216,6 +1216,13 @@ private fun ExoVideoPlayer(
             androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(loadControl)
+                .setAudioAttributes(
+                    androidx.media3.common.AudioAttributes.Builder()
+                        .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+                        .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE)
+                        .build(),
+                    true
+                )
                 .build().apply {
                     val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
                     trackSelectionParameters = trackSelectionParameters.buildUpon().apply {

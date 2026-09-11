@@ -887,10 +887,15 @@ object TorService {
                     onAddressReady(onionAddress)
                 } else if (responseLines.any { it.contains("550 Onion address collision") }) {
                     Logger.info(TAG, "Onion address collision: Hidden service already active.")
-                    // If we have a private key, we can derive the address to trigger the UI callback
                     if (privateKeyB64 != null) {
-                        val pubBytes = android.util.Base64.decode(privateKeyB64, android.util.Base64.DEFAULT)
+                        val pubBytes = com.noslop.app.crypto.CryptoService.getPublicKeyFromPrivateKey(privateKeyB64)
                         val derived = com.noslop.app.crypto.CryptoService.deriveOnionAddress(pubBytes)
+                        val serviceId = derived.removeSuffix(".onion")
+                        if (privateKeyB64 == currentPrivateKeyB64) {
+                            activeMainServiceId = serviceId
+                        } else {
+                            activeBurnableServiceId = serviceId
+                        }
                         Logger.info(TAG, "Derived onion from persistent key: $derived")
                         onAddressReady(derived)
                     }

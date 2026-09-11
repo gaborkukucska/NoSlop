@@ -61,7 +61,16 @@ object CryptoService {
      * Bulletproof parsing: Uses BC's ASN.1 factories to reliably extract the 32-byte parameters
      * from any historical PKCS#8 / X.509 structure size.
      */
+    fun getPublicKeyFromPrivateKey(privKeyB64: String): ByteArray {
+        val bytes = Base64.decode(privKeyB64, Base64.DEFAULT)
+        val privParams = getEd25519PrivateKeyParams(bytes)
+        return privParams.generatePublicKey().encoded
+    }
+
     private fun getEd25519PrivateKeyParams(encoded: ByteArray): Ed25519PrivateKeyParameters {
+        if (encoded.size == 44) {
+            throw IllegalArgumentException("Expected Ed25519 private key (PKCS#8 48 bytes or raw 32/64 bytes), but received 44-byte X.509 public key")
+        }
         if (encoded.size == 32 || encoded.size == 64) {
             return Ed25519PrivateKeyParameters(encoded, 0)
         }
@@ -75,6 +84,9 @@ object CryptoService {
     }
 
     private fun getEd25519PublicKeyParams(encoded: ByteArray): Ed25519PublicKeyParameters {
+        if (encoded.size == 48) {
+            throw IllegalArgumentException("Expected Ed25519 public key (X.509 44 bytes or raw 32 bytes), but received 48-byte PKCS#8 private key")
+        }
         if (encoded.size == 32) {
             return Ed25519PublicKeyParameters(encoded, 0)
         }

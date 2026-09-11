@@ -92,7 +92,7 @@ class MainActivity : ComponentActivity() {
                                                     return if (rawUrl.startsWith("noslop://")) {
                                                         val onion = rawUrl.substringAfter("noslop://").substringBefore("/")
                                                         val id = rawUrl.substringAfterLast("/")
-                                                        "http://127.0.0.1:8080/stream?onion=${onion}&id=${id}"
+                                                        com.noslop.app.mesh.MediaProxyService.buildProxyUrl(onion, id)
                                                     } else {
                                                         rawUrl
                                                     }
