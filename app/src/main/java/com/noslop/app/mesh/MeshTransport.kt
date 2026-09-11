@@ -224,7 +224,7 @@ class MeshTransport(
         try {
             val maxAttempts = if (isDmHighPriority) 3 else 1
             val connectTimeout = when {
-                isDmHighPriority -> 25000
+                isDmHighPriority -> 35000
                 isInteractive -> 8000
                 isMediaPacket -> 20000
                 else -> 12000
@@ -236,12 +236,12 @@ class MeshTransport(
                     socket = Socket(proxy)
                     // Onion connections can take time to establish (v3 circuits)
                     Logger.debug(TAG, "Socket connected to proxy, attempting to connect to target onion: $onionAddress with timeout $connectTimeout ms (attempt $attempt/$maxAttempts)")
+                    socket.setSoLinger(true, 5)
                     socket.connect(InetSocketAddress.createUnresolved(onionAddress, port), connectTimeout) 
                     val writer = PrintWriter(socket.getOutputStream(), true)
                     writer.print(packet.toJson() + "\n")
                     writer.flush()
-                    try { socket.shutdownOutput() } catch (e: Exception) {} // Let Tor proxy know we are done writing
-                    delay(150) // Brief pause to ensure Tor flushes the TCP buffer to the network
+                    delay(300) // Allow OS and Tor SOCKS proxy to transmit packet frame
                     Logger.info(TAG, "Packet sent to $onionAddress (attempt $attempt/$maxAttempts)")
                     GossipService.recordSendSuccess(onionAddress)
                     return@withContext true

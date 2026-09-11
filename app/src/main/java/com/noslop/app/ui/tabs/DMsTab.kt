@@ -398,25 +398,52 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
                     text = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                            if (peer.authorAvatarB64 != null) {
-                                val bitmap = remember(peer.authorAvatarB64) {
-                                    try {
-                                        val bytes = android.util.Base64.decode(peer.authorAvatarB64, android.util.Base64.DEFAULT)
-                                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                    } catch (e: Exception) { null }
-                                }
-                                if (bitmap != null) {
-                                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+
+                            Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
+                                if (peer.authorAvatarB64 != null) {
+                                    val bitmap = remember(peer.authorAvatarB64) {
+                                        try {
+                                            val bytes = android.util.Base64.decode(peer.authorAvatarB64, android.util.Base64.DEFAULT)
+                                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                        } catch (e: Exception) { null }
+                                    }
+                                    if (bitmap != null) {
                                         androidx.compose.foundation.Image(
                                             bitmap = bitmap,
                                             contentDescription = "Avatar".tr,
                                             modifier = Modifier.size(80.dp).clip(CircleShape),
                                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                         )
+                                    } else {
+                                        Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                            Text(peer.handle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.height(16.dp))
+                                } else {
+                                    Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                        Text(peer.handle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                                    }
+                                }
+
+                                if (peer.isCreator && !peer.fundMeLink.isNullOrBlank()) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = AccentGreen,
+                                        border = BorderStroke(2.dp, SurfaceDark),
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 4.dp, y = (-4).dp)
+                                            .size(26.dp)
+                                            .clickable { activeDonationUrl = peer.fundMeLink }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                        }
+                                    }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(16.dp))
                             
                             var cleanHandle = peer.handle
                             if (cleanHandle.endsWith(".${peer.tripcode}")) cleanHandle = cleanHandle.removeSuffix(".${peer.tripcode}")
@@ -432,47 +459,15 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             if (peer.isCreator) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                if (!peer.fundMeLink.isNullOrBlank()) {
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    var activeDonationUrl by remember { mutableStateOf<String?>(null) }
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(AccentGreen.copy(alpha = 0.1f))
-                                            .clickable { activeDonationUrl = peer.fundMeLink }
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    ) {
-                                        Surface(
-                                            shape = CircleShape,
-                                            color = AccentGreen.copy(alpha = 0.25f),
-                                            border = BorderStroke(1.dp, AccentGreen),
-                                            modifier = Modifier.size(20.dp)
-                                        ) {
-                                            Box(contentAlignment = Alignment.Center) {
-                                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "${"Support:".tr} ${peer.fundMeLink}",
-                                            color = AccentGreen,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
+                            }
 
-                                    if (activeDonationUrl != null) {
-                                        com.noslop.app.ui.ArticleWebViewDialog(
-                                            url = activeDonationUrl!!,
-                                            title = "${"Support".tr} ${peer.handle}",
-                                            onDismiss = { activeDonationUrl = null }
-                                        )
-                                    }
-                                }                            }
+                            if (activeDonationUrl != null) {
+                                com.noslop.app.ui.ArticleWebViewDialog(
+                                    url = activeDonationUrl!!,
+                                    title = "${"Support".tr} ${peer.handle}",
+                                    onDismiss = { activeDonationUrl = null }
+                                )
+                            }
 
                             if (isTrusted && peer.isTemporary) {
                                 Spacer(modifier = Modifier.height(8.dp))

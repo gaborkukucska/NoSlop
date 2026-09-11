@@ -171,11 +171,21 @@ object MeshPacketVerifier {
                 packet.getUserHandshakePayload()
             }
             p?.let {
-                val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(
                     it.fromUserId, it.fromUsername, it.fromHomeNode, it.timestamp.toString(),
                     it.authorAvatarB64, it.bio.takeIf { b -> !b.isNullOrBlank() }
                 )
-                Signed(s, packet.signature, it.fromUserId)
+                var pipePayload = "${it.fromUserId}|${it.fromUsername}|${it.fromHomeNode}|${it.timestamp}"
+                if (it.authorAvatarB64 != null) pipePayload += "|${it.authorAvatarB64}"
+                if (!it.bio.isNullOrBlank()) pipePayload += "|${it.bio}"
+
+                val sig = packet.signature
+                val signer = it.fromUserId
+                if (sig != null && CryptoService.verify(pipePayload, sig, signer)) {
+                    Signed(pipePayload, sig, signer)
+                } else {
+                    Signed(encPayload, sig, signer)
+                }
             }
         }
 

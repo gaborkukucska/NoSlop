@@ -1690,6 +1690,11 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
             if (mainIdentity != null) {
                 com.noslop.app.tor.TorService.updateKeyAndRegister(mainIdentity.privateKeyB64, newBurnable.privateKeyB64)
             }
+            var waitCount = 0
+            while (com.noslop.app.tor.TorService.currentBurnableOnionAddress == null && waitCount < 10) {
+                kotlinx.coroutines.delay(500)
+                waitCount++
+            }
         }
         return meshSocialRepository.sendConnectionRequest(handle, publicKeyB64, onionAddress, encPublicKeyB64, useBurnableIdentity)
     }

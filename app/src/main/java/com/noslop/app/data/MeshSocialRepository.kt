@@ -231,7 +231,8 @@ class MeshSocialRepository(
                         Logger.warn(TAG, "Direct send to $onionAddress failed. Enqueueing in persistent outbox and gossip relaying ${packet.type} ${packet.id}.")
                         val peer = peerDao.getPeerByPublicKey(packet.targetUserId!!)
                         if (peer != null) {
-                            val isCriticalOutboxType = packet.type == "MESSAGE" || packet.type == "GROUP_INVITE" ||
+                            val isCriticalOutboxType = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" ||
+                                packet.type == "USER_HANDSHAKE" || packet.type == "GROUP_INVITE" ||
                                 packet.type == "GROUP_UPDATE" || packet.type == "GROUP_DELETE" || packet.type == "DELETE_MESSAGE"
                             if (isCriticalOutboxType) {
                                 enqueuePendingDm(packet.targetUserId!!, packet)

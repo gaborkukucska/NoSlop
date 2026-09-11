@@ -125,13 +125,14 @@ object CryptoService {
 
         val pubB64 = Base64.encodeToString(ED25519_X509_HEADER + rawPub, Base64.NO_WRAP)
         val privB64 = Base64.encodeToString(ED25519_PKCS8_HEADER + rawSeed, Base64.NO_WRAP)
-        val encPubB64 = Base64.encodeToString(org.bouncycastle.asn1.x509.SubjectPublicKeyInfo(
-            org.bouncycastle.asn1.x509.AlgorithmIdentifier(org.bouncycastle.asn1.edec.EdECObjectIdentifiers.id_X25519), rawXPub
-        ).encoded, Base64.NO_WRAP)
-        val encPrivB64 = Base64.encodeToString(org.bouncycastle.asn1.pkcs.PrivateKeyInfo(
-            org.bouncycastle.asn1.x509.AlgorithmIdentifier(org.bouncycastle.asn1.edec.EdECObjectIdentifiers.id_X25519),
-            org.bouncycastle.asn1.DEROctetString(rawXSeed)
-        ).encoded, Base64.NO_WRAP)
+        val encPubB64 = Base64.encodeToString(
+            org.bouncycastle.crypto.util.SubjectPublicKeyInfoFactory.createSubjectPublicKeyInfo(xPrivParams.generatePublicKey()).encoded,
+            Base64.NO_WRAP
+        )
+        val encPrivB64 = Base64.encodeToString(
+            org.bouncycastle.crypto.util.PrivateKeyInfoFactory.createPrivateKeyInfo(xPrivParams).encoded,
+            Base64.NO_WRAP
+        )
 
         val tripcode = deriveTripcode(rawPub)
         val onion = deriveOnionAddress(rawPub)

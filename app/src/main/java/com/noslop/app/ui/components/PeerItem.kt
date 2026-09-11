@@ -313,26 +313,30 @@ fun ContactCardDialog(
                     .padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Large Avatar
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(
-                            2.dp,
-                            when {
-                                peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
-                                peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
-                                else -> BorderSubtle
-                            },
-                            RoundedCornerShape(16.dp)
+                var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+
+                // Large Avatar with Donation & Online Badges
+                Box(modifier = Modifier.size(96.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp))
+                            .border(
+                                2.dp,
+                                when {
+                                    peer.isTrusted && peer.isTemporary -> TemporaryAmber.copy(alpha = 0.5f)
+                                    peer.isTrusted -> AccentGreen.copy(alpha = 0.5f)
+                                    else -> BorderSubtle
+                                },
+                                RoundedCornerShape(16.dp)
+                            )
+                    ) {
+                        PeerAvatar(
+                            peer = peer,
+                            size = 96,
+                            modifier = Modifier.fillMaxSize()
                         )
-                ) {
-                    PeerAvatar(
-                        peer = peer,
-                        size = 96,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    }
 
                     // Online indicator
                     if (peer.isTrusted && peer.isOnline) {
@@ -345,6 +349,24 @@ fun ContactCardDialog(
                                 .background(AccentGreen)
                                 .border(3.dp, SurfaceDark, CircleShape)
                         )
+                    }
+
+                    // Donation icon on top right corner of avatar
+                    if (peer.isCreator && !peer.fundMeLink.isNullOrBlank()) {
+                        Surface(
+                            shape = CircleShape,
+                            color = AccentGreen,
+                            border = BorderStroke(2.dp, SurfaceDark),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 6.dp, y = (-6).dp)
+                                .size(28.dp)
+                                .clickable { activeDonationUrl = peer.fundMeLink }
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
+                        }
                     }
                 }
 
@@ -367,43 +389,9 @@ fun ContactCardDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                var activeDonationUrl by remember { mutableStateOf<String?>(null) }
-
                 if (peer.isCreator) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    if (!peer.fundMeLink.isNullOrBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(AccentGreen.copy(alpha = 0.1f))
-                                .clickable { activeDonationUrl = peer.fundMeLink }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = AccentGreen.copy(alpha = 0.25f),
-                                border = BorderStroke(1.dp, AccentGreen),
-                                modifier = Modifier.size(20.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "${"Support:".tr} ${peer.fundMeLink}",
-                                color = AccentGreen,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
                 }
 
                 if (activeDonationUrl != null) {
@@ -486,30 +474,32 @@ fun ContactCardDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Onion address (truncated)
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(PrimaryBlack)
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        text = "ONION ADDRESS".tr,
-                        color = TextMuted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
-                        color = TextLight.copy(alpha = 0.7f),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Onion address (truncated, shown only when not connected)
+                if (!peer.isTrusted) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(PrimaryBlack)
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "ONION ADDRESS".tr,
+                            color = TextMuted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
+                            color = TextLight.copy(alpha = 0.7f),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
                 val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))

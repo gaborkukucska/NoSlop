@@ -187,7 +187,16 @@ class HandshakePacketHandler(
             return false
         }
 
-        val peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
+        var peer = peerDao.getPeerByPublicKey(handPay.fromUserId)
+        if (peer == null) {
+            peer = peerDao.getAllPeersList().find {
+                it.onionAddress.isNotBlank() && it.onionAddress == handPay.fromHomeNode
+            }
+            if (peer != null) {
+                peerDao.deletePeer(peer)
+                peer = peer.copy(publicKeyB64 = handPay.fromUserId)
+            }
+        }
         if (peer == null) {
             Logger.warn(TAG, "Received USER_HANDSHAKE from unknown/deleted peer ${handPay.fromUserId}. Ignoring to prevent forced re-connection.")
             return false

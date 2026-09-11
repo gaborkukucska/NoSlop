@@ -489,18 +489,20 @@ object TorService {
             if (skipHiddenServiceRegistration) {
                 Logger.info(TAG, "Skipping hidden service registration (Hub connected mode). Using Tor strictly as an outbound SOCKS5 proxy.")
             } else if (currentPrivateKeyB64 != null) {
-                // FIX: Clean up any stale hidden service from a previous session or
-                // a prior registration with the wrong key (e.g. ephemeral NEW key
-                // registered before identity was loaded during onboarding).
-                if (activeMainServiceId != null) {
-                    Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering with correct key.")
-                    unregisterHiddenService(activeMainServiceId!!)
-                    activeMainServiceId = null
-                }
-                // Small delay to ensure ControlPort is fully receptive
-                delay(3000)
-                registerHiddenService(currentPrivateKeyB64) { onionAddress ->
-                    onAddressCallback?.invoke(onionAddress)
+                val pubBytes = com.noslop.app.crypto.CryptoService.getPublicKeyFromPrivateKey(currentPrivateKeyB64!!)
+                val expectedServiceId = com.noslop.app.crypto.CryptoService.deriveOnionAddress(pubBytes).removeSuffix(".onion")
+                if (activeMainServiceId != expectedServiceId) {
+                    if (activeMainServiceId != null) {
+                        Logger.info(TAG, "Unregistering stale hidden service $activeMainServiceId before re-registering with correct key.")
+                        unregisterHiddenService(activeMainServiceId!!)
+                        activeMainServiceId = null
+                    }
+                    delay(1000)
+                    registerHiddenService(currentPrivateKeyB64) { onionAddress ->
+                        onAddressCallback?.invoke(onionAddress)
+                    }
+                } else {
+                    Logger.info(TAG, "Main hidden service $activeMainServiceId is already active. Skipping re-registration.")
                 }
             } else {
                 if (activeMainServiceId != null) {
@@ -515,16 +517,20 @@ object TorService {
             }
             
             if (currentBurnablePrivateKeyB64 != null) {
-                // FIX: Also clean up stale burnable service
-                if (activeBurnableServiceId != null) {
-                    unregisterHiddenService(activeBurnableServiceId!!)
-                    activeBurnableServiceId = null
-                }
-                // Short delay between control port commands
-                delay(1000)
-                registerHiddenService(currentBurnablePrivateKeyB64) { onionAddress ->
-                    currentBurnableOnionAddress = onionAddress
-                    onBurnableAddressCallback?.invoke(onionAddress)
+                val pubBytes = com.noslop.app.crypto.CryptoService.getPublicKeyFromPrivateKey(currentBurnablePrivateKeyB64!!)
+                val expectedBurnableId = com.noslop.app.crypto.CryptoService.deriveOnionAddress(pubBytes).removeSuffix(".onion")
+                if (activeBurnableServiceId != expectedBurnableId) {
+                    if (activeBurnableServiceId != null) {
+                        unregisterHiddenService(activeBurnableServiceId!!)
+                        activeBurnableServiceId = null
+                    }
+                    delay(500)
+                    registerHiddenService(currentBurnablePrivateKeyB64) { onionAddress ->
+                        currentBurnableOnionAddress = onionAddress
+                        onBurnableAddressCallback?.invoke(onionAddress)
+                    }
+                } else {
+                    Logger.info(TAG, "Burnable hidden service $activeBurnableServiceId is already active. Skipping re-registration.")
                 }
             }
         }

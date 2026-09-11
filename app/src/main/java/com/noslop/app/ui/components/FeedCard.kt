@@ -749,6 +749,9 @@ fun FullScreenMeshCardV2(
                         val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
                         val isTrusted = peer?.isTrusted == true
                         val isSelf = post.authorPublicKeyB64 == myPubKey
+                        val isCreator = peer?.isCreator == true || discPeer?.isCreator == true
+                        val fundMeLink = peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() }
+                        var activeDonationUrl by remember { mutableStateOf<String?>(null) }
 
                         var showConnectWarning by remember { mutableStateOf(false) }
                         
@@ -760,25 +763,50 @@ fun FullScreenMeshCardV2(
                             title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
                             text = {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                    if (post.authorAvatarB64 != null) {
-                                        val bitmap = remember(post.authorAvatarB64) {
-                                            try {
-                                                val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
-                                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                            } catch (e: Exception) { null }
-                                        }
-                                        if (bitmap != null) {
-                                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
+                                        if (post.authorAvatarB64 != null) {
+                                            val bitmap = remember(post.authorAvatarB64) {
+                                                try {
+                                                    val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                                } catch (e: Exception) { null }
+                                            }
+                                            if (bitmap != null) {
                                                 androidx.compose.foundation.Image(
                                                     bitmap = bitmap,
                                                     contentDescription = "Avatar".tr,
                                                     modifier = Modifier.size(80.dp).clip(CircleShape),
                                                     contentScale = ContentScale.Crop
                                                 )
+                                            } else {
+                                                Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                                    Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                                                }
                                             }
-                                            Spacer(modifier = Modifier.height(16.dp))
+                                        } else {
+                                            Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                                Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
+                                            }
+                                        }
+
+                                        if (isCreator && !fundMeLink.isNullOrBlank()) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = AccentGreen,
+                                                border = BorderStroke(2.dp, SurfaceDark),
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .offset(x = 4.dp, y = (-4).dp)
+                                                    .size(26.dp)
+                                                    .clickable { activeDonationUrl = fundMeLink }
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                                }
+                                            }
                                         }
                                     }
+                                    Spacer(modifier = Modifier.height(16.dp))
                                     
                                     val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: post.authorTripcode
                                     val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
@@ -788,6 +816,19 @@ fun FullScreenMeshCardV2(
                                     if (!bio.isNullOrBlank()) {
                                         Spacer(modifier = Modifier.height(12.dp))
                                         Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                    }
+
+                                    if (isCreator) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    }
+
+                                    if (activeDonationUrl != null) {
+                                        com.noslop.app.ui.ArticleWebViewDialog(
+                                            url = activeDonationUrl!!,
+                                            title = "${"Support".tr} $displayHandle",
+                                            onDismiss = { activeDonationUrl = null }
+                                        )
                                     }
 
                                     if (isTrusted && peer?.isTemporary == true) {
