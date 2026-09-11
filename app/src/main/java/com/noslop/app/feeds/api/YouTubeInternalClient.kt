@@ -604,7 +604,7 @@ object YouTubeInternalClient {
     private const val RESOLVE_BUDGET_MS = 60_000L
 
     suspend fun resolveStreamUrl(videoId: String, quality: String = "high", canRotateCircuit: Boolean = true): String? {
-        val waitTimeoutMs = if (!canRotateCircuit) 2000L else RESOLVE_QUEUE_WAIT_MS
+        val waitTimeoutMs = if (!canRotateCircuit) 15000L else RESOLVE_QUEUE_WAIT_MS
         val gotPermit = kotlinx.coroutines.withTimeoutOrNull(waitTimeoutMs) {
             playerResolveGate.acquire()
             true

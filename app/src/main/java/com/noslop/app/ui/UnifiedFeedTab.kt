@@ -574,6 +574,12 @@ fun MainScreenContent(viewModel: NoSlopViewModel, initialRoute: String? = null) 
     // --- NOSLOP_TOR_GATE_UI_V1 --- drawn above the tab content
     val useTorForClearnet by viewModel.useTorForClearnet.collectAsState()
     val daemonState by com.noslop.app.tor.TorService.torState.collectAsState()
+
+    LaunchedEffect(daemonState) {
+        if (daemonState == com.noslop.app.tor.TorState.READY) {
+            com.noslop.app.tor.TorService.setTorStatusMessage(null)
+        }
+    }
     if (useTorForClearnet) {
         if (daemonState == com.noslop.app.tor.TorState.FAILED && activeTorMessage == null) {
             TorStatusOverlay(

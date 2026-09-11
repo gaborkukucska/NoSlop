@@ -1513,9 +1513,7 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val tripcode = if (pubBytes != null) CryptoService.deriveTripcode(pubBytes) else "noslop"
 
         val existing = peerDao.getPeerByPublicKey(OFFICIAL_CREATOR_PUBKEY)
-        if (existing != null && existing.fundMeLink == "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00") {
-            peerDao.insertPeer(existing.copy(fundMeLink = null))
-        }
+        val officialDonationLink = "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
         if (existing == null) {
             peerDao.insertPeer(
                 Peer(
@@ -1527,19 +1525,20 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                     isTrusted = false,
                     isDiscoverable = true,
                     isCreator = true,
-                    fundMeLink = null,
+                    fundMeLink = officialDonationLink,
                     bio = "Official NoSlop Creator Node — The unfiltered pulse of the mesh.",
                     lastSeenAt = System.currentTimeMillis()
                 )
             )
             Logger.info("REPOSITORY", "Seeded official NoSlop Creator Node ($tripcode) into discoverable peers")
-        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY) {        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY) {
+        } else if (!existing.isDiscoverable || existing.onionAddress != OFFICIAL_CREATOR_ONION || existing.encPublicKeyB64 != OFFICIAL_CREATOR_ENC_PUBKEY || existing.fundMeLink.isNullOrBlank()) {
             peerDao.insertPeer(
                 existing.copy(
                     onionAddress = OFFICIAL_CREATOR_ONION,
                     encPublicKeyB64 = OFFICIAL_CREATOR_ENC_PUBKEY,
                     isDiscoverable = true,
-                    isCreator = true
+                    isCreator = true,
+                    fundMeLink = existing.fundMeLink?.takeIf { it.isNotBlank() } ?: officialDonationLink
                 )
             )
         }

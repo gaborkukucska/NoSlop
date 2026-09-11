@@ -399,6 +399,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                     text = {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                             var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+                            val effectiveDonationUrl = if (peer.publicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                                peer.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+                            } else {
+                                peer.fundMeLink?.takeIf { it.isNotBlank() }
+                            }
 
                             Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
                                 if (peer.authorAvatarB64 != null) {
@@ -426,7 +431,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     }
                                 }
 
-                                if (peer.isCreator && !peer.fundMeLink.isNullOrBlank()) {
+                                if (peer.isCreator && effectiveDonationUrl != null) {
                                     Surface(
                                         shape = CircleShape,
                                         color = AccentGreen,
@@ -435,7 +440,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                             .align(Alignment.TopEnd)
                                             .offset(x = 4.dp, y = (-4).dp)
                                             .size(26.dp)
-                                            .clickable { activeDonationUrl = peer.fundMeLink }
+                                            .clickable { activeDonationUrl = effectiveDonationUrl }
                                     ) {
                                         Box(contentAlignment = Alignment.Center) {
                                             Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -458,7 +463,24 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             
                             if (peer.isCreator) {
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    if (effectiveDonationUrl != null) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = AccentGreen.copy(alpha = 0.2f),
+                                            border = BorderStroke(1.dp, AccentGreen),
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clickable { activeDonationUrl = effectiveDonationUrl }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             if (activeDonationUrl != null) {
@@ -482,6 +504,35 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                                     modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            // Onion address excerpt (shown on discovered nodes when not connected)
+                            if (!isTrusted && peer.onionAddress.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(PrimaryBlack)
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = "ONION ADDRESS".tr,
+                                        color = TextMuted,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = if (peer.onionAddress.length > 8) peer.onionAddress.take(8) + "..." else peer.onionAddress,
+                                        color = TextLight.copy(alpha = 0.7f),
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 

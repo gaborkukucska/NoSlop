@@ -314,6 +314,11 @@ fun ContactCardDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+                val effectiveDonationUrl = if (peer.publicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                    peer.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+                } else {
+                    peer.fundMeLink?.takeIf { it.isNotBlank() }
+                }
 
                 // Large Avatar with Donation & Online Badges
                 Box(modifier = Modifier.size(96.dp)) {
@@ -352,7 +357,7 @@ fun ContactCardDialog(
                     }
 
                     // Donation icon on top right corner of avatar
-                    if (peer.isCreator && !peer.fundMeLink.isNullOrBlank()) {
+                    if (peer.isCreator && effectiveDonationUrl != null) {
                         Surface(
                             shape = CircleShape,
                             color = AccentGreen,
@@ -361,7 +366,7 @@ fun ContactCardDialog(
                                 .align(Alignment.TopEnd)
                                 .offset(x = 6.dp, y = (-6).dp)
                                 .size(28.dp)
-                                .clickable { activeDonationUrl = peer.fundMeLink }
+                                .clickable { activeDonationUrl = effectiveDonationUrl }
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -391,7 +396,24 @@ fun ContactCardDialog(
 
                 if (peer.isCreator) {
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        if (effectiveDonationUrl != null) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                shape = CircleShape,
+                                color = AccentGreen.copy(alpha = 0.2f),
+                                border = BorderStroke(1.dp, AccentGreen),
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clickable { activeDonationUrl = effectiveDonationUrl }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (activeDonationUrl != null) {

@@ -749,8 +749,12 @@ fun FullScreenMeshCardV2(
                         val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
                         val isTrusted = peer?.isTrusted == true
                         val isSelf = post.authorPublicKeyB64 == myPubKey
-                        val isCreator = peer?.isCreator == true || discPeer?.isCreator == true
-                        val fundMeLink = peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() }
+                        val isCreator = peer?.isCreator == true || discPeer?.isCreator == true || post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY
+                        val effectiveDonationUrl = if (post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                            peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+                        } else {
+                            peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() }
+                        }
                         var activeDonationUrl by remember { mutableStateOf<String?>(null) }
 
                         var showConnectWarning by remember { mutableStateOf(false) }
@@ -789,7 +793,7 @@ fun FullScreenMeshCardV2(
                                             }
                                         }
 
-                                        if (isCreator && !fundMeLink.isNullOrBlank()) {
+                                        if (isCreator && effectiveDonationUrl != null) {
                                             Surface(
                                                 shape = CircleShape,
                                                 color = AccentGreen,
@@ -798,7 +802,7 @@ fun FullScreenMeshCardV2(
                                                     .align(Alignment.TopEnd)
                                                     .offset(x = 4.dp, y = (-4).dp)
                                                     .size(26.dp)
-                                                    .clickable { activeDonationUrl = fundMeLink }
+                                                    .clickable { activeDonationUrl = effectiveDonationUrl }
                                             ) {
                                                 Box(contentAlignment = Alignment.Center) {
                                                     Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -820,7 +824,24 @@ fun FullScreenMeshCardV2(
 
                                     if (isCreator) {
                                         Spacer(modifier = Modifier.height(6.dp))
-                                        Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            if (effectiveDonationUrl != null) {
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = AccentGreen.copy(alpha = 0.2f),
+                                                    border = BorderStroke(1.dp, AccentGreen),
+                                                    modifier = Modifier
+                                                        .size(20.dp)
+                                                        .clickable { activeDonationUrl = effectiveDonationUrl }
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
 
                                     if (activeDonationUrl != null) {
@@ -844,6 +865,35 @@ fun FullScreenMeshCardV2(
                                             modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
                                         ) {
                                             Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+
+                                    // Onion address excerpt (shown on non-connected authors)
+                                    if (!isTrusted && !isSelf && targetOnion != null && targetOnion.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(16.dp))
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(PrimaryBlack)
+                                                .padding(12.dp)
+                                        ) {
+                                            Text(
+                                                text = "ONION ADDRESS".tr,
+                                                color = TextMuted,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                letterSpacing = 1.sp
+                                            )
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            Text(
+                                                text = if (targetOnion.length > 8) targetOnion.take(8) + "..." else targetOnion,
+                                                color = TextLight.copy(alpha = 0.7f),
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
 
