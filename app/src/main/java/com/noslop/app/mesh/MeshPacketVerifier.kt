@@ -249,6 +249,13 @@ object MeshPacketVerifier {
             Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.messageId, p.authorId, p.timestamp.toString()), packet.signature, p.authorId)
         }
 
+        "GROUP_MESSAGE" -> packet.getGroupMessagePayload()?.let { p ->
+            val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.groupId, p.id, p.content, p.timestamp.toString(), packet.senderId
+            )
+            Signed(s, p.signature, packet.senderId)
+        }
+
         // Everything else: MESSAGE (AEAD-authenticated at decrypt time), MEDIA_*,
         // SYNC_REQUEST / SYNC_RESPONSE / INVENTORY_SYNC_REQUEST (inner items
         // verified individually by SyncPacketHandler), GROUP_UPDATE and

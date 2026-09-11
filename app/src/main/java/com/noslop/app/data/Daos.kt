@@ -464,3 +464,18 @@ interface GroupChatDao {
     @Query("DELETE FROM group_chats WHERE groupId = :groupId")
     suspend fun deleteGroupChat(groupId: String)
 }
+
+@Dao
+interface PendingGroupMessageDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(pending: PendingGroupMessage)
+
+    @Query("SELECT * FROM pending_group_messages WHERE memberPub = :memberPub")
+    suspend fun getPendingForMember(memberPub: String): List<PendingGroupMessage>
+
+    @Query("DELETE FROM pending_group_messages WHERE groupId = :groupId AND memberPub = :memberPub AND msgId = :msgId")
+    suspend fun delete(groupId: String, memberPub: String, msgId: String)
+
+    @Query("DELETE FROM pending_group_messages WHERE createdAt < :cutoff")
+    suspend fun deleteExpired(cutoff: Long)
+}

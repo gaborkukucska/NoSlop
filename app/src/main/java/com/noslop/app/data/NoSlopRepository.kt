@@ -817,12 +817,14 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = System.currentTimeMillis()
         val myHandle = getLocalHandle() ?: "Me"
 
+        // P0-2: Store group message body encrypted at rest
+        val (encryptedBody, bodyNonce) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(text)
         val localMsg = ChatMessage(
             id = msgId,
             chatWithPeerPub = groupId,
             senderPub = myKeys.publicKeyB64,
-            ciphertext = text,
-            nonce = "",
+            ciphertext = encryptedBody,
+            nonce = bodyNonce,
             timestamp = timestamp,
             mediaId = media?.id,
             mediaType = media?.type,
@@ -844,20 +846,24 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         }.toString()
 
         var directSentCount = 0
-        var hasUnconnectedMembers = false
 
         for (memberPub in memberPubs) {
             if (memberPub == myKeys.publicKeyB64) continue
             val peer = peerDao.getPeerByPublicKey(memberPub)
-            if (peer == null || peer.onionAddress.isBlank()) {
-                hasUnconnectedMembers = true
-                continue
-            }
-            if (privacy == "friends" && !peer.isTrusted) {
+            if (privacy == "friends" && (peer == null || !peer.isTrusted)) {
                 continue
             }
 
-            val encPub = peer.encPublicKeyB64.ifBlank { memberPub }
+            val encPub = peer?.encPublicKeyB64?.takeIf { it.isNotBlank() }
+            if (encPub == null) {
+                // P0-1: Never fallback to Ed25519 key for X25519 encryption. Send connection request to learn key.
+                Logger.warn("REPOSITORY", "Member ${memberPub.take(12)}... has no X25519 key. Requesting handshake.")
+                if (peer != null && peer.onionAddress.isNotBlank()) {
+                    sendConnectionRequest(peer.handle, memberPub, peer.onionAddress)
+                }
+                continue
+            }
+
             val (ciphertext, nonce) = CryptoService.encryptDM(jsonPayload, encPub, myKeys.encPrivateKeyB64)
             if (ciphertext.isBlank() || nonce.isBlank()) {
                 Logger.error("REPOSITORY", "sendGroupMessage: encryption FAILED for member ${memberPub.take(12)}... -- not sending")
@@ -872,35 +878,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
                 type = "MESSAGE",
                 payload = com.google.gson.Gson().toJsonTree(msgPayload)
             )
-            meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
-            directSentCount++
-        }
 
-        // When the group has unconnected members or message is public, broadcast GROUP_MESSAGE over mesh gossip
-        if (privacy == "public" || hasUnconnectedMembers) {
-            val groupMsgPayload = com.noslop.app.mesh.GroupMessagePayload(
-                id = msgId,
-                groupId = groupId,
-                senderHandle = myHandle,
-                senderTripcode = myKeys.tripcode,
-                content = text,
-                timestamp = timestamp,
-                privacy = privacy,
-                mediaId = media?.id,
-                mediaType = media?.type,
-                mediaMetadata = media,
-                replyToMessageId = replyToMessageId
-            )
-            val broadcastPacket = com.noslop.app.mesh.NetworkPacket(
-                id = java.util.UUID.randomUUID().toString(),
-                hops = if (privacy == "friends") 1 else 6,
-                senderId = myKeys.publicKeyB64,
-                type = "GROUP_MESSAGE",
-                payload = com.google.gson.Gson().toJsonTree(groupMsgPayload)
-            )
-            com.noslop.app.mesh.GossipService.broadcast(broadcastPacket)
-            Logger.info("REPOSITORY", "sendGroupMessage: broadcasted GROUP_MESSAGE over mesh gossip (privacy=$privacy, hops=${broadcastPacket.hops})")
+            if (peer.onionAddress.isNotBlank()) {
+                meshSocialRepository.dispatchPacket(peer.onionAddress, packet)
+                directSentCount++
+            } else {
+                // P0-1: Store-and-forward queue for members with unknown onion address
+                db.pendingGroupMessageDao().insert(
+                    PendingGroupMessage(
+                        groupId = groupId,
+                        memberPub = memberPub,
+                        msgId = msgId,
+                        ciphertext = ciphertext,
+                        nonce = nonce,
+                        createdAt = timestamp
+                    )
+                )
+                Logger.info("REPOSITORY", "Enqueued group message $msgId for offline member ${memberPub.take(12)}...")
+            }
         }
+        // P0-1: Cleartext GROUP_MESSAGE gossip broadcast deleted entirely.
         Logger.info("REPOSITORY", "sendGroupMessage: dispatched to $directSentCount direct member(s)")
     }
 
@@ -1231,7 +1228,19 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val conversations: Flow<List<ChatMessage>> = messageDao.getConversations()
 
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
-        messageDao.getMessagesWithPeer(peerPub)
+        kotlinx.coroutines.flow.flow {
+            messageDao.getMessagesWithPeer(peerPub).collect { list ->
+                val isGroup = peerPub.contains("-")
+                val decrypted = if (isGroup) {
+                    list.map { msg ->
+                        msg.copy(ciphertext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(msg.ciphertext, msg.nonce))
+                    }
+                } else {
+                    list
+                }
+                emit(decrypted)
+            }
+        }
 
     fun getCommentsForPost(postId: String): Flow<List<MeshComment>> =
         commentDao.getCommentsForPost(postId)

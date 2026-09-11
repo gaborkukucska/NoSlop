@@ -132,20 +132,60 @@ class MeshSocialRepository(
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
-        val list = pendingOutboxMessages[recipientPub] ?: return
-        val toSend = synchronized(list) { list.toList() }
-        if (toSend.isEmpty()) return
-        repositoryScope.launch(Dispatchers.IO) {
-            Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
-            for (packet in toSend) {
-                val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
-                if (success) {
-                    list.remove(packet)
-                    savePersistedOutbox()
-                    Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
-                } else {
-                    break
+        // 1. Flush standard DM outbox
+        val list = pendingOutboxMessages[recipientPub]
+        if (list != null) {
+            val toSend = synchronized(list) { list.toList() }
+            if (toSend.isNotEmpty()) {
+                repositoryScope.launch(Dispatchers.IO) {
+                    Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
+                    for (packet in toSend) {
+                        val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                        if (success) {
+                            list.remove(packet)
+                            savePersistedOutbox()
+                            Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
+                        } else {
+                            break
+                        }
+                    }
                 }
+            }
+        }
+
+        // 2. P0-1: Flush pending group messages for this peer
+        repositoryScope.launch(Dispatchers.IO) {
+            try {
+                val pendingGroupMsgs = db.pendingGroupMessageDao().getPendingForMember(recipientPub)
+                if (pendingGroupMsgs.isNotEmpty()) {
+                    val myKeys = getLocalIdentity() ?: return@launch
+                    Logger.info(TAG, "Flushing ${pendingGroupMsgs.size} pending group message(s) to $onionAddress")
+                    for (pending in pendingGroupMsgs) {
+                        val msgPayload = com.noslop.app.mesh.EncryptedPayload(
+                            id = pending.msgId,
+                            ciphertext = pending.ciphertext,
+                            nonce = pending.nonce,
+                            groupId = pending.groupId,
+                            timestamp = pending.createdAt
+                        )
+                        val packet = com.noslop.app.mesh.NetworkPacket(
+                            id = java.util.UUID.randomUUID().toString(),
+                            senderId = myKeys.publicKeyB64,
+                            targetUserId = recipientPub,
+                            type = "MESSAGE",
+                            payload = com.google.gson.Gson().toJsonTree(msgPayload)
+                        )
+                        val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                        if (success) {
+                            db.pendingGroupMessageDao().delete(pending.groupId, pending.memberPub, pending.msgId)
+                            Logger.info(TAG, "Delivered pending group message ${pending.msgId} to $onionAddress")
+                        } else {
+                            break
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error(TAG, "Failed to flush pending group messages: ${e.message}")
             }
         }
     }
@@ -155,6 +195,12 @@ class MeshSocialRepository(
         outboxWorkerJob = repositoryScope.launch(Dispatchers.IO) {
             while (isActive) {
                 kotlinx.coroutines.delay(10_000L) // Scan pending outbox every 10s
+                // P0-1: Prune pending group messages older than 7 days
+                try {
+                    val sevenDaysAgo = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000L
+                    db.pendingGroupMessageDao().deleteExpired(sevenDaysAgo)
+                } catch (_: Exception) {}
+
                 val hasPending = pendingOutboxMessages.values.any { it.isNotEmpty() }
                 if (hasPending) {
                     val allPeers = peerDao.getAllPeersList().filter { it.onionAddress.isNotBlank() }

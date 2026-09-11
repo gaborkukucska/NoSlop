@@ -228,3 +228,16 @@ data class NotificationItem(
     val iconType: String? = null,
     val senderPub: String? = null
 )
+
+@Entity(
+    tableName = "pending_group_messages",
+    primaryKeys = ["groupId", "memberPub", "msgId"]
+)
+data class PendingGroupMessage(
+    val groupId: String,
+    val memberPub: String,
+    val msgId: String,
+    val ciphertext: String,
+    val nonce: String,
+    val createdAt: Long = System.currentTimeMillis()
+)

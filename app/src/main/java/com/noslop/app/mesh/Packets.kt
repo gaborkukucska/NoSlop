@@ -320,7 +320,8 @@ data class GroupMessagePayload(
     @SerializedName("media_id") val mediaId: String? = null,
     @SerializedName("media_type") val mediaType: String? = null,
     @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
-    @SerializedName("reply_to") val replyToMessageId: String? = null
+    @SerializedName("reply_to") val replyToMessageId: String? = null,
+    @SerializedName("signature") val signature: String? = null
 )
 
 data class TypingPayload(

@@ -44,9 +44,10 @@ import androidx.room.RoomDatabase
         NotificationItem::class,
         ViewedHistoryItem::class,
         SwipeTracker::class,
-        GroupChat::class
+        GroupChat::class,
+        PendingGroupMessage::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = false
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -66,6 +67,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
     abstract fun viewedHistoryDao(): ViewedHistoryDao
     abstract fun swipeTrackerDao(): SwipeTrackerDao
     abstract fun groupChatDao(): GroupChatDao
+    abstract fun pendingGroupMessageDao(): PendingGroupMessageDao
 
     companion object {
         @Volatile
@@ -157,6 +159,38 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13 = object : androidx.room.migration.Migration(12, 13) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS pending_group_messages (
+                        groupId TEXT NOT NULL,
+                        memberPub TEXT NOT NULL,
+                        msgId TEXT NOT NULL,
+                        ciphertext TEXT NOT NULL,
+                        nonce TEXT NOT NULL,
+                        createdAt INTEGER NOT NULL,
+                        PRIMARY KEY(groupId, memberPub, msgId)
+                    )
+                """.trimIndent())
+
+                // P0-2: Re-encrypt existing plaintext group chat messages at rest
+                try {
+                    val cursor = database.query("SELECT id, ciphertext FROM chat_messages WHERE (nonce = '' OR nonce IS NULL) AND chatWithPeerPub LIKE '%-%'")
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getString(0)
+                        val plaintext = cursor.getString(1)
+                        if (!plaintext.startsWith(com.noslop.app.crypto.GroupMessageCrypto.CIPHERTEXT_PREFIX)) {
+                            val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext)
+                            database.execSQL("UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?", arrayOf(encBody, iv, id))
+                        }
+                    }
+                    cursor.close()
+                } catch (e: Exception) {
+                    com.noslop.app.debug.Logger.warn("DATABASE", "Migration 12->13 re-encryption notice: ${e.message}")
+                }
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -165,7 +199,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .build()
                 INSTANCE = instance
                 instance

@@ -127,15 +127,17 @@ class DmPacketHandler(
             }
 
             val threadKey = groupId ?: packet.senderId
+            val (storedCiphertext, storedNonce) = if (groupId != null) {
+                com.noslop.app.crypto.GroupMessageCrypto.encrypt(finalContent)
+            } else {
+                Pair(msgPay.ciphertext, msgPay.nonce)
+            }
             val msg = ChatMessage(
                 id = msgPay.id,
                 chatWithPeerPub = threadKey,
                 senderPub = packet.senderId,
-                // A group thread has no single counterparty key to decrypt
-                // against at render time, so store the resolved plaintext --
-                // the same convention sendGroupMessage uses for its own echo.
-                ciphertext = if (groupId != null) finalContent else msgPay.ciphertext,
-                nonce = if (groupId != null) "" else msgPay.nonce,
+                ciphertext = storedCiphertext,
+                nonce = storedNonce,
                 timestamp = msgPay.timestamp ?: System.currentTimeMillis(),
                 mediaId = mediaId,
                 mediaType = mediaType,
@@ -260,18 +262,36 @@ class DmPacketHandler(
         // Deduplication: ignore if message already exists locally
         if (messageDao.hasMessage(groupMsg.id) > 0) return true
 
-        val senderDisplay = if (!groupMsg.senderTripcode.isNullOrBlank()) {
-            "${groupMsg.senderHandle}.${groupMsg.senderTripcode}"
-        } else {
-            groupMsg.senderHandle
+        // P0-1: Strict membership check
+        val members: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        if (!members.contains(packet.senderId)) {
+            Logger.warn(TAG, "Rejected GROUP_MESSAGE: sender ${packet.senderId} is not a member of group ${group.groupId}")
+            return false
         }
 
+        // P0-1: Verify Ed25519 signature over canonical payload
+        val sig = groupMsg.signature
+        if (sig.isNullOrBlank()) {
+            Logger.warn(TAG, "Rejected GROUP_MESSAGE: missing cryptographic signature from sender ${packet.senderId}")
+            return false
+        }
+        val expectedSignPayload = CryptoService.encodeForSigning(
+            groupMsg.groupId, groupMsg.id, groupMsg.content, groupMsg.timestamp.toString(), packet.senderId
+        )
+        if (!CryptoService.verify(expectedSignPayload, sig, packet.senderId)) {
+            Logger.warn(TAG, "Rejected GROUP_MESSAGE: signature verification failed for sender ${packet.senderId}")
+            return false
+        }
+
+        val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(groupMsg.content)
         val msg = ChatMessage(
             id = groupMsg.id,
             chatWithPeerPub = groupMsg.groupId,
-            senderPub = senderDisplay,
-            ciphertext = groupMsg.content,
-            nonce = "",
+            senderPub = packet.senderId, // P0-1: Store authentic public key, resolve handle at render time
+            ciphertext = encBody,
+            nonce = iv,
             timestamp = groupMsg.timestamp,
             mediaId = groupMsg.mediaId,
             mediaType = groupMsg.mediaType,
