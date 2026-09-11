@@ -61,6 +61,7 @@ fun CreatorStudioTab(
 
     var isRefreshing by remember { mutableStateOf(false) }
     var showCreatorIdSheet by remember { mutableStateOf(false) }
+    var showBurnConfirmDialog by remember { mutableStateOf(false) }
     var burnableIdentity by remember { mutableStateOf<com.noslop.app.crypto.CryptoService.IdentityKeys?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val handle by viewModel.localHandle.collectAsState()
@@ -132,6 +133,18 @@ fun CreatorStudioTab(
                         Text("Creator ID 🪪".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
+                    OutlinedButton(
+                        onClick = { showBurnConfirmDialog = true },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = DestructiveRed),
+                        border = BorderStroke(1.dp, DestructiveRed.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Default.LocalFireDepartment, contentDescription = null, modifier = Modifier.size(14.dp), tint = DestructiveRed)
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text("Burn ID 🔥".tr, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = AccentGreen.copy(alpha = 0.2f)
@@ -196,6 +209,46 @@ fun CreatorStudioTab(
                 }
             }
         }
+    }
+
+    if (showBurnConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showBurnConfirmDialog = false },
+            containerColor = SurfaceDark,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.LocalFireDepartment, contentDescription = null, tint = DestructiveRed, modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Burn Creator Identity?".tr, color = DestructiveRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        "Burning your Creator Identity will permanently purge your secondary keypair from this device, unregister its Tor hidden service, broadcast a USER_EXIT to followers, and generate a brand-new Creator ID. ".tr +
+                        "All current followers connected via your old Creator ID will permanently lose connectivity. Are you sure?".tr,
+                        color = TextMuted
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showBurnConfirmDialog = false
+                        viewModel.burnCreatorIdentity()
+                        android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Creator Identity burned. New identity generated."), android.widget.Toast.LENGTH_SHORT).show()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                ) {
+                    Text("Burn & Regenerate".tr, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBurnConfirmDialog = false }) {
+                    Text("Cancel".tr, color = AccentGreen)
+                }
+            }
+        )
     }
 
     if (showCreatorIdSheet && burnableIdentity != null) {

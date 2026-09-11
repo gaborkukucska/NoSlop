@@ -121,7 +121,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 24 | `TYPING` | `TypingPayload` | **none — unsigned** | `DmPacketHandler.handleTyping` | none; updates the in-memory `peerTypingStates` flow |
 | 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
-| 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | Masked identity mesh broadcast | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage`; local notification shown, triggers media auto-download |
+| 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | `groupId|id|content|timestamp|senderId` | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage` (Keystore encrypted at rest); legacy receive-only wire support with strict signature and group membership verification |
 
 Notes:
 
@@ -685,7 +685,7 @@ and still accurate.
 | `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
-| `GROUP_MESSAGE` | *(identity-masked mesh broadcast; routing validated by group membership)* |
+| `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |
 
 All signature operations use Ed25519 (`CryptoService.sign`/`verify`), Base64

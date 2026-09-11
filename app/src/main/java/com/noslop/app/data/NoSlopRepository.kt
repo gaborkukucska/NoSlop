@@ -817,8 +817,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         val timestamp = System.currentTimeMillis()
         val myHandle = getLocalHandle() ?: "Me"
 
-        // P0-2: Store group message body encrypted at rest
-        val (encryptedBody, bodyNonce) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(text)
+        // P0-2: Store group message body encrypted at rest with AAD binding
+        val (encryptedBody, bodyNonce) = try {
+            com.noslop.app.crypto.GroupMessageCrypto.encrypt(text, groupId = groupId, msgId = msgId)
+        } catch (e: Exception) {
+            Logger.error("REPOSITORY", "Refusing to store group message in cleartext after encryption failure: ${e.message}")
+            return
+        }
         val localMsg = ChatMessage(
             id = msgId,
             chatWithPeerPub = groupId,
@@ -1230,10 +1235,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     fun getMessagesWithPeer(peerPub: String): Flow<List<ChatMessage>> =
         kotlinx.coroutines.flow.flow {
             messageDao.getMessagesWithPeer(peerPub).collect { list ->
-                val isGroup = peerPub.contains("-")
+                // Check hyphen or groupChatDao to explicitly distinguish group threads from peer public keys
+                val isGroup = peerPub.contains("-") || db.groupChatDao().getGroupChatById(peerPub) != null
                 val decrypted = if (isGroup) {
                     list.map { msg ->
-                        msg.copy(ciphertext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(msg.ciphertext, msg.nonce))
+                        msg.copy(ciphertext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(
+                            msg.ciphertext, msg.nonce, groupId = msg.chatWithPeerPub, msgId = msg.id
+                        ))
                     }
                 } else {
                     list

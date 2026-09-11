@@ -128,7 +128,12 @@ class DmPacketHandler(
 
             val threadKey = groupId ?: packet.senderId
             val (storedCiphertext, storedNonce) = if (groupId != null) {
-                com.noslop.app.crypto.GroupMessageCrypto.encrypt(finalContent)
+                try {
+                    com.noslop.app.crypto.GroupMessageCrypto.encrypt(finalContent, groupId = groupId, msgId = msgPay.id)
+                } catch (e: Exception) {
+                    Logger.error(TAG, "Failed to encrypt group message at rest for $groupId: ${e.message}")
+                    return false
+                }
             } else {
                 Pair(msgPay.ciphertext, msgPay.nonce)
             }
@@ -285,7 +290,12 @@ class DmPacketHandler(
             return false
         }
 
-        val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(groupMsg.content)
+        val (encBody, iv) = try {
+            com.noslop.app.crypto.GroupMessageCrypto.encrypt(groupMsg.content, groupId = groupMsg.groupId, msgId = groupMsg.id)
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to encrypt group message at rest for ${groupMsg.groupId}: ${e.message}")
+            return false
+        }
         val msg = ChatMessage(
             id = groupMsg.id,
             chatWithPeerPub = groupMsg.groupId,

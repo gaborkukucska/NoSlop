@@ -172,6 +172,25 @@ class MeshPacketVerifierTest {
     }
 
     @Test
+    fun groupMessage_validSignatureAccepted_tamperedRejected() {
+        val s = CryptoService.encodeForSigning("group-1", "msg-1", "hello group", "1700000000", alice.publicKeyB64)
+        val good = GroupMessagePayload(
+            id = "msg-1",
+            groupId = "group-1",
+            senderHandle = "alice",
+            senderTripcode = "noslop",
+            content = "hello group",
+            timestamp = 1700000000L,
+            signature = sign(s)
+        )
+        assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("GROUP_MESSAGE", good)))
+
+        // Tampered content must fail
+        val tampered = good.copy(content = "tampered content")
+        assertEquals(MeshPacketVerifier.Verdict.INVALID, MeshPacketVerifier.verify(packet("GROUP_MESSAGE", tampered)))
+    }
+
+    @Test
     fun follow_isSignedByTheFollower() {
         val s = "${mallory.publicKeyB64}|${alice.publicKeyB64}|3"
         val p = FollowPayload(

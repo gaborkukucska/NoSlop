@@ -1173,6 +1173,30 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                 }
                                 Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
                             }
+
+                            HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(horizontal = 16.dp))
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        com.noslop.app.net.SshDeployer.clearPinnedHostKey(context)
+                                        android.widget.Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Pinned SSH host keys cleared"), android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                    .padding(16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.KeyOff, contentDescription = null, tint = TextMuted)
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column {
+                                        Text("Clear Pinned SSH Host Key".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                        Text("Reset pinned fingerprint to allow connecting to a reinstalled Hub".tr, style = MaterialTheme.typography.bodySmall, color = TextMuted)
+                                    }
+                                }
+                                Icon(Icons.Default.KeyboardArrowRight, contentDescription = null, tint = TextMuted)
+                            }
                         }
                     }
                 }
@@ -1257,6 +1281,9 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             var showImportWarning by remember { mutableStateOf(false) }
                             var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
                             var importStatus by remember { mutableStateOf<String?>(null) }
+                            var showLegacyConfirmDialog by remember { mutableStateOf(false) }
+                            var pendingLegacyImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
+                            var pendingLegacyMnemonic by remember { mutableStateOf("") }
 
                             val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                                 if (uri != null && mnemonicInput.isNotBlank()) {
@@ -1391,7 +1418,10 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                                     uriToImport,
                                                     allowLegacyUnauthenticated = false,
                                                     onLegacyDetected = {
-                                                        importStatus = "Legacy archive detected. Requires confirmation."
+                                                        pendingLegacyImportUri = uriToImport
+                                                        pendingLegacyMnemonic = mnemonicToUse
+                                                        showLegacyConfirmDialog = true
+                                                        importStatus = "Legacy archive detected. Confirmation required."
                                                     }
                                                 ) { success ->
                                                     if (!success) {
@@ -1412,6 +1442,75 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         }
                                     },
                                     containerColor = SurfaceDark
+                                )
+                            }
+
+                            if (showLegacyConfirmDialog && pendingLegacyImportUri != null) {
+                                AlertDialog(
+                                    onDismissRequest = {
+                                        showLegacyConfirmDialog = false
+                                        pendingLegacyImportUri = null
+                                        pendingLegacyMnemonic = ""
+                                    },
+                                    containerColor = SurfaceDark,
+                                    title = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.Warning, contentDescription = null, tint = TemporaryAmber, modifier = Modifier.size(24.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Legacy Unauthenticated Backup".tr, color = TemporaryAmber, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    text = {
+                                        Column {
+                                            Text(
+                                                "This backup uses legacy AES-CBC encryption without an AEAD authentication tag (predates NoSlop authenticated backups). ".tr +
+                                                "Its authenticity and integrity cannot be mathematically verified. ".tr +
+                                                "Do you want to proceed with importing this legacy archive?".tr,
+                                                color = TextMuted
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                "The app will restart automatically after import.".tr,
+                                                color = TextLight,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = {
+                                                showLegacyConfirmDialog = false
+                                                val uri = pendingLegacyImportUri!!
+                                                val mnemonic = pendingLegacyMnemonic
+                                                pendingLegacyImportUri = null
+                                                pendingLegacyMnemonic = ""
+                                                importStatus = "Importing legacy backup..."
+                                                viewModel.importBackupFromUri(
+                                                    context,
+                                                    mnemonic,
+                                                    uri,
+                                                    allowLegacyUnauthenticated = true
+                                                ) { success ->
+                                                    if (!success) {
+                                                        importStatus = "Legacy import failed. Check password and file."
+                                                    }
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = TemporaryAmber, contentColor = PrimaryBlack)
+                                        ) {
+                                            Text("Proceed with Import".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = {
+                                            showLegacyConfirmDialog = false
+                                            pendingLegacyImportUri = null
+                                            pendingLegacyMnemonic = ""
+                                            importStatus = null
+                                        }) {
+                                            Text("Cancel".tr, color = AccentGreen)
+                                        }
+                                    }
                                 )
                             }
 

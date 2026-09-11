@@ -262,7 +262,13 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                                             sharedFolder = "",
                                             identity = null,
                                             strategy = com.noslop.app.net.OverwriteStrategy.UPDATE_HUB,
-                                            onLog = { chunk -> updateLogs += chunk }
+                                            onLog = { chunk -> updateLogs += chunk },
+                                            onHostKeyPrompt = { host, fp ->
+                                                kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                                                    hostKeyPromptData = host to fp
+                                                    hostKeyContinuation = { approved -> cont.resume(approved, onCancellation = null) }
+                                                }
+                                            }
                                         )
                                         if (result.isSuccess) {
                                             updateError = null
