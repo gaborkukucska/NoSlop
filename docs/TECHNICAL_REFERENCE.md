@@ -2012,6 +2012,27 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 
 ## 22. Peer Mesh Content Lists, Severable Creator Architecture & Tor Daemon Teardown (2026-09-10)
 
+(See previous section for content modal lists, author feed fast-path, and creator mode architecture.)
+
+## 23. Security & Cryptographic Audit Remediation (2026-09-11)
+
+### 23.1 Group Messaging E2EE Fan-out & At-Rest Encryption
+* **Pairwise Fan-out**: Group message bodies are encrypted per-member using that member's X25519 key agreement and ChaCha20-Poly1305 AEAD. Cleartext gossip relaying has been completely eliminated.
+* **Store-and-Forward Outbox**: Undelivered group messages for offline members are stored in `pending_group_messages` table and flushed on peer connect with automatic 7-day expiration.
+* **At-Rest Encryption**: Group chat message bodies stored in Room are encrypted under Android Keystore AES-256-GCM via `GroupMessageCrypto.encrypt`/`decrypt` (Room version 13, `MIGRATION_12_13`).
+
+### 23.2 Hardened Tor Control & Address Derivation
+* **UNIX_ONLY Sockets**: `TorControlChannel` uses `Mode.UNIX_ONLY` bound to app-private `filesDir/tor/ControlSocket`. The loopback TCP control port 9051 is closed, with post-bootstrap verification.
+* **Collision Derivation**: On hidden service collision, `TorService` derives the `.onion` address using `CryptoService.getPublicKeyFromPrivateKey()`.
+
+### 23.3 Deterministic HKDF Identity Derivation & Severable Teardown
+* **HKDF Seed Derivation**: `CryptoService.deriveIdentityFromSeed()` derives Ed25519 and X25519 keypairs via domain-separated HKDF-SHA512 (`noslop-identity-ed25519-v1` and `noslop-identity-x25519-v1`).
+* **Severable ID Burn**: `setCreatorEnabled(false)` unregisters secondary hidden services, broadcasts `USER_EXIT`, and removes keys from disk.
+
+### 23.4 Schema Export & Consolidation
+* **Room Schema Safety**: Schema export enabled (`exportSchema = true`), schema exported to `app/schemas/com.noslop.app.data.NoSlopDatabase/13.json`, and `room-testing` added.
+* **Code Consolidation**: Extracted `ProxyAuth.kt` for proxy signing, `compressImageFile` in `MediaUtils.kt`, `JsonUtils.kt` for JSON/HTML processing, and unified deployment runners in `HubSetupScreen.kt`.
+
 ### 22.1 Peer Mesh Content List & Direct Filtered Feed Navigation
 Previously, User Info modals in `FullScreenMeshCardV2` only displayed a minimal text list for temporary contacts, while `ContactCardDialog` in `PeerItem.kt` and the Discoverable Node modal in `DMsTab.kt` lacked mesh post listings entirely.
 * **`PeerMeshContentList` Composable**: Renders a scrollable list of an author's mesh broadcasts with 52dp rounded media thumbnails (Base64 bitmaps, Coil web/clearnet URLs, or media icons), timestamps, and two-line body excerpts parsed with `MarkdownUtils.parseMarkdown(...)`.

@@ -1,5 +1,39 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-11) — Security Audit Remediation (P0, P1, P2, P3, P4)
+
+* **Group Messaging E2EE Fan-out & Keystore Encryption at Rest (P0-1 & P0-2)**:
+  * Replaced cleartext `GROUP_MESSAGE` gossip broadcasts with strict pairwise X25519 + ChaCha20-Poly1305 encrypted fan-out.
+  * Added Room database table `pending_group_messages` with automatic 7-day TTL expiration and persistent store-and-forward outbox delivery.
+  * Implemented `GroupMessageCrypto` encrypting group chat message bodies at rest in Room via Android Keystore AES-256-GCM (`MIGRATION_12_13`, schema version 13).
+  * Enforced strict sender membership and signature validation in `DmPacketHandler.handleGroupMessage`.
+* **Tor Control Channel Socket Hardening (P0-3)**:
+  * Switched `TorControlChannel` to `Mode.UNIX_ONLY`, securing the control socket via Android private app file permissions.
+  * Removed unauthenticated TCP control port loopback binding and added post-bootstrap port 9051 self-check verification.
+* **Splash Media Pre-warm & Onion Collision Fix (P0-4 & P0-5)**:
+  * Replaced hand-built splash proxy URL string with `MediaProxyService.buildProxyUrl()` containing session token and port resolution.
+  * Corrected `TorService.kt` onion derivation on address collision to extract public keys from private key parameters rather than treating private key bytes as public keys.
+* **Identity Derivation & Severable Creator Teardown (P1-1 & P1-2)**:
+  * Added `CryptoService.deriveIdentityFromSeed()` using HKDF-SHA512 to deterministically derive Ed25519 and X25519 keypairs from the 12-word Word Cloud mnemonic.
+  * Configured `setCreatorEnabled(false)` and `burnCreatorIdentity()` to unregister secondary hidden services, broadcast `USER_EXIT`, and purge keys from disk.
+* **Exit Cache Invalidation, Permissions & Audio Focus (P1-3, P1-4, P1-5)**:
+  * Keyed `CachedSource` staleness checks on `streamNonce` rather than unused generation counters, invalidating cached URLs upon circuit rotation.
+  * Declared `android.permission.WAKE_LOCK` in `AndroidManifest.xml` for background mesh sync.
+  * Configured `setAudioAttributes(..., handleAudioFocus = true)` on ExoPlayer in `VideoPlayer.kt`.
+* **Rate Limiting & Downgrade Guards (P1-6, P1-8, P1-10)**:
+  * Enforced dedicated rate limits (5 per 60s per sender) on `ANNOUNCE_DISCOVERABLE`, `IDENTITY_UPDATE`, and `USER_EXIT` in `GossipService.kt`.
+  * Added SSH host-key verification dialog with prompt continuation across all Hub deployment paths in `HubSetupScreen.kt`.
+  * Enforced `LegacyBackupConfirmationRequiredException` on unauthenticated legacy CBC backup archive imports in `BackupManager.kt`.
+* **Room Schema Export, Hygiene & Dead Code Removal (P2-1, P2-5, P3)**:
+  * Enabled `exportSchema = true`, configured KSP schema location to `app/schemas/`, committed `13.json`, and added `androidx.room:room-testing`.
+  * Replaced silent catch blocks with diagnostic logging in `MainActivity.kt` and `BackupManager.kt`.
+  * Removed 34 verified dead functions and unused assets (`ground_zero_qr.png`, `TorWarningPanel.kt`, dead DAO queries, and uncalled ViewModel functions).
+* **Consolidation of Duplication (P4-1, P4-3, P4-4, P4-5)**:
+  * Extracted `ProxyAuth.kt` centralizing proxy authentication and HMAC signing across YouTube, Reddit, and Jamendo clients.
+  * Extracted `compressImageFile()` in `ui/MediaUtils.kt` consolidating image scaling and EXIF orientation routines.
+  * Extracted `startDeployment()` in `HubSetupScreen.kt` consolidating 3 duplicate deployment launcher blocks.
+  * Created `JsonUtils.kt` (`JsonObject.str`, `stripHtml`), consolidated base32 loops in `CryptoService.kt`, and unified comment/reaction sync mapping extensions.
+
 ## Completed Changes (2026-09-10) — Peer Mesh Content In Modals, Creator Studio Severable ID, Tor 40% Recovery & Dual-Identity Broadcasts
 
 * **Peer Mesh Content List in User Info Modals (`PeerItem.kt`, `FeedCard.kt`, `DMsTab.kt`)**:

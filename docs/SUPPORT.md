@@ -16,9 +16,9 @@
 *   **Tor v3 Addresses**: Mesh communication depends on Tor hidden services. If Tor is not ready, you won't be able to send or receive mesh posts.
 
 ## Backup and Restore
-*   **Word Cloud**: Your 12-word mnemonic is the ONLY way to recover your identity if you lose your device. Write it down and keep it safe.
-*   **Export Backup**: Go to Settings -> Backup to export an AES-256-CBC encrypted archive containing your identity, the full local database (peers, mesh posts, comments, DMs, votes/reactions), and any downloaded media files. The encryption key is derived from your Word Cloud mnemonic — see [TECHNICAL_REFERENCE.md §3.8](TECHNICAL_REFERENCE.md#38-bip39-mnemonic).
-*   **Import Backup (Destructive)**: Importing a `.zip` backup will **permanently wipe** your current active identity, database, and settings on the device, replacing them entirely with the contents of the archive. A warning dialog will confirm your intent before proceeding. Upon success, the app will automatically restart to securely reload the restored keys and database.
+*   **Word Cloud**: Your 12-word mnemonic generates your cryptographic identity keys via HKDF and encrypts your backup archives. Write it down and keep it safe.
+*   **Export Backup**: Go to Settings -> Backup to export an authenticated AES-256-GCM encrypted archive containing your identity, the full local database (peers, mesh posts, comments, DMs, votes/reactions), and any downloaded media files. The encryption key is derived from your Word Cloud mnemonic — see [TECHNICAL_REFERENCE.md §3.8](TECHNICAL_REFERENCE.md#38-bip39-mnemonic).
+*   **Import Backup**: Importing a `.zip` backup will restore your database and media files after verifying the AES-256-GCM authentication tag. Legacy unauthenticated CBC archives prompt for explicit confirmation before proceeding. When migrating across devices, Keystore-sealed identity files require re-deriving your identity from your Word Cloud mnemonic.
 
 ## Known Issues
 *   WebView for "Read Full Article" might not block all trackers on the source website.

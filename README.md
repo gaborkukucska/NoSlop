@@ -7,7 +7,7 @@
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=android">
   <img alt="Status" src="https://img.shields.io/badge/Status-v0.5.0--alpha-orange?style=for-the-badge">
-  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-100%25_Tor_Only-blueviolet?style=for-the-badge&logo=torproject">
+  <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">
 </p>
@@ -57,7 +57,7 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 Direct peer-to-peer communication over the HAI-Net gossip network — no central server ever exists:
 
 * 📬 **End-to-End Encrypted DMs** — Mathematically secure messaging via X25519 key agreement and ChaCha20-Poly1305 AEAD.
-* 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
+* 👥 **Decentralized Group Chats** — End-to-end encrypted multi-member group conversations with pairwise X25519 fan-out, persistent store-and-forward outbox, audience controls (`🌐 All Members` vs `👥 Friends Only`), non-admin invites, and admin moderation.
 * 🎬 **Creator Studio & Severable ID** — Dedicated Creator Mode equipped with an ephemeral/burnable secondary identity (`.onion`). Creators can share their **Creator ID 🪪**, receive followers, and publish broadcasts without leaking their personal identity.
 * 🏠 **Home HUBs & Admin AI** — Link or auto-deploy an always-on home server over SSH as your sovereign master database and private LLM assistant.
 * 🌉 **Clearnet-to-Mesh Bridge** — Liking, commenting, or sharing clearnet content instantly transforms it into a signed, deterministic SHA3-256 mesh anchor post.
@@ -71,7 +71,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 🧅 **Native Tor v3 Onion Address** — Your node address is derived directly from your public key for direct peer reachability.
 * 🪪 **Dual-Identity Separation** — Primary identity for trusted personal contacts; severable burnable identity for public creator broadcasts.
 * ☁️ **Word Cloud Backup** — 12-word recovery mnemonic with AES-256-GCM authenticated encrypted zip backup and restore.
-* 🪪 **Human-Readable Tripcode** — 6-character Base32 visual verification fingerprint (`@handle.tripcode`).
+* 🪪 **Human-Readable Tripcode** — 6-character Base32 visual display disambiguator (`@handle.tripcode`).
 
 ---
 
@@ -92,7 +92,7 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 | **Media** | Media3 / ExoPlayer, Coil, Android System WebView (fallback) |
 | **Networking** | Embedded Tor daemon (`tor-android`), OkHttp, SOCKS5 Stream Isolation |
 | **Cryptography** | Ed25519 (Lazysodium / Bouncy Castle), X25519, ChaCha20-Poly1305, SHA3-256, AES-256-GCM |
-| **Persistence** | Room (SQLite), EncryptedSharedPreferences (Hardware Keystore backed) |
+| **Persistence** | Room (SQLite, Keystore AES-256-GCM message encryption), EncryptedSharedPreferences |
 | **Hardware** | CameraX (QR scanning & media capture), ZXing |
 | **Background** | Android WorkManager & Foreground Services |
 
@@ -114,7 +114,8 @@ Direct peer-to-peer communication over the HAI-Net gossip network — no central
 * 📈 **[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)** — Detailed technical milestone changelog and completed audit resolutions.
 * 🌍 **[docs/TRANSLATION_GUIDE.md](docs/TRANSLATION_GUIDE.md)** — Guide for community localization and language JSON files.
 * 🛡️ **[docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)** — User privacy expectations, data sovereignty, and security posture.
-* 🏠 **[docs/HUB_INTEGRATION_PLAN.md](docs/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
+* 🏠 **[docs/archived/HUB_INTEGRATION_PLAN.md](docs/archived/HUB_INTEGRATION_PLAN.md)** — HAI-Net Home Hub integration blueprint and roadmap.
+* 📋 **[docs/FINDINGS.md](docs/FINDINGS.md)** — Architectural findings, security enhancements, and technical roadmap.
 * 🛠️ **[docs/SUPPORT.md](docs/SUPPORT.md)** — Backup/restore guides, troubleshooting, and operations.
 * 🐞 **[docs/DEBUG.md](docs/DEBUG.md)** — Extracting structured diagnostic logs.
 

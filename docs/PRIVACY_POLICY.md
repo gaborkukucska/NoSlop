@@ -22,7 +22,7 @@ NoSlop generates a public/private key pair on your device during onboarding. You
 
 ### Content you create
 
-Posts, direct messages, and any other content you create are stored locally in an encrypted SQLite database on your device. They are shared only with the peers you choose to connect with, over the encrypted mesh network. Nothing is sent to any server operated by NoSlop.
+Posts, direct messages, and any other content you create are stored locally in a SQLite database on your device. Group chat message bodies are encrypted at rest using an AES-256-GCM key bound to the Android Keystore, and 1:1 direct messages store encrypted ciphertext. Content is shared only with the peers you choose to connect with, over the encrypted mesh network. Nothing is sent to any server operated by NoSlop.
 
 ### Mesh network and peer connections
 
@@ -31,6 +31,10 @@ When you connect to peers, your device exchanges messages directly with theirs (
 ### Tor
 
 If you use the Tor routing option, your traffic is routed through the Tor network. Tor is a third-party anonymity network; its privacy properties and limitations are described at [torproject.org](https://www.torproject.org/about/privacy-policy/). NoSlop does not control or monitor Tor.
+
+### Home Hub Deployment
+
+When you deploy a HAI-Net Home Hub via SSH from NoSlop, your cryptographic identity (including Ed25519 and X25519 keys) is transmitted to your local server over SSH to allow your node to operate 24/7. First-time SSH connections prompt you to verify and pin the remote server's host key fingerprint.
 
 ### Content feeds and API proxies
 
