@@ -1,5 +1,25 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-12) — Verification Pass Remediation
+
+* **Group Message Crypto Hardening & AAD Binding (§3.1, §3.2, §3.3, §3.4)**:
+  * Eliminated silent plaintext fallback in `GroupMessageCrypto.encrypt()`: fails closed by throwing `SecurityException` so database writes are never executed unencrypted.
+  * Added Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"`, preventing cross-row ciphertext transplantation attacks.
+  * Cached Keystore `SecretKey` reference in memory to eliminate expensive keystore round-trips when reading message threads.
+  * Explicitly validated group IDs against `GroupChatDao` to avoid fragile hyphen assumptions.
+* **Tor Dead Code & Circuit Rotation Cleanup (P1-3 Remainder)**:
+  * Removed obsolete `requestNewCircuit()`, `_circuitGeneration`, `circuitGeneration`, `newnymMutex`, and interval constants from `TorService.kt` in favor of SOCKS5 stream nonce-bumping.
+* **SSH Host Key Verification & Pinned Key Reset (P1-8 Remainder)**:
+  * Wired host key verification dialogs into the Hub software update path in `HubSetupScreen.kt`.
+  * Added "Clear Pinned SSH Host Key" setting action in `SettingsTab.kt` to allow users to reconnect after Hub OS reinstalls.
+* **Legacy Backup Confirmation Dialog (§3.10)**:
+  * Added dedicated warning dialog in `SettingsTab.kt` when importing legacy AES-CBC unauthenticated backups, allowing users to explicitly choose whether to proceed.
+* **Creator Studio Severable ID Burning UI (§3.8)**:
+  * Added "Burn ID 🔥" action with a destructive confirmation dialog to `CreatorStudioTab.kt`, wiring `viewModel.burnCreatorIdentity()` to unregister hidden services, broadcast `USER_EXIT`, and regenerate keys.
+* **Unit Tests & Wire Protocol Documentation (§3.7, §3.9)**:
+  * Added unit test coverage for `GroupMessageCryptoTest` (AAD round-trip, tampering rejection, deterministic HKDF seed derivation) and `MeshPacketVerifierTest` (`GROUP_MESSAGE`).
+  * Updated `docs/WIRE_PROTOCOL_REFERENCE.md` cataloging `GROUP_MESSAGE` as legacy receive-only with strict membership and signature verification.
+
 ## Completed Changes (2026-09-11) — Security Audit Remediation (P0, P1, P2, P3, P4)
 
 * **Group Messaging E2EE Fan-out & Keystore Encryption at Rest (P0-1 & P0-2)**:
