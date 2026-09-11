@@ -65,5 +65,5 @@ object GuardianApiClient {
         } catch (e: Exception) { Logger.error(TAG, "Guardian request failed", e.message); emptyList() }
     }
 
-    private fun stripHtml(html: String): String = html.replace(Regex("<[^>]*>"), " ").replace(Regex("&nbsp;", RegexOption.IGNORE_CASE), " ").replace(Regex("\\s+"), " ").trim()
+
 }

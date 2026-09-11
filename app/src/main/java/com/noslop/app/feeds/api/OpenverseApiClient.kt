@@ -107,15 +107,12 @@ object OpenverseApiClient {
             for (element in results) {
                 try {
                     val obj = element.asJsonObject
-                    fun str(key: String): String? =
-                        obj.get(key)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
-
-                    val id = str("id") ?: continue
-                    val imageUrl = str("url") ?: continue
-                    val title = str("title") ?: "Untitled"
-                    val creator = str("creator")
-                    val provider = str("provider") ?: str("source")
-                    val license = str("license")?.uppercase()
+                    val id = obj.str("id") ?: continue
+                    val imageUrl = obj.str("url") ?: continue
+                    val title = obj.str("title") ?: "Untitled"
+                    val creator = obj.str("creator")
+                    val provider = obj.str("provider") ?: obj.str("source")
+                    val license = obj.str("license")?.uppercase()
 
                     val excerpt = listOfNotNull(
                         license?.let { "CC $it" },
@@ -127,10 +124,10 @@ object OpenverseApiClient {
                             id = "openverse_img_$id",
                             sourceId = sourceId,
                             title = title,
-                            url = str("foreign_landing_url") ?: imageUrl,
+                            url = obj.str("foreign_landing_url") ?: imageUrl,
                             author = creator,
                             excerpt = excerpt.ifBlank { null },
-                            thumbnailUrl = str("thumbnail") ?: imageUrl,
+                            thumbnailUrl = obj.str("thumbnail") ?: imageUrl,
                             publishedAt = UNDATED,
                             // --- NOSLOP_TOR_GATE_UI_V1 --- on low, serve the
                             // Openverse-rendered thumbnail rather than the
@@ -138,7 +135,7 @@ object OpenverseApiClient {
                             mediaUrl = if (
                                 (try { com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.imageQuality }
                                  catch (_: Exception) { "high" }) == "low"
-                            ) (str("thumbnail") ?: imageUrl) else imageUrl,
+                            ) (obj.str("thumbnail") ?: imageUrl) else imageUrl,
                             mediaType = "image",
                             apiSource = "openverse"
                         )
@@ -202,15 +199,12 @@ object OpenverseApiClient {
                 try {
                     val obj = element.asJsonObject
 
-                    fun str(key: String): String? =
-                        obj.get(key)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
-
-                    val id = str("id") ?: continue
+                    val id = obj.str("id") ?: continue
                     // `url` is the actual audio file; without it there is nothing to play.
-                    val streamUrl = str("url") ?: continue
-                    val title = str("title") ?: "Untitled"
+                    val streamUrl = obj.str("url") ?: continue
+                    val title = obj.str("title") ?: "Untitled"
 
-                    val filetype = str("filetype")?.lowercase()
+                    val filetype = obj.str("filetype")?.lowercase()
                     // NB: `filetype in PLAYABLE_FILETYPES` with a String? does
                     // not compile — Set<String>.contains takes a non-null
                     // String. Branch on nullability instead of relying on `in`.
@@ -225,9 +219,9 @@ object OpenverseApiClient {
                         continue
                     }
 
-                    val creator = str("creator")
-                    val provider = str("provider") ?: str("source")
-                    val license = str("license")?.uppercase()
+                    val creator = obj.str("creator")
+                    val provider = obj.str("provider") ?: obj.str("source")
+                    val license = obj.str("license")?.uppercase()
 
                     val durationMs = try {
                         obj.get("duration")?.takeIf { !it.isJsonNull }?.asLong
@@ -255,10 +249,10 @@ object OpenverseApiClient {
                             id = "openverse_$id",
                             sourceId = sourceId,
                             title = title,
-                            url = str("foreign_landing_url") ?: streamUrl,
+                            url = obj.str("foreign_landing_url") ?: streamUrl,
                             author = creator,
                             excerpt = excerpt.ifBlank { null },
-                            thumbnailUrl = str("thumbnail"),
+                            thumbnailUrl = obj.str("thumbnail"),
                             publishedAt = UNDATED,
                             mediaUrl = streamUrl,
                             mediaType = "audio",

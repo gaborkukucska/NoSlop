@@ -324,6 +324,44 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
     var scanMode by remember { mutableStateOf<String?>(initialScanMode) }
     var scanTimeoutReached by remember { mutableStateOf(false) }
 
+    fun startDeployment(strategy: com.noslop.app.net.OverwriteStrategy) {
+        isDeploying = true
+        deployError = null
+        deployResult = null
+        deploymentLogs = ""
+        coroutineScope.launch {
+            val localIdentity = viewModel.localKeys.value
+            val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
+                ip = targetIp,
+                user = username,
+                pass = password,
+                sharedFolder = sharedFolder,
+                identity = localIdentity,
+                strategy = strategy,
+                onLog = { chunk -> deploymentLogs += chunk },
+                onHostKeyPrompt = { host, fp ->
+                    kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                        hostKeyPromptData = host to fp
+                        hostKeyContinuation = { approved -> cont.resume(approved, onCancellation = null) }
+                    }
+                }
+            )
+            if (result.isSuccess) {
+                showSetupDialog = false
+                viewModel.setHubDeploymentStatus("Active at $targetIp")
+            } else {
+                if (strategy == com.noslop.app.net.OverwriteStrategy.PROMPT &&
+                    result.exceptionOrNull() is com.noslop.app.net.ExistingDeploymentException) {
+                    showExistingHubDialog = true
+                    showSetupDialog = false
+                } else {
+                    deployError = result.exceptionOrNull()?.message ?: com.noslop.app.util.LanguageManager.translate("Unknown Error")
+                }
+            }
+            isDeploying = false
+        }
+    }
+
     LaunchedEffect(scanMode) {
         if (scanMode != null) {
             scanTimeoutReached = false
@@ -619,42 +657,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                 val unknownErrorMsg = "Unknown Error".tr
                 if (deployError == null) {
                     Button(
-                        onClick = {
-                            isDeploying = true
-                            deployError = null
-                            deployResult = null
-                            deploymentLogs = ""
-                            coroutineScope.launch {
-                                val localIdentity = viewModel.localKeys.value
-                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
-                                    ip = targetIp,
-                                    user = username,
-                                    pass = password,
-                                    sharedFolder = sharedFolder,
-                                    identity = localIdentity,
-                                    strategy = com.noslop.app.net.OverwriteStrategy.PROMPT,
-                                    onLog = { chunk -> deploymentLogs += chunk },
-                                    onHostKeyPrompt = { host, fp ->
-                                        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-                                            hostKeyPromptData = host to fp
-                                            hostKeyContinuation = { approved -> cont.resume(approved, onCancellation = null) }
-                                        }
-                                    }
-                                )
-                                if (result.isSuccess) {
-                                    showSetupDialog = false
-                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
-                                } else {
-                                    if (result.exceptionOrNull() is com.noslop.app.net.ExistingDeploymentException) {
-                                        showExistingHubDialog = true
-                                        showSetupDialog = false
-                                    } else {
-                                        deployError = result.exceptionOrNull()?.message ?: unknownErrorMsg
-                                    }
-                                }
-                                isDeploying = false
-                            }
-                        },
+                        onClick = { startDeployment(com.noslop.app.net.OverwriteStrategy.PROMPT) },
                         enabled = !isDeploying && targetIp.isNotBlank() && username.isNotBlank() && password.isNotBlank(),
                         colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
                     ) {
@@ -766,29 +769,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                         onClick = {
                             showExistingHubDialog = false
                             showSetupDialog = true
-                            isDeploying = true
-                            deployError = null
-                            deployResult = null
-                            deploymentLogs = ""
-                            coroutineScope.launch {
-                                val localIdentity = viewModel.localKeys.value
-                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
-                                    ip = targetIp,
-                                    user = username,
-                                    pass = password,
-                                    sharedFolder = sharedFolder,
-                                    identity = localIdentity,
-                                    strategy = com.noslop.app.net.OverwriteStrategy.RESET_IDENTITY,
-                                    onLog = { chunk -> deploymentLogs += chunk }
-                                )
-                                if (result.isSuccess) {
-                                    showSetupDialog = false
-                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
-                                } else {
-                                    deployError = result.exceptionOrNull()?.message ?: com.noslop.app.util.LanguageManager.translate("Unknown Error")
-                                }
-                                isDeploying = false
-                            }
+                            startDeployment(com.noslop.app.net.OverwriteStrategy.RESET_IDENTITY)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = AccentGreen)
@@ -799,29 +780,7 @@ fun HubSetupScreen(viewModel: NoSlopViewModel, onBack: () -> Unit = {}, initialS
                         onClick = {
                             showExistingHubDialog = false
                             showSetupDialog = true
-                            isDeploying = true
-                            deployError = null
-                            deployResult = null
-                            deploymentLogs = ""
-                            coroutineScope.launch {
-                                val localIdentity = viewModel.localKeys.value
-                                val result = com.noslop.app.net.SshDeployer.deployHaiNetHub(
-                                    ip = targetIp,
-                                    user = username,
-                                    pass = password,
-                                    sharedFolder = sharedFolder,
-                                    identity = localIdentity,
-                                    strategy = com.noslop.app.net.OverwriteStrategy.FULL_WIPE,
-                                    onLog = { chunk -> deploymentLogs += chunk }
-                                )
-                                if (result.isSuccess) {
-                                    showSetupDialog = false
-                                    viewModel.setHubDeploymentStatus("Active at $targetIp")
-                                } else {
-                                    deployError = result.exceptionOrNull()?.message ?: com.noslop.app.util.LanguageManager.translate("Unknown Error")
-                                }
-                                isDeploying = false
-                            }
+                            startDeployment(com.noslop.app.net.OverwriteStrategy.FULL_WIPE)
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed.copy(alpha=0.2f), contentColor = DestructiveRed)

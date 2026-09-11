@@ -25,6 +25,29 @@ class SyncPacketHandler(
     private val commentDao = db.commentDao()
     private val reactionDao = db.reactionDao()
 
+    private fun MeshComment.toCommentSyncData(): CommentSyncData = CommentSyncData(
+        id = id,
+        postId = postId,
+        authorId = authorPublicKeyB64,
+        authorName = authorHandle,
+        authorAvatarB64 = authorAvatarB64,
+        content = content,
+        timestamp = timestamp,
+        signature = signature,
+        parentCommentId = parentCommentId,
+        mediaId = mediaId,
+        mediaType = mediaType
+    )
+
+    private fun MeshReaction.toReactionSyncData(): ReactionSyncData = ReactionSyncData(
+        id = id,
+        postId = postId,
+        authorId = authorPublicKeyB64,
+        reactionType = reactionType,
+        timestamp = timestamp,
+        signature = signature
+    )
+
     suspend fun handleSyncRequest(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val syncPay = packet.getSyncRequestPayload() ?: return false
         val recentPosts = postDao.getPostsSince(syncPay.since).filter { !it.isOrphaned }
@@ -58,33 +81,10 @@ class SyncPacketHandler(
 
         // Also include comments and reactions for full sync
         val recentComments = commentDao.getCommentsSince(syncPay.since)
-        val commentSyncList = recentComments.map { c ->
-            CommentSyncData(
-                id = c.id,
-                postId = c.postId,
-                authorId = c.authorPublicKeyB64,
-                authorName = c.authorHandle,
-                authorAvatarB64 = c.authorAvatarB64,
-                content = c.content,
-                timestamp = c.timestamp,
-                signature = c.signature,
-                parentCommentId = c.parentCommentId,
-                mediaId = c.mediaId,
-                mediaType = c.mediaType
-            )
-        }
+        val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
         val recentReactions = reactionDao.getReactionsSince(syncPay.since)
-        val reactionSyncList = recentReactions.map { r ->
-            ReactionSyncData(
-                id = r.id,
-                postId = r.postId,
-                authorId = r.authorPublicKeyB64,
-                reactionType = r.reactionType,
-                timestamp = r.timestamp,
-                signature = r.signature
-            )
-        }
+        val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
 
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
@@ -185,33 +185,10 @@ class SyncPacketHandler(
         }
 
         val recentComments = commentDao.getCommentsSince(sevenDaysAgo)
-        val commentSyncList = recentComments.map { c ->
-            CommentSyncData(
-                id = c.id,
-                postId = c.postId,
-                authorId = c.authorPublicKeyB64,
-                authorName = c.authorHandle,
-                authorAvatarB64 = c.authorAvatarB64,
-                content = c.content,
-                timestamp = c.timestamp,
-                signature = c.signature,
-                parentCommentId = c.parentCommentId,
-                mediaId = c.mediaId,
-                mediaType = c.mediaType
-            )
-        }
+        val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
         val recentReactions = reactionDao.getReactionsSince(sevenDaysAgo)
-        val reactionSyncList = recentReactions.map { r ->
-            ReactionSyncData(
-                id = r.id,
-                postId = r.postId,
-                authorId = r.authorPublicKeyB64,
-                reactionType = r.reactionType,
-                timestamp = r.timestamp,
-                signature = r.signature
-            )
-        }
+        val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
 
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {

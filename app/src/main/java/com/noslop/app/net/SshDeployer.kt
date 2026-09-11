@@ -311,6 +311,31 @@ EOF_SHIM
                 run_sudo() {
                     sudo "${'$'}@"
                 }
+
+                setup_tor_hidden_service() {
+                    cat << 'PYEOF' > gen_tor.py
+import base64, sys
+b64_str = "$expandedSeedB64"
+if not b64_str:
+    sys.exit(0)
+try:
+    expanded = base64.b64decode(b64_str)
+    header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
+    with open("hs_ed25519_secret_key", "wb") as f:
+        f.write(header + expanded)
+except Exception as e:
+    print("Error generating tor key:", e)
+PYEOF
+                    python3 gen_tor.py
+                    run_sudo rm -rf /var/lib/tor/hainet/
+                    run_sudo mkdir -p /var/lib/tor/hainet/
+                    run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
+                    TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
+                    run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
+                    run_sudo chmod 700 /var/lib/tor/hainet/
+                    run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+                    rm -f gen_tor.py
+                }
                 
                 STRATEGY="${strategy.name}"
                 if [ "${'$'}STRATEGY" == "PROMPT" ]; then
@@ -367,28 +392,7 @@ EOF
                     # for the new identity instead of showing a passphrase form
                     rm -f ~/.hainet/auth.json
                     
-                    cat << 'PYEOF' > gen_tor.py
-import base64, sys
-b64_str = "$expandedSeedB64"
-if not b64_str:
-    sys.exit(0)
-try:
-    expanded = base64.b64decode(b64_str)
-    header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
-    with open("hs_ed25519_secret_key", "wb") as f:
-        f.write(header + expanded)
-except Exception as e:
-    print("Error generating tor key:", e)
-PYEOF
-                    python3 gen_tor.py
-                    run_sudo rm -rf /var/lib/tor/hainet/
-                    run_sudo mkdir -p /var/lib/tor/hainet/
-                    run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
-                    TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
-                    run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
-                    run_sudo chmod 700 /var/lib/tor/hainet/
-                    run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
-                    rm -f gen_tor.py
+                    setup_tor_hidden_service
                     
                     # Ensure full HiddenService block exists in torrc
                     if ! run_sudo grep -q "HiddenServiceDir.*hainet" /etc/tor/torrc; then
@@ -657,28 +661,7 @@ EOF
                 run_sudo apt-get update -qq >/dev/null 2>&1 || true
                 run_sudo apt-get install -y -qq tor >/dev/null 2>&1 || true
                 
-                cat << 'PYEOF' > gen_tor.py
-import base64, sys
-b64_str = "$expandedSeedB64"
-if not b64_str:
-    sys.exit(0)
-try:
-    expanded = base64.b64decode(b64_str)
-    header = b"== ed25519v1-secret: type0 ==" + bytes([0, 0, 0])
-    with open("hs_ed25519_secret_key", "wb") as f:
-        f.write(header + expanded)
-except Exception as e:
-    print("Error generating tor key:", e)
-PYEOF
-                python3 gen_tor.py
-                
-                run_sudo rm -rf /var/lib/tor/hainet/
-                run_sudo mkdir -p /var/lib/tor/hainet/
-                run_sudo mv hs_ed25519_secret_key /var/lib/tor/hainet/hs_ed25519_secret_key
-                TOR_USER=${'$'}(id -u debian-tor >/dev/null 2>&1 && echo "debian-tor" || echo "tor")
-                run_sudo chown -R ${'$'}TOR_USER:${'$'}TOR_USER /var/lib/tor/hainet/
-                run_sudo chmod 700 /var/lib/tor/hainet/
-                run_sudo chmod 600 /var/lib/tor/hainet/hs_ed25519_secret_key
+                setup_tor_hidden_service
                 
                 echo "${identity?.onionAddress ?: ""}" > onion.txt
                 run_sudo mv onion.txt /var/lib/hainet/onion.txt

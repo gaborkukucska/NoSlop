@@ -406,13 +406,7 @@ object FeedParser {
         }
     }
 
-    fun stripHtml(html: String): String {
-        return try {
-            android.text.Html.fromHtml(html, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()
-        } catch (e: Exception) {
-            html.replace(Regex("<[^>]*>"), " ").trim()
-        }
-    }
+    fun stripHtml(html: String): String = com.noslop.app.feeds.api.stripHtml(html)
 
     private fun extractFirstImage(html: String): String? {
         if (html.isBlank()) return null

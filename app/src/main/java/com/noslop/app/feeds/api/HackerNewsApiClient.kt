@@ -56,13 +56,10 @@ object HackerNewsApiClient {
             for (element in hits) {
                 try {
                     val obj = element.asJsonObject
-                    fun str(key: String): String? =
-                        obj.get(key)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
-
-                    val objectId = str("objectID") ?: continue
-                    val title = str("title") ?: str("story_title") ?: continue
+                    val objectId = obj.str("objectID") ?: continue
+                    val title = obj.str("title") ?: obj.str("story_title") ?: continue
                     // Prefer the linked article; fall back to the discussion.
-                    val link = str("url") ?: "https://news.ycombinator.com/item?id=$objectId"
+                    val link = obj.str("url") ?: "https://news.ycombinator.com/item?id=$objectId"
 
                     val points = try {
                         obj.get("points")?.takeIf { !it.isJsonNull }?.asInt
@@ -80,7 +77,7 @@ object HackerNewsApiClient {
                     val excerpt = listOfNotNull(
                         points?.let { "$it points" },
                         comments?.let { "$it comments" },
-                        str("author")?.let { "by $it" }
+                        obj.str("author")?.let { "by $it" }
                     ).joinToString(" · ")
 
                     items.add(
@@ -89,7 +86,7 @@ object HackerNewsApiClient {
                             sourceId = sourceId,
                             title = title,
                             url = link,
-                            author = str("author"),
+                            author = obj.str("author"),
                             excerpt = excerpt.ifBlank { null },
                             thumbnailUrl = null,
                             publishedAt = createdAt ?: 0L,

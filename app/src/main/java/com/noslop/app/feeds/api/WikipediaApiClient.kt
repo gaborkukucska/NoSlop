@@ -67,13 +67,10 @@ object WikipediaApiClient {
             for (element in pages) {
                 try {
                     val obj = element.asJsonObject
-                    fun str(key: String): String? =
-                        obj.get(key)?.takeIf { !it.isJsonNull }?.asString?.takeIf { it.isNotBlank() }
-
                     val pageId = obj.get("pageid")?.takeIf { !it.isJsonNull }?.asString ?: continue
-                    val title = str("title") ?: continue
-                    val extract = str("extract")
-                    val pageUrl = str("fullurl")
+                    val title = obj.str("title") ?: continue
+                    val extract = obj.str("extract")
+                    val pageUrl = obj.str("fullurl")
                         ?: "https://$language.wikipedia.org/?curid=$pageId"
 
                     val thumb = try {
