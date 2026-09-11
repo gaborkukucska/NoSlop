@@ -108,6 +108,46 @@ object CryptoService {
         )
     }
 
+    fun deriveIdentityFromSeed(seed: ByteArray, handle: String): IdentityKeys {
+        val hkdfEd = org.bouncycastle.crypto.generators.HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA512Digest())
+        hkdfEd.init(org.bouncycastle.crypto.params.HKDFParameters(seed, null, "noslop-identity-ed25519-v1".toByteArray(Charsets.UTF_8)))
+        val rawSeed = ByteArray(32)
+        hkdfEd.generateBytes(rawSeed, 0, 32)
+        val privParams = org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters(rawSeed, 0)
+        val rawPub = privParams.generatePublicKey().encoded
+
+        val hkdfX = org.bouncycastle.crypto.generators.HKDFBytesGenerator(org.bouncycastle.crypto.digests.SHA512Digest())
+        hkdfX.init(org.bouncycastle.crypto.params.HKDFParameters(seed, null, "noslop-identity-x25519-v1".toByteArray(Charsets.UTF_8)))
+        val rawXSeed = ByteArray(32)
+        hkdfX.generateBytes(rawXSeed, 0, 32)
+        val xPrivParams = org.bouncycastle.crypto.params.X25519PrivateKeyParameters(rawXSeed, 0)
+        val rawXPub = xPrivParams.generatePublicKey().encoded
+
+        val pubB64 = Base64.encodeToString(ED25519_X509_HEADER + rawPub, Base64.NO_WRAP)
+        val privB64 = Base64.encodeToString(ED25519_PKCS8_HEADER + rawSeed, Base64.NO_WRAP)
+        val encPubB64 = Base64.encodeToString(org.bouncycastle.asn1.x509.SubjectPublicKeyInfo(
+            org.bouncycastle.asn1.x509.AlgorithmIdentifier(org.bouncycastle.asn1.edec.EdECObjectIdentifiers.id_X25519), rawXPub
+        ).encoded, Base64.NO_WRAP)
+        val encPrivB64 = Base64.encodeToString(org.bouncycastle.asn1.pkcs.PrivateKeyInfo(
+            org.bouncycastle.asn1.x509.AlgorithmIdentifier(org.bouncycastle.asn1.edec.EdECObjectIdentifiers.id_X25519),
+            org.bouncycastle.asn1.DEROctetString(rawXSeed)
+        ).encoded, Base64.NO_WRAP)
+
+        val tripcode = deriveTripcode(rawPub)
+        val onion = deriveOnionAddress(rawPub)
+        val formattedDisplayName = if (handle.endsWith(".$tripcode")) handle else if (handle.isNotBlank()) "$handle.$tripcode" else tripcode
+
+        return IdentityKeys(
+            publicKeyB64 = pubB64,
+            privateKeyB64 = privB64,
+            tripcode = tripcode,
+            onionAddress = onion,
+            displayName = formattedDisplayName,
+            encPublicKeyB64 = encPubB64,
+            encPrivateKeyB64 = encPrivB64
+        )
+    }
+
     fun generateIdentity(handle: String): IdentityKeys {
         Logger.info(TAG, "Generating Ed25519 and X25519 identity for handle: $handle")
         return try {

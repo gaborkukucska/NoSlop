@@ -548,6 +548,16 @@ object TorService {
         }
     }
 
+    suspend fun unregisterBurnableHiddenService() {
+        val serviceId = activeBurnableServiceId
+        if (serviceId != null) {
+            unregisterHiddenService(serviceId)
+            activeBurnableServiceId = null
+            currentBurnablePrivateKeyB64 = null
+            currentBurnableOnionAddress = null
+        }
+    }
+
     private suspend fun unregisterHiddenService(serviceId: String) = withContext(Dispatchers.IO) {
         Logger.info(TAG, "Unregistering hidden service $serviceId...")
         try {

@@ -1277,6 +1277,26 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun getWordCloudMnemonic(): String = identityRepository.getMnemonic() ?: ""
     suspend fun getBurnableIdentity(): CryptoService.IdentityKeys? = identityRepository.getBurnableIdentity()
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys = identityRepository.generateBurnableIdentity()
+    suspend fun clearBurnableIdentity() {
+        val burnable = identityRepository.getBurnableIdentity()
+        if (burnable != null) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = CryptoService.encodeForSigning(burnable.publicKeyB64, timestamp.toString())
+            val sig = CryptoService.sign(payloadToSign, burnable.privateKeyB64)
+            val exitPacket = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 6,
+                senderId = burnable.publicKeyB64,
+                type = "USER_EXIT",
+                payload = com.google.gson.Gson().toJsonTree(com.noslop.app.mesh.UserExitPayload(burnable.publicKeyB64, timestamp, sig)),
+                signature = sig
+            )
+            com.noslop.app.mesh.GossipService.broadcast(exitPacket)
+        }
+        com.noslop.app.tor.TorService.unregisterBurnableHiddenService()
+        identityRepository.clearBurnableIdentity()
+        _identityUpdateFlow.emit(Unit)
+    }
     suspend fun updateOnionAddress(address: String) {
         identityRepository.updateOnionAddress(address)
         _identityUpdateFlow.emit(Unit)

@@ -359,7 +359,7 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
                 title = { Text("Restore Profile Backup".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("Enter your 24-word 'Word Cloud' to decrypt the backup file. The app will restart upon success.".tr, color = TextMuted, fontSize = 14.sp)
+                        Text("Enter your 12-word 'Word Cloud' to decrypt the backup file. The app will restart upon success.".tr, color = TextMuted, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(16.dp))
                         OutlinedTextField(
                             value = mnemonicInput,
@@ -527,7 +527,7 @@ fun Step3Identity(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "Word Cloud Password (BIP39):".tr,
+                        text = "Word Cloud Password:".tr,
                         style = MaterialTheme.typography.labelMedium,
                         color = AccentGreen,
                         fontWeight = FontWeight.Bold

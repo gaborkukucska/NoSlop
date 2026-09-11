@@ -101,6 +101,10 @@ object YouTubeInternalClient {
         return urlToStreamId[url]
     }
 
+    fun getStreamNonce(videoId: String): Int {
+        return videoStreamNonces[videoId] ?: 0
+    }
+
     private fun registerStreamId(url: String, videoId: String, streamId: String) {
         urlToStreamId[url] = streamId
         urlToStreamId[videoId] = streamId

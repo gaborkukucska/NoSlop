@@ -1317,7 +1317,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             OutlinedTextField(
                                                 value = mnemonicInput,
                                                 onValueChange = { mnemonicInput = it },
-                                                label = { Text("Word Cloud (BIP39 Mnemonic)".tr) },
+                                                label = { Text("Word Cloud (Mnemonic)".tr) },
                                                 colors = OutlinedTextFieldDefaults.colors(
                                                     focusedBorderColor = AccentGreen,
                                                     unfocusedBorderColor = BorderSubtle,

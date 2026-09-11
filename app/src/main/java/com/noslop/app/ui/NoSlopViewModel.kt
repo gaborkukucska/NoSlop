@@ -1780,7 +1780,8 @@ fun toggleAggregator() {
 
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
         viewModelScope.launch {
-            val keys = CryptoService.generateIdentity(handle)
+            val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(mnemonic)
+            val keys = CryptoService.deriveIdentityFromSeed(seed, handle)
             repository.saveLocalIdentity(handle, keys, mnemonic)
             preloadFeedsDuringOnboarding(selectedSources, selectedCategories, selectedMusicGenres, selectedVideoGenres, creatorKeywords)
             repository.setOnboardingComplete(true)
@@ -2434,7 +2435,22 @@ fun toggleAggregator() {
         viewModelScope.launch {
             repository.putAppSetting("is_creator_enabled", enabled.toString())
             _isCreatorEnabled.value = enabled
-            if (enabled && _isDiscoverableEnabled.value) {
+            if (enabled) {
+                ensureBurnableIdentity()
+                if (_isDiscoverableEnabled.value) {
+                    broadcastDiscoverable()
+                }
+            } else {
+                repository.clearBurnableIdentity()
+            }
+        }
+    }
+
+    fun burnCreatorIdentity() {
+        viewModelScope.launch {
+            repository.clearBurnableIdentity()
+            ensureBurnableIdentity()
+            if (_isDiscoverableEnabled.value) {
                 broadcastDiscoverable()
             }
         }

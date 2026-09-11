@@ -76,7 +76,7 @@ private class CachedSource(
     val source: VideoSource,
     val expiresAtMs: Long,
     val overTor: Boolean,
-    val circuitGeneration: Long
+    val streamNonce: Int
 )
 
 /**
@@ -97,23 +97,7 @@ private fun CachedSource.stalenessReason(): String? {
         }
     }
 
-    if (!overTorNow) return null
-
-    val generationNow = com.noslop.app.tor.TorService.circuitGeneration
-    if (circuitGeneration == generationNow) return null
-
-    return when (val s = source) {
-        // Signed URLs are IP-locked to the exit that issued them.
-        is VideoSource.Direct ->
-            if (SIGNED_URL_HINT_PATTERN.containsMatchIn(s.url)) {
-                "circuit rotated ($circuitGeneration -> $generationNow) and the URL is signed for the old exit"
-            } else null
-        // A new exit is exactly the thing that might not be gated, so don't
-        // make a rotation wait out the 60s failure TTL.
-        is VideoSource.Unavailable ->
-            "circuit rotated ($circuitGeneration -> $generationNow) — retrying on the new exit"
-        else -> null
-    }
+    return null
 }
 
 private val sourceCache = ConcurrentHashMap<String, CachedSource>(64)
@@ -230,11 +214,13 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
         // NOSLOP_ROUTE_AWARE_CACHE_V1 — stamp the route this was resolved on.
         // Never poison sourceCache with an Unavailable result from a speculative background preload.
         if (!(isPreload && result is VideoSource.Unavailable)) {
+            val videoId = extractYouTubeId(rawUrl) ?: ""
+            val nonce = if (videoId.isNotBlank()) YouTubeInternalClient.getStreamNonce(videoId) else 0
             sourceCache[cacheKey] = CachedSource(
                 source = result,
                 expiresAtMs = expiryMs,
                 overTor = HttpClientProvider.useTorForClearnet,
-                circuitGeneration = com.noslop.app.tor.TorService.circuitGeneration
+                streamNonce = nonce
             )
         }
         result
