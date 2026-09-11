@@ -577,6 +577,7 @@ fun ChatThreadScreen(
                                             }
                                         } else {
                                             val progress = downloadProgress[mid] ?: 0
+                                            val isDownloading = downloadProgress.containsKey(mid)
                                             Box(
                                                 modifier = Modifier.padding(top = 8.dp).fillMaxWidth().height(120.dp).clip(RoundedCornerShape(8.dp)).border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)).background(PrimaryBlack.copy(alpha = 0.5f)).clickable {
                                                     val meta = parsedMediaMetadata ?: com.noslop.app.mesh.MediaManager.getMetadataSync(mid)
@@ -589,9 +590,14 @@ fun ChatThreadScreen(
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                                     Icon(Icons.Default.Download, contentDescription = "Download".tr, tint = AccentGreen, modifier = Modifier.size(36.dp))
                                                     Spacer(modifier = Modifier.height(8.dp))
-                                                    if (progress > 0) {
-                                                        LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
-                                                        Text("Downloading $progress%", color = TextLight, fontSize = 10.sp)
+                                                    if (isDownloading) {
+                                                        if (progress > 0) {
+                                                            LinearProgressIndicator(progress = { progress / 100f }, color = AccentGreen, modifier = Modifier.width(80.dp))
+                                                            Text("Downloading $progress%", color = TextLight, fontSize = 10.sp)
+                                                        } else {
+                                                            LinearProgressIndicator(color = AccentGreen, modifier = Modifier.width(80.dp))
+                                                            Text("Connecting...".tr, color = TextLight, fontSize = 10.sp)
+                                                        }
                                                     } else {
                                                         Text("Tap to Download".tr, color = TextLight, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                                     }

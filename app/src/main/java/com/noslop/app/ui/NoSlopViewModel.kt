@@ -1095,6 +1095,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         val currentIds = _unifiedFeed.value.map { it.id }.toSet()
         val localPubKey = localKeys.value?.publicKeyB64
+        val burnablePubKey = burnableKeys.value?.publicKeyB64
+        val isOwnAuthor = { pub: String -> pub == localPubKey || (burnablePubKey != null && pub == burnablePubKey) }
         val isSearchActive = activeSearchQuery.isNotBlank()
         
         val isPersistentList = isSearchActive || actualFilter == "History" || actualFilter == "Liked" || actualFilter == "Saved" ||
@@ -1181,20 +1183,18 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        if (actualFilter == "My Content" && localPubKey != null) {
-            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == localPubKey }
+        if (actualFilter == "My Content") {
+            unseenMeshes = unseenMeshes.filter { isOwnAuthor(it.authorPublicKeyB64) }
             unseenFeeds = emptyList()
         } else if (actualFilter == "P2P Mesh" || actualFilter == "Mesh") {
             unseenFeeds = emptyList()
-            if (localPubKey != null) {
-                unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
-            }
+            unseenMeshes = unseenMeshes.filter { !isOwnAuthor(it.authorPublicKeyB64) }
         } else if (actualFilter?.startsWith("Author:") == true) {
             val authorPub = actualFilter.substringAfter("Author:")
             unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 == authorPub }
             unseenFeeds = emptyList()
-        } else if (localPubKey != null) {
-            unseenMeshes = unseenMeshes.filter { it.authorPublicKeyB64 != localPubKey }
+        } else {
+            unseenMeshes = unseenMeshes.filter { !isOwnAuthor(it.authorPublicKeyB64) }
         }
 
         // Swiped items are hidden from discovery feeds (user dismissed them). NOT applied in Saved, Liked, History, or search lists.
@@ -1330,7 +1330,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 else if (actualFilter.startsWith("Author:")) true
                 else when (actualFilter) {
                     "Mesh" -> true
-                    "My Content" -> it.authorPublicKeyB64 == localPubKey
+                    "My Content" -> isOwnAuthor(it.authorPublicKeyB64)
                     "Videos" -> (it.mediaType == "video" || it.clearnetMediaType == "video")
                     "Audio" -> (it.mediaType == "audio" || it.clearnetMediaType == "audio")
                     "Images" -> (it.mediaType == "image" || it.clearnetMediaType == "image")
