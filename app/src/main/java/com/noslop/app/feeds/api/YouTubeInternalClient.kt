@@ -23,8 +23,6 @@ object YouTubeInternalClient {
 
     /** NOSLOP_FEED_RECENCY_V1 — sentinel: the source gave us no usable date. */
     const val UNKNOWN_PUBLISH_DATE = 0L
-    private val PROXY_URL = com.noslop.app.BuildConfig.PROXY_URL
-    private val PROXY_SECRET = com.noslop.app.BuildConfig.PROXY_SECRET
     private const val API_KEY = "AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w"
 
     // --- NOSLOP_YT_COLDSTART_V1 ---
@@ -152,26 +150,45 @@ object YouTubeInternalClient {
         return payload
     }
 
-    private fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
-        val timestamp = (System.currentTimeMillis() / 1000).toString()
-        val signatureInput = "$timestamp:$payloadStr"
-        val hmacSig = try {
-            val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
-            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
-            sha256HMAC.init(secretKey)
-            val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
-            hash.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) { "" }
+    private fun executeSearchRequest(payloadStr: String): okhttp3.Response? {
+        val requestBody = payloadStr.toRequestBody(jsonMediaType)
+        val reqBuilder = Request.Builder()
+            .url("${ProxyAuth.PROXY_URL}/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+            .header("X-YouTube-Client-Name", "1")
+            .header("X-YouTube-Client-Version", CLIENT_VERSION)
+            .header("X-Goog-Api-Format-Version", "2")
+            .header("Origin", "https://www.youtube.com")
+            .header("Referer", "https://www.youtube.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+            .post(requestBody)
 
-        // NOSLOP_PROXY_SECRET_V1 — sending the HMAC key in cleartext beside the
-        // signature made the signature pointless. Kept behind a flag only so the
-        // client and the Worker can be rolled forward independently; set
-        // NOSLOP_PROXY_LEGACY_SECRET=false once the Worker verifies the HMAC.
-        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
-            builder.header("X-Proxy-Secret", PROXY_SECRET)
+        ProxyAuth.applyProxyAuthHeaders(reqBuilder, payloadStr)
+        val request = reqBuilder.build()
+
+        var response: okhttp3.Response? = null
+        try {
+            response = client.newCall(request).execute()
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Proxy request threw exception: ${e.message}")
         }
-        builder.header("X-Proxy-Timestamp", timestamp)
-        builder.header("X-Proxy-Signature", hmacSig)
+
+        if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
+            val directReq = request.newBuilder()
+                .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
+                .removeHeader("X-Proxy-Secret")
+                .removeHeader("X-Proxy-Timestamp")
+                .removeHeader("X-Proxy-Signature")
+                .header("X-YouTube-Client-Name", "1")
+                .header("X-YouTube-Client-Version", CLIENT_VERSION)
+                .header("X-Goog-Api-Format-Version", "2")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                .build()
+            response?.close()
+            response = client.newCall(directReq).execute()
+        }
+        return response
     }
 
     /**
@@ -185,49 +202,11 @@ object YouTubeInternalClient {
                 payload.addProperty("params", "EgIIBQ==")
             }
             val payloadStr = payload.toString()
-            val requestBody = payloadStr.toRequestBody(jsonMediaType)
-
-            val reqBuilder = Request.Builder()
-                .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                .header("X-YouTube-Client-Name", "1")
-                .header("X-YouTube-Client-Version", CLIENT_VERSION)
-                .header("X-Goog-Api-Format-Version", "2")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                .post(requestBody)
-
-            applyProxyAuthHeaders(reqBuilder, payloadStr)
-            val request = reqBuilder.build()
-
-            var response: okhttp3.Response? = null
-            try {
-                response = client.newCall(request).execute()
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Proxy request threw exception: ${e.message}")
-            }
+            val response = executeSearchRequest(payloadStr)
             
-            if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
-                // Do not rotate Tor circuits on search proxy errors; simply bypass the proxy and go direct.
-                val directReq = request.newBuilder()
-                    .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                    .removeHeader("X-Proxy-Secret")
-                    .removeHeader("X-Proxy-Timestamp")
-                    .removeHeader("X-Proxy-Signature")
-                    .header("X-YouTube-Client-Name", "1")
-                    .header("X-YouTube-Client-Version", CLIENT_VERSION)
-                    .header("X-Goog-Api-Format-Version", "2")
-                    .header("Origin", "https://www.youtube.com")
-                    .header("Referer", "https://www.youtube.com/")
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                    .build()
-                response?.close()
-                response = client.newCall(directReq).execute()
-            }
-            
-            val bodyStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                Logger.error(TAG, "Search failed: HTTP ${response.code}, Body: $bodyStr")
+            val bodyStr = response?.body?.string() ?: ""
+            if (response == null || !response.isSuccessful) {
+                Logger.error(TAG, "Search failed: HTTP ${response?.code ?: -1}, Body: $bodyStr")
                 return@withContext emptyList()
             }
             
@@ -324,47 +303,11 @@ object YouTubeInternalClient {
             val payload = buildPayload(query)
             payload.addProperty("params", "EgIQAg==") 
             val payloadStr = payload.toString()
-            val requestBody = payloadStr.toRequestBody(jsonMediaType)
-            val requestBuilder = Request.Builder()
-                .url("$PROXY_URL/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                .header("X-YouTube-Client-Name", "1")
-                .header("X-YouTube-Client-Version", CLIENT_VERSION)
-                .header("X-Goog-Api-Format-Version", "2")
-                .header("Origin", "https://www.youtube.com")
-                .header("Referer", "https://www.youtube.com/")
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                .post(requestBody)
-
-            applyProxyAuthHeaders(requestBuilder, payloadStr)
-            val request = requestBuilder.build()
-
-            var response: okhttp3.Response? = null
-            try {
-                response = client.newCall(request).execute()
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Channel proxy request threw exception: ${e.message}")
-            }
+            val response = executeSearchRequest(payloadStr)
             
-            if (response == null || response.code == 403 || response.code == 429 || response.code == 400 || !response.isSuccessful) {
-                val directReq = request.newBuilder()
-                    .url("https://www.youtube.com/youtubei/v1/search?key=$API_KEY&prettyPrint=false")
-                    .removeHeader("X-Proxy-Secret")
-                    .removeHeader("X-Proxy-Timestamp")
-                    .removeHeader("X-Proxy-Signature")
-                    .header("X-YouTube-Client-Name", "1")
-                    .header("X-YouTube-Client-Version", CLIENT_VERSION)
-                    .header("X-Goog-Api-Format-Version", "2")
-                    .header("Origin", "https://www.youtube.com")
-                    .header("Referer", "https://www.youtube.com/")
-                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
-                    .build()
-                response?.close()
-                response = client.newCall(directReq).execute()
-            }
-            
-            val bodyStr = response.body?.string() ?: ""
-            if (!response.isSuccessful) {
-                Logger.error(TAG, "Channel search failed: HTTP ${response.code}, Body: $bodyStr")
+            val bodyStr = response?.body?.string() ?: ""
+            if (response == null || !response.isSuccessful) {
+                Logger.error(TAG, "Channel search failed: HTTP ${response?.code ?: -1}, Body: $bodyStr")
                 return@withContext emptyList()
             }
             
@@ -787,7 +730,7 @@ object YouTubeInternalClient {
                     }
 
                     if (usingProxy) {
-                        applyProxyAuthHeaders(requestBuilder, payloadStr)
+                        ProxyAuth.applyProxyAuthHeaders(requestBuilder, payloadStr)
                     }
 
                     var response = activePlayerClient.newCall(requestBuilder.build()).execute()

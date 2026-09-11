@@ -17,31 +17,8 @@ object JamendoApiClient {
     
     // Default test client ID for Jamendo API
     private const val CLIENT_ID = "709fa152"
-    private val PROXY_URL = com.noslop.app.BuildConfig.PROXY_URL
-    private val PROXY_SECRET = com.noslop.app.BuildConfig.PROXY_SECRET
     private val gson = Gson()
     private val client get() = com.noslop.app.net.HttpClientProvider.activeClearnetClient
-    private fun applyProxyAuthHeaders(builder: Request.Builder, payloadStr: String) {
-        val timestamp = (System.currentTimeMillis() / 1000).toString()
-        val signatureInput = "$timestamp:$payloadStr"
-        val hmacSig = try {
-            val sha256HMAC = javax.crypto.Mac.getInstance("HmacSHA256")
-            val secretKey = javax.crypto.spec.SecretKeySpec(PROXY_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256")
-            sha256HMAC.init(secretKey)
-            val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
-            hash.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) { "" }
-
-        // NOSLOP_PROXY_SECRET_V1 — sending the HMAC key in cleartext beside the
-        // signature made the signature pointless. Kept behind a flag only so the
-        // client and the Worker can be rolled forward independently; set
-        // NOSLOP_PROXY_LEGACY_SECRET=false once the Worker verifies the HMAC.
-        if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
-            builder.header("X-Proxy-Secret", PROXY_SECRET)
-        }
-        builder.header("X-Proxy-Timestamp", timestamp)
-        builder.header("X-Proxy-Signature", hmacSig)
-    }
 
     suspend fun searchTracks(tags: String, sourceId: String = "api-jamendo-music"): List<FeedItem> {
         return try {
@@ -51,9 +28,9 @@ object JamendoApiClient {
             // tags= only accepts known Jamendo genre/mood tokens and fails on arbitrary text.
             val url = "$BASE_URL/tracks/?client_id=$CLIENT_ID&format=json&limit=20&namesearch=$encodedQuery&include=musicinfo"
             
-            val proxiedUrl = url.replace("https://api.jamendo.com", "$PROXY_URL/jamendo")
+            val proxiedUrl = url.replace("https://api.jamendo.com", "${ProxyAuth.PROXY_URL}/jamendo")
             val reqBuilder = Request.Builder().url(proxiedUrl)
-            applyProxyAuthHeaders(reqBuilder, proxiedUrl)
+            ProxyAuth.applyProxyAuthHeaders(reqBuilder, proxiedUrl)
             val request = reqBuilder.build()
 
             var response: okhttp3.Response? = null

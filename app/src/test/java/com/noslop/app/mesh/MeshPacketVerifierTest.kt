@@ -49,7 +49,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun post_validSignatureAccepted_tamperedRejected() {
-        val expected = "post-1|${alice.publicKeyB64}|hello mesh|1700000000"
+        val expected = CryptoService.encodeForSigning("post-1", alice.publicKeyB64, "hello mesh", "1700000000", null)
         val good = PostPayload(
             id = "post-1",
             authorId = alice.publicKeyB64,
@@ -73,7 +73,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun post_avatarIsAppendedToTheSignedString() {
-        val withAvatar = "post-2|${alice.publicKeyB64}|body|42|AVATARB64"
+        val withAvatar = CryptoService.encodeForSigning("post-2", alice.publicKeyB64, "body", "42", "AVATARB64")
         val p = PostPayload(
             id = "post-2",
             authorId = alice.publicKeyB64,
@@ -90,7 +90,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun deletePost_format() {
-        val s = "post-9|${alice.publicKeyB64}|99"
+        val s = CryptoService.encodeForSigning("post-9", alice.publicKeyB64, "99")
         val p = DeletePostPayload("post-9", alice.publicKeyB64, 99L, sign(s))
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("DELETE_POST", p)))
     }
@@ -119,7 +119,7 @@ class MeshPacketVerifierTest {
             reactionType = "like",
             authorId = alice.publicKeyB64,
             timestamp = 5L,
-            signature = sign("post-1|like|${alice.publicKeyB64}|5")
+            signature = sign(CryptoService.encodeForSigning("post-1", "like", alice.publicKeyB64, "5"))
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("REACTION", r)))
 
@@ -128,7 +128,7 @@ class MeshPacketVerifierTest {
             voteType = "upvote",
             authorId = alice.publicKeyB64,
             timestamp = 6L,
-            signature = sign("post-1|upvote|${alice.publicKeyB64}|6")
+            signature = sign(CryptoService.encodeForSigning("post-1", "upvote", alice.publicKeyB64, "6"))
         )
         assertEquals(MeshPacketVerifier.Verdict.VALID, MeshPacketVerifier.verify(packet("VOTE", v)))
     }
@@ -187,7 +187,7 @@ class MeshPacketVerifierTest {
 
     @Test
     fun connectionRequest_signatureLivesOnTheEnvelope() {
-        val s = "${alice.publicKeyB64}|alice|${alice.onionAddress}|1"
+        val s = CryptoService.encodeForSigning(alice.publicKeyB64, "alice", alice.onionAddress, "1", null, null)
         val p = PeerHandshakePayload(
             id = "h-1",
             fromUserId = alice.publicKeyB64,

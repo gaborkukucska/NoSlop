@@ -199,6 +199,22 @@ object CryptoService {
         }
     }
 
+    private fun base32(bytes: ByteArray): String {
+        val base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
+        val sb = StringBuilder()
+        var buffer = 0
+        var bitsLeft = 0
+        for (b in bytes) {
+            buffer = (buffer shl 8) or (b.toInt() and 0xFF)
+            bitsLeft += 8
+            while (bitsLeft >= 5) {
+                bitsLeft -= 5
+                sb.append(base32Alphabet[(buffer shr bitsLeft) and 0x1F])
+            }
+        }
+        return sb.toString()
+    }
+
     fun deriveTripcode(encodedPubKeyBytes: ByteArray): String {
         val pubKeyParams = getEd25519PublicKeyParams(encodedPubKeyBytes)
         val rawKeyBytes = pubKeyParams.encoded
@@ -208,19 +224,7 @@ object CryptoService {
         digest.update(rawKeyBytes, 0, rawKeyBytes.size)
         digest.doFinal(hash, 0)
 
-        val base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
-        val sb = StringBuilder()
-        var buffer = 0
-        var bitsLeft = 0
-        for (b in hash) {
-            buffer = (buffer shl 8) or (b.toInt() and 0xFF)
-            bitsLeft += 8
-            while (bitsLeft >= 5) {
-                bitsLeft -= 5
-                sb.append(base32Alphabet[(buffer shr bitsLeft) and 0x1F])
-            }
-        }
-        return sb.toString().take(6)
+        return base32(hash).take(6)
     }
 
     fun deriveOnionAddress(encodedPubKeyBytes: ByteArray): String {
@@ -238,22 +242,9 @@ object CryptoService {
         val checksum = hash.copyOfRange(0, 2)
 
         val payload = rawKey + checksum + version
+        val encoded = base32(payload).padEnd(56, 'a')
 
-        val base32Alphabet = "abcdefghijklmnopqrstuvwxyz234567"
-        val sb = StringBuilder()
-        var buffer = 0
-        var bitsLeft = 0
-        for (b in payload) {
-            buffer = (buffer shl 8) or (b.toInt() and 0xFF)
-            bitsLeft += 8
-            while (bitsLeft >= 5) {
-                bitsLeft -= 5
-                sb.append(base32Alphabet[(buffer shr bitsLeft) and 0x1F])
-            }
-        }
-        while (sb.length < 56) sb.append('a')
-
-        return "${sb.toString().take(56)}.onion"
+        return "${encoded.take(56)}.onion"
     }
 
     /**

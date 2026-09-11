@@ -51,7 +51,10 @@ class PostPacketHandlerTest {
     private fun postPacket(signedContent: String, bodyContent: String = signedContent): NetworkPacket {
         val id = "post-1"
         val ts = 1_700_000_000_000L
-        val signature = CryptoService.sign("$id|${identity.publicKeyB64}|$signedContent|$ts", identity.privateKeyB64)
+        val signature = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, signedContent, ts.toString(), null),
+            identity.privateKeyB64
+        )
         val payload = PostPayload(
             id = id,
             authorId = identity.publicKeyB64,
@@ -83,7 +86,10 @@ class PostPacketHandlerTest {
         // A valid self-signed packet, but re-attributed to a different author key it wasn't signed by.
         val other = CryptoService.generateIdentity("mallory")
         val id = "post-1"; val ts = 1_700_000_000_000L
-        val sig = CryptoService.sign("$id|${identity.publicKeyB64}|hi|$ts", identity.privateKeyB64)
+        val sig = CryptoService.sign(
+            CryptoService.encodeForSigning(id, identity.publicKeyB64, "hi", ts.toString(), null),
+            identity.privateKeyB64
+        )
         val payload = PostPayload(
             id = id, authorId = other.publicKeyB64, authorName = "mallory",
             authorPublicKey = other.publicKeyB64, originNode = null, content = "hi", timestamp = ts, signature = sig,

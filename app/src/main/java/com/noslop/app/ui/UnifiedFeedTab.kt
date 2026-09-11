@@ -1848,48 +1848,11 @@ fun UnifiedFeedTab(
                                                 }
                                             }
                                         }
-                                    } else if (type == "image" && file.length() > 500 * 1024) {
+                                    } else if (type == "image" && (file.length() > 500 * 1024 || com.noslop.app.ui.ExifUtils.needsRotation(file))) {
                                         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                             compressionProgress = 0 // Triggers "Processing..." UI
                                         }
-                                        try {
-                                            val bitmap = android.graphics.BitmapFactory.decodeFile(file.absolutePath)
-                                            if (bitmap != null) {
-                                                val maxDim = when(imageQuality) {
-                                                    "low" -> 640
-                                                    "medium" -> 960
-                                                    else -> 1280
-                                                }
-                                                val compressQuality = when(imageQuality) {
-                                                    "low" -> 60
-                                                    "medium" -> 75
-                                                    else -> 85
-                                                }
-                                                val width = bitmap.width
-                                                val height = bitmap.height
-                                                var newWidth = width
-                                                var newHeight = height
-                                                if (width > maxDim || height > maxDim) {
-                                                    val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
-                                                    newWidth = (width * ratio).toInt()
-                                                    newHeight = (height * ratio).toInt()
-                                                }
-                                                val scaled = if (newWidth != width || newHeight != height) {
-                                                    android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-                                                } else bitmap
-                                                
-                                                val compressedFile = java.io.File(tempDir, "compressed_${file.name}.jpg")
-                                                val out = java.io.FileOutputStream(compressedFile)
-                                                scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, compressQuality, out)
-                                                out.close()
-                                                
-                                                if (compressedFile.length() < file.length()) {
-                                                    finalFile = compressedFile
-                                                }
-                                            }
-                                        } catch (e: Exception) {
-                                            com.noslop.app.debug.Logger.error("COMPRESS", "Error compressing image: ${e.message}")
-                                        }
+                                        finalFile = compressImageFile(file, tempDir, imageQuality)
                                     }
                                     
                                     val id = "post_${finalFile.name}"

@@ -46,6 +46,7 @@ import com.noslop.app.debug.Logger
 import com.noslop.app.mesh.MediaCaptureManager
 import com.noslop.app.mesh.MediaMetadata
 import com.noslop.app.ui.NoSlopViewModel
+import com.noslop.app.ui.compressImageFile
 import com.noslop.app.ui.theme.*
 import java.text.SimpleDateFormat
 import java.util.*
@@ -170,38 +171,8 @@ fun ChatThreadScreen(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 compressionProgress = 0
             }
-            try {
-                val bitmap = com.noslop.app.ui.ExifUtils.decodeOriented(file)
-                if (bitmap != null) {
-                    val quality = viewModel.mediaSettings.value.videoQuality
-                                                val imageQuality = viewModel.mediaSettings.value.imageQuality
-                                                val maxDim = when(imageQuality) { "low" -> 640; "medium" -> 960; else -> 1280 }
-                                                val compressQuality = when(imageQuality) { "low" -> 60; "medium" -> 75; else -> 85 }
-                    val width = bitmap.width
-                    val height = bitmap.height
-                    var newWidth = width
-                    var newHeight = height
-                    if (width > maxDim || height > maxDim) {
-                        val ratio = Math.min(maxDim.toFloat() / width, maxDim.toFloat() / height)
-                        newWidth = (width * ratio).toInt()
-                        newHeight = (height * ratio).toInt()
-                    }
-                    val scaled = if (newWidth != width || newHeight != height) {
-                        android.graphics.Bitmap.createScaledBitmap(bitmap, newWidth, newHeight, true)
-                    } else bitmap
-                    
-                    val compressedFile = java.io.File(context.cacheDir, "compressed_${file.name}.jpg")
-                    val out = java.io.FileOutputStream(compressedFile)
-                    scaled.compress(android.graphics.Bitmap.CompressFormat.JPEG, compressQuality, out)
-                    out.close()
-                    
-                    if (compressedFile.length() < file.length()) {
-                        finalFile = compressedFile
-                    }
-                }
-            } catch (e: Exception) {
-                Logger.error("CHAT_COMPRESS", "Error compressing image: ${e.message}")
-            }
+            val imageQuality = viewModel.mediaSettings.value.imageQuality
+            finalFile = compressImageFile(file, context.cacheDir, imageQuality)
         }
         
         val id = "dm-${finalFile.name}"
