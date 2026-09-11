@@ -72,11 +72,7 @@ interface FeedDao {
     @Query("UPDATE feed_items SET isSaved = :isSaved WHERE id = :id")
     suspend fun updateSavedState(id: String, isSaved: Boolean)
 
-    @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0 AND publishedAt < :beforeTimestamp")
-    suspend fun deleteExpiredItems(beforeTimestamp: Long)
 
-    @Query("DELETE FROM feed_items WHERE sourceId LIKE 'api_%'")
-    suspend fun clearApiItems()
 
     @Query("DELETE FROM feed_items WHERE id LIKE 'yt_%' AND isSaved = 0 AND isRead = 0")
     suspend fun deleteYouTubeItems()
@@ -87,8 +83,7 @@ interface FeedDao {
     @Query("DELETE FROM feed_items WHERE isSaved = 0 AND isRead = 0")
     suspend fun clearUnsavedItems()
 
-    @Query("DELETE FROM feed_sources WHERE feedType = 'api'")
-    suspend fun clearApiSources()
+
 }
 
 @Dao
@@ -123,8 +118,7 @@ interface PeerDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPeer(peer: Peer)
 
-    @Update
-    suspend fun updatePeer(peer: Peer)
+
 
     @Delete
     suspend fun deletePeer(peer: Peer)
@@ -243,8 +237,7 @@ interface CommentDao {
     @Query("DELETE FROM mesh_comments WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteCommentsByAuthor(authorId: String)
 
-    @Query("DELETE FROM mesh_comments WHERE postId = :postId")
-    suspend fun deleteCommentsForPost(postId: String)
+
 
     @Query("SELECT * FROM mesh_comments WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getCommentsSince(since: Long): List<MeshComment>
@@ -288,8 +281,7 @@ interface ReactionDao {
     @Query("DELETE FROM mesh_reactions WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteReactionsByAuthor(authorId: String)
 
-    @Query("DELETE FROM mesh_reactions WHERE postId = :postId")
-    suspend fun deleteReactionsForPost(postId: String)
+
 
     @Query("SELECT * FROM mesh_reactions WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getReactionsSince(since: Long): List<MeshReaction>
@@ -343,8 +335,7 @@ interface VoteDao {
     @Query("DELETE FROM mesh_votes WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteVotesByAuthor(authorId: String)
 
-    @Query("DELETE FROM mesh_votes WHERE postId = :postId")
-    suspend fun deleteVotesForPost(postId: String)
+
 }
 
 @Dao

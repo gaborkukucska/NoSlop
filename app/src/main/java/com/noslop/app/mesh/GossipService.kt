@@ -94,9 +94,7 @@ object GossipService {
         peerSendFailures.remove(peerOnionAddress)
     }
 
-    fun clearPeerCooldown(peerOnionAddress: String) {
-        peerSendFailures.remove(peerOnionAddress)
-    }
+
 
     /**
      * Periodic cleanup of failure tracking data
@@ -240,9 +238,7 @@ object GossipService {
         senderMediaBytes.clear()
     }
 
-    fun touchRelayState(mediaId: String) {
-        relayStates[mediaId]?.lastActivity = System.currentTimeMillis()
-    }
+
 
     /**
      * NOSLOP_VERIFY_BEFORE_FORWARD_V1 — the record half of dedup, split out of

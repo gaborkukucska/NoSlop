@@ -33,7 +33,7 @@ object YouTubeInternalClient {
     @Volatile
     private var proxyBlockedUntilMs = 0L
 
-    private fun proxyIsCoolingDown(): Boolean = System.currentTimeMillis() < proxyBlockedUntilMs
+
 
     private fun notePlayerProxyBlocked(code: Int) {
         proxyBlockedUntilMs = System.currentTimeMillis() + PROXY_COOLDOWN_MS
@@ -564,17 +564,7 @@ object YouTubeInternalClient {
         return null
     }
 
-    // --- NOSLOP_TOR_SIZE_CEILING_V1 ---
-    // Three relays deep, a 1.8GB progressive file is not a slow download, it
-    // is an impossible one — and accepting it burns the entire resolve budget
-    // finding that out. The 16:09 capture handed ExoPlayer 1806MB, 402MB and
-    // 149MB streams in a row, every one of which sat at bufPos=0 forever.
-    private const val TOR_STREAM_SIZE_CEILING_BYTES = 250L * 1024L * 1024L
 
-    private fun exceedsTorSizeCeiling(obj: JsonObject): Boolean {
-        val contentLength = obj.get("contentLength")?.asString?.toLongOrNull() ?: return false
-        return contentLength > TOR_STREAM_SIZE_CEILING_BYTES
-    }
 
     private fun extractUrlFromPlayerResponse(root: JsonObject, quality: String): String? {
         val streamingData = root.getAsJsonObject("streamingData") ?: return null

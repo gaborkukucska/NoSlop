@@ -1859,9 +1859,7 @@ fun toggleAggregator() {
     private val _isLocked = MutableStateFlow(false)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
-    fun checkLockStatus() {
-        viewModelScope.launch { _isLocked.value = repository.isLocked() }
-    }
+
 
     fun exportBackupToUri(context: Context, mnemonic: String, uri: android.net.Uri) {
         viewModelScope.launch {
@@ -2071,20 +2069,7 @@ fun toggleAggregator() {
         }
     }
 
-    fun discardFeedItem(itemId: String) {
-        val currentFeed = _unifiedFeed.value.toMutableList()
-        val iterator = currentFeed.iterator()
-        var modified = false
-        while (iterator.hasNext()) {
-            if (iterator.next().id == itemId) {
-                iterator.remove()
-                modified = true
-            }
-        }
-        if (modified) {
-            _unifiedFeed.value = currentFeed
-        }
-    }
+
 
     private suspend fun refreshExclusionCaches() {
         cachedViewedIds = repository.getViewedItemIds()
@@ -2134,11 +2119,7 @@ fun toggleAggregator() {
     }
 
 
-    fun advanceFeedTutorial() {
-        val next = _feedTutorialStep.value + 1
-        _feedTutorialStep.value = next
-        viewModelScope.launch { repository.putAppSetting("feed_tutorial_step", next.toString()) }
-    }
+
 
     fun setFeedTutorialStep(step: Int) {
         if (step > _feedTutorialStep.value) {
@@ -2222,24 +2203,7 @@ fun toggleAggregator() {
         }
     }
 
-    fun deleteFeedSource(source: FeedSource) {
-        viewModelScope.launch { repository.removeSource(source) }
-    }
 
-    fun addCustomFeedSource(title: String, url: String, category: String, feedType: String) {
-        viewModelScope.launch {
-            val resolvedUrl = try {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    com.noslop.app.feeds.FeedParser.resolveRssUrl(url)
-                }
-            } catch (e: Exception) { url }
-            val sourceId = "custom_${java.util.UUID.randomUUID().hashCode()}"
-            repository.insertSource(FeedSource(id = sourceId, url = resolvedUrl, title = title, feedType = feedType, category = category))
-            refreshFeeds()
-        }
-    }
-
-    fun isMeshListening(): Boolean = repository.meshTransport.isListening()
 
     fun updateMediaSettings(settings: MediaSettings) { 
         viewModelScope.launch { 
@@ -2262,7 +2226,7 @@ fun toggleAggregator() {
 
     fun setSendOnEnterEnabled(enabled: Boolean) { viewModelScope.launch { repository.setSendOnEnterEnabled(enabled) } }
 
-    fun sendTestPost() { viewModelScope.launch { repository.composeAndBroadcastPost("test-${System.currentTimeMillis()}") } }
+
 
     fun syncDmsWithPeer(peer: Peer) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -2378,19 +2342,7 @@ fun toggleAggregator() {
         }
     }
 
-    fun injectMeshClearnetToFeed(post: MeshPost) {
-        if (post.clearnetUrl == null) return
-        viewModelScope.launch {
-            val feedItem = FeedItem(
-                id = "mesh_${post.id}", sourceId = "mesh_shared", title = post.clearnetTitle ?: "Shared Link", url = post.clearnetUrl, author = post.authorHandle, excerpt = post.content.take(100), publishedAt = System.currentTimeMillis(), isRead = true, isSaved = false
-            )
-            repository.insertFeedItem(feedItem)
-            val currentFeed = _unifiedFeed.value.toMutableList()
-            currentFeed.add(0, UnifiedItem.Feed(feedItem))
-            _unifiedFeed.value = currentFeed
-            _scrollToTopEvent.emit(Unit)
-        }
-    }
+
 
     fun composeAndBroadcastComment(postId: String, content: String, parentCommentId: String? = null, mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null) {
         if (content.isBlank() && mediaMetadata == null) return

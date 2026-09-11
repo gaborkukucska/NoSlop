@@ -160,16 +160,7 @@ private fun expiryOfSource(source: VideoSource): Long = when (source) {
     is VideoSource.Unavailable -> System.currentTimeMillis() + UNAVAILABLE_TTL_MS
 }
 
-internal fun isSourceCached(url: String): Boolean {
-    // NOSLOP_ROUTE_AWARE_CACHE_V1 — entries are stored under "$url||$quality",
-    // so the bare-url lookup this used to do never matched anything and the
-    // function always answered false. Scan the quality variants, and apply the
-    // same route-aware validity test as every other reader.
-    val entry = sourceCache.entries
-        .firstOrNull { it.key == url || it.key.startsWith("$url||") }
-        ?.value ?: return false
-    return entry.stalenessReason() == null
-}
+
 
 private val resolveMutexes = ConcurrentHashMap<String, kotlinx.coroutines.sync.Mutex>()
 

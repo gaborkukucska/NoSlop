@@ -61,16 +61,7 @@ class MeshTransport(
         }
     }
 
-    fun stopListening() {
-        isRunning = false
-        listening = false
-        try {
-            serverSocket?.close()
-        } catch (e: Exception) {
-            // ignore
-        }
-        scope.cancel()
-    }
+
 
     private suspend fun handleIncomingConnection(socket: Socket) = withContext(Dispatchers.IO) {
         val clientIp = socket.remoteSocketAddress?.toString() ?: "unknown"
