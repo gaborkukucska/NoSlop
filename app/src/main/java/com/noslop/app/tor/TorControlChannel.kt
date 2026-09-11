@@ -100,16 +100,10 @@ object TorControlChannel {
 
     /**
      * --- NOSLOP_CONTROL_SOCKET_V2 ---
-     * The first cut of this shipped UNIX_ONLY and the control channel never
-     * opened: no bootstrap-phase lines, no hidden service, and the app never
-     * reached READY. tor writes nothing to logcat, so there was no way to tell
-     * whether tor refused to create the socket or whether we were looking in
-     * the wrong place.
-     *
-     * AUTO answers that question on the next run without keeping the app
-     * broken while we find out.
+     * Switched to UNIX_ONLY. File permissions on filesDir/tor/ControlSocket
+     * protect the control channel; no TCP control port is opened on loopback.
      */
-    val MODE = Mode.AUTO
+    val MODE = Mode.UNIX_ONLY
 
     @Volatile
     private var socketFile: File? = null
@@ -185,8 +179,8 @@ object TorControlChannel {
             Mode.TCP_ONLY -> "ControlPort ${Constants.TOR_CONTROL_PORT}\n"
             Mode.UNIX_ONLY -> {
                 if (f == null) {
-                    Logger.error(TAG, "torrcLines() called before configure() — falling back to a TCP control port")
-                    "ControlPort ${Constants.TOR_CONTROL_PORT}\n"
+                    Logger.error(TAG, "torrcLines() called before configure() — no control socket configured, emitting no control lines")
+                    ""
                 } else {
                     "ControlSocket ${f.absolutePath}\nControlSocketsGroupWritable 0\n"
                 }

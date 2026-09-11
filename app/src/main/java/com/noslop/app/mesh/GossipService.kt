@@ -14,6 +14,8 @@ object GossipService {
 
     private val processedPacketIds = LinkedHashSet<String>()
     private val senderRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
+    // P1-6: Dedicated rate limits for unauthenticated/untrusted lifecycle announcements (max 5 per 60s)
+    private val announcementRateLimits = ConcurrentHashMap<String, MutableList<Long>>()
 
     private val relayStates = ConcurrentHashMap<String, RelayState>()
 
@@ -226,6 +228,15 @@ object GossipService {
                 firewallIter.remove()
             }
         }
+
+        val announceIter = announcementRateLimits.entries.iterator()
+        while (announceIter.hasNext()) {
+            val entry = announceIter.next()
+            entry.value.removeAll { now - it > 60_000L }
+            if (entry.value.isEmpty()) {
+                announceIter.remove()
+            }
+        }
         senderMediaBytes.clear()
     }
 
@@ -360,6 +371,20 @@ object GossipService {
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT"
+
+        // P1-6: Dedicated rate limit for discoverable announcements & identity updates (5 per 60s per sender)
+        if (isDiscoverable || isIdentityUpdate) {
+            val now = System.currentTimeMillis()
+            val limitList = announcementRateLimits.getOrPut(senderId) { ArrayList() }
+            synchronized(limitList) {
+                limitList.removeAll { now - it > 60_000L }
+                if (limitList.size >= 5) {
+                    Logger.warn("FIREWALL", "Announcement rate limit (5/60s) exceeded for $senderId. Dropping ${packet.type} $packetId.")
+                    return false
+                }
+                limitList.add(now)
+            }
+        }
         
         if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate) {
             val dao = peerDao
@@ -386,9 +411,10 @@ object GossipService {
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
                 if (peer == null || !peer.isTrusted) {
-                    val payloadSize = packet.payload?.toString()?.length ?: 0
+                    // P1-6: UTF-8 byte count instead of UTF-16 character length
+                    val payloadSize = packet.payload?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: 0
                     val currentBytes = senderMediaBytes.getOrDefault(senderId, 0L)
-                    val MEDIA_BYTE_LIMIT = 2 * 1024 * 1024 // 2MB per 10s window
+                    val MEDIA_BYTE_LIMIT = 2 * 1024 * 1024 // 2MB per 60s window
                     if (currentBytes + payloadSize > MEDIA_BYTE_LIMIT) {
                         Logger.warn("FIREWALL", "Media byte limit exceeded for untrusted sender $senderId. Dropping packet ${packet.id}.")
                         return false

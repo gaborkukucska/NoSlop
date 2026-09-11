@@ -440,6 +440,17 @@ object TorService {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor circuits established. Promoting state to READY.")
                             setTorStatusMessage(null)
+
+                            // P0-3: Verify TCP control port is NOT open on loopback
+                            try {
+                                Socket().use { s ->
+                                    s.connect(InetSocketAddress(PROXY_HOST, Constants.TOR_CONTROL_PORT), 400)
+                                    Logger.error(TAG, "SECURITY ALERT: Unauthenticated TCP control port ${Constants.TOR_CONTROL_PORT} is accessible on loopback!")
+                                }
+                            } catch (_: Exception) {
+                                // Expected: TCP control port should be closed
+                            }
+
                             triggerRegistration()
                         }
                     } else {
@@ -589,15 +600,15 @@ object TorService {
             // Ensure parent directory exists
             torrcFile.parentFile?.mkdirs()
 
+            val controlLines = TorControlChannel.torrcLines()
             val content = buildString {
                 append("SocksPort $SOCKS_PORT IsolateSOCKSAuth KeepAliveIsolateSOCKSAuth\n")
                 append("ClientPreferIPv6ORPort 0\n")
-                append(TorControlChannel.torrcLines())
-                // Left at 0 deliberately: tor-android's own control connection
-                // authenticates with empty credentials, and enabling cookie auth
-                // globally would break it. Access control is the socket's file
-                // permissions, not a cookie.
-                append("CookieAuthentication 0\n")
+                append(controlLines)
+                // Only append CookieAuthentication when a TCP ControlPort is actually declared
+                if (controlLines.contains("ControlPort")) {
+                    append("CookieAuthentication 0\n")
+                }
             }
             java.io.FileWriter(torrcFile).use { it.write(content) }
             Logger.info(TAG, "Custom torrc written to ${torrcFile.absolutePath}")
