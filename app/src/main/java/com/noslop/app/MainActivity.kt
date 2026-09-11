@@ -14,6 +14,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import com.noslop.app.ui.MainScreen
+import com.noslop.app.debug.Logger
 import com.noslop.app.ui.NoSlopViewModel
 import com.noslop.app.ui.OnboardingScreen
 import com.noslop.app.ui.theme.MyApplicationTheme
@@ -58,7 +59,9 @@ class MainActivity : ComponentActivity() {
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Connecting to Tor network...")
                             try {
                                 com.noslop.app.net.HttpClientProvider.awaitNetworkReady(35000L)
-                            } catch (_: Exception) {}
+                            } catch (e: Exception) {
+                                Logger.debug("MAIN", "Tor awaitNetworkReady in splash failed or timed out: ${e.message}")
+                            }
 
                             var firstPreloadUrl: String? = null
                             var secondPreloadUrl: String? = null
@@ -106,7 +109,7 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             } catch (e: Exception) {
-                                // Caught timeout or deliberate success cancellation
+                                Logger.debug("MAIN", "Initial feed item check during splash ended: ${e.message}")
                             }
                             
                             // 3. Pre-warm Slide 1 media in background (never cancel mid-flight on timeout)
@@ -116,13 +119,17 @@ class MainActivity : ComponentActivity() {
                                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                                     try {
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, targetUrl)
-                                    } catch (_: Exception) {}
+                                    } catch (e: Exception) {
+                                        Logger.debug("MAIN", "Slide 1 preWarm failed: ${e.message}")
+                                    }
                                 }
                                 try {
                                     kotlinx.coroutines.withTimeoutOrNull(3000L) {
                                         com.noslop.app.ui.PreloadManager.waitForPreload(targetUrl)
                                     }
-                                } catch (_: Exception) {}
+                                } catch (e: Exception) {
+                                    Logger.debug("MAIN", "Slide 1 waitForPreload timed out or failed: ${e.message}")
+                                }
                             }
                             
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
@@ -141,7 +148,9 @@ class MainActivity : ComponentActivity() {
                                     try {
                                         kotlinx.coroutines.delay(1000L)
                                         com.noslop.app.ui.PreloadManager.preWarm(this@MainActivity, url)
-                                    } catch (_: Exception) {}
+                                    } catch (e: Exception) {
+                                        Logger.debug("MAIN", "Slide 2 async preWarm failed: ${e.message}")
+                                    }
                                 }
                             }
                         }

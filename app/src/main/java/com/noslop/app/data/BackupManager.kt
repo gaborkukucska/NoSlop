@@ -184,7 +184,11 @@ object BackupManager {
             false
         } finally {
             // Plaintext archive must not survive the export, success or failure.
-            try { if (tempZip.exists()) tempZip.delete() } catch (_: Exception) {}
+            try {
+                if (tempZip.exists()) tempZip.delete()
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Failed to clean up temp export zip: ${e.message}")
+            }
         }
     }
 
@@ -245,7 +249,11 @@ object BackupManager {
             } catch (e: Exception) {
                 // AEADBadTagException lands here: wrong mnemonic, or a tampered
                 // or truncated archive. Do not leave the partial plaintext around.
-                try { tempZip.delete() } catch (_: Exception) {}
+                try {
+                    tempZip.delete()
+                } catch (delEx: Exception) {
+                    Logger.debug(TAG, "Failed to clean up temp zip on decryption failure: ${delEx.message}")
+                }
                 Logger.error(TAG, "Import failed during decryption — wrong Word Cloud, or the archive is corrupt or has been modified: ${e.message}")
                 return false
             }
@@ -325,7 +333,11 @@ object BackupManager {
             Logger.error(TAG, "Import failed: ${e.message}")
             false
         } finally {
-            try { if (tempZip.exists()) tempZip.delete() } catch (_: Exception) {}
+            try {
+                if (tempZip.exists()) tempZip.delete()
+            } catch (e: Exception) {
+                Logger.debug(TAG, "Failed to clean up temp import zip: ${e.message}")
+            }
         }
     }
 
@@ -346,6 +358,7 @@ object BackupManager {
             )
             prefs.getString("ed25519_private_key", null) != null
         } catch (e: Exception) {
+            Logger.debug(TAG, "Probe of restored keystore-sealed identity failed (expected on new device): ${e.message}")
             false
         }
     }
@@ -368,6 +381,7 @@ object BackupManager {
             val parentPath = parent.canonicalPath + File.separator
             child.canonicalPath.startsWith(parentPath)
         } catch (e: Exception) {
+            Logger.debug(TAG, "Canonical path check failed for child ${child.name}: ${e.message}")
             false
         }
     }
