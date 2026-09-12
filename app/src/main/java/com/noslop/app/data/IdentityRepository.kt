@@ -97,6 +97,10 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             .putString("onboarding_complete", "true")
             .apply()
 
+        // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
+        appSettingDao.insertSetting(AppSetting("identity_version", "2"))
+        prefs.edit().putString("identity_version", "2").apply()
+
         // Public data -> Room (safe to query, display, share)
         appSettingDao.insertSetting(AppSetting("local_handle", handle))
         appSettingDao.insertSetting(AppSetting("local_pub_ed25519", keys.publicKeyB64))
@@ -198,6 +202,11 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
             Logger.warn(TAG, "Unlock failed: Mnemonic mismatch")
             false
         }
+    }
+
+    suspend fun getIdentityVersion(): Int {
+        val verStr = appSettingDao.getSetting("identity_version") ?: prefs.getString("identity_version", null)
+        return verStr?.toIntOrNull() ?: 1 // Default to version 1 for legacy pre-0.5.1 random keys
     }
 
     suspend fun getHandle(): String = appSettingDao.getSetting("local_handle") ?: "Anonymous"

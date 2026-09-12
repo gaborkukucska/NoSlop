@@ -18,52 +18,52 @@ object GroupMessageCrypto {
     private const val KEY_ALIAS = "noslop_group_storage_key"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_LENGTH = 128
-    const val CIPHERTEXT_PREFIX = "ENC:GCM:"
+
+    /** Current format version with mandatory AAD binding ($groupId|$msgId). */
+    const val CIPHERTEXT_PREFIX_V2 = "ENC:GCM2:"
+    /** Legacy prefix retained exclusively for pre-v0.5.2 rows without AAD. */
+    const val LEGACY_CIPHERTEXT_PREFIX = "ENC:GCM:"
 
     @Volatile
     private var cachedKey: SecretKey? = null
+
+    /**
+     * Test hook to supply an in-memory key in test environments (e.g. Robolectric)
+     * without polluting production code with an in-memory fallback.
+     */
+    @androidx.annotation.VisibleForTesting
     @Volatile
-    private var testFallbackKey: SecretKey? = null
+    var testKeyProviderOverride: (() -> SecretKey)? = null
 
     @Synchronized
     private fun getOrCreateKey(): SecretKey {
+        testKeyProviderOverride?.let { return it() }
         cachedKey?.let { return it }
-        return try {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            if (!keyStore.containsAlias(KEY_ALIAS)) {
-                val keyGenerator = KeyGenerator.getInstance(
-                    KeyProperties.KEY_ALGORITHM_AES,
-                    ANDROID_KEYSTORE
-                )
-                val spec = KeyGenParameterSpec.Builder(
-                    KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .setUserAuthenticationRequired(false)
-                    .build()
-                keyGenerator.init(spec)
-                val newKey = keyGenerator.generateKey()
-                cachedKey = newKey
-                newKey
-            } else {
-                val entry = keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry
-                val key = entry.secretKey
-                cachedKey = key
-                key
-            }
-        } catch (e: Exception) {
-            // AndroidKeyStore is unavailable in Robolectric/JVM unit test environments.
-            // Generate a standard in-memory AES-256 key for test execution.
-            testFallbackKey?.let { return it }
-            val kg = KeyGenerator.getInstance("AES")
-            kg.init(256)
-            val k = kg.generateKey()
-            testFallbackKey = k
-            k
+
+        val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        if (!keyStore.containsAlias(KEY_ALIAS)) {
+            val keyGenerator = KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
+            )
+            val spec = KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            )
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .setUserAuthenticationRequired(false)
+                .build()
+            keyGenerator.init(spec)
+            val newKey = keyGenerator.generateKey()
+            cachedKey = newKey
+            return newKey
         }
+        val entry = keyStore.getEntry(KEY_ALIAS, null) as KeyStore.SecretKeyEntry
+        val key = entry.secretKey
+        cachedKey = key
+        return key
     }
 
     private fun invalidateCachedKey() {
@@ -71,7 +71,7 @@ object GroupMessageCrypto {
     }
 
     /**
-     * Encrypt group message plaintext under Keystore-backed AES-GCM with optional AAD binding.
+     * Encrypt group message plaintext under Keystore-backed AES-GCM with AAD binding.
      * Fails closed: throws SecurityException on Keystore or encryption failure so plaintext is never stored.
      */
     fun encrypt(plaintext: String, groupId: String = "", msgId: String = ""): Pair<String, String> {
@@ -86,7 +86,7 @@ object GroupMessageCrypto {
             val ciphertextBytes = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
             val ciphertextB64 = Base64.encodeToString(ciphertextBytes, Base64.NO_WRAP)
             val ivB64 = Base64.encodeToString(iv, Base64.NO_WRAP)
-            return Pair("$CIPHERTEXT_PREFIX$ciphertextB64", ivB64)
+            return Pair("$CIPHERTEXT_PREFIX_V2$ciphertextB64", ivB64)
         } catch (e: Exception) {
             invalidateCachedKey()
             com.noslop.app.debug.Logger.error("CRYPTO", "Group message encryption failed: ${e.message}")
@@ -96,13 +96,22 @@ object GroupMessageCrypto {
 
     /**
      * Decrypt group message ciphertext under Keystore-backed AES-GCM.
-     * Attempts decryption with AAD first (if provided); falls back to decrypting without AAD for legacy entries.
+     * If prefix is ENC:GCM2:, strictly validates AAD ($groupId|$msgId); does NOT fall back to unauthenticated decryption.
+     * If prefix is legacy ENC:GCM:, decrypts without AAD for backward compatibility with pre-v0.5.2 rows.
      */
     fun decrypt(ciphertextWithPrefix: String, ivB64: String, groupId: String = "", msgId: String = ""): String {
-        if (!ciphertextWithPrefix.startsWith(CIPHERTEXT_PREFIX) || ivB64.isBlank()) {
+        val isV2 = ciphertextWithPrefix.startsWith(CIPHERTEXT_PREFIX_V2)
+        val isLegacy = ciphertextWithPrefix.startsWith(LEGACY_CIPHERTEXT_PREFIX)
+        if ((!isV2 && !isLegacy) || ivB64.isBlank()) {
             return ciphertextWithPrefix
         }
-        val rawB64 = ciphertextWithPrefix.removePrefix(CIPHERTEXT_PREFIX)
+
+        val rawB64 = if (isV2) {
+            ciphertextWithPrefix.removePrefix(CIPHERTEXT_PREFIX_V2)
+        } else {
+            ciphertextWithPrefix.removePrefix(LEGACY_CIPHERTEXT_PREFIX)
+        }
+
         val ciphertextBytes = try {
             Base64.decode(rawB64, Base64.DEFAULT)
         } catch (e: Exception) {
@@ -114,24 +123,13 @@ object GroupMessageCrypto {
             return ciphertextWithPrefix
         }
 
-        // Try decrypting with AAD first
-        if (groupId.isNotBlank() || msgId.isNotBlank()) {
-            try {
-                val key = getOrCreateKey()
-                val cipher = Cipher.getInstance(TRANSFORMATION)
-                cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
-                cipher.updateAAD("$groupId|$msgId".toByteArray(Charsets.UTF_8))
-                val decryptedBytes = cipher.doFinal(ciphertextBytes)
-                return String(decryptedBytes, Charsets.UTF_8)
-            } catch (_: Exception) {
-                // Decryption with AAD failed; fallback to decryption without AAD for backward-compatibility
-            }
-        }
-
         return try {
             val key = getOrCreateKey()
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+            if (isV2 && (groupId.isNotBlank() || msgId.isNotBlank())) {
+                cipher.updateAAD("$groupId|$msgId".toByteArray(Charsets.UTF_8))
+            }
             val decryptedBytes = cipher.doFinal(ciphertextBytes)
             String(decryptedBytes, Charsets.UTF_8)
         } catch (e: Exception) {

@@ -46,82 +46,6 @@ object TorService {
         _torBlockedMessage.value = message
     }
 
-    /**
-     * NOSLOP_TOR_CIRCUIT_V1
-     *
-     * Ask Tor for a fresh set of circuits (SIGNAL NEWNYM).
-     *
-     * Why this matters: googlevideo URLs are IP-locked to the exit that
-     * resolved them, and large exits are routinely blocked by Google. In the
-     * captured log every one of 27 stream URLs carried ip=185.220.101.15 and
-     * only one video ever played — a blocked exit, not a broken app.
-     *
-     * A new circuit means a new exit, which is very likely not blocked. This is
-     * the privacy-preserving answer to the problem: change route, never leave
-     * Tor.
-     *
-     * NEWNYM is rate-limited by Tor itself, so callers should not spam it.
-     *
-     * --- NOSLOP_NEWNYM_COOLDOWN_V1 ---
-     * That instruction was advice, not a guarantee, and the callers did not
-     * follow it: the 13:42 capture shows eighteen rotations in sixty-three
-     * seconds, fired independently by ~10 concurrent stream resolves. NEWNYM
-     * is process-wide — it discards the circuit the visible video is streaming
-     * through, which is precisely why several slides sat at bufPos=0 for
-     * twenty-plus seconds while the resolver "helpfully" rotated underneath
-     * them.
-     *
-     * The gate below is now the guarantee. A rotation is a shared, destructive
-     * resource: one at a time, and not more often than once every
-     * [NEWNYM_MIN_INTERVAL_MS]. A caller that is refused gets `false` and
-     * should treat it as "this route is what you have — try something else",
-     * not as an error.
-     */
-    private val newnymMutex = kotlinx.coroutines.sync.Mutex()
-
-    @Volatile
-    private var lastNewnymAtMs = 0L
-
-    /** Protect the Tor daemon and active circuits from rotation storms.
-     *  Rebuilding Tor circuits takes time; rotating faster than 90s overwhelms the daemon. */
-    private const val NEWNYM_MIN_INTERVAL_MS = 90_000L
-
-    // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
-    // Minimum 75s even when idle to prevent rapid circuit churn that invalidates caches.
-    private const val NEWNYM_IDLE_INTERVAL_MS = 75_000L
-
-    /** How recently the buffer must have advanced to count as "streaming". */
-    private const val MEDIA_ACTIVE_WINDOW_MS = 10_000L
-
-    // --- NOSLOP_COOPERATIVE_ROTATION_V1 ---
-    // A rotation performed by ANYONE moves EVERYONE onto a new exit — NEWNYM
-    // is process-wide. So when three concurrent resolves are all refused by
-    // the same gated exit and all ask to rotate, the two that lose the race
-    // are still on a fresh circuit a moment later. Reporting `false` to them
-    // and letting them read it as "nothing changed, give up" threw away
-    // exactly the retry that would have worked.
-    //
-    // Within this window, "someone else just rotated" is as good as "I
-    // rotated" and the caller should proceed.
-    private const val CIRCUIT_CONSIDERED_FRESH_MS = 30_000L
-
-    // --- NOSLOP_CIRCUIT_GENERATION_V1 ---
-    // Monotonic count of ACTUAL exit changes. googlevideo signs a stream URL to
-    // the IP that asked for it, so anything resolved under generation N is
-    // worthless once the process is on generation N+1. Consumers compare the
-    // generation stamped on a cached result against this value instead of
-    // trusting the URL's own `expire=` deadline, which says nothing about which
-    // route the URL is bound to.
-    //
-    // Incremented ONLY where a NEWNYM actually succeeded — not on the
-    // cooperative "someone else rotated recently, reporting success" path,
-    // where no rotation occurs and the sibling that did rotate has already
-    // bumped it.
-    @Volatile
-    private var _circuitGeneration = 0L
-
-    val circuitGeneration: Long get() = _circuitGeneration
-
     @Volatile
     private var lastMediaProgressAtMs = 0L
 
@@ -134,81 +58,6 @@ object TorService {
         lastMediaProgressAtMs = System.currentTimeMillis()
         if (_torBlockedMessage.value != null) {
             _torBlockedMessage.value = null
-        }
-    }
-
-    private fun mediaIsStreaming(): Boolean =
-        System.currentTimeMillis() - lastMediaProgressAtMs < MEDIA_ACTIVE_WINDOW_MS
-
-    suspend fun requestNewCircuit(): Boolean {
-        if (!newnymMutex.tryLock()) {
-            Logger.info(TAG, "Skipping NEWNYM — another rotation is already in flight")
-            return false
-        }
-        try {
-            // --- NOSLOP_ADAPTIVE_ROTATION_V1 ---
-            val streaming = mediaIsStreaming()
-            val requiredIntervalMs =
-                if (streaming) NEWNYM_MIN_INTERVAL_MS else NEWNYM_IDLE_INTERVAL_MS
-            val sinceMs = System.currentTimeMillis() - lastNewnymAtMs
-            if (lastNewnymAtMs != 0L && sinceMs < requiredIntervalMs) {
-                // --- NOSLOP_COOPERATIVE_ROTATION_V1 ---
-                // The caller wants to know whether it is on a fresh exit, not
-                // whether it personally issued the NEWNYM. A rotation seconds
-                // ago — by a sibling resolve refused on the same gated exit —
-                // has already given it one.
-                if (!streaming && sinceMs < CIRCUIT_CONSIDERED_FRESH_MS) {
-                    Logger.info(
-                        TAG,
-                        "Not rotating — another caller rotated ${sinceMs / 1000}s ago, so this " +
-                            "circuit is already fresh. Reporting success so the caller retries " +
-                            "on it instead of giving up."
-                    )
-                    return true
-                }
-                val why = if (streaming) {
-                    "because a video is streaming right now and rotating would kill its circuit."
-                } else {
-                    "even with nothing streaming."
-                }
-                Logger.info(
-                    TAG,
-                    "Skipping NEWNYM — rotated ${sinceMs / 1000}s ago, minimum interval is " +
-                        "${requiredIntervalMs / 1000}s $why"
-                )
-                return false
-            }
-            val ok = doRequestNewCircuit()
-            if (ok) {
-                lastNewnymAtMs = System.currentTimeMillis()
-                // NOSLOP_CIRCUIT_GENERATION_V1 — everything resolved on the old
-                // exit is now unusable. Bump before returning so a caller that
-                // re-resolves immediately stamps the new generation.
-                _circuitGeneration++
-                Logger.info(TAG, "Circuit rotated — generation is now ${_circuitGeneration}")
-            }
-            return ok
-        } finally {
-            newnymMutex.unlock()
-        }
-    }
-
-    private suspend fun doRequestNewCircuit(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-        try {
-            val channel = TorControlChannel.open() ?: run {
-                Logger.warn(TAG, "NEWNYM: control channel unavailable")
-                return@withContext false
-            }
-            channel.use { ch ->
-                ch.send("SIGNAL NEWNYM")
-                val resp = ch.readLine()
-                val ok = resp != null && resp.startsWith("250")
-                Logger.info(TAG, "SIGNAL NEWNYM -> $resp")
-                ok
-            }
-        } catch (e: Exception) {
-            Logger.warn(TAG, "requestNewCircuit failed: ${e.message}")
-            false
         }
     }
 
@@ -754,7 +603,7 @@ object TorService {
         }
 
     /**
-     * Wait for the ControlPort (9051) to be ready.
+     * Wait for the Tor control channel to be ready.
      */
     private suspend fun waitForControlPort(timeoutSeconds: Int = 10): Boolean =
         withContext(Dispatchers.IO) {

@@ -10,6 +10,21 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class GroupMessageCryptoTest {
 
+    private lateinit var testKey: javax.crypto.SecretKey
+
+    @org.junit.Before
+    fun setUp() {
+        val kg = javax.crypto.KeyGenerator.getInstance("AES")
+        kg.init(256)
+        testKey = kg.generateKey()
+        GroupMessageCrypto.testKeyProviderOverride = { testKey }
+    }
+
+    @org.junit.After
+    fun tearDown() {
+        GroupMessageCrypto.testKeyProviderOverride = null
+    }
+
     @Test
     fun encryptDecrypt_roundTripWithAad() {
         val plaintext = "Hello confidential group message"
@@ -17,7 +32,7 @@ class GroupMessageCryptoTest {
         val msgId = "msg-uuid-5678"
 
         val (ciphertext, nonce) = GroupMessageCrypto.encrypt(plaintext, groupId = groupId, msgId = msgId)
-        assertTrue(ciphertext.startsWith(GroupMessageCrypto.CIPHERTEXT_PREFIX))
+        assertTrue(ciphertext.startsWith(GroupMessageCrypto.CIPHERTEXT_PREFIX_V2))
         assertTrue(nonce.isNotBlank())
         assertNotEquals(plaintext, ciphertext)
 

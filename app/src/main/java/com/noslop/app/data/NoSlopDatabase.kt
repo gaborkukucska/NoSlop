@@ -154,14 +154,15 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     )
                 """.trimIndent())
 
-                // P0-2: Re-encrypt existing plaintext group chat messages at rest
+                // P0-2: Re-encrypt existing plaintext group chat messages at rest with AAD binding
                 try {
-                    val cursor = database.query("SELECT id, ciphertext FROM chat_messages WHERE (nonce = '' OR nonce IS NULL) AND chatWithPeerPub LIKE '%-%'")
+                    val cursor = database.query("SELECT id, ciphertext, chatWithPeerPub FROM chat_messages WHERE (nonce = '' OR nonce IS NULL) AND chatWithPeerPub LIKE '%-%'")
                     while (cursor.moveToNext()) {
                         val id = cursor.getString(0)
                         val plaintext = cursor.getString(1)
-                        if (!plaintext.startsWith(com.noslop.app.crypto.GroupMessageCrypto.CIPHERTEXT_PREFIX)) {
-                            val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext)
+                        val groupId = cursor.getString(2) ?: ""
+                        if (!plaintext.startsWith("ENC:GCM")) {
+                            val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(plaintext, groupId = groupId, msgId = id)
                             database.execSQL("UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?", arrayOf(encBody, iv, id))
                         }
                     }
