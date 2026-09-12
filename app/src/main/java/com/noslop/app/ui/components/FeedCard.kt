@@ -413,6 +413,8 @@ fun FullScreenMeshCardV2(
     }
 
     val myPubKey = viewModel?.localKeys?.collectAsState()?.value?.publicKeyB64
+    val burnablePubKey = viewModel?.burnableKeys?.collectAsState()?.value?.publicKeyB64
+    val isMyPost = post.authorPublicKeyB64 == myPubKey || (burnablePubKey != null && post.authorPublicKeyB64 == burnablePubKey)
     val allPeers by (viewModel?.peers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
     val resolveOriginOnion: () -> String? = {
         val rawOrigin = post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/") ?: ""
@@ -764,7 +766,7 @@ fun FullScreenMeshCardV2(
                         val peer = allPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
                         val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
                         val isTrusted = peer?.isTrusted == true
-                        val isSelf = post.authorPublicKeyB64 == myPubKey
+                        val isSelf = isMyPost
                         val isCreator = peer?.isCreator == true || discPeer?.isCreator == true || post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY
                         val effectiveDonationUrl = if (post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
                             peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
@@ -1070,7 +1072,7 @@ fun FullScreenMeshCardV2(
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
-                onDelete = if (post.authorPublicKeyB64 == myPubKey) { { showDeleteConfirm = true } } else null,
+                onDelete = if (isMyPost) { { showDeleteConfirm = true } } else null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .graphicsLayer { 

@@ -454,17 +454,22 @@ class MeshSocialRepository(
 
     suspend fun deleteMeshPost(postId: String): Boolean = withContext(Dispatchers.IO) {
         val myKeys = getLocalIdentity() ?: return@withContext false
+        val burnableKeys = getBurnableIdentity()
         val existingPost = postDao.getPostById(postId) ?: return@withContext false
         
-        if (existingPost.authorPublicKeyB64 != myKeys.publicKeyB64) return@withContext false
+        val signingKey = when (existingPost.authorPublicKeyB64) {
+            myKeys.publicKeyB64 -> myKeys
+            burnableKeys?.publicKeyB64 -> burnableKeys
+            else -> return@withContext false
+        }
         
         val timestamp = System.currentTimeMillis()
-        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, myKeys.publicKeyB64, timestamp.toString())
-        val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(postId, signingKey.publicKeyB64, timestamp.toString())
+        val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
         
         val deletePay = com.noslop.app.mesh.DeletePostPayload(
             postId = postId,
-            authorId = myKeys.publicKeyB64,
+            authorId = signingKey.publicKeyB64,
             timestamp = timestamp,
             signature = signature
         )
@@ -472,7 +477,7 @@ class MeshSocialRepository(
         val packet = com.noslop.app.mesh.NetworkPacket(
             id = UUID.randomUUID().toString(),
             hops = if (existingPost.privacy == "friends") 1 else 6,
-            senderId = myKeys.publicKeyB64,
+            senderId = signingKey.publicKeyB64,
             type = "DELETE_POST",
             payload = com.google.gson.Gson().toJsonTree(deletePay),
             signature = signature
