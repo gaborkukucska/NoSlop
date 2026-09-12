@@ -84,3 +84,6 @@ tmp_logs/
 *.logcat
 *.diff
 _workspace/
+!scripts/*.py
+!scripts/*.sh
+!scripts/*.kts

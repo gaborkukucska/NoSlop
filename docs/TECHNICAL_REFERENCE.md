@@ -2,7 +2,7 @@
 
 **Scope**: This document is a purely technical reference for the NoSlop
 Android application as it exists in the codebase (`com.noslop.app`,
-versionName `0.4.0-alpha`, Room schema version 11 — see §10, compileSdk/targetSdk
+versionName `0.5.3-alpha`, Room schema version 14 — see §10, compileSdk/targetSdk
 35, minSdk 24). It is intended to complement — not replace — `README.md` and
 `docs/PROJECT_STATUS.md`. Where this document and those files overlap, this
 document goes deeper into implementation detail (file paths, function names,
@@ -930,7 +930,7 @@ the ephemeral onion with the identity-derived one.
 
 ---
 
-## 10. Data Model (Room, version 8)
+## 10. Data Model (Room, version 14)
 
 | Entity / Table | Primary Key | Notable Fields | Indices |
 |---|---|---|---|
@@ -956,7 +956,7 @@ keyword lists (`keywords_<Category>`), `selected_categories`,
 `channel_cutoff_enabled`, `channel_cutoff_year`, `channel_cutoff_month`,
 `enable_aggregator`, `user_profile` (JSON), `dm_all_tab_hidden` (`"true"`/`"false"`).
 
-Database migrations (`MIGRATION_1_2` through `MIGRATION_7_8`) safely preserve data across schema updates. `MIGRATION_7_8` adds the optional `channelCreatedAt` timestamp to `feed_items` and `feed_sources`.
+Database migrations (`MIGRATION_1_2` through `MIGRATION_13_14`) safely preserve data across schema updates. `MIGRATION_12_13` introduced `pending_group_messages` and Keystore message encryption, and `MIGRATION_13_14` re-encrypts legacy group messages with mandatory AAD binding (`$groupId|$msgId`).
 
 ---
 
@@ -2015,6 +2015,12 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 (See previous section for content modal lists, author feed fast-path, and creator mode architecture.)
 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
+
+
+### 23.6 Migration 13 → 14, Group Message Gate & Word Cloud Recovery (v0.5.3-alpha)
+* **Migration 13 → 14**: Scans `chat_messages` for legacy `ENC:GCM:` group rows, decrypts via legacy unauthenticated GCM, re-encrypts under `ENC:GCM2:` with Additional Authenticated Data (`"$groupId|$msgId"`), and updates both ciphertext and IV.
+* **GroupMessageGate Architecture**: `DmPacketHandler.handleGroupMessage` delegates acceptance decisions to a pure, stateless evaluation gate (`GroupMessageGate`), enabling comprehensive JVM test coverage over group membership, author verification, and signature validity without Robolectric or instrumentation overhead.
+* **Word Cloud Restore**: Allows fresh devices to deterministically derive Ed25519 signing keys and X25519 encryption keys directly from the 12-word mnemonic phrase via HKDF-SHA512. Detects legacy pre-v0.5.1 identities (`identity_version < 2`) and protects them against loss.
 
 ### 23.5 Dual-Identity Deletion & Download UX Resilience (v0.5.2-alpha)
 * **Dual-Identity Post Deletion**: Mesh post deletion resolves the active signing key from either the user's primary identity or burnable creator identity (`burnableKeys`). The `DELETE_POST` packet is stamped and signed with the matching author key, ensuring peer firewalls and tombstone checks validate the request.

@@ -27,3 +27,11 @@ This document tracks active architectural enhancements and audit items for the N
 ## 6. LAN Hub TLS Pinning (Finding #14)
 - **Current State**: Because Android's Network Security Config enforces system-anchor TLS and restricts cleartext to loopback and `.onion`, Hub API interactions route reliably over the authenticated Tor hidden service (`.onion`) endpoint.
 - **Roadmap**: Support direct LAN HTTP fast-path with Hub self-signed certificate generation and fingerprint pinning.
+
+
+## 7. Client-Side Proxy Secret and Shared API Keys (P1-9 / D-2)
+- **Current State**: `PROXY_SECRET` is embedded via `BuildConfig` (defaulting to `NoSlopRocks2026`) and used for HMAC-SHA256 request signing against the Cloudflare Worker API proxy (`ProxyAuth.kt`). `JamendoApiClient.kt` carries a shared client ID (`CLIENT_ID = "709fa152"`). Outbound Cloudflare Worker proxy usage is disclosed in `docs/PRIVACY_POLICY.md`.
+- **Roadmap / Architectural Decision**: Hardcoded secrets inside an open-source client provide abuse friction rather than cryptographic secrecy. Long-term resolution:
+  1. Migrate Cloudflare Worker endpoints to server-side rate limiting or Proof-of-Work headers, completely deprecating client-side HMAC secret signing.
+  2. Support user-configurable custom API keys in `ApiKeysScreen` for Jamendo and custom proxy endpoints, consistent with the existing Guardian/NewsAPI/Pexels/Vimeo pattern.
+

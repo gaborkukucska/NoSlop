@@ -10,9 +10,23 @@ Two standing notes for whoever executes this:
 
 ---
 
-# Group A — Time-sensitive
+# Completed in v0.5.3-alpha (All Group A, B, C, D Items Resolved)
 
-## A-1. Migration 13 → 14: retire the legacy `ENC:GCM:` population
+- **A-1 & A-2**: Completed — Room bumped to version 14 with `MIGRATION_13_14` re-encrypting legacy `ENC:GCM:` rows with AAD binding; version bumped to 53 / `0.5.3-alpha`.
+- **B-1**: Completed — `GroupMessageGate` extracted into pure evaluation function; unit tests added in `GroupMessageSecurityTest.kt`.
+- **B-2**: Completed — `app/src/androidTest/` configured with `MigrationTest.kt` (13→14) and `PendingGroupMessageDaoTest.kt`.
+- **C-1, C-2, C-3, C-4**: Completed — `lastMediaProgressAtMs` removed, stale `circuitGeneration` comment updated to `streamNonce`, `senderPub` aligned to public key in `NotificationItem`, `getIdentityVersion()` actively utilized.
+- **D-1**: Completed — "Restore from Word Cloud" onboarding flow implemented with legacy `identity_version < 2` guard.
+- **D-2**: Completed — Recorded architectural decision in `docs/FINDINGS.md §7`.
+- **D-3**: Completed — Ad-hoc scripts moved to `scripts/`, `_workspace/` added to `.gitignore`.
+- **D-4**: Completed — 12 verified dead methods pruned across DAOs and clients.
+- **D-5**: Completed — Diagnostic logging added to silent catch blocks in `TorService.kt` and `ProxyAuth.kt`.
+
+---
+
+# Group A — Time-sensitive (Archive)
+
+## A-1. Migration 13 → 14: retire the legacy `ENC:GCM:` population [RESOLVED]
 
 **Why now:** anyone who installed the first `0.5.2-alpha` build has already run `MIGRATION_12_13`, which wrote `ENC:GCM:` rows with no AAD binding. The database is still at version 13, so the migration will not re-run, and nothing re-encrypts lazily on read. The legacy branch in `decrypt()` — whose entire purpose was to become retirable — can therefore never be retired by waiting. The affected population grows with every install of the current build.
 

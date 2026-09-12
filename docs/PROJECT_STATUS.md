@@ -1,5 +1,30 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-12) — Release v0.5.3-alpha: AAD Re-Encryption Migration, Word Cloud Restore & Test Harness
+
+* **Room Migration 13 → 14 (`NoSlopDatabase.kt`, `GroupMessageCrypto.kt`)**:
+  * Retired the legacy `ENC:GCM:` group message ciphertext format; re-encrypted existing rows under `ENC:GCM2:` with strict Additional Authenticated Data (AAD) binding (`"$groupId|$msgId"`).
+  * Migration executes idempotently, skipping rows already carrying `ENC:GCM2:`, and fails safe by logging warnings rather than aborting database open on hardware keystore errors.
+  * Stamped planned retirement date for legacy `ENC:GCM:` fallback branches in `GroupMessageCrypto.kt`.
+* **Mnemonic Word Cloud Identity Restore (`OnboardingScreen.kt`, `NoSlopViewModel.kt`, `NoSlopRepository.kt`)**:
+  * Implemented "Restore from Word Cloud" in the onboarding welcome screen, allowing users to deterministically reconstruct their Ed25519/X25519 keypair and `.onion` address directly from their 12-word mnemonic.
+  * Enforced legacy identity safeguard: checks `getIdentityVersion()` and warns users if an existing on-device identity is legacy (pre-v0.5.1, `version < 2`), preventing silent identity clobbering.
+  * Clarified backup import dialog copy to distinguish between encrypted ZIP archive restoration and sovereign Word Cloud derivation.
+* **Pure-JVM Group Message Gate Architecture (`DmPacketHandler.kt`, `GroupMessageSecurityTest.kt`)**:
+  * Extracted `GroupMessageGate.evaluate()` as a pure function decoupling packet authorization decisions (membership, signature validity, group existence) from Android/database side effects.
+  * Added unit test coverage asserting `GroupMessageGate` verdict states: unknown group, non-member sender, missing signature, invalid signature, and valid member.
+* **Instrumented Room Migration & DAO Test Suite (`app/src/androidTest/`)**:
+  * Configured `androidTest` source set with Room testing assets and schema locations.
+  * Added `MigrationTest.kt` verifying Room migration 13 → 14 against seeded legacy database rows, asserting format upgrades and authenticated AAD decryption.
+  * Added `PendingGroupMessageDaoTest.kt` asserting real SQLite execution of queue insertion, retrieval, peer deletion, and TTL expiration pruning.
+* **Diagnostics & Dead Code Cleanup (`TorService.kt`, `VideoPlayer.kt`, `Daos.kt`, `FeedParser.kt`, `SourceLibrary.kt`, `Packets.kt`)**:
+  * Removed dead write-only `lastMediaProgressAtMs` field from `TorService.kt`.
+  * Updated stale `CachedSource` comment in `VideoPlayer.kt` to reflect SOCKS5 `streamNonce` circuit invalidation.
+  * Aligned `NotificationItem.senderPub` to store authentic sender public keys (`packet.senderId`) consistent with chat messages and 1:1 DMs.
+  * Pruned 12 verified dead methods across DAOs, API clients, and network packet handlers.
+  * Replaced silent catch blocks with diagnostic `Logger.debug` logging in `TorService.kt` and `ProxyAuth.kt`.
+  * Added `_workspace/` to `.gitignore` and reorganized root test scripts into `scripts/`.
+
 ## Completed Changes (2026-09-12) — Release v0.5.2-alpha: Security Hardening, Dual-Identity Deletion & Media UX
 
 * **Creator Mode Dual-Identity Post Deletion & Lifecycle (`FeedCard.kt`, `MeshSocialRepository.kt`)**:
