@@ -257,6 +257,8 @@ class HandshakePacketHandler(
                 )
             }
             repo.setHandshakeAccepted(peer)
+            // Immediately request inventory sync to pull all broadcasts from the newly connected peer
+            repo.requestInventorySync(peer)
         }
         return true
     }

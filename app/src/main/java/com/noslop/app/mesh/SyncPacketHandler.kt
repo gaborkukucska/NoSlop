@@ -89,8 +89,9 @@ class SyncPacketHandler(
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
             val maxBatchSize = 25
+            val isCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true"
             val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
-            val effectiveSenderId = if (contactIdentity == "burnable") {
+            val effectiveSenderId = if (contactIdentity == "burnable" || isCreator) {
                 repo.getBurnableIdentity()?.publicKeyB64 ?: localKeys.publicKeyB64
             } else {
                 localKeys.publicKeyB64
@@ -282,7 +283,16 @@ class SyncPacketHandler(
             val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
             )
-            val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
+            val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString()
+            )
+            val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+            val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
+            val sig = postPay.signature ?: ""
+            val isValid = CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
+                CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
+                CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
+                CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting post ${postPay.id} — invalid signature")
                 continue
