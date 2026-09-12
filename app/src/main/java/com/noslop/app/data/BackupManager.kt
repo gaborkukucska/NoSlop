@@ -89,16 +89,13 @@ object BackupManager {
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
 
-            // Checkpoint WAL to ensure all data is flushed to the main DB file
+            // Checkpoint WAL using Room openHelper to ensure all data is flushed into mesh.db
             try {
-                val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                    dbFile.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READWRITE
-                )
-                db.rawQuery("PRAGMA wal_checkpoint(TRUNCATE)", null).use { it.moveToFirst() }
-                db.close()
-                Logger.info(TAG, "WAL checkpoint completed before export")
+                val db = NoSlopDatabase.getDatabase(context)
+                db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+                Logger.info(TAG, "WAL checkpoint (TRUNCATE) completed via Room openHelper")
             } catch (e: Exception) {
-                Logger.warn(TAG, "WAL checkpoint skipped: ${e.message}")
+                Logger.warn(TAG, "WAL checkpoint failed: ${e.message}")
             }
 
             ZipOutputStream(BufferedOutputStream(FileOutputStream(tempZip))).use { zos ->
@@ -107,11 +104,64 @@ object BackupManager {
                     addToZip(zos, dbFile, "database.db")
                 }
 
-                // Add SharedPreferences - primary (EncryptedSharedPreferences)
-                // Contains: Ed25519/X25519 private keys, mnemonic, onion address, handle, tripcode
-                //
-                // Sealed by a non-exportable Keystore key — useful for a same-device
-                // restore, inert on a new device. See the class header.
+                // Add sovereign identity JSON (encrypted inside this zip with the 12-word mnemonic)
+                try {
+                    val idRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
+                    val idKeys = idRepo.loadIdentity()
+                    if (idKeys != null) {
+                        val burnable = idRepo.getBurnableIdentity()
+                        val idObj = org.json.JSONObject().apply {
+                            put("publicKeyB64", idKeys.publicKeyB64)
+                            put("privateKeyB64", idKeys.privateKeyB64)
+                            put("encPublicKeyB64", idKeys.encPublicKeyB64)
+                            put("encPrivateKeyB64", idKeys.encPrivateKeyB64)
+                            put("handle", idRepo.getHandle())
+                            put("tripcode", idKeys.tripcode)
+                            put("onionAddress", idKeys.onionAddress)
+                            put("displayName", idKeys.displayName)
+                            put("mnemonic", idRepo.getMnemonic() ?: mnemonic)
+                            put("identity_version", idRepo.getIdentityVersion())
+                            if (burnable != null) {
+                                val bObj = org.json.JSONObject().apply {
+                                    put("publicKeyB64", burnable.publicKeyB64)
+                                    put("privateKeyB64", burnable.privateKeyB64)
+                                    put("encPublicKeyB64", burnable.encPublicKeyB64)
+                                    put("encPrivateKeyB64", burnable.encPrivateKeyB64)
+                                    put("tripcode", burnable.tripcode)
+                                    put("onionAddress", burnable.onionAddress)
+                                    put("displayName", burnable.displayName)
+                                }
+                                put("burnable", bObj)
+                            }
+                        }
+                        val tempIdFile = File(context.cacheDir, "identity_backup.json")
+                        tempIdFile.writeText(idObj.toString(), Charsets.UTF_8)
+                        addToZip(zos, tempIdFile, "identity_backup.json")
+                        tempIdFile.delete()
+                        Logger.info(TAG, "Exported sovereign identity JSON to archive")
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Failed to export identity JSON: ${e.message}")
+                }
+
+                // Add API keys as JSON for cross-device portability
+                try {
+                    val apiRepo = ApiKeyRepository(context)
+                    val apiObj = org.json.JSONObject()
+                    for (srv in ApiKeyRepository.SERVICES) {
+                        val k = apiRepo.getKey(srv.id)
+                        if (!k.isNullOrBlank()) apiObj.put(srv.id, k)
+                    }
+                    if (apiObj.length() > 0) {
+                        val tempApiFile = File(context.cacheDir, "api_keys_backup.json")
+                        tempApiFile.writeText(apiObj.toString(), Charsets.UTF_8)
+                        addToZip(zos, tempApiFile, "api_keys_backup.json")
+                        tempApiFile.delete()
+                    }
+                } catch (e: Exception) {
+                    Logger.warn(TAG, "Failed to export API keys JSON: ${e.message}")
+                }
+
                 val prefsFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
                 if (prefsFile.exists()) {
                     addToZip(zos, prefsFile, "preferences.xml")
@@ -268,7 +318,82 @@ object BackupManager {
                     val name = entry!!.name
                     when {
                         name == "database.db" -> {
-                            restoreFile(zis, context.getDatabasePath(DB_NAME))
+                            NoSlopDatabase.closeInstance()
+                            val targetDb = context.getDatabasePath(DB_NAME)
+                            val walFile = File(targetDb.path + "-wal")
+                            val shmFile = File(targetDb.path + "-shm")
+                            if (walFile.exists()) walFile.delete()
+                            if (shmFile.exists()) shmFile.delete()
+                            restoreFile(zis, targetDb)
+                        }
+                        name == "identity_backup.json" -> {
+                            val tempIdFile = File(context.cacheDir, "restored_identity.json")
+                            restoreFile(zis, tempIdFile)
+                            try {
+                                val jsonStr = tempIdFile.readText(Charsets.UTF_8)
+                                val obj = org.json.JSONObject(jsonStr)
+                                val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
+                                if (secureFile.exists()) secureFile.delete()
+
+                                val masterKey = androidx.security.crypto.MasterKey.Builder(context)
+                                    .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                                    .build()
+                                val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                                    context,
+                                    PREFS_NAME,
+                                    masterKey,
+                                    androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                                    androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                                )
+                                val edit = freshPrefs.edit()
+                                    .putString("ed25519_private_key", obj.getString("privateKeyB64"))
+                                    .putString("enc_private_key", obj.getString("encPrivateKeyB64"))
+                                    .putString("pub_ed25519", obj.getString("publicKeyB64"))
+                                    .putString("pub_enc", obj.getString("encPublicKeyB64"))
+                                    .putString("handle", obj.getString("handle"))
+                                    .putString("tripcode", obj.getString("tripcode"))
+                                    .putString("onion", obj.getString("onionAddress"))
+                                    .putString("display_name", obj.getString("displayName"))
+                                    .putString("mnemonic", obj.optString("mnemonic", mnemonic))
+                                    .putString("onboarding_complete", "true")
+                                    .putString("identity_version", obj.optString("identity_version", "2"))
+                                if (obj.has("burnable")) {
+                                    val bObj = obj.getJSONObject("burnable")
+                                    edit.putString("burnable_ed25519_private_key", bObj.getString("privateKeyB64"))
+                                        .putString("burnable_enc_private_key", bObj.getString("encPrivateKeyB64"))
+                                        .putString("burnable_pub_ed25519", bObj.getString("publicKeyB64"))
+                                        .putString("burnable_pub_enc", bObj.getString("encPublicKeyB64"))
+                                        .putString("burnable_tripcode", bObj.getString("tripcode"))
+                                        .putString("burnable_onion", bObj.getString("onionAddress"))
+                                        .putString("burnable_display_name", bObj.getString("displayName"))
+                                }
+                                edit.apply()
+                                restoredKeystoreSealedIdentity = true
+                                Logger.info(TAG, "Restored sovereign identity directly into hardware Keystore")
+                            } catch (e: Exception) {
+                                Logger.error(TAG, "Failed parsing identity_backup.json: ${e.message}")
+                            } finally {
+                                tempIdFile.delete()
+                            }
+                        }
+                        name == "api_keys_backup.json" -> {
+                            val tempApiFile = File(context.cacheDir, "restored_api_keys.json")
+                            restoreFile(zis, tempApiFile)
+                            try {
+                                val jsonStr = tempApiFile.readText(Charsets.UTF_8)
+                                val obj = org.json.JSONObject(jsonStr)
+                                val apiRepo = ApiKeyRepository(context)
+                                val keys = obj.keys()
+                                while (keys.hasNext()) {
+                                    val k = keys.next()
+                                    apiRepo.setKey(k, obj.getString(k))
+                                }
+                                Logger.info(TAG, "Restored API keys into hardware Keystore")
+                            } catch (e: Exception) {
+                                Logger.warn(TAG, "Failed parsing api_keys_backup.json: ${e.message}")
+                            } finally {
+                                tempApiFile.delete()
+                            }
                         }
                         name == "preferences.xml" -> {
                             restoreFile(zis, File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml"))

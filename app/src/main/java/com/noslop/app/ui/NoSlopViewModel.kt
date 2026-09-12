@@ -1929,11 +1929,11 @@ fun toggleAggregator() {
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
                     try {
+                        com.noslop.app.data.NoSlopDatabase.closeInstance()
                         val success = com.noslop.app.data.BackupManager.importData(
                             context, mnemonic, inputStream, allowLegacyUnauthenticated
                         )
                         if (success) {
-                            com.noslop.app.data.NoSlopDatabase.closeInstance()
                             context.getSharedPreferences("noslop_system", Context.MODE_PRIVATE)
                                 .edit().putBoolean("prompt_hub_after_restore", true).commit()
                             kotlinx.coroutines.delay(500)

@@ -17,19 +17,35 @@ class ApiKeyRepository(context: Context) {
 
     private val TAG = "API_KEY_REPO"
 
-    private val prefs: SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
+    private fun createEncryptedPrefs(ctx: Context): SharedPreferences {
+        val masterKey = MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            ctx,
             "noslop_api_keys",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
+            masterKey,
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
+    }
+
+    private val prefs: SharedPreferences = try {
+        createEncryptedPrefs(context)
     } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences init failed for API keys. Falling back to unencrypted.", e.message)
-        context.getSharedPreferences("noslop_api_keys_fallback", Context.MODE_PRIVATE)
+        val apiFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_api_keys.xml")
+        var recovered: SharedPreferences? = null
+        if (apiFile.exists()) {
+            try {
+                apiFile.delete()
+                recovered = createEncryptedPrefs(context)
+                Logger.info(TAG, "Recovered EncryptedSharedPreferences for API keys after clearing foreign file")
+            } catch (_: Exception) {}
+        }
+        recovered ?: run {
+            Logger.error(TAG, "EncryptedSharedPreferences init failed for API keys. Falling back to unencrypted.", e.message)
+            context.getSharedPreferences("noslop_api_keys_fallback", Context.MODE_PRIVATE)
+        }
     }
 
     fun getKey(service: String): String? = prefs.getString("api_key_$service", null)
