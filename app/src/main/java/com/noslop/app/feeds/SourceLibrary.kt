@@ -177,10 +177,6 @@ object SourceLibrary {
         BuiltInSource("api-artic-artworks", "Art Institute of Chicago", "artic:artworks", "api", "Art")
     )
 
-    fun getSourcesForCategory(category: String): List<BuiltInSource> {
-        return sources.filter { it.category == category }
-    }
-
     /**
      * Curated list of well-known creators, channels, YouTubers, podcasters, subreddits,
      * and content personalities per category. Used to seed the word-cloud suggestion UI

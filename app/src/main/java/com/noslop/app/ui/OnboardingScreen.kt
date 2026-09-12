@@ -288,9 +288,14 @@ fun OnboardingScreen(
 fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
     val context = LocalContext.current
     var showRestoreDialog by remember { mutableStateOf(false) }
+    var showWordCloudRestoreDialog by remember { mutableStateOf(false) }
     var mnemonicInput by remember { mutableStateOf("") }
+    var wordCloudHandleInput by remember { mutableStateOf("") }
+    var wordCloudMnemonicInput by remember { mutableStateOf("") }
     var isRestoring by remember { mutableStateOf(false) }
+    var isRestoringWordCloud by remember { mutableStateOf(false) }
     var restoreError by remember { mutableStateOf<String?>(null) }
+    var wordCloudRestoreError by remember { mutableStateOf<String?>(null) }
     
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -349,7 +354,20 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
         ) {
             Icon(Icons.Default.SettingsBackupRestore, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text("Restore from Backup".tr, fontWeight = FontWeight.Bold)
+            Text("Restore from Backup Archive".tr, fontWeight = FontWeight.Bold)
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        OutlinedButton(
+            onClick = { showWordCloudRestoreDialog = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp).height(50.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+            border = BorderStroke(1.dp, AccentGreen)
+        ) {
+            Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Restore from Word Cloud".tr, fontWeight = FontWeight.Bold)
         }
         
         if (showRestoreDialog) {
@@ -359,7 +377,7 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
                 title = { Text("Restore Profile Backup".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        Text("Enter your 12-word 'Word Cloud' to decrypt the backup file. The app will restart upon success.".tr, color = TextMuted, fontSize = 14.sp)
+                        Text("Enter the 12-word 'Word Cloud' password used when creating this backup file. The app will restart upon success.".tr, color = TextMuted, fontSize = 14.sp)
                         Spacer(modifier = Modifier.height(16.dp))
                         OutlinedTextField(
                             value = mnemonicInput,
@@ -391,6 +409,80 @@ fun Step1Welcome(viewModel: NoSlopViewModel, onComplete: () -> Unit) {
                 dismissButton = {
                     if (!isRestoring) {
                         TextButton(onClick = { showRestoreDialog = false }) {
+                            Text("Cancel".tr, color = TextMuted)
+                        }
+                    }
+                }
+            )
+        }
+
+        if (showWordCloudRestoreDialog) {
+            AlertDialog(
+                onDismissRequest = { if (!isRestoringWordCloud) showWordCloudRestoreDialog = false },
+                containerColor = SurfaceDark,
+                title = { Text("Restore Identity from Word Cloud".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text(
+                            "Enter your handle and your 12-word Word Cloud mnemonic to deterministically reconstruct your cryptographic identity and onion address.".tr,
+                            color = TextMuted,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = wordCloudHandleInput,
+                            onValueChange = { wordCloudHandleInput = it },
+                            label = { Text("Handle (e.g. satoshi)".tr) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = wordCloudMnemonicInput,
+                            onValueChange = { wordCloudMnemonicInput = it },
+                            label = { Text("12-Word Mnemonic".tr) },
+                            modifier = Modifier.fillMaxWidth().height(120.dp),
+                            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = TextLight, unfocusedTextColor = TextLight)
+                        )
+                        if (wordCloudRestoreError != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(wordCloudRestoreError!!, color = DestructiveRed, fontSize = 12.sp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            isRestoringWordCloud = true
+                            wordCloudRestoreError = null
+                            viewModel.restoreIdentityFromWordCloud(
+                                handle = wordCloudHandleInput,
+                                mnemonic = wordCloudMnemonicInput,
+                                onSuccess = {
+                                    isRestoringWordCloud = false
+                                    showWordCloudRestoreDialog = false
+                                    onComplete()
+                                },
+                                onError = { err ->
+                                    isRestoringWordCloud = false
+                                    wordCloudRestoreError = err
+                                }
+                            )
+                        },
+                        enabled = !isRestoringWordCloud && wordCloudHandleInput.isNotBlank() && wordCloudMnemonicInput.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                    ) {
+                        if (isRestoringWordCloud) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = PrimaryBlack)
+                        } else {
+                            Text("Restore Identity".tr, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                },
+                dismissButton = {
+                    if (!isRestoringWordCloud) {
+                        TextButton(onClick = { showWordCloudRestoreDialog = false }) {
                             Text("Cancel".tr, color = TextMuted)
                         }
                     }

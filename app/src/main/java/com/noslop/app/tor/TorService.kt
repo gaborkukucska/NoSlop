@@ -133,18 +133,24 @@ object TorService {
             TorControlChannel.open(connectTimeoutMs = 800, readTimeoutMs = 800)?.use { ch ->
                 ch.send("SIGNAL HALT")
             }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Logger.debug(TAG, "SIGNAL HALT on stopTor was ignored or closed: ${e.message}")
+        }
 
         try {
             val stopIntent = android.content.Intent(context, org.torproject.jni.TorService::class.java).apply {
                 action = "org.torproject.android.intent.action.STOP"
             }
             context.stopService(stopIntent)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Logger.debug(TAG, "Stop TorService intent failed: ${e.message}")
+        }
 
         try {
             context.unregisterReceiver(torStatusReceiver)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Logger.debug(TAG, "torStatusReceiver unregister notice: ${e.message}")
+        }
     }
 
     /**

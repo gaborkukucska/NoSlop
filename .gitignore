@@ -83,3 +83,4 @@ local.properties
 tmp_logs/
 *.logcat
 *.diff
+_workspace/

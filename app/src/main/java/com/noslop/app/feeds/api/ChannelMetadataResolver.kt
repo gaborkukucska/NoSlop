@@ -24,15 +24,6 @@ object ChannelMetadataResolver {
     }
 
     /**
-     * Manually record a known channel creation date.
-     */
-    fun setCreationDate(author: String, timestampMs: Long) {
-        if (author.isNotBlank() && timestampMs > 0L) {
-            cache[author.lowercase().trim()] = timestampMs
-        }
-    }
-
-    /**
      * Asynchronously resolves creation date for an author.
      * Uses video upload timestamp as a fallback upper bound when exact join date is unavailable.
      */

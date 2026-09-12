@@ -446,14 +446,6 @@ data class NetworkPacket(
         Gson().fromJson(payload, MediaRecoveryFoundPayload::class.java)
     } else null
 
-    fun getMediaPendingPayload(): MediaPendingPayload? = if (type == "MEDIA_PENDING" && payload != null) {
-        Gson().fromJson(payload, MediaPendingPayload::class.java)
-    } else null
-
-    fun getMediaTransferAckPayload(): MediaTransferAckPayload? = if (type == "MEDIA_TRANSFER_ACK" && payload != null) {
-        Gson().fromJson(payload, MediaTransferAckPayload::class.java)
-    } else null
-
     fun getCommentPayload(): CommentPayload? = if (type == "COMMENT" && payload != null) {
         Gson().fromJson(payload, CommentPayload::class.java)
     } else null

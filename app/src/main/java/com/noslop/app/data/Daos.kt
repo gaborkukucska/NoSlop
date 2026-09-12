@@ -100,9 +100,6 @@ interface PeerDao {
     @Query("SELECT * FROM peers WHERE isTemporary = 1 ORDER BY lastSeenAt DESC")
     fun getTemporaryPeers(): Flow<List<Peer>>
 
-    @Query("SELECT * FROM peers WHERE customFolder = :folder AND isTrusted = 1 ORDER BY lastSeenAt DESC")
-    fun getPeersByFolder(folder: String): Flow<List<Peer>>
-
     @Query("SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 ORDER BY lastSeenAt DESC")
     fun getDiscoverablePeers(): Flow<List<Peer>>
 
@@ -140,9 +137,6 @@ interface PostDao {
 
     @Query("SELECT * FROM mesh_posts WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getPostsSince(since: Long): List<MeshPost>
-
-    @Query("SELECT * FROM mesh_posts WHERE isOrphaned = 1 AND authorPublicKeyB64 = :authorId")
-    suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost>
 
     // --- NOSLOP_DELETION_BUDGET_V1 ---
     // Orphaned posts still owing a deletion announcement. Ordered oldest-first
@@ -273,9 +267,6 @@ interface ReactionDao {
 
     @Query("DELETE FROM mesh_reactions WHERE id = :id")
     suspend fun deleteReactionById(id: String)
-
-    @Query("SELECT COUNT(*) FROM mesh_reactions WHERE postId = :postId")
-    suspend fun getReactionCountForPost(postId: String): Int
 
     // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
     @Query("DELETE FROM mesh_reactions WHERE authorPublicKeyB64 = :authorId")

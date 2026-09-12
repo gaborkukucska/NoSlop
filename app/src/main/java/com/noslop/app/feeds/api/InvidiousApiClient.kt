@@ -89,17 +89,6 @@ object InvidiousApiClient {
         instanceFailureTime.remove(instance)
     }
 
-    fun getPrimaryInstance(): String {
-        val all = (INVIDIOUS_INSTANCES + gossipedInstances).distinct()
-        val isTor = com.noslop.app.net.HttpClientProvider.useTorForClearnet
-        val usable = if (isTor) {
-            all.filter { it.contains(".onion") } + all.filter { !it.contains(".onion") }
-        } else {
-            all.filter { !it.contains(".onion") }
-        }
-        return usable.firstOrNull { !isInstanceCoolingDown(it) } ?: usable.first()
-    }
-
     fun preWarmInstances() {
         CoroutineScope(Dispatchers.IO).launch {
             // Proactively warm up healthy instances in background

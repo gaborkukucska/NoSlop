@@ -18,7 +18,10 @@ object ProxyAuth {
             sha256HMAC.init(secretKey)
             val hash = sha256HMAC.doFinal(signatureInput.toByteArray(Charsets.UTF_8))
             hash.joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) { "" }
+        } catch (e: Exception) {
+            com.noslop.app.debug.Logger.debug("PROXY_AUTH", "Failed to compute HMAC signature: ${e.message}")
+            ""
+        }
 
         if (com.noslop.app.BuildConfig.PROXY_SEND_LEGACY_SECRET) {
             builder.header("X-Proxy-Secret", PROXY_SECRET)

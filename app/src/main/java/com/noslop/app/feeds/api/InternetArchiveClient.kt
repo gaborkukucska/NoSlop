@@ -129,24 +129,6 @@ object InternetArchiveClient {
         return fetchAndParse(url, "video", sourceId)
     }
 
-    /**
-     * Get public domain feature films.
-     */
-    suspend fun getPublicDomainFilms(
-        sourceId: String = "api-archive-video",
-        rows: Int = 20
-    ): List<FeedItem> {
-        val encodedQuery = java.net.URLEncoder.encode(
-            "collection:feature_films AND mediatype:movies", "UTF-8"
-        )
-        val url = "https://archive.org/advancedsearch.php?" +
-                "q=$encodedQuery&" +
-                "fl[]=identifier,title,description,creator,mediatype,date,subject&" +
-                "sort[]=downloads+desc&" +
-                "rows=$rows&output=json"
-        return fetchAndParse(url, "video", sourceId)
-    }
-
     private suspend fun search(
         encodedQuery: String,
         defaultMediaType: String,

@@ -37,8 +37,6 @@ class MeshTransport(
     // peer cannot buffer the heap away by never sending a newline.
     private val MAX_PACKET_CHARS = 4 * 1024 * 1024
 
-    fun isListening(): Boolean = listening
-
     fun startListening() {
         if (isRunning) return
         isRunning = true

@@ -107,7 +107,6 @@ class FakeReactionDao : ReactionDao {
     override fun getReactionsForPost(postId: String): Flow<List<MeshReaction>> =
         flowOf(store.values.filter { it.postId == postId })
     override fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> = flowOf(emptyList())
-    override suspend fun getReactionCountForPost(postId: String): Int = store.values.count { it.postId == postId }
     override suspend fun deleteReactionsByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
 }
@@ -133,7 +132,6 @@ class FakePeerDao : PeerDao {
     override fun getAllPeers(): Flow<List<Peer>> = flowOf(peers.values.toList())
     override fun getTrustedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTrusted })
     override fun getTemporaryPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isTemporary })
-    override fun getPeersByFolder(folder: String): Flow<List<Peer>> = flowOf(peers.values.filter { it.customFolder == folder })
     override fun getDiscoverablePeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isDiscoverable })
     override fun getFollowedPeers(): Flow<List<Peer>> = flowOf(peers.values.filter { it.isFollowing })
     override suspend fun updateFollowState(pubKey: String, isFollowing: Boolean) {
@@ -149,7 +147,6 @@ class FakePostDao : PostDao {
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
-    override suspend fun getOrphanedPostsByAuthor(authorId: String): List<MeshPost> = emptyList()
     override suspend fun getPendingDeletionsByAuthor(authorId: String, maxBroadcasts: Int, limit: Int): List<MeshPost> =
         posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId && it.deletionBroadcasts < maxBroadcasts }
             .sortedBy { it.timestamp }.take(limit)

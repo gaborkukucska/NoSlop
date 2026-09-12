@@ -203,8 +203,6 @@ object Logger {
 
     fun getLogs(): List<LogEntry> = ringBuffer.toList()
 
-    fun getRecentLogs(n: Int): List<String> = ringBuffer.toList().takeLast(n).map { it.toString() }
-
     fun clearLog() {
         ringBuffer.clear()
         val file = logFile
