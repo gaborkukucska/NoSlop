@@ -89,6 +89,12 @@ class SyncPacketHandler(
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
             val maxBatchSize = 25
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
+            val effectiveSenderId = if (contactIdentity == "burnable") {
+                repo.getBurnableIdentity()?.publicKeyB64 ?: localKeys.publicKeyB64
+            } else {
+                localKeys.publicKeyB64
+            }
             
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {
@@ -96,7 +102,7 @@ class SyncPacketHandler(
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)
@@ -143,10 +149,18 @@ class SyncPacketHandler(
         val syncPay = packet.getInventorySyncRequestPayload() ?: return false
         val peerInventory = syncPay.inventory.associate { it.id to it.hash }
         
-        val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-        val recentPosts = postDao.getPostsSince(sevenDaysAgo).filter { !it.isOrphaned }
+        val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
+        val myPub = localKeys.publicKeyB64
+        val myBurnablePub = repo.getBurnableIdentity()?.publicKeyB64
+        val candidatePosts = postDao.getPostsSince(syncCutoff).filter { !it.isOrphaned }.toMutableList()
+        // Always include own authored broadcasts regardless of age
+        val olderOwnPosts = postDao.getPostsSince(0L).filter {
+            !it.isOrphaned && it.timestamp <= syncCutoff &&
+            (it.authorPublicKeyB64 == myPub || (myBurnablePub != null && it.authorPublicKeyB64 == myBurnablePub))
+        }
+        candidatePosts.addAll(olderOwnPosts)
         
-        val missingOrUpdatedPosts = recentPosts.filter { post ->
+        val missingOrUpdatedPosts = candidatePosts.filter { post ->
             val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
             val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
             val hashBytes = ByteArray(digest.digestSize)
@@ -184,15 +198,21 @@ class SyncPacketHandler(
             )
         }
 
-        val recentComments = commentDao.getCommentsSince(sevenDaysAgo)
+        val recentComments = commentDao.getCommentsSince(syncCutoff)
         val commentSyncList = recentComments.map { it.toCommentSyncData() }
 
-        val recentReactions = reactionDao.getReactionsSince(sevenDaysAgo)
+        val recentReactions = reactionDao.getReactionsSince(syncCutoff)
         val reactionSyncList = recentReactions.map { it.toReactionSyncData() }
 
         val requestingPeer = peerDao.getPeerByPublicKey(packet.senderId)
         if (requestingPeer != null) {
             val maxBatchSize = 25
+            val contactIdentity = db.appSettingDao().getSetting("contact_identity_${packet.senderId}")
+            val effectiveSenderId = if (contactIdentity == "burnable") {
+                repo.getBurnableIdentity()?.publicKeyB64 ?: localKeys.publicKeyB64
+            } else {
+                localKeys.publicKeyB64
+            }
 
             // Send posts in batches
             for (postBatch in postPayloads.chunked(maxBatchSize)) {
@@ -200,7 +220,7 @@ class SyncPacketHandler(
                 val respPacket = NetworkPacket(
                     id = UUID.randomUUID().toString(),
                     hops = 3,
-                    senderId = localKeys.publicKeyB64,
+                    senderId = effectiveSenderId,
                     targetUserId = packet.senderId,
                     type = "SYNC_RESPONSE",
                     payload = com.google.gson.Gson().toJsonTree(syncResp)

@@ -735,10 +735,15 @@ class MeshSocialRepository(
     }
 
     suspend fun requestInventorySync(peer: Peer) = withContext(Dispatchers.IO) {
-        val myKeys = getLocalIdentity() ?: return@withContext
-        val sevenDaysAgo = System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-        val recentPosts = postDao.getPostsSince(sevenDaysAgo)
-        val inventory = recentPosts.map { post ->
+        val myKeys = getIdentityForPeer(peer.publicKeyB64) ?: getLocalIdentity() ?: return@withContext
+        val syncCutoff = System.currentTimeMillis() - 365L * 24 * 60 * 60 * 1000L
+        val myPub = myKeys.publicKeyB64
+        val candidatePosts = postDao.getPostsSince(syncCutoff).toMutableList()
+        val olderOwnPosts = postDao.getPostsSince(0L).filter {
+            it.timestamp <= syncCutoff && it.authorPublicKeyB64 == myPub
+        }
+        candidatePosts.addAll(olderOwnPosts)
+        val inventory = candidatePosts.map { post ->
             val hashInput = "${post.id}|${post.authorPublicKeyB64}|${post.content}|${post.timestamp}".toByteArray(Charsets.UTF_8)
             val digest = org.bouncycastle.crypto.digests.SHA3Digest(256)
             val hashBytes = ByteArray(digest.digestSize)
