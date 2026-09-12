@@ -107,20 +107,23 @@ object BackupManager {
                 // Add sovereign identity JSON (encrypted inside this zip with the 12-word mnemonic)
                 try {
                     val idRepo = IdentityRepository(context, NoSlopDatabase.getDatabase(context).appSettingDao())
-                    val idKeys = idRepo.loadIdentity()
-                    if (idKeys != null) {
+                    val idObj = kotlinx.coroutines.runBlocking {
+                        val idKeys = idRepo.loadIdentity() ?: return@runBlocking null
                         val burnable = idRepo.getBurnableIdentity()
-                        val idObj = org.json.JSONObject().apply {
+                        val handle = idRepo.getHandle()
+                        val idMnemonic = idRepo.getMnemonic() ?: mnemonic
+                        val idVersion = idRepo.getIdentityVersion()
+                        org.json.JSONObject().apply {
                             put("publicKeyB64", idKeys.publicKeyB64)
                             put("privateKeyB64", idKeys.privateKeyB64)
                             put("encPublicKeyB64", idKeys.encPublicKeyB64)
                             put("encPrivateKeyB64", idKeys.encPrivateKeyB64)
-                            put("handle", idRepo.getHandle())
+                            put("handle", handle)
                             put("tripcode", idKeys.tripcode)
                             put("onionAddress", idKeys.onionAddress)
                             put("displayName", idKeys.displayName)
-                            put("mnemonic", idRepo.getMnemonic() ?: mnemonic)
-                            put("identity_version", idRepo.getIdentityVersion())
+                            put("mnemonic", idMnemonic)
+                            put("identity_version", idVersion)
                             if (burnable != null) {
                                 val bObj = org.json.JSONObject().apply {
                                     put("publicKeyB64", burnable.publicKeyB64)
@@ -134,6 +137,8 @@ object BackupManager {
                                 put("burnable", bObj)
                             }
                         }
+                    }
+                    if (idObj != null) {
                         val tempIdFile = File(context.cacheDir, "identity_backup.json")
                         tempIdFile.writeText(idObj.toString(), Charsets.UTF_8)
                         addToZip(zos, tempIdFile, "identity_backup.json")
