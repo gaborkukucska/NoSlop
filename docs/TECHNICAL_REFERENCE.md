@@ -2023,7 +2023,7 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ### 23.1 Group Messaging E2EE Fan-out & At-Rest Encryption
 * **Pairwise Fan-out**: Group message bodies are encrypted per-member using that member's X25519 key agreement and ChaCha20-Poly1305 AEAD. Cleartext gossip relaying has been completely eliminated.
 * **Store-and-Forward Outbox**: Undelivered group messages for offline members are stored in `pending_group_messages` table and flushed on peer connect with automatic 7-day expiration.
-* **At-Rest Encryption with AAD**: Group chat message bodies stored in Room are encrypted under Android Keystore AES-256-GCM via `GroupMessageCrypto.encrypt`/`decrypt` (Room version 13, `MIGRATION_12_13`). Encryption fails closed (never falls back to plaintext on Keystore failure), caches `SecretKey` in memory, and cryptographically binds message ID and group ID via Additional Authenticated Data (AAD).
+* **At-Rest Encryption with AAD**: Group chat message bodies stored in Room are encrypted under Android Keystore AES-256-GCM via `GroupMessageCrypto.encrypt`/`decrypt` (Room version 13, `MIGRATION_12_13`). Encryption fails closed (never falls back to plaintext or ephemeral keys on Keystore failure in production), caches `SecretKey` in memory, uses prefix `ENC:GCM2:`, and cryptographically binds message ID and group ID via Additional Authenticated Data (AAD).
 
 ### 23.2 Hardened Tor Control & Address Derivation
 * **UNIX_ONLY Sockets**: `TorControlChannel` uses `Mode.UNIX_ONLY` bound to app-private `filesDir/tor/ControlSocket`. The loopback TCP control port 9051 is closed, with post-bootstrap verification.

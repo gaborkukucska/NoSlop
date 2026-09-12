@@ -13,9 +13,11 @@
   * Resolved a UI freeze in DM chat where tapping "Tap to Download" on GIFs or images appeared inactive before chunk reception.
 * **Group Message Crypto Hardening & AAD Binding (`GroupMessageCrypto.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`)**:
   * Eliminated silent plaintext fallbacks in `GroupMessageCrypto.encrypt()`: now strictly fails closed via `SecurityException`.
-  * Added Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"` on both encryption and decryption to prevent cross-row ciphertext transplantation attacks.
+  * Removed in-production test key fallback in `getOrCreateKey()`; isolated test key injection cleanly to `@VisibleForTesting testKeyProviderOverride`.
+  * Introduced versioned prefix `ENC:GCM2:` strictly enforcing Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"` with zero fallback, while maintaining `ENC:GCM:` backward compatibility for pre-v0.5.2 rows.
+  * Updated Room migration `MIGRATION_12_13` to bind `groupId` and `msgId` as AAD during group message re-encryption.
   * Added in-memory Keystore `SecretKey` caching to eliminate expensive hardware keystore roundtrips on message reads.
-  * Avoided brittle hyphen assumptions for group identification by validating against `GroupChatDao`.
+  * Stored explicit `identity_version = "2"` in `IdentityRepository` to track deterministic HKDF-derived keys.
 * **Tor Dead Code & Circuit Rotation Cleanup (`TorService.kt`)**:
   * Removed dead NEWNYM circuit rotation routines (`requestNewCircuit`, `_circuitGeneration`, etc.) in favor of modern SOCKS5 stream nonce-bumping.
 * **SSH Host Key Verification & Pinned Fingerprint Management (`HubSetupScreen.kt`, `SettingsTab.kt`)**:
