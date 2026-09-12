@@ -6,7 +6,7 @@
 
 <p align="center">
   <img alt="Build Status" src="https://img.shields.io/badge/Build-Passing-brightgreen?style=for-the-badge&logo=android">
-  <img alt="Status" src="https://img.shields.io/badge/Status-v0.5.2--alpha-orange?style=for-the-badge">
+  <img alt="Status" src="https://img.shields.io/badge/Status-v0.5.3--alpha-orange?style=for-the-badge">
   <img alt="Privacy" src="https://img.shields.io/badge/Privacy-Tor_Default_(Toggleable)-blueviolet?style=for-the-badge&logo=torproject">
   <img alt="Network" src="https://img.shields.io/badge/Network-HAI--Net_/_HUBs-blue?style=for-the-badge">
   <img alt="License" src="https://img.shields.io/badge/License-AGPL--3.0-purple?style=for-the-badge">

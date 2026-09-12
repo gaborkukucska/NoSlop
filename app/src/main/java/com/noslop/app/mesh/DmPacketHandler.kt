@@ -262,32 +262,27 @@ class DmPacketHandler(
 
     suspend fun handleGroupMessage(packet: NetworkPacket): Boolean {
         val groupMsg = packet.getGroupMessagePayload() ?: return false
-        val group = db.groupChatDao().getGroupChatById(groupMsg.groupId) ?: return false
 
         // Deduplication: ignore if message already exists locally
         if (messageDao.hasMessage(groupMsg.id) > 0) return true
 
-        // P0-1: Strict membership check
-        val members: List<String> = try {
-            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
-        } catch (e: Exception) { emptyList() }
-        if (!members.contains(packet.senderId)) {
-            Logger.warn(TAG, "Rejected GROUP_MESSAGE: sender ${packet.senderId} is not a member of group ${group.groupId}")
-            return false
+        val group = db.groupChatDao().getGroupChatById(groupMsg.groupId)
+        val sig = groupMsg.signature
+        val signatureValid = if (!sig.isNullOrBlank()) {
+            val expectedSignPayload = CryptoService.encodeForSigning(
+                groupMsg.groupId, groupMsg.id, groupMsg.content, groupMsg.timestamp.toString(), packet.senderId
+            )
+            CryptoService.verify(expectedSignPayload, sig, packet.senderId)
+        } else {
+            false
         }
 
-        // P0-1: Verify Ed25519 signature over canonical payload
-        val sig = groupMsg.signature
-        if (sig.isNullOrBlank()) {
-            Logger.warn(TAG, "Rejected GROUP_MESSAGE: missing cryptographic signature from sender ${packet.senderId}")
-            return false
-        }
-        val expectedSignPayload = CryptoService.encodeForSigning(
-            groupMsg.groupId, groupMsg.id, groupMsg.content, groupMsg.timestamp.toString(), packet.senderId
-        )
-        if (!CryptoService.verify(expectedSignPayload, sig, packet.senderId)) {
-            Logger.warn(TAG, "Rejected GROUP_MESSAGE: signature verification failed for sender ${packet.senderId}")
-            return false
+        when (val verdict = GroupMessageGate.evaluate(groupMsg, group, packet.senderId, signatureValid)) {
+            is GroupMessageGate.Verdict.Reject -> {
+                Logger.warn(TAG, "Rejected GROUP_MESSAGE: ${verdict.reason}")
+                return false
+            }
+            is GroupMessageGate.Verdict.Accept -> { /* proceed */ }
         }
 
         val (encBody, iv) = try {
@@ -313,7 +308,7 @@ class DmPacketHandler(
         val title = com.noslop.app.util.LanguageManager.translate("New Group Message")
         val msgBody = com.noslop.app.util.LanguageManager.translate("Message from {author} in {group}")
             .replace("{author}", groupMsg.senderHandle)
-            .replace("{group}", group.title)
+            .replace("{group}", group!!.title)
         val route = "group_chat/${group.groupId}"
 
         notificationDao.insertNotification(
@@ -324,7 +319,7 @@ class DmPacketHandler(
                 body = msgBody,
                 targetRoute = route,
                 iconType = "group",
-                senderPub = groupMsg.senderHandle
+                senderPub = packet.senderId // C-3: Store key, aligning with ChatMessage and 1:1 DMs
             )
         )
 
@@ -392,5 +387,39 @@ class DmPacketHandler(
             kotlinx.coroutines.delay(100L)
         }
         return true
+    }
+}
+
+/**
+ * Pure evaluation gate for incoming group messages to allow isolated unit testing (B-1).
+ */
+object GroupMessageGate {
+    sealed class Verdict {
+        object Accept : Verdict()
+        data class Reject(val reason: String) : Verdict()
+    }
+
+    fun evaluate(
+        payload: GroupMessagePayload,
+        group: GroupChat?,
+        senderId: String,
+        signatureValid: Boolean
+    ): Verdict {
+        if (group == null) {
+            return Verdict.Reject("sender $senderId sent message for unknown group ${payload.groupId}")
+        }
+        val members: List<String> = try {
+            com.google.gson.Gson().fromJson(group.membersJson, Array<String>::class.java).toList()
+        } catch (e: Exception) { emptyList() }
+        if (!members.contains(senderId)) {
+            return Verdict.Reject("sender $senderId is not a member of group ${group.groupId}")
+        }
+        if (payload.signature.isNullOrBlank()) {
+            return Verdict.Reject("missing cryptographic signature from sender $senderId")
+        }
+        if (!signatureValid) {
+            return Verdict.Reject("signature verification failed for sender $senderId")
+        }
+        return Verdict.Accept
     }
 }

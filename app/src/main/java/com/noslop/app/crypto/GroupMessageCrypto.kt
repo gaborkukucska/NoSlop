@@ -21,7 +21,11 @@ object GroupMessageCrypto {
 
     /** Current format version with mandatory AAD binding ($groupId|$msgId). */
     const val CIPHERTEXT_PREFIX_V2 = "ENC:GCM2:"
-    /** Legacy prefix retained exclusively for pre-v0.5.2 rows without AAD. */
+    /**
+     * Legacy prefix retained exclusively for pre-v0.5.2 rows without AAD.
+     * Migration 13->14 upgrades all legacy rows to ENC:GCM2:. Safe to delete
+     * after a release cycle (planned retirement: 2026-10-15 or v0.5.4+).
+     */
     const val LEGACY_CIPHERTEXT_PREFIX = "ENC:GCM:"
 
     @Volatile

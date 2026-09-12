@@ -46,16 +46,12 @@ object TorService {
         _torBlockedMessage.value = message
     }
 
-    @Volatile
-    private var lastMediaProgressAtMs = 0L
-
     /**
      * Called from the playback sampler whenever a player's buffer advances.
-     * Cheap by design — a timestamp write, no allocation — because it runs on
-     * every sample of every visible video.
+     * Cheap by design — no allocation — because it runs on every sample of every visible video.
+     * Clears any active blocked message once progress is confirmed.
      */
     fun noteMediaProgress() {
-        lastMediaProgressAtMs = System.currentTimeMillis()
         if (_torBlockedMessage.value != null) {
             _torBlockedMessage.value = null
         }

@@ -60,15 +60,86 @@ class GroupMessageSecurityTest {
     }
 
     @Test
-    fun groupMembership_rejectsNonMemberSender() {
+    fun groupMessageGate_acceptsValidMemberWithValidSignature() {
+        val payload = GroupMessagePayload(
+            id = "msg-valid",
+            groupId = groupId,
+            senderHandle = "alice",
+            content = "Hello group",
+            timestamp = 1700000000L,
+            privacy = "friends",
+            signature = "valid_sig"
+        )
         val group = kotlinx.coroutines.runBlocking { fakeGroupDao.getGroupChatById(groupId) }
-        assertNotNull(group)
+        val verdict = GroupMessageGate.evaluate(payload, group, alice.publicKeyB64, signatureValid = true)
+        assertTrue("Expected Accept but got $verdict", verdict is GroupMessageGate.Verdict.Accept)
+    }
 
-        val members: List<String> = gson.fromJson(group!!.membersJson, Array<String>::class.java).toList()
-        assertTrue(members.contains(alice.publicKeyB64))
-        assertTrue(members.contains(admin.publicKeyB64))
-        // Non-member mallory is rejected
-        assertFalse(members.contains(mallory.publicKeyB64))
+    @Test
+    fun groupMessageGate_rejectsUnknownGroup() {
+        val payload = GroupMessagePayload(
+            id = "msg-1",
+            groupId = "unknown-group",
+            senderHandle = "alice",
+            content = "Hello",
+            timestamp = 1700000000L,
+            privacy = "friends",
+            signature = "valid_sig"
+        )
+        val verdict = GroupMessageGate.evaluate(payload, null, alice.publicKeyB64, signatureValid = true)
+        assertTrue(verdict is GroupMessageGate.Verdict.Reject)
+        assertTrue((verdict as GroupMessageGate.Verdict.Reject).reason.contains("unknown group"))
+    }
+
+    @Test
+    fun groupMessageGate_rejectsNonMemberSender() {
+        val payload = GroupMessagePayload(
+            id = "msg-1",
+            groupId = groupId,
+            senderHandle = "mallory",
+            content = "Hello from intruder",
+            timestamp = 1700000000L,
+            privacy = "friends",
+            signature = "valid_sig"
+        )
+        val group = kotlinx.coroutines.runBlocking { fakeGroupDao.getGroupChatById(groupId) }
+        val verdict = GroupMessageGate.evaluate(payload, group, mallory.publicKeyB64, signatureValid = true)
+        assertTrue(verdict is GroupMessageGate.Verdict.Reject)
+        assertTrue((verdict as GroupMessageGate.Verdict.Reject).reason.contains("not a member"))
+    }
+
+    @Test
+    fun groupMessageGate_rejectsMissingSignature() {
+        val payload = GroupMessagePayload(
+            id = "msg-1",
+            groupId = groupId,
+            senderHandle = "alice",
+            content = "Hello",
+            timestamp = 1700000000L,
+            privacy = "friends",
+            signature = ""
+        )
+        val group = kotlinx.coroutines.runBlocking { fakeGroupDao.getGroupChatById(groupId) }
+        val verdict = GroupMessageGate.evaluate(payload, group, alice.publicKeyB64, signatureValid = false)
+        assertTrue(verdict is GroupMessageGate.Verdict.Reject)
+        assertTrue((verdict as GroupMessageGate.Verdict.Reject).reason.contains("missing cryptographic signature"))
+    }
+
+    @Test
+    fun groupMessageGate_rejectsInvalidSignature() {
+        val payload = GroupMessagePayload(
+            id = "msg-1",
+            groupId = groupId,
+            senderHandle = "alice",
+            content = "Hello",
+            timestamp = 1700000000L,
+            privacy = "friends",
+            signature = "forged_sig"
+        )
+        val group = kotlinx.coroutines.runBlocking { fakeGroupDao.getGroupChatById(groupId) }
+        val verdict = GroupMessageGate.evaluate(payload, group, alice.publicKeyB64, signatureValid = false)
+        assertTrue(verdict is GroupMessageGate.Verdict.Reject)
+        assertTrue((verdict as GroupMessageGate.Verdict.Reject).reason.contains("signature verification failed"))
     }
 
     @Test

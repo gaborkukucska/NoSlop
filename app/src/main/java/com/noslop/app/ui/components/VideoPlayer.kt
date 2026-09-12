@@ -69,9 +69,9 @@ internal sealed class VideoSource {
 //                      for the device's own address cannot be fetched through
 //                      Tor, and one signed for an exit cannot be fetched
 //                      directly. Either way, a toggle invalidates.
-//   circuitGeneration  TorService's exit-change counter at resolve time. A
-//                      rotation makes every signed URL from the previous
-//                      generation unusable.
+//   streamNonce        SOCKS5 stream isolation nonce at resolve time. When a
+//                      circuit hops via nonce-bumping, previous URLs tied to
+//                      older nonces/exits become invalid.
 private class CachedSource(
     val source: VideoSource,
     val expiresAtMs: Long,

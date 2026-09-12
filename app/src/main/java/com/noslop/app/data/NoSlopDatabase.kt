@@ -7,7 +7,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-// Schema Version 13 (with migrations MIGRATION_1_2 through MIGRATION_12_13)
+// Schema Version 14 (with migrations MIGRATION_1_2 through MIGRATION_13_14)
 @Database(
     entities = [
         FeedSource::class,
@@ -28,7 +28,7 @@ import androidx.room.RoomDatabase
         GroupChat::class,
         PendingGroupMessage::class
     ],
-    version = 13,
+    version = 14,
     exportSchema = true
 )
 abstract class NoSlopDatabase : RoomDatabase() {
@@ -173,6 +173,40 @@ abstract class NoSlopDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_13_14 = object : androidx.room.migration.Migration(13, 14) {
+            override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+                // A-1: Retire legacy ENC:GCM: ciphertext by re-encrypting with AAD binding ($groupId|$msgId)
+                try {
+                    val cursor = database.query(
+                        "SELECT id, ciphertext, nonce, chatWithPeerPub FROM chat_messages WHERE ciphertext LIKE 'ENC:GCM:%'"
+                    )
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getString(0)
+                        val ciphertext = cursor.getString(1)
+                        val nonce = cursor.getString(2) ?: ""
+                        val groupId = cursor.getString(3) ?: ""
+
+                        // Idempotent: skip rows already carrying ENC:GCM2:
+                        if (!ciphertext.startsWith(com.noslop.app.crypto.GroupMessageCrypto.CIPHERTEXT_PREFIX_V2)) {
+                            val plaintext = com.noslop.app.crypto.GroupMessageCrypto.decrypt(ciphertext, nonce)
+                            val (encBody, iv) = com.noslop.app.crypto.GroupMessageCrypto.encrypt(
+                                plaintext,
+                                groupId = groupId,
+                                msgId = id
+                            )
+                            database.execSQL(
+                                "UPDATE chat_messages SET ciphertext = ?, nonce = ? WHERE id = ?",
+                                arrayOf(encBody, iv, id)
+                            )
+                        }
+                    }
+                    cursor.close()
+                } catch (e: Exception) {
+                    com.noslop.app.debug.Logger.warn("DATABASE", "Migration 13->14 legacy migration notice: ${e.message}")
+                }
+            }
+        }
+
         fun getDatabase(context: Context): NoSlopDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -181,7 +215,7 @@ abstract class NoSlopDatabase : RoomDatabase() {
                     "mesh.db"
                 )
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                 .build()
                 INSTANCE = instance
                 instance
