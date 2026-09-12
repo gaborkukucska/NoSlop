@@ -130,6 +130,12 @@ android {
         buildConfig = true
     }
 
+    sourceSets {
+        getByName("androidTest") {
+            assets.srcDirs(files("$projectDir/schemas"))
+        }
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
@@ -179,6 +185,8 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
     testImplementation("androidx.room:room-testing:2.7.0")
+    androidTestImplementation("androidx.room:room-testing:2.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     // --- Security: EncryptedSharedPreferences for private key storage ---
     implementation(libs.androidx.security.crypto)
