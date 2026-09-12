@@ -1,5 +1,34 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-12) — Release v0.5.2-alpha: Security Hardening, Dual-Identity Deletion & Media UX
+
+* **Creator Mode Dual-Identity Post Deletion & Lifecycle (`FeedCard.kt`, `MeshSocialRepository.kt`)**:
+  * Resolved an identity mismatch where broadcasts authored under the Creator/Burnable identity hid the delete action from the author and failed repository permission checks.
+  * `FeedCard.kt` (`FullScreenMeshCardV2`) now checks both `localKeys` and `burnableKeys`, ensuring the author always has full control over their broadcasts.
+  * `MeshSocialRepository.deleteMeshPost()` dynamically selects the matching signing key (main or burnable), generating valid signatures and packet origins accepted across the mesh.
+* **Creator Feed Filtering ("Your Broadcasts") Fix (`NoSlopViewModel.kt`)**:
+  * Added `burnableKeys` inclusion to `"My Content"` feed filtering, ensuring all broadcasts authored under either personal or creator identities display seamlessly.
+* **Immediate Media Download Visual Feedback (`FeedCard.kt`, `ChatThreadScreen.kt`)**:
+  * Replaced static zero-percent progress bars with animated indeterminate connection indicators (`LinearProgressIndicator`), giving instant visual feedback when requesting media chunks over Tor.
+  * Resolved a UI freeze in DM chat where tapping "Tap to Download" on GIFs or images appeared inactive before chunk reception.
+* **Group Message Crypto Hardening & AAD Binding (`GroupMessageCrypto.kt`, `NoSlopRepository.kt`, `DmPacketHandler.kt`)**:
+  * Eliminated silent plaintext fallbacks in `GroupMessageCrypto.encrypt()`: now strictly fails closed via `SecurityException`.
+  * Added Additional Authenticated Data (AAD) binding over `"$groupId|$msgId"` on both encryption and decryption to prevent cross-row ciphertext transplantation attacks.
+  * Added in-memory Keystore `SecretKey` caching to eliminate expensive hardware keystore roundtrips on message reads.
+  * Avoided brittle hyphen assumptions for group identification by validating against `GroupChatDao`.
+* **Tor Dead Code & Circuit Rotation Cleanup (`TorService.kt`)**:
+  * Removed dead NEWNYM circuit rotation routines (`requestNewCircuit`, `_circuitGeneration`, etc.) in favor of modern SOCKS5 stream nonce-bumping.
+* **SSH Host Key Verification & Pinned Fingerprint Management (`HubSetupScreen.kt`, `SettingsTab.kt`)**:
+  * Wired host key verification prompts into the Hub software update deployment pathway.
+  * Added a dedicated "Clear Pinned SSH Host Key" setting action in `SettingsTab.kt`.
+* **Legacy Backup Import Safety Confirmation (`SettingsTab.kt`)**:
+  * Added a user confirmation dialog for legacy unauthenticated AES-CBC archives before importing.
+* **Creator Studio Severable ID Burning (`CreatorStudioTab.kt`)**:
+  * Added a "Burn ID 🔥" action with a confirmation dialog, allowing creators to burn and regenerate their public broadcast identities on demand.
+* **Comprehensive Test Coverage & Documentation (`GroupMessageCryptoTest.kt`, `MeshPacketVerifierTest.kt`, `WIRE_PROTOCOL_REFERENCE.md`)**:
+  * Added unit test suites verifying AAD group encryption roundtrips, cross-row tampering rejections, HKDF seed derivation determinism, and `GROUP_MESSAGE` packet verification.
+  * Synchronized `docs/WIRE_PROTOCOL_REFERENCE.md` cataloging `GROUP_MESSAGE` as legacy receive-only with strict membership and signature checks.
+
 ## Completed Changes (2026-09-12) — Verification Pass Remediation
 
 * **Group Message Crypto Hardening & AAD Binding (§3.1, §3.2, §3.3, §3.4)**:

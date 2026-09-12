@@ -2016,6 +2016,10 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
+### 23.5 Dual-Identity Deletion & Download UX Resilience (v0.5.2-alpha)
+* **Dual-Identity Post Deletion**: Mesh post deletion resolves the active signing key from either the user's primary identity or burnable creator identity (`burnableKeys`). The `DELETE_POST` packet is stamped and signed with the matching author key, ensuring peer firewalls and tombstone checks validate the request.
+* **Responsive Media Download Feedback**: The media download state machine distinguishes between un-started downloads and in-flight chunk requests. While awaiting the initial Tor circuit handshake (0 bytes received), the UI renders an animated indeterminate progress bar rather than a static zero-percent indicator.
+
 ### 23.1 Group Messaging E2EE Fan-out & At-Rest Encryption
 * **Pairwise Fan-out**: Group message bodies are encrypted per-member using that member's X25519 key agreement and ChaCha20-Poly1305 AEAD. Cleartext gossip relaying has been completely eliminated.
 * **Store-and-Forward Outbox**: Undelivered group messages for offline members are stored in `pending_group_messages` table and flushed on peer connect with automatic 7-day expiration.
