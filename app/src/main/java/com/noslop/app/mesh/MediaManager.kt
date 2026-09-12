@@ -248,6 +248,59 @@ object MediaManager {
         return noSlopDir
     }
 
+    fun deleteMediaFiles(mediaIds: List<String>) {
+        val repo = repository ?: return
+        try {
+            val possibleDirs = listOf(
+                Environment.DIRECTORY_PICTURES,
+                Environment.DIRECTORY_MOVIES,
+                Environment.DIRECTORY_MUSIC,
+                Environment.DIRECTORY_DOWNLOADS
+            ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } + File(repo.context.filesDir, "NoSlop")
+
+            for (id in mediaIds) {
+                if (id.isBlank()) continue
+                for (dir in possibleDirs) {
+                    if (!dir.exists()) continue
+                    File(dir, id).takeIf { it.exists() }?.delete()
+                    File(dir, "$id.mine").takeIf { it.exists() }?.delete()
+                    File(dir, "$id.part").takeIf { it.exists() }?.delete()
+                    File(dir, "$id.creator_locked").takeIf { it.exists() }?.delete()
+                }
+                activeDownloads.remove(id)
+            }
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to delete media files: ${e.message}")
+        }
+    }
+
+    fun deleteAllMediaFiles() {
+        val repo = repository ?: return
+        try {
+            val possibleDirs = listOf(
+                Environment.DIRECTORY_PICTURES,
+                Environment.DIRECTORY_MOVIES,
+                Environment.DIRECTORY_MUSIC,
+                Environment.DIRECTORY_DOWNLOADS
+            ).mapNotNull { repo.context.getExternalFilesDir(it)?.let { dir -> File(dir, "NoSlop") } } +
+                listOf(File(repo.context.filesDir, "NoSlop"), File(repo.context.filesDir, "media"))
+
+            for (dir in possibleDirs) {
+                if (dir.exists()) {
+                    dir.deleteRecursively()
+                    dir.mkdirs()
+                }
+            }
+            repo.context.cacheDir.deleteRecursively()
+            repo.context.externalCacheDir?.deleteRecursively()
+            activeDownloads.clear()
+            _downloadProgress.value = emptyMap()
+            Logger.info(TAG, "All media files and cache completely deleted")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to delete all media files: ${e.message}")
+        }
+    }
+
     fun copyFileToMediaDirectory(source: File, type: String?, id: String): File? {
         val repo = repository ?: return null
         return try {

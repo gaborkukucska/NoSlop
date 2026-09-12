@@ -38,7 +38,16 @@ class PostPacketHandler(
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString(), postPay.authorAvatarB64
         )
-        val isValid = CryptoService.verify(payloadToVerify, postPay.signature ?: "", postPay.authorId)
+        val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postPay.id, postPay.authorId, postPay.content, postPay.timestamp.toString()
+        )
+        val legacyPipePayload = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}"
+        val legacyPipeWithAvatar = "${postPay.id}|${postPay.authorId}|${postPay.content}|${postPay.timestamp}|${postPay.authorAvatarB64}"
+        val sig = postPay.signature ?: ""
+        val isValid = CryptoService.verify(payloadToVerify, sig, postPay.authorId) ||
+            CryptoService.verify(payloadNoAvatar, sig, postPay.authorId) ||
+            CryptoService.verify(legacyPipePayload, sig, postPay.authorId) ||
+            CryptoService.verify(legacyPipeWithAvatar, sig, postPay.authorId)
         if (!isValid) {
             Logger.warn(TAG, "Rejected gossip post: Signature verification failed")
             return false

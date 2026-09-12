@@ -127,6 +127,17 @@ object GossipService {
         return true
     }
 
+    fun resetAllState() {
+        processedPacketIds.clear()
+        senderRateLimits.clear()
+        announcementRateLimits.clear()
+        relayStates.clear()
+        firewallBuffer.clear()
+        senderMediaBytes.clear()
+        recentlyDeletedPeers.clear()
+        peerSendFailures.clear()
+    }
+
     fun removePeerFromRelays(publicKeyB64: String) {
         val iterator = relayStates.entries.iterator()
         while (iterator.hasNext()) {
@@ -354,7 +365,7 @@ object GossipService {
         // Whitelist DMs, handshakes, and media/sync to ensure critical packets aren't dropped during sync bursts
         val isMediaPacket = packet.type.startsWith("MEDIA_")
         val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
-        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
+        val isCriticalPacket = packet.type == "MESSAGE" || packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE" || packet.type == "DELETE_MESSAGE" || packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT" || packet.type == "PEER_REMOVED"
         if (!isMediaPacket && !isSyncPacket && !isCriticalPacket) {
             val now = System.currentTimeMillis()
             val limitList = senderRateLimits.getOrPut(senderId) { ArrayList() }
@@ -372,7 +383,8 @@ object GossipService {
         val isConnectionPacket = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
-        val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT"
+        val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
+        val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
 
         // P1-6: Dedicated rate limit for discoverable announcements & identity updates (5 per 60s per sender)
         if (isDiscoverable || isIdentityUpdate) {
@@ -388,7 +400,7 @@ object GossipService {
             }
         }
         
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
@@ -699,7 +711,7 @@ object GossipService {
         val forwardedPacket = NetworkPacket(
             id = packet.id,
             hops = currentHops - 1,
-            senderId = if (packet.type == "MESSAGE") packet.senderId else localPublicKeyB64, // Do not re-stamp DMs!
+            senderId = if (packet.type == "MESSAGE" || packet.type == "ANNOUNCE_DISCOVERABLE") packet.senderId else localPublicKeyB64, // Preserve senderId for DMs and Discoverability!
             targetUserId = packet.targetUserId,
             signature = packet.signature,
             type = packet.type,

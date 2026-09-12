@@ -344,7 +344,16 @@ class SyncPacketHandler(
             val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 c.postId, c.id, c.content, c.timestamp.toString(), c.authorAvatarB64
             )
-            val isValid = CryptoService.verify(payloadToVerify, c.signature, c.authorId)
+            val payloadNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                c.postId, c.id, c.content, c.timestamp.toString()
+            )
+            val legacyPipe = "${c.postId}|${c.id}|${c.content}|${c.timestamp}"
+            val legacyPipeWithAvatar = "${c.postId}|${c.id}|${c.content}|${c.timestamp}|${c.authorAvatarB64}"
+            val sig = c.signature
+            val isValid = CryptoService.verify(payloadToVerify, sig, c.authorId) ||
+                CryptoService.verify(payloadNoAvatar, sig, c.authorId) ||
+                CryptoService.verify(legacyPipe, sig, c.authorId) ||
+                CryptoService.verify(legacyPipeWithAvatar, sig, c.authorId)
             if (!isValid) {
                 Logger.warn(TAG, "Sync: rejecting comment ${c.id} — invalid signature")
                 return@forEach

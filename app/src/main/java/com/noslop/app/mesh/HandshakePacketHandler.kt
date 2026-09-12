@@ -229,6 +229,7 @@ class HandshakePacketHandler(
         GossipService.flushFirewallBuffer(handPay.fromUserId)
         // Always trigger inventory sync upon handshake confirmation to pull peer broadcasts immediately
         repo.requestInventorySync(peer)
+        repo.shareDiscoverableNodesWith(peer)
 
         if (!wasAlreadyTrusted) {
             val notifSettings = repo.notificationSettingsFlow.value
@@ -352,19 +353,29 @@ class HandshakePacketHandler(
         
         // Heuristic: If we already have a trusted peer with this exact handle but a DIFFERENT public key, ignore this announcement to prevent spoofing.
         val existingPeers = peerDao.getAllPeersList()
-        val hasMatchingTrustedPeer = existingPeers.any { it.publicKeyB64 != announcePay.authorId && it.isTrusted && it.handle == announcePay.handle }
+        val hasMatchingTrustedPeer = announcePay.handle.isNotBlank() && announcePay.handle != "Anonymous" &&
+            existingPeers.any { it.publicKeyB64 != announcePay.authorId && it.isTrusted && it.handle.equals(announcePay.handle, ignoreCase = true) }
         if (hasMatchingTrustedPeer) {
             com.noslop.app.debug.Logger.info("HANDSHAKE", "Ignoring ANNOUNCE_DISCOVERABLE from ${announcePay.handle} because we already have a trusted peer with this handle.")
             return false
         }
         
-        val payloadToVerify = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, announcePay.signature, announcePay.authorId)) {
+        val s1 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.bio ?: ""}:${announcePay.timestamp}"
+        val s2 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.fundMeLink ?: ""}:${announcePay.authorAvatarB64 ?: ""}:${announcePay.timestamp}"
+        val s3 = "${announcePay.authorId}:${announcePay.handle}:${announcePay.onionAddress}:${announcePay.encPublicKey}:${announcePay.isCreator}:${announcePay.timestamp}"
+        val s4 = "${announcePay.authorId}|${announcePay.handle}|${announcePay.onionAddress}|${announcePay.encPublicKey}|${announcePay.isCreator}|${announcePay.timestamp}"
+        val sig = announcePay.signature
+        val authorId = announcePay.authorId
+        val isValid = CryptoService.verify(s1, sig, authorId) ||
+            CryptoService.verify(s2, sig, authorId) ||
+            CryptoService.verify(s3, sig, authorId) ||
+            CryptoService.verify(s4, sig, authorId)
+        if (!isValid) {
             com.noslop.app.debug.Logger.warn("HANDSHAKE", "Signature mismatch for ANNOUNCE_DISCOVERABLE from ${announcePay.handle}")
             return false
         }
         
-        val isOldPacket = (System.currentTimeMillis() - announcePay.timestamp) > 5 * 60 * 1000L
+        val isOldPacket = Math.abs(System.currentTimeMillis() - announcePay.timestamp) > 30 * 60 * 1000L
         if (isOldPacket) return true
 
         val pubBytes = Base64.decode(announcePay.authorId, Base64.DEFAULT)
@@ -392,7 +403,9 @@ class HandshakePacketHandler(
                 lastSeenAt = System.currentTimeMillis()
             )
             peerDao.insertPeer(newPeer)
+            db.appSettingDao().insertSetting(AppSetting("disc_packet_${announcePay.authorId}", packet.toJson()))
         } else {
+            db.appSettingDao().insertSetting(AppSetting("disc_packet_${announcePay.authorId}", packet.toJson()))
             // --- NOSLOP_DELETION_BUDGET_V1 ---
             // A peer that was offline has come back. Refill the deletion budget
             // so any post we deleted while they were away is announced again —
@@ -546,16 +559,45 @@ class HandshakePacketHandler(
         val exitPay = packet.getUserExitPayload() ?: return false
         if (exitPay.userId != packet.senderId) return false
 
-        val isOldPacket = (System.currentTimeMillis() - exitPay.timestamp) > 5 * 60 * 1000L
+        val isOldPacket = Math.abs(System.currentTimeMillis() - exitPay.timestamp) > 30 * 60 * 1000L
         if (isOldPacket) return true
 
-        val payloadToVerify = "${exitPay.userId}|${exitPay.timestamp}"
-        if (!CryptoService.verify(payloadToVerify, exitPay.signature, exitPay.userId)) return false
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(exitPay.userId, exitPay.timestamp.toString())
+        val pipePayload = "${exitPay.userId}|${exitPay.timestamp}"
+        val isValid = CryptoService.verify(encPayload, exitPay.signature, exitPay.userId) ||
+            CryptoService.verify(pipePayload, exitPay.signature, exitPay.userId)
+        if (!isValid) return false
+
+        // If USER_EXIT was targeted specifically to us, it means the peer removed us from their account!
+        if (packet.targetUserId != null && repo.isLocalUser(packet.targetUserId)) {
+            Logger.info(TAG, "Received targeted USER_EXIT from ${exitPay.userId.take(12)} — removing peer and purging content")
+            repo.deletePeer(exitPay.userId, notifyRemote = false)
+            return true
+        }
 
         val peer = peerDao.getPeerByPublicKey(exitPay.userId)
         if (peer != null) {
             peerDao.insertPeer(peer.copy(isOnline = false, lastSeenAt = System.currentTimeMillis()))
         }
+        return true
+    }
+
+    suspend fun handlePeerRemoved(packet: NetworkPacket): Boolean {
+        val removePay = packet.getPeerRemovedPayload() ?: return false
+        val senderId = packet.senderId
+        if (removePay.userId != senderId) return false
+
+        val encPayload = com.noslop.app.crypto.CryptoService.encodeForSigning(removePay.userId, removePay.timestamp.toString())
+        val pipePayload = "${removePay.userId}|${removePay.timestamp}"
+        val sig = removePay.signature
+        if (!CryptoService.verify(encPayload, sig, removePay.userId) &&
+            !CryptoService.verify(pipePayload, sig, removePay.userId)) {
+            Logger.warn(TAG, "PEER_REMOVED signature verification failed for ${removePay.userId}")
+            return false
+        }
+
+        Logger.info(TAG, "Peer ${removePay.userId.take(12)} removed us — deleting peer and all their content locally")
+        repo.deletePeer(removePay.userId, notifyRemote = false)
         return true
     }
 

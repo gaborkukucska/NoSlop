@@ -109,6 +109,9 @@ interface PeerDao {
     @Query("UPDATE peers SET isFollowing = :isFollowing WHERE publicKeyB64 = :pubKey")
     suspend fun updateFollowState(pubKey: String, isFollowing: Boolean)
 
+    @Query("SELECT * FROM peers WHERE isDiscoverable = 1 AND isTrusted = 0 ORDER BY lastSeenAt DESC")
+    suspend fun getDiscoverablePeersList(): List<Peer>
+
     @Query("SELECT * FROM peers WHERE publicKeyB64 = :pubKey LIMIT 1")
     suspend fun getPeerByPublicKey(pubKey: String): Peer?
 
@@ -125,6 +128,12 @@ interface PeerDao {
 interface PostDao {
     @Query("SELECT * FROM mesh_posts ORDER BY timestamp DESC")
     fun getAllPosts(): Flow<List<MeshPost>>
+
+    @Query("SELECT * FROM mesh_posts ORDER BY timestamp DESC")
+    suspend fun getAllPostsList(): List<MeshPost>
+
+    @Query("DELETE FROM mesh_posts WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deletePostsByAuthor(authorId: String)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPost(post: MeshPost)
@@ -231,6 +240,12 @@ interface CommentDao {
     @Query("DELETE FROM mesh_comments WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteCommentsByAuthor(authorId: String)
 
+    @Query("DELETE FROM mesh_comments WHERE postId = :postId")
+    suspend fun deleteCommentsForPost(postId: String)
+
+    @Query("SELECT * FROM mesh_comments WHERE authorPublicKeyB64 = :authorId")
+    suspend fun getCommentsByAuthorList(authorId: String): List<MeshComment>
+
 
 
     @Query("SELECT * FROM mesh_comments WHERE timestamp > :since ORDER BY timestamp ASC")
@@ -272,6 +287,9 @@ interface ReactionDao {
     @Query("DELETE FROM mesh_reactions WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteReactionsByAuthor(authorId: String)
 
+    @Query("DELETE FROM mesh_reactions WHERE postId = :postId")
+    suspend fun deleteReactionsForPost(postId: String)
+
 
 
     @Query("SELECT * FROM mesh_reactions WHERE timestamp > :since ORDER BY timestamp ASC")
@@ -291,6 +309,9 @@ interface ChatReactionDao {
 
     @Query("DELETE FROM chat_reactions WHERE id = :id")
     suspend fun deleteReactionById(id: String)
+
+    @Query("DELETE FROM chat_reactions WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteChatReactionsByAuthor(authorId: String)
 }
 
 @Dao
@@ -306,6 +327,9 @@ interface CommentReactionDao {
 
     @Query("DELETE FROM comment_reactions WHERE id = :id")
     suspend fun deleteReactionById(id: String)
+
+    @Query("DELETE FROM comment_reactions WHERE authorPublicKeyB64 = :authorId")
+    suspend fun deleteCommentReactionsByAuthor(authorId: String)
 }
 
 @Dao
@@ -325,6 +349,9 @@ interface VoteDao {
     // --- NOSLOP_MEDIA_PEERS_V1 --- used when a contact is removed
     @Query("DELETE FROM mesh_votes WHERE authorPublicKeyB64 = :authorId")
     suspend fun deleteVotesByAuthor(authorId: String)
+
+    @Query("DELETE FROM mesh_votes WHERE postId = :postId")
+    suspend fun deleteVotesForPost(postId: String)
 
 
 }
@@ -370,6 +397,9 @@ interface NotificationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertNotification(notification: NotificationItem)
+
+    @Query("DELETE FROM notifications WHERE senderPub = :senderPub")
+    suspend fun deleteNotificationsBySender(senderPub: String)
 
     @Query("UPDATE notifications SET isRead = 1 WHERE id = :id")
     suspend fun markAsRead(id: String)
@@ -460,4 +490,7 @@ interface PendingGroupMessageDao {
 
     @Query("DELETE FROM pending_group_messages WHERE createdAt < :cutoff")
     suspend fun deleteExpired(cutoff: Long)
+
+    @Query("DELETE FROM pending_group_messages WHERE memberPub = :memberPub")
+    suspend fun deleteForMember(memberPub: String)
 }

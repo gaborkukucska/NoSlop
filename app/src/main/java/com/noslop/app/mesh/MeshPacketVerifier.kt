@@ -108,10 +108,23 @@ object MeshPacketVerifier {
 
         // --- PostPacketHandler ---
         "POST" -> packet.getPostPayload()?.let { p ->
-            val s = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            val encWithAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
                 p.id, p.authorId, p.content, p.timestamp.toString(), p.authorAvatarB64
             )
-            Signed(s, p.signature, p.authorId)
+            val encNoAvatar = com.noslop.app.crypto.CryptoService.encodeForSigning(
+                p.id, p.authorId, p.content, p.timestamp.toString()
+            )
+            val pipeNoAvatar = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}"
+            val pipeWithAvatar = "${p.id}|${p.authorId}|${p.content}|${p.timestamp}|${p.authorAvatarB64}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matchedPayload = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeNoAvatar, sig, signer) -> pipeNoAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipeWithAvatar, sig, signer) -> pipeWithAvatar
+                sig != null && com.noslop.app.crypto.CryptoService.verify(encNoAvatar, sig, signer) -> encNoAvatar
+                else -> encWithAvatar
+            }
+            Signed(matchedPayload, sig, signer)
         }
 
         "EDIT_POST" -> packet.getEditPostPayload()?.let { p ->
@@ -197,13 +210,23 @@ object MeshPacketVerifier {
             Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.authorId, p.timestamp.toString()), p.signature, p.authorId)
         }
 
-        // Colon-delimited, unlike everything else. Matches
-        // HandshakePacketHandler.handleAnnounceDiscoverable and the sender in
-        // MeshSocialRepository.startPresenceHeartbeat.
         "ANNOUNCE_DISCOVERABLE" -> packet.getAnnounceDiscoverablePayload()?.let { p ->
-            val s = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:" +
+            val full = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:" +
                 "${p.fundMeLink ?: ""}:${p.authorAvatarB64 ?: ""}:${p.bio ?: ""}:${p.timestamp}"
-            Signed(s, p.signature, p.authorId)
+            val noBio = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:" +
+                "${p.fundMeLink ?: ""}:${p.authorAvatarB64 ?: ""}:${p.timestamp}"
+            val simple = "${p.authorId}:${p.handle}:${p.onionAddress}:${p.encPublicKey}:${p.isCreator}:${p.timestamp}"
+            val pipe = "${p.authorId}|${p.handle}|${p.onionAddress}|${p.encPublicKey}|${p.isCreator}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.authorId
+            val matched = when {
+                sig != null && com.noslop.app.crypto.CryptoService.verify(full, sig, signer) -> full
+                sig != null && com.noslop.app.crypto.CryptoService.verify(noBio, sig, signer) -> noBio
+                sig != null && com.noslop.app.crypto.CryptoService.verify(simple, sig, signer) -> simple
+                sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer) -> pipe
+                else -> full
+            }
+            Signed(matched, sig, signer)
         }
 
         "SUBSCRIBE" -> packet.getSubscribePayload()?.let { p ->
@@ -218,7 +241,21 @@ object MeshPacketVerifier {
         }
 
         "USER_EXIT" -> packet.getUserExitPayload()?.let { p ->
-            Signed(com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString()), p.signature, p.userId)
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString())
+            val pipe = "${p.userId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
+        }
+
+        "PEER_REMOVED" -> packet.getPeerRemovedPayload()?.let { p ->
+            val enc = com.noslop.app.crypto.CryptoService.encodeForSigning(p.userId, p.timestamp.toString())
+            val pipe = "${p.userId}|${p.timestamp}"
+            val sig = p.signature
+            val signer = p.userId
+            val matched = if (sig != null && com.noslop.app.crypto.CryptoService.verify(pipe, sig, signer)) pipe else enc
+            Signed(matched, sig, signer)
         }
 
         "FOLLOW", "UNFOLLOW" -> packet.getFollowPayload()?.let { p ->

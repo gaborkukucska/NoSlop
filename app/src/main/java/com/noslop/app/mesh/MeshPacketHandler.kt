@@ -83,6 +83,7 @@ class MeshPacketHandler(
             "COMMENT_REACTION" -> reaction.handleCommentReaction(packet)
             "IDENTITY_UPDATE" -> handshake.handleIdentityUpdate(packet)
             "USER_EXIT" -> handshake.handleUserExit(packet)
+            "PEER_REMOVED" -> handshake.handlePeerRemoved(packet)
             "EDIT_POST" -> post.handleEditPost(packet)
             "DELETE_POST" -> post.handleDeletePost(packet)
             "EDIT_COMMENT" -> comment.handleEditComment(packet)

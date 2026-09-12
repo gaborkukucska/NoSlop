@@ -1885,9 +1885,31 @@ fun toggleAggregator() {
     fun factoryReset() {
         viewModelScope.launch {
             repository.factoryReset()
+            _unifiedFeed.value = emptyList()
+            cachedDefaultFeed = emptyList()
+            sessionLoadedIds.clear()
+            cachedViewedIds = emptySet()
+            cachedExcludedIds = emptySet()
+            savedTimestampsMap.clear()
+            savedFeedItemId = null
+            _savedActiveItemId.value = null
+            _selectedPeerPub.value = null
+            _selectedGroupChatId.value = null
+            _userProfile.value = com.noslop.app.data.UserProfile()
+            _selectedInterests.value = emptyList()
+            _selectedMusicGenres.value = emptyList()
+            _selectedVideoGenres.value = emptyList()
+            _negativeKeywords.value = ""
+            _creatorKeywords.value = ""
+            _bannedChannels.value = emptyList()
+            _isDiscoverableEnabled.value = false
+            _isCreatorEnabled.value = false
+            _creatorFundMeLink.value = ""
+            _hubDeploymentStatus.value = null
             _isOnboardingComplete.value = false
             _feedTutorialStep.value = 0
             _dmTutorialStep.value = 0
+            clearLogFile()
         }
     }
 
@@ -2632,10 +2654,15 @@ fun toggleAggregator() {
         viewModelScope.launch { 
             repository.deletePeer(peerPub) 
             
-            // Instantly clear their private posts from the active UI
+            // Instantly clear all their posts (both public and private) from the active UI and caches
             val currentFeed = _unifiedFeed.value.toMutableList()
-            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub && it.post.privacy != "public" }
+            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub }
             _unifiedFeed.value = currentFeed
+            cachedDefaultFeed = cachedDefaultFeed.filterNot { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub }
+            sessionLoadedIds.removeAll { id -> allMeshes.any { it.id == id && it.authorPublicKeyB64 == peerPub } }
+            if (_selectedPeerPub.value == peerPub) {
+                _selectedPeerPub.value = null
+            }
         } 
     }
 

@@ -212,6 +212,12 @@ data class UserExitPayload(
     val signature: String
 )
 
+data class PeerRemovedPayload(
+    @SerializedName("user_id") val userId: String,
+    val timestamp: Long,
+    val signature: String
+)
+
 data class ConnectionRejectedPayload(
     @SerializedName("from_user_id") val fromUserId: String,
     val timestamp: Long,
@@ -536,6 +542,10 @@ data class NetworkPacket(
 
     fun getUserExitPayload(): UserExitPayload? = if (type == "USER_EXIT" && payload != null) {
         Gson().fromJson(payload, UserExitPayload::class.java)
+    } else null
+
+    fun getPeerRemovedPayload(): PeerRemovedPayload? = if (type == "PEER_REMOVED" && payload != null) {
+        Gson().fromJson(payload, PeerRemovedPayload::class.java)
     } else null
 
     fun getConnectionRejectedPayload(): ConnectionRejectedPayload? = if (type == "CONNECTION_REJECTED" && payload != null) {

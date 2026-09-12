@@ -1638,11 +1638,34 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
         preferencesRepository.getChannelCutoffSettings()
 
     suspend fun factoryReset() = withContext(Dispatchers.IO) {
-        // Clear all database tables
+        // 1. Delete all media files and cache from disk
+        com.noslop.app.mesh.MediaManager.deleteAllMediaFiles()
+
+        // 2. Clear all database tables
         db.clearAllTables()
         
-        // Clear EncryptedSharedPreferences (identity, onboarding flag, etc.)
+        // 3. Clear EncryptedSharedPreferences (identity, onboarding flag, etc.)
         identityRepository.clearAll()
+
+        // 4. Clear API keys and system preferences
+        try {
+            val apiPrefFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_api_keys.xml")
+            if (apiPrefFile.exists()) apiPrefFile.delete()
+            val sysPrefFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_system.xml")
+            if (sysPrefFile.exists()) sysPrefFile.delete()
+        } catch (_: Exception) {}
+
+        // 5. Unregister Tor hidden services
+        try {
+            com.noslop.app.tor.TorService.unregisterHiddenServices()
+            com.noslop.app.tor.TorService.unregisterBurnableHiddenService()
+        } catch (_: Exception) {}
+
+        // 6. Reset in-memory states
+        com.noslop.app.mesh.GossipService.resetAllState()
+        meshSocialRepository.clearOutbox()
+        com.noslop.app.ui.PreloadManager.evictAll()
+        com.noslop.app.ui.components.PlaybackPositionStore.clearAll()
         
         setOnboardingComplete(false)
         _identityUpdateFlow.emit(Unit)
@@ -1715,7 +1738,9 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
 
-    suspend fun deletePeer(publicKeyB64: String) = meshSocialRepository.deletePeer(publicKeyB64)
+    suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = meshSocialRepository.deletePeer(publicKeyB64, notifyRemote)
+
+    suspend fun shareDiscoverableNodesWith(peer: Peer) = meshSocialRepository.shareDiscoverableNodesWith(peer)
 
     suspend fun requestDmSync(peer: Peer) = meshSocialRepository.requestDmSync(peer)
     suspend fun requestAllPeersDmSync() = meshSocialRepository.requestAllPeersDmSync()
