@@ -51,6 +51,14 @@ object TorService {
      * Cheap by design — no allocation — because it runs on every sample of every visible video.
      * Clears any active blocked message once progress is confirmed.
      */
+    fun isNetworkAvailable(context: Context): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? android.net.ConnectivityManager
+            ?: return true
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
     fun noteMediaProgress() {
         if (_torBlockedMessage.value != null) {
             _torBlockedMessage.value = null
@@ -305,13 +313,15 @@ object TorService {
                             triggerRegistration()
                         }
                     } else {
-                        // Check if connectivity check passes as fallback
                         val (isTor, _) = checkTorConnection()
                         if (isTor) {
                             _torState.value = TorState.READY
                             Logger.info(TAG, "Tor connectivity verified. Promoting state to READY.")
                             setTorStatusMessage(null)
                             triggerRegistration()
+                        } else if (!isNetworkAvailable(context)) {
+                            Logger.info(TAG, "No internet connection detected. Tor daemon is idle waiting for network.")
+                            setTorStatusMessage("Waiting for internet connection...")
                         } else {
                             Logger.warn(
                                 TAG,

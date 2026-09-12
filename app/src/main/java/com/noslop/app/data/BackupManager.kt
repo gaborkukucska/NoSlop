@@ -319,12 +319,54 @@ object BackupManager {
             // but this device has no matching master key, and no fallback store
             // came along with it.
             if (restoredKeystoreSealedIdentity && !restoredFallbackIdentity && !canOpenRestoredIdentity(context)) {
-                lastRestoreNeedsIdentityRecovery = true
-                Logger.warn(
-                    TAG,
-                    "Restored identity store cannot be opened on this device. Data is back, " +
-                        "but the identity must be re-derived from the Word Cloud mnemonic."
-                )
+                Logger.info(TAG, "Cross-device restore detected: re-deriving identity deterministically from mnemonic using local hardware Keystore...")
+                val secureFile = File(context.filesDir.parentFile, "shared_prefs/$PREFS_NAME.xml")
+                if (secureFile.exists()) secureFile.delete()
+                try {
+                    val handle = try {
+                        val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                            context.getDatabasePath(DB_NAME).absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                        )
+                        var extractedHandle = "Anonymous"
+                        db.rawQuery("SELECT value FROM app_settings WHERE key = 'local_handle' LIMIT 1", null).use {
+                            if (it.moveToFirst()) extractedHandle = it.getString(0)
+                        }
+                        db.close()
+                        extractedHandle
+                    } catch (_: Exception) { "Anonymous" }
+
+                    val cleanMnemonic = mnemonic.trim().lowercase().split(Regex("\\s+")).joinToString(" ")
+                    val derivationSeed = MnemonicGenerator.deriveSeed(cleanMnemonic)
+                    val derivedKeys = com.noslop.app.crypto.CryptoService.deriveIdentityFromSeed(derivationSeed, handle)
+
+                    val freshPrefs = androidx.security.crypto.EncryptedSharedPreferences.create(
+                        context,
+                        PREFS_NAME,
+                        androidx.security.crypto.MasterKey.Builder(context)
+                            .setKeyScheme(androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM)
+                            .build(),
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                        androidx.security.crypto.EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                    )
+                    freshPrefs.edit()
+                        .putString("ed25519_private_key", derivedKeys.privateKeyB64)
+                        .putString("enc_private_key", derivedKeys.encPrivateKeyB64)
+                        .putString("mnemonic", cleanMnemonic)
+                        .putString("pub_ed25519", derivedKeys.publicKeyB64)
+                        .putString("pub_enc", derivedKeys.encPublicKeyB64)
+                        .putString("handle", handle)
+                        .putString("tripcode", derivedKeys.tripcode)
+                        .putString("onion", derivedKeys.onionAddress)
+                        .putString("display_name", derivedKeys.displayName)
+                        .putString("onboarding_complete", "true")
+                        .putString("identity_version", "2")
+                        .apply()
+                    lastRestoreNeedsIdentityRecovery = false
+                    Logger.info(TAG, "Identity deterministically re-derived and hardware-encrypted for new device.")
+                } catch (recEx: Exception) {
+                    lastRestoreNeedsIdentityRecovery = true
+                    Logger.warn(TAG, "Automatic cross-device identity recovery failed: ${recEx.message}")
+                }
             }
 
             Logger.info(TAG, "Import completed. Restart required.", "identityRecoveryNeeded=$lastRestoreNeedsIdentityRecovery")

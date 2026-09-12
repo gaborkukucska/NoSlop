@@ -23,24 +23,49 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
 
     val isUsingInsecureStorage = kotlinx.coroutines.flow.MutableStateFlow(false)
 
-    // EncryptedSharedPreferences backed by Android Keystore master key
-    // Falls back to plaintext SharedPreferences if hardware Keystore is unavailable
-    private val prefs: android.content.SharedPreferences = try {
-        EncryptedSharedPreferences.create(
-            context,
+    private fun buildMasterKey(ctx: Context): MasterKey {
+        return MasterKey.Builder(ctx)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+    }
+
+    private fun createEncryptedPrefs(ctx: Context): android.content.SharedPreferences {
+        return EncryptedSharedPreferences.create(
+            ctx,
             "noslop_identity_secure",
-            MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build(),
+            buildMasterKey(ctx),
             EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        ).also {
+        )
+    }
+
+    // EncryptedSharedPreferences backed by Android Keystore master key
+    // Falls back to plaintext SharedPreferences ONLY if hardware Keystore is genuinely unavailable
+    private val prefs: android.content.SharedPreferences = try {
+        createEncryptedPrefs(context).also {
             Logger.info(TAG, "EncryptedSharedPreferences initialized with hardware-backed keystore")
         }
     } catch (e: Exception) {
-        Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to AES-GCM encrypted SharedPreferences: ${e.message}")
-        isUsingInsecureStorage.value = true
-        context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+        val secureFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml")
+        var recovered: android.content.SharedPreferences? = null
+        if (secureFile.exists()) {
+            Logger.warn(TAG, "EncryptedSharedPreferences failed on existing file (${e.message}). Testing if Keystore functions after purging unopenable file...")
+            try {
+                secureFile.delete()
+                recovered = createEncryptedPrefs(context).also {
+                    Logger.info(TAG, "Successfully restored hardware-backed EncryptedSharedPreferences after clearing unopenable file")
+                }
+            } catch (e2: Exception) {
+                Logger.error(TAG, "Hardware Keystore is genuinely unavailable: ${e2.message}")
+            }
+        }
+        if (recovered != null) {
+            recovered
+        } else {
+            Logger.error(TAG, "EncryptedSharedPreferences failed, falling back to AES-GCM encrypted SharedPreferences: ${e.message}")
+            isUsingInsecureStorage.value = true
+            context.getSharedPreferences("noslop_identity_fallback", Context.MODE_PRIVATE)
+        }
     }
 
     private val fallbackSecretKey: javax.crypto.SecretKey by lazy {
@@ -240,15 +265,17 @@ class IdentityRepository(context: Context, private val appSettingDao: AppSetting
      */
     suspend fun clearAll() {
         prefs.edit().clear().apply()
-        // NOSLOP_CLEARALL_ROOM_V1 — the docstring claimed Room was cleared too but
-        // nothing did it, so a factory reset left the public identity behind and a
-        // subsequent loadIdentity() saw a half-wiped state.
+        val secureFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_secure.xml")
+        if (secureFile.exists()) secureFile.delete()
+        val fallbackFile = java.io.File(context.filesDir.parentFile, "shared_prefs/noslop_identity_fallback.xml")
+        if (fallbackFile.exists()) fallbackFile.delete()
+        isUsingInsecureStorage.value = false
         listOf(
             "local_handle", "local_pub_ed25519", "local_pub_enc",
             "local_tripcode", "local_onion", "local_display_name",
-            "onboarding_complete", "session_locked"
+            "onboarding_complete", "session_locked", "identity_version"
         ).forEach { appSettingDao.removeSetting(it) }
-        Logger.info(TAG, "All identity data cleared from encrypted prefs and Room")
+        Logger.info(TAG, "All identity data cleared from encrypted prefs, files, and Room")
     }
 
     suspend fun generateBurnableIdentity(): CryptoService.IdentityKeys {

@@ -1359,7 +1359,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                             onClick = {
                                                 showMnemonicDialog = false
                                                 if (isExporting) {
-                                                    exportLauncher.launch("noslop_backup.zip")
+                                                    val exportTimestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date())
+                                                    exportLauncher.launch("noslop_backup_$exportTimestamp.zip")
                                                 } else {
                                                     importLauncher.launch(arrayOf("application/zip"))
                                                 }

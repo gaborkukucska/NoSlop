@@ -545,14 +545,15 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     refreshTorStatus()
                 } else if (state == TorState.FAILED) {
-                    _torReadyState.value = Pair(false, "Tor daemon failed")
-                    if (retryCount < 3) {
+                    _torReadyState.value = Pair(false, "Tor disconnected")
+                    val hasNet = com.noslop.app.tor.TorService.isNetworkAvailable(getApplication())
+                    if (hasNet && retryCount < 2) {
                         retryCount++
-                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED. Auto-retrying startTor with forceRestart (attempt $retryCount/3)...")
+                        com.noslop.app.debug.Logger.warn("VM", "Tor FAILED while online. Retrying startTor (attempt $retryCount/2)...")
                         kotlinx.coroutines.delay(5000L * retryCount)
-                        startTor(forceRestart = true)
+                        startTor(forceRestart = false)
                     } else {
-                        com.noslop.app.debug.Logger.error("VM", "Tor failed after $retryCount retries. Halting auto-retry loop.")
+                        com.noslop.app.debug.Logger.info("VM", "Tor retry skipped (hasNet=$hasNet, retries=$retryCount).")
                     }
                 }
             }
