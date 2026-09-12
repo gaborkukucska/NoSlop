@@ -17,7 +17,7 @@ import com.noslop.app.debug.Logger
  *     via AppSettingDao for display purposes.
  *   - Private keys are NEVER written to Room, logs, or any unencrypted store.
  */
-class IdentityRepository(context: Context, private val appSettingDao: AppSettingDao) {
+class IdentityRepository(private val context: Context, private val appSettingDao: AppSettingDao) {
 
     private val TAG = "IDENTITY_REPO"
 
