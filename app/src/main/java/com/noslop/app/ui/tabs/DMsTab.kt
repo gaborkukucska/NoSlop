@@ -69,11 +69,21 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     val handle by viewModel.localHandle.collectAsState()
     val dmStep by viewModel.dmTutorialStep.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val discoverablePeers by viewModel.discoverablePeers.collectAsState()
+    val burnableKeys by viewModel.burnableKeys.collectAsState()
+    val visibleDiscoverablePeers = remember(discoverablePeers, localKeys, burnableKeys) {
+        discoverablePeers.filter {
+            it.publicKeyB64 != localKeys?.publicKeyB64 &&
+            it.publicKeyB64 != burnableKeys?.publicKeyB64
+        }
+    }
+    var selectedDiscoverableNode by remember { mutableStateOf<Peer?>(null) }
 
-    // Auto-complete DM tutorial if the user already has connections (e.g. restored from backup)
-    // or if they successfully add a peer during the tutorial itself.
-    LaunchedEffect(peers.size, dmStep) {
-        if (peers.isNotEmpty() && dmStep in 0..3) {
+    val rawContacts = remember(peers) { peers.filter { it.isTrusted && !it.isTemporary } }
+    // Auto-complete DM tutorial only if the user already has trusted connected contacts (e.g. restored from backup).
+    // Discoverable nodes like the official NoSlop node do not cancel the tutorial.
+    LaunchedEffect(rawContacts.size, dmStep) {
+        if (rawContacts.isNotEmpty() && dmStep in 0..4) {
             viewModel.completeDmTutorial()
         }
     }
@@ -85,6 +95,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
     var tabCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var myIdRect by remember { mutableStateOf(Rect.Zero) }
     var addPeerRect by remember { mutableStateOf(Rect.Zero) }
+    var discoverableNodeRect by remember { mutableStateOf(Rect.Zero) }
 
     // Intercept hardware back button when viewing a chat thread —
     // return to contacts list instead of minimising the app.
@@ -221,14 +232,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             }
 
 
-            val discoverablePeers by viewModel.discoverablePeers.collectAsState()
-            val burnableKeys by viewModel.burnableKeys.collectAsState()
-            val visibleDiscoverablePeers = remember(discoverablePeers, localKeys, burnableKeys) {
-                discoverablePeers.filter {
-                    it.publicKeyB64 != localKeys?.publicKeyB64 &&
-                    it.publicKeyB64 != burnableKeys?.publicKeyB64
-                }
-            }
+            // Discoverable peers state hoisted to DMsTab root scope
             val groupChats by viewModel.groupChats.collectAsState()
             val pendingRequests = peers.filter { !it.isTrusted && !it.isDiscoverable && it.onionAddress.isNotBlank() && it.onionAddress.endsWith(".onion") }
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
@@ -297,7 +301,7 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val contacts = if (selectedFolder == "All") rawContacts else rawContacts.filter { it.customFolder == selectedFolder }
             
             var peerToAssignFolder by remember { mutableStateOf<Peer?>(null) }
-            var selectedDiscoverableNode by remember { mutableStateOf<Peer?>(null) }
+            // selectedDiscoverableNode hoisted to DMsTab root scope
             
             if (peerToAssignFolder != null) {
                 var folderName by remember { mutableStateOf(peerToAssignFolder?.customFolder ?: "") }
@@ -672,7 +676,15 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                         ) {
                             items(visibleDiscoverablePeers, key = { it.publicKeyB64 }) { peer ->
                                 Card(
-                                    modifier = Modifier.width(140.dp).clickable { selectedDiscoverableNode = peer },
+                                    modifier = Modifier.width(140.dp)
+                                        .then(
+                                            if (peer.publicKeyB64 == visibleDiscoverablePeers.firstOrNull()?.publicKeyB64) {
+                                                Modifier.onGloballyPositioned { cardCoords ->
+                                                    tabCoordinates?.let { discoverableNodeRect = it.localBoundingBoxOf(cardCoords, clipBounds = false) }
+                                                }
+                                            } else Modifier
+                                        )
+                                        .clickable { selectedDiscoverableNode = peer },
                                     colors = CardDefaults.cardColors(containerColor = SurfaceDark),
                                     border = BorderStroke(1.dp, if (peer.isCreator) AccentGreen else BorderSubtle)
                                 ) {
@@ -799,7 +811,20 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         if (dmStep == 0) {
             TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID".tr, onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 2) {
-            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer (Scan with camera or select from gallery)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = addPeerRect, text = "2. Add a new Peer (Scan with camera or select from gallery)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+        } else if (dmStep == 4) {
+            if (visibleDiscoverablePeers.isNotEmpty()) {
+                TutorialSpotlight(
+                    targetRect = discoverableNodeRect,
+                    text = "3. Discoverable Nodes: This is the official NoSlop node. As your mesh expands, other discoverable nodes will also appear here. Tap to connect!".tr,
+                    onClickTarget = {
+                        selectedDiscoverableNode = visibleDiscoverablePeers.first()
+                        viewModel.completeDmTutorial()
+                    }
+                )
+            } else {
+                viewModel.completeDmTutorial()
+            }
         }
 
         // Render dialogs
