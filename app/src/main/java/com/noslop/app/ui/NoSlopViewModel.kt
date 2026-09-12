@@ -1781,9 +1781,11 @@ fun toggleAggregator() {
 
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
         viewModelScope.launch {
+            repository.clearBurnableIdentity()
             val seed = com.noslop.app.crypto.MnemonicGenerator.deriveSeed(mnemonic)
             val keys = CryptoService.deriveIdentityFromSeed(seed, handle)
             repository.saveLocalIdentity(handle, keys, mnemonic)
+            repository.ensureDefaultDiscoverableNode()
             preloadFeedsDuringOnboarding(selectedSources, selectedCategories, selectedMusicGenres, selectedVideoGenres, creatorKeywords)
             repository.setOnboardingComplete(true)
             _isOnboardingComplete.value = true

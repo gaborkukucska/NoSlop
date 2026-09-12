@@ -24,10 +24,12 @@ class DmPacketHandler(
 
     suspend fun handleDirectMessage(packet: NetworkPacket, localKeys: CryptoService.IdentityKeys): Boolean {
         val burnableKeys = repo.getBurnableIdentity()
-        val myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
+        var myKeys = if (packet.targetUserId == localKeys.publicKeyB64) {
             localKeys
         } else if (burnableKeys != null && packet.targetUserId == burnableKeys.publicKeyB64) {
             burnableKeys
+        } else if (packet.targetUserId.isNullOrBlank()) {
+            localKeys
         } else {
             return false
         }
@@ -58,7 +60,16 @@ class DmPacketHandler(
             return false
         }
 
-        val plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
+        var plaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, myKeys.encPrivateKeyB64)
+        if (plaintext == null && burnableKeys != null) {
+            val altKeys = if (myKeys.publicKeyB64 == localKeys.publicKeyB64) burnableKeys else localKeys
+            val altPlaintext = CryptoService.decryptDM(msgPay.ciphertext, msgPay.nonce, opponentEncPub, altKeys.encPrivateKeyB64)
+            if (altPlaintext != null) {
+                plaintext = altPlaintext
+                myKeys = altKeys
+                Logger.info(TAG, "Decrypted follower DM using burnable identity keys")
+            }
+        }
         if (plaintext == null) {
             Logger.error(TAG, "FATAL: DM Decryption failed for sender ${packet.senderId}.")
             return false

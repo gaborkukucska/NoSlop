@@ -120,6 +120,14 @@ class IdentityRepository(private val context: Context, private val appSettingDao
             .putString("onion", keys.onionAddress)
             .putString("display_name", keys.displayName)
             .putString("onboarding_complete", "true")
+            // Clean up any stale burnable identity from previous account
+            .remove("burnable_ed25519_private_key")
+            .remove("burnable_enc_private_key")
+            .remove("burnable_pub_ed25519")
+            .remove("burnable_pub_enc")
+            .remove("burnable_tripcode")
+            .remove("burnable_onion")
+            .remove("burnable_display_name")
             .apply()
 
         // Identity version 2 indicates deterministic HKDF derivation from Word Cloud mnemonic
