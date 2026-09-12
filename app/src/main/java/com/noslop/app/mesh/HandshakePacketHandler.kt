@@ -64,8 +64,8 @@ class HandshakePacketHandler(
             return false
         }
 
-        // Drop requests from peers we recently deleted
-        if (existingPeer == null && GossipService.isPeerRecentlyDeleted(connPay.fromUserId)) {
+        // Drop requests from peers we recently deleted (unless fresh intentional reconnect)
+        if (existingPeer == null && GossipService.isPeerRecentlyDeleted(connPay.fromUserId, connPay.timestamp)) {
             Logger.warn(TAG, "Ignored CONNECTION_REQUEST from recently deleted peer: ${connPay.fromUserId}")
             return false
         }

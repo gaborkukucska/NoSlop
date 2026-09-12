@@ -111,14 +111,20 @@ object GossipService {
         }
     }
 
-    fun isPeerRecentlyDeleted(publicKeyB64: String): Boolean {
+    fun isPeerRecentlyDeleted(publicKeyB64: String, packetTimestamp: Long = 0L): Boolean {
         val deletedAt = recentlyDeletedPeers[publicKeyB64] ?: return false
         val gracePeriod = 7L * 24 * 60 * 60 * 1000L // 7 days
-        if (System.currentTimeMillis() - deletedAt < gracePeriod) {
-            return true
+        val now = System.currentTimeMillis()
+        if (now - deletedAt >= gracePeriod) {
+            recentlyDeletedPeers.remove(publicKeyB64)
+            return false
         }
-        recentlyDeletedPeers.remove(publicKeyB64)
-        return false
+        // If this is a fresh connection request created after deletion, allow the deliberate reconnect
+        if (packetTimestamp > deletedAt) {
+            recentlyDeletedPeers.remove(publicKeyB64)
+            return false
+        }
+        return true
     }
 
     fun removePeerFromRelays(publicKeyB64: String) {
@@ -754,7 +760,9 @@ object GossipService {
             
             scope.launch {
                 val peerIdentitySetting = tx.repository.getAppSetting("contact_identity_${peer.publicKeyB64}")
-                val peerSenderId = if (peerIdentitySetting == "burnable") {
+                val isCreatorPost = tx.repository.getAppSetting("is_creator_enabled") == "true" &&
+                    (packet.type == "POST" || packet.type == "DELETE_POST" || packet.type == "EDIT_POST")
+                val peerSenderId = if (peerIdentitySetting == "burnable" || (isCreatorPost && peer.isTemporary)) {
                     tx.repository.getBurnableIdentity()?.publicKeyB64 ?: packet.senderId
                 } else {
                     tx.repository.getLocalIdentity()?.publicKeyB64 ?: packet.senderId
