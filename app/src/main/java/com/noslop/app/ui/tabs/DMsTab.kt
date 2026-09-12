@@ -811,12 +811,12 @@ fun DMsTab(viewModel: NoSlopViewModel) {
         if (dmStep == 0) {
             TutorialSpotlight(targetRect = myIdRect, text = "1. Tap to view your ID".tr, onClickTarget = { showShareSheet = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 2) {
-            TutorialSpotlight(targetRect = addPeerRect, text = "2. Add a new Peer (Scan with camera or select from gallery)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
+            TutorialSpotlight(targetRect = addPeerRect, text = "3. Add a new Peer (Scan with camera or select from gallery)".tr, onClickTarget = { showScanScreen = true; viewModel.advanceDmTutorial() })
         } else if (dmStep == 4) {
             if (visibleDiscoverablePeers.isNotEmpty()) {
                 TutorialSpotlight(
                     targetRect = discoverableNodeRect,
-                    text = "3. Discoverable Nodes: This is the official NoSlop node. As your mesh expands, other discoverable nodes will also appear here. Tap to connect!".tr,
+                    text = "5. Discoverable Nodes: This is the official NoSlop node. As your mesh expands, other discoverable nodes will also appear here. Tap to connect!".tr,
                     onClickTarget = {
                         selectedDiscoverableNode = visibleDiscoverablePeers.first()
                         viewModel.completeDmTutorial()
@@ -895,24 +895,30 @@ fun TutorialSpotlight(
             }
         }
         
-        if (targetRect != Rect.Zero) {
+        run {
             val density = LocalDensity.current
             val config = LocalConfiguration.current
             val screenHeightPx = with(density) { config.screenHeightDp.dp.toPx() }
             val screenWidthPx = with(density) { config.screenWidthDp.dp.toPx() }
-            val yOffset = with(density) { if (targetRect.top > screenHeightPx / 2) targetRect.top.toDp() - 48.dp else targetRect.bottom.toDp() + 16.dp }
+            val yOffset = with(density) {
+                if (targetRect != Rect.Zero) {
+                    if (targetRect.top > screenHeightPx / 2) targetRect.top.toDp() - 48.dp else targetRect.bottom.toDp() + 16.dp
+                } else {
+                    120.dp
+                }
+            }
             
-            val isRightAligned = targetRect.center.x > (screenWidthPx / 2)
-            val xOffset = if (!isRightAligned) {
+            val isRightAligned = targetRect != Rect.Zero && targetRect.center.x > (screenWidthPx / 2)
+            val xOffset = if (!isRightAligned && targetRect != Rect.Zero) {
                 with(density) { maxOf(0.dp, targetRect.left.toDp() - 8.dp) }
-            } else 0.dp // Not used when right aligned
+            } else 0.dp
 
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .offset(y = yOffset)
                     .padding(horizontal = 16.dp),
-                contentAlignment = if (isRightAligned) Alignment.CenterEnd else Alignment.TopStart
+                contentAlignment = if (isRightAligned) Alignment.CenterEnd else if (targetRect != Rect.Zero) Alignment.TopStart else Alignment.Center
             ) {
                 Text(
                     text = text,
@@ -920,7 +926,7 @@ fun TutorialSpotlight(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     modifier = Modifier
-                        .then(if (!isRightAligned) Modifier.offset(x = xOffset) else Modifier)
+                        .then(if (!isRightAligned && targetRect != Rect.Zero) Modifier.offset(x = xOffset) else Modifier)
                         .background(Color(0xFFFFCA28), RoundedCornerShape(8.dp))
                         .padding(horizontal = 12.dp, vertical = 6.dp)
                 )

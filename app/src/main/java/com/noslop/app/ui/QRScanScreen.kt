@@ -228,7 +228,7 @@ fun QRScanScreen(
                                     ) {
                                         Button(
                                             onClick = { 
-                                                if (dmStep == 3) viewModel?.completeDmTutorial()
+                                                if (dmStep == 3) viewModel?.advanceDmTutorial()
                                                 imagePickerLauncher.launch("image/*") 
                                             },
                                             modifier = Modifier.weight(1f).height(50.dp).onGloballyPositioned { galleryRect = it.boundsInRoot() },
@@ -289,7 +289,7 @@ fun QRScanScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedButton(
                                 onClick = { 
-                                    if (dmStep == 3) viewModel?.completeDmTutorial()
+                                    if (dmStep == 3) viewModel?.advanceDmTutorial()
                                     imagePickerLauncher.launch("image/*") 
                                 },
                                 modifier = Modifier.weight(1f).onGloballyPositioned { galleryRect = it.boundsInRoot() },
@@ -400,9 +400,9 @@ fun QRScanScreen(
         if (dmStep == 3) {
             com.noslop.app.ui.tabs.TutorialSpotlight(
                 targetRect = galleryRect, 
-                text = "4. Scan or select from Gallery", 
+                text = "4. Scan with camera or select from Gallery".tr, 
                 onClickTarget = { 
-                    viewModel?.completeDmTutorial()
+                    viewModel?.advanceDmTutorial()
                     imagePickerLauncher.launch("image/*") 
                 }
             )
