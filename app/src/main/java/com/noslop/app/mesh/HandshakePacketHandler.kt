@@ -227,6 +227,8 @@ class HandshakePacketHandler(
         ))
         
         GossipService.flushFirewallBuffer(handPay.fromUserId)
+        // Always trigger inventory sync upon handshake confirmation to pull peer broadcasts immediately
+        repo.requestInventorySync(peer)
 
         if (!wasAlreadyTrusted) {
             val notifSettings = repo.notificationSettingsFlow.value
@@ -257,8 +259,6 @@ class HandshakePacketHandler(
                 )
             }
             repo.setHandshakeAccepted(peer)
-            // Immediately request inventory sync to pull all broadcasts from the newly connected peer
-            repo.requestInventorySync(peer)
         }
         return true
     }

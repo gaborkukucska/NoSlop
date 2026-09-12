@@ -2188,8 +2188,8 @@ fun toggleAggregator() {
     }
 
     fun completeDmTutorial() {
-        _dmTutorialStep.value = 4
-        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "4") }
+        _dmTutorialStep.value = 5
+        viewModelScope.launch { repository.putAppSetting("dms_tutorial_step", "5") }
     }
 
     suspend fun ensureBurnableIdentity(): CryptoService.IdentityKeys {
@@ -2280,6 +2280,12 @@ fun toggleAggregator() {
         viewModelScope.launch(Dispatchers.IO) {
             repository.flushOutboxForPeer(peer.publicKeyB64, peer.onionAddress)
             repository.requestDmSync(peer)
+        }
+    }
+
+    fun requestInventorySync(peer: Peer) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.requestInventorySync(peer)
         }
     }
 

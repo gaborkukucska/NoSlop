@@ -396,6 +396,11 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             if (selectedDiscoverableNode != null) {
                 val peer = selectedDiscoverableNode!!
                 var showConnectWarning by remember { mutableStateOf(false) }
+                LaunchedEffect(peer.publicKeyB64) {
+                    if (peer.onionAddress.isNotBlank()) {
+                        viewModel.requestInventorySync(peer)
+                    }
+                }
 
                 AlertDialog(
                     onDismissRequest = { selectedDiscoverableNode = null },
@@ -541,8 +546,13 @@ fun DMsTab(viewModel: NoSlopViewModel) {
                             }
 
                             val authorPosts by viewModel.meshPosts.collectAsState(initial = emptyList())
-                            val userPosts = remember(authorPosts, peer.publicKeyB64) {
-                                authorPosts.filter { it.authorPublicKeyB64 == peer.publicKeyB64 && !it.isOrphaned }
+                            val userPosts = remember(authorPosts, peer.publicKeyB64, peer.handle) {
+                                authorPosts.filter { post ->
+                                    !post.isOrphaned && (
+                                        post.authorPublicKeyB64 == peer.publicKeyB64 ||
+                                        (post.authorHandle.isNotBlank() && post.authorHandle.equals(peer.handle, ignoreCase = true))
+                                    )
+                                }
                             }
                             if (userPosts.isNotEmpty()) {
                                 Spacer(modifier = Modifier.height(16.dp))
