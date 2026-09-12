@@ -81,7 +81,9 @@ class HandshakePacketHandler(
         val avatarToUse = connPay.authorAvatarB64 ?: existingPeer?.authorAvatarB64
         
         val burnable = repo.getBurnableIdentity()
-        if (burnable != null && packet.targetUserId == burnable.publicKeyB64) {
+        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
+                             db.appSettingDao().getSetting("is_creator") == "true"
+        if (burnable != null && (packet.targetUserId == burnable.publicKeyB64 || isLocalCreator)) {
             db.appSettingDao().insertSetting(com.noslop.app.data.AppSetting("contact_identity_${connPay.fromUserId}", "burnable"))
         }
 
@@ -103,8 +105,7 @@ class HandshakePacketHandler(
         )
         peerDao.insertPeer(peer)
         
-        val isLocalCreator = db.appSettingDao().getSetting("is_creator_enabled") == "true" ||
-                             db.appSettingDao().getSetting("is_creator") == "true"
+        // isLocalCreator already declared above
         if (isLocalCreator) {
             val now = System.currentTimeMillis()
             val limits = autoAcceptRateLimits.getOrPut("auto_accept") { mutableListOf() }
