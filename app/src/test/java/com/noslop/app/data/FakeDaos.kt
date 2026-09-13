@@ -108,6 +108,7 @@ class FakeReactionDao : ReactionDao {
         flowOf(store.values.filter { it.postId == postId })
     override fun getReactionSummaryForPost(postId: String): Flow<List<ReactionDao.ReactionCount>> = flowOf(emptyList())
     override suspend fun deleteReactionsByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
+    override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
 }
 
@@ -120,6 +121,7 @@ class FakeVoteDao : VoteDao {
     override fun getVotesForPost(postId: String): Flow<List<MeshVote>> =
         flowOf(store.values.filter { it.postId == postId })
     override suspend fun deleteVotesByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
+    override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
 }
 
 /** Fake [PeerDao] keyed by public key (REPLACE on insert). */
@@ -137,6 +139,7 @@ class FakePeerDao : PeerDao {
     override suspend fun updateFollowState(pubKey: String, isFollowing: Boolean) {
         peers[pubKey]?.let { peers[pubKey] = it.copy(isFollowing = isFollowing) }
     }
+    override suspend fun getDiscoverablePeersList(): List<Peer> = peers.values.filter { it.isDiscoverable && !it.isTrusted }
 }
 
 /** Fake [PostDao] keyed by id (REPLACE on insert). */
@@ -147,6 +150,8 @@ class FakePostDao : PostDao {
     override suspend fun getPostById(id: String): MeshPost? = posts[id]
     override suspend fun getPostsSince(since: Long): List<MeshPost> = posts.values.filter { it.timestamp > since }
     override fun getAllPosts(): Flow<List<MeshPost>> = flowOf(posts.values.toList())
+    override suspend fun getAllPostsList(): List<MeshPost> = posts.values.toList()
+    override suspend fun deletePostsByAuthor(authorId: String) { posts.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun getPendingDeletionsByAuthor(authorId: String, maxBroadcasts: Int, limit: Int): List<MeshPost> =
         posts.values.filter { it.isOrphaned && it.authorPublicKeyB64 == authorId && it.deletionBroadcasts < maxBroadcasts }
             .sortedBy { it.timestamp }.take(limit)
@@ -225,5 +230,8 @@ class FakePendingGroupMessageDao : PendingGroupMessageDao {
     }
     override suspend fun deleteExpired(cutoff: Long) {
         pending.removeAll { it.createdAt < cutoff }
+    }
+    override suspend fun deleteForMember(memberPub: String) {
+        pending.removeAll { it.memberPub == memberPub }
     }
 }

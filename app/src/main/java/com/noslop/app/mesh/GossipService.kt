@@ -384,7 +384,7 @@ object GossipService {
         val isMediaRelayPacket = packet.type.startsWith("MEDIA_") // ALL media packets bypass strict trust firewall
         val isDiscoverable = packet.type == "ANNOUNCE_DISCOVERABLE"
         val isIdentityUpdate = packet.type == "IDENTITY_UPDATE" || packet.type == "USER_EXIT" || packet.type == "PEER_REMOVED"
-        val isSyncPacket = packet.type.startsWith("SYNC_") || packet.type == "INVENTORY_SYNC_REQUEST"
+        val isDeletePacket = packet.type == "DELETE_POST" || packet.type == "DELETE_COMMENT"
 
         // P1-6: Dedicated rate limit for discoverable announcements & identity updates (5 per 60s per sender)
         if (isDiscoverable || isIdentityUpdate) {
@@ -400,7 +400,7 @@ object GossipService {
             }
         }
         
-        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket) {
+        if (!isConnectionPacket && !isMediaRelayPacket && !isDiscoverable && !isIdentityUpdate && !isSyncPacket && !isDeletePacket) {
             val dao = peerDao
             if (dao != null) {
                 val peer = dao.getPeerByPublicKey(senderId)
