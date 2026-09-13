@@ -220,9 +220,14 @@ class MeshTransport(
         }
 
         try {
-            val maxAttempts = if (isDmHighPriority) 3 else 1
+            val maxAttempts = when {
+                packet.type == "CONNECTION_REQUEST" -> 1 // Fast-fail to outbox if descriptor is still propagating
+                isDmHighPriority -> 2
+                else -> 1
+            }
             val connectTimeout = when {
-                isDmHighPriority -> 35000
+                packet.type == "CONNECTION_REQUEST" -> 18000 // 18s is sufficient to hit live HSDirs
+                isDmHighPriority -> 25000
                 isInteractive -> 8000
                 isMediaPacket -> 20000
                 else -> 12000

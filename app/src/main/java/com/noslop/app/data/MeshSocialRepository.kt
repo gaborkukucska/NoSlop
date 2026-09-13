@@ -74,6 +74,7 @@ class MeshSocialRepository(
 
     // Persistent DM outbox: queued packets waiting for peer connection
     private val pendingOutboxMessages = java.util.concurrent.ConcurrentHashMap<String, MutableList<com.noslop.app.mesh.NetworkPacket>>()
+    private val inFlightFlushes = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private var outboxWorkerJob: kotlinx.coroutines.Job? = null
 
     init {
@@ -132,25 +133,35 @@ class MeshSocialRepository(
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
+        if (!inFlightFlushes.add(recipientPub)) return // Prevent racing flushes on the same peer
+
         // 1. Flush standard DM outbox
         val list = pendingOutboxMessages[recipientPub]
         if (list != null) {
             val toSend = synchronized(list) { list.toList() }
             if (toSend.isNotEmpty()) {
                 repositoryScope.launch(Dispatchers.IO) {
-                    Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
-                    for (packet in toSend) {
-                        val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
-                        if (success) {
-                            list.remove(packet)
-                            savePersistedOutbox()
-                            Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
-                        } else {
-                            break
+                    try {
+                        Logger.info(TAG, "Flushing ${toSend.size} pending DM(s) to $onionAddress")
+                        for (packet in toSend) {
+                            val success = meshTransport.sendPacket(onionAddress, Constants.MESH_PORT, packet)
+                            if (success) {
+                                list.remove(packet)
+                                savePersistedOutbox()
+                                Logger.info(TAG, "Delivered outbox DM ${packet.id} to $onionAddress")
+                            } else {
+                                break
+                            }
                         }
+                    } finally {
+                        inFlightFlushes.remove(recipientPub)
                     }
                 }
+            } else {
+                inFlightFlushes.remove(recipientPub)
             }
+        } else {
+            inFlightFlushes.remove(recipientPub)
         }
 
         // 2. P0-1: Flush pending group messages for this peer
@@ -830,88 +841,99 @@ class MeshSocialRepository(
     }
 
     suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = withContext(Dispatchers.IO) {
-        val peer = peerDao.getPeerByPublicKey(publicKeyB64)
-        if (peer != null) {
-            val myKeys = getLocalIdentity()
-            if (myKeys != null && notifyRemote) {
-                val timestamp = System.currentTimeMillis()
-                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
-                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-                
-                val removePayload = com.noslop.app.mesh.PeerRemovedPayload(
-                    userId = myKeys.publicKeyB64,
-                    timestamp = timestamp,
-                    signature = signature
-                )
-                
-                val packet = com.noslop.app.mesh.NetworkPacket(
-                    id = java.util.UUID.randomUUID().toString(),
-                    hops = 3,
-                    senderId = myKeys.publicKeyB64,
-                    targetUserId = publicKeyB64,
-                    type = "PEER_REMOVED",
-                    payload = com.google.gson.Gson().toJsonTree(removePayload),
-                    signature = signature
-                )
-                
-                // Send PEER_REMOVED directly to inform them we're disconnecting
-                repositoryScope.launch {
-                    meshTransport.sendPacket(peer.onionAddress, Constants.MESH_PORT, packet)
-                }
-            }
-
-            com.noslop.app.mesh.GossipService.recordDeletedPeer(publicKeyB64)
-            com.noslop.app.mesh.GossipService.removePeerFromRelays(publicKeyB64)
-
-            // Collect all media IDs associated with this peer to delete from disk
-            val mediaIdsToDelete = mutableListOf<String>()
-            try {
-                val posts = postDao.getAllPostsList().filter { it.authorPublicKeyB64 == publicKeyB64 }
-                posts.forEach { p ->
-                    p.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
-                    commentDao.deleteCommentsForPost(p.id)
-                    reactionDao.deleteReactionsForPost(p.id)
-                    voteDao.deleteVotesForPost(p.id)
-                }
-                val messages = messageDao.getMessagesWithPeerList(publicKeyB64)
-                messages.forEach { m ->
-                    m.mediaId?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
-                }
-                val comments = commentDao.getCommentsByAuthorList(publicKeyB64)
-                comments.forEach { c ->
-                    c.mediaId?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
-                }
-            } catch (e: Exception) {
-                Logger.warn(TAG, "Error collecting media for peer: ${e.message}")
-            }
-
-            if (mediaIdsToDelete.isNotEmpty()) {
-                com.noslop.app.mesh.MediaManager.deleteMediaFiles(mediaIdsToDelete)
-            }
-
-            peerDao.deletePeer(peer)
-            messageDao.deleteMessagesWithPeer(publicKeyB64)
-
-            try {
-                commentDao.deleteCommentsByAuthor(publicKeyB64)
-                commentVoteDao.deleteCommentVotesByAuthor(publicKeyB64)
-                reactionDao.deleteReactionsByAuthor(publicKeyB64)
-                voteDao.deleteVotesByAuthor(publicKeyB64)
-                chatReactionDao.deleteChatReactionsByAuthor(publicKeyB64)
-                commentReactionDao.deleteCommentReactionsByAuthor(publicKeyB64)
-                postDao.deletePostsByAuthor(publicKeyB64)
-                db.notificationDao().deleteNotificationsBySender(publicKeyB64)
-                db.pendingGroupMessageDao().deleteForMember(publicKeyB64)
-                db.appSettingDao().removeSetting("contact_identity_$publicKeyB64")
-            } catch (e: Exception) {
-                Logger.error(TAG, "Failed to purge peer content: ${e.message}")
-            }
-
-            pendingOutboxMessages.remove(publicKeyB64)
-            savePersistedOutbox()
-
-            Logger.info(TAG, "Deleted peer and all of their content & media: ${peer.handle}")
+        var peer = peerDao.getPeerByPublicKey(publicKeyB64)
+        if (peer == null) {
+            peer = peerDao.getAllPeersList().find { it.onionAddress.isNotBlank() && (it.onionAddress == publicKeyB64 || it.publicKeyB64 == publicKeyB64) }
         }
+        val targetPub = peer?.publicKeyB64 ?: publicKeyB64
+        val targetHandle = peer?.handle
+        val targetOnion = peer?.onionAddress ?: ""
+
+        val myKeys = getIdentityForPeer(targetPub) ?: getBurnableIdentity() ?: getLocalIdentity()
+        if (myKeys != null && notifyRemote && targetOnion.isNotBlank()) {
+            val timestamp = System.currentTimeMillis()
+            val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(myKeys.publicKeyB64, timestamp.toString())
+            val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
+            
+            val removePayload = com.noslop.app.mesh.PeerRemovedPayload(
+                userId = myKeys.publicKeyB64,
+                timestamp = timestamp,
+                signature = signature
+            )
+            
+            val packet = com.noslop.app.mesh.NetworkPacket(
+                id = java.util.UUID.randomUUID().toString(),
+                hops = 3,
+                senderId = myKeys.publicKeyB64,
+                targetUserId = targetPub,
+                type = "PEER_REMOVED",
+                payload = com.google.gson.Gson().toJsonTree(removePayload),
+                signature = signature
+            )
+            
+            dispatchPacket(targetOnion, packet)
+        }
+
+        com.noslop.app.mesh.GossipService.recordDeletedPeer(targetPub)
+        com.noslop.app.mesh.GossipService.removePeerFromRelays(targetPub)
+
+        // Collect all media IDs associated with this peer to delete from disk
+        val mediaIdsToDelete = mutableListOf<String>()
+        try {
+            val posts = postDao.getAllPostsList().filter { 
+                it.authorPublicKeyB64 == targetPub || (targetHandle != null && targetHandle.isNotBlank() && it.authorHandle.equals(targetHandle, ignoreCase = true)) 
+            }
+            posts.forEach { p ->
+                p.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
+                commentDao.deleteCommentsForPost(p.id)
+                reactionDao.deleteReactionsForPost(p.id)
+                voteDao.deleteVotesForPost(p.id)
+                db.openHelper.writableDatabase.execSQL("DELETE FROM mesh_posts WHERE id = ?", arrayOf(p.id))
+            }
+            val messages = messageDao.getMessagesWithPeerList(targetPub)
+            messages.forEach { m ->
+                m.mediaId?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
+            }
+            val comments = commentDao.getCommentsByAuthorList(targetPub)
+            comments.forEach { c ->
+                c.mediaId?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Error collecting media for peer: ${e.message}")
+        }
+
+        if (mediaIdsToDelete.isNotEmpty()) {
+            com.noslop.app.mesh.MediaManager.deleteMediaFiles(mediaIdsToDelete)
+        }
+
+        if (peer != null) {
+            peerDao.deletePeer(peer)
+        }
+        messageDao.deleteMessagesWithPeer(targetPub)
+
+        try {
+            commentDao.deleteCommentsByAuthor(targetPub)
+            commentVoteDao.deleteCommentVotesByAuthor(targetPub)
+            reactionDao.deleteReactionsByAuthor(targetPub)
+            voteDao.deleteVotesByAuthor(targetPub)
+            chatReactionDao.deleteChatReactionsByAuthor(targetPub)
+            commentReactionDao.deleteCommentReactionsByAuthor(targetPub)
+            postDao.deletePostsByAuthor(targetPub)
+            if (!targetHandle.isNullOrBlank()) {
+                db.openHelper.writableDatabase.execSQL("DELETE FROM mesh_posts WHERE authorHandle = ?", arrayOf(targetHandle))
+            }
+            db.notificationDao().deleteNotificationsBySender(targetPub)
+            db.pendingGroupMessageDao().deleteForMember(targetPub)
+            db.appSettingDao().removeSetting("contact_identity_$targetPub")
+            db.appSettingDao().removeSetting("disc_packet_$targetPub")
+        } catch (e: Exception) {
+            Logger.error(TAG, "Failed to purge peer content: ${e.message}")
+        }
+
+        pendingOutboxMessages.remove(targetPub)
+        savePersistedOutbox()
+
+        Logger.info(TAG, "Deleted peer and all of their content & media: $targetHandle ($targetPub)")
     }
 
     fun clearOutbox() {

@@ -1282,6 +1282,7 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             var pendingImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
                             var importStatus by remember { mutableStateOf<String?>(null) }
                             var showLegacyConfirmDialog by remember { mutableStateOf(false) }
+                            var showExportSuccessDialog by remember { mutableStateOf(false) }
                             var pendingLegacyImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
                             var pendingLegacyMnemonic by remember { mutableStateOf("") }
 
@@ -1293,7 +1294,8 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     importStatus = "Exporting backup (this may take a moment for large media)..."
                                     viewModel.exportBackupToUri(context, mnemonicToUse, uri) { success, errMsg ->
                                         if (success) {
-                                            importStatus = "Backup exported successfully!"
+                                            showExportSuccessDialog = true
+                                            importStatus = null
                                         } else {
                                             importStatus = errMsg ?: "Export failed."
                                         }
@@ -1460,6 +1462,31 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                         }
                                     },
                                     containerColor = SurfaceDark
+                                )
+                            }
+
+                            if (showExportSuccessDialog) {
+                                AlertDialog(
+                                    onDismissRequest = { showExportSuccessDialog = false },
+                                    containerColor = SurfaceDark,
+                                    title = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text("Backup Exported".tr, color = TextLight, fontWeight = FontWeight.Bold)
+                                        }
+                                    },
+                                    text = {
+                                        Text("The backup exported successfully!".tr, color = TextMuted)
+                                    },
+                                    confirmButton = {
+                                        Button(
+                                            onClick = { showExportSuccessDialog = false },
+                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                        ) {
+                                            Text("OK".tr, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
                                 )
                             }
 
