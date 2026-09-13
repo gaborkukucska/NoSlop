@@ -85,7 +85,8 @@ object BackupManager {
 
     fun exportData(context: Context, mnemonic: String, targetStream: OutputStream): Boolean {
         Logger.info(TAG, "Starting data export...")
-        val tempZip = File(context.cacheDir, "noslop_backup.zip")
+        val tempDir = context.externalCacheDir ?: context.cacheDir
+        val tempZip = File(tempDir, "noslop_backup_${System.currentTimeMillis()}.zip")
         return try {
             val dbFile = context.getDatabasePath(DB_NAME)
 
@@ -199,9 +200,13 @@ object BackupManager {
                     val noSlopDir = File(baseDir, "NoSlop")
                     if (noSlopDir.exists() && noSlopDir.isDirectory) {
                         noSlopDir.listFiles()?.forEach { file ->
-                            // Only plain files with a plain name; never a path fragment.
-                            if (file.isFile && isSafeEntryName(file.name)) {
-                                addToZip(zos, file, "media/$dirType/${file.name}")
+                            // Only plain files; skip in-progress .part files and unsafe names
+                            if (file.isFile && isSafeEntryName(file.name) && !file.name.endsWith(".part")) {
+                                try {
+                                    addToZip(zos, file, "media/$dirType/${file.name}")
+                                } catch (e: Exception) {
+                                    Logger.warn(TAG, "Skipping unreadable media file ${file.name}: ${e.message}")
+                                }
                             }
                         }
                     }
@@ -255,7 +260,8 @@ object BackupManager {
     ): Boolean {
         Logger.info(TAG, "Starting data import...")
         lastRestoreNeedsIdentityRecovery = false
-        val tempZip = File(context.cacheDir, "noslop_restore.zip")
+        val tempDir = context.externalCacheDir ?: context.cacheDir
+        val tempZip = File(tempDir, "noslop_restore_${System.currentTimeMillis()}.zip")
         return try {
             val seed = MnemonicGenerator.deriveSeed(mnemonic)
             val key = SecretKeySpec(seed.copyOfRange(0, 32), "AES")

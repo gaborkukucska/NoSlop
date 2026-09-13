@@ -1285,9 +1285,19 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             var pendingLegacyImportUri by remember { mutableStateOf<android.net.Uri?>(null) }
                             var pendingLegacyMnemonic by remember { mutableStateOf("") }
 
+                            val isBackupExporting by viewModel.isBackupExporting.collectAsState()
+
                             val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
                                 if (uri != null && mnemonicInput.isNotBlank()) {
-                                    viewModel.exportBackupToUri(context, mnemonicInput, uri)
+                                    val mnemonicToUse = mnemonicInput
+                                    importStatus = "Exporting backup (this may take a moment for large media)..."
+                                    viewModel.exportBackupToUri(context, mnemonicToUse, uri) { success, errMsg ->
+                                        if (success) {
+                                            importStatus = "Backup exported successfully!"
+                                        } else {
+                                            importStatus = errMsg ?: "Export failed."
+                                        }
+                                    }
                                     mnemonicInput = ""
                                 }
                             }
@@ -1304,13 +1314,20 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                                     isExporting = true
                                     showMnemonicDialog = true
                                 },
+                                enabled = !isBackupExporting,
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryBlack, contentColor = AccentGreen),
                                 border = BorderStroke(1.dp, AccentGreen)
                             ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Export Profile (Zip)".tr, fontWeight = FontWeight.Bold)
+                                if (isBackupExporting) {
+                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = AccentGreen, strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Exporting Backup...".tr, fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Export Profile (Zip)".tr, fontWeight = FontWeight.Bold)
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))

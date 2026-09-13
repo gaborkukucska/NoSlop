@@ -674,7 +674,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                     val updatedFeed = _unifiedFeed.value.mapNotNull { currentItem ->
                         when (currentItem) {
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
-                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id }?.let { UnifiedItem.Mesh(it) } ?: currentItem
+                            is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id && !it.isOrphaned }?.let { UnifiedItem.Mesh(it) }
                             is UnifiedItem.Tutorial -> currentItem
                         }
                     }.toList()
@@ -1910,6 +1910,15 @@ fun toggleAggregator() {
             _feedTutorialStep.value = 0
             _dmTutorialStep.value = 0
             clearLogFile()
+            kotlinx.coroutines.delay(500)
+            val context = getApplication<Application>()
+            val pm = context.packageManager
+            val intent = pm.getLaunchIntentForPackage(context.packageName)
+            if (intent != null) {
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                context.startActivity(intent)
+                android.os.Process.killProcess(android.os.Process.myPid())
+            }
         }
     }
 
@@ -1931,11 +1940,36 @@ fun toggleAggregator() {
 
 
 
-    fun exportBackupToUri(context: Context, mnemonic: String, uri: android.net.Uri) {
-        viewModelScope.launch {
-            val outputStream = context.contentResolver.openOutputStream(uri)
-            if (outputStream != null) {
-                com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream)
+    private val _isBackupExporting = MutableStateFlow(false)
+    val isBackupExporting: StateFlow<Boolean> = _isBackupExporting.asStateFlow()
+
+    fun exportBackupToUri(
+        context: Context,
+        mnemonic: String,
+        uri: android.net.Uri,
+        onResult: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _isBackupExporting.value = true
+            try {
+                val outputStream = context.contentResolver.openOutputStream(uri)
+                if (outputStream != null) {
+                    val success = com.noslop.app.data.BackupManager.exportData(context, mnemonic, outputStream)
+                    withContext(Dispatchers.Main) {
+                        onResult(success, if (success) null else "Export failed during archive creation")
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        onResult(false, "Could not open target file for writing")
+                    }
+                }
+            } catch (e: Exception) {
+                Logger.error("VM", "exportBackupToUri failed: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onResult(false, e.message ?: "Export failed")
+                }
+            } finally {
+                _isBackupExporting.value = false
             }
         }
     }
@@ -1948,7 +1982,7 @@ fun toggleAggregator() {
         onLegacyDetected: (() -> Unit)? = null,
         onResult: (Boolean) -> Unit = {}
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 val inputStream = context.contentResolver.openInputStream(uri)
                 if (inputStream != null) {
@@ -1969,16 +2003,16 @@ fun toggleAggregator() {
                                 android.os.Process.killProcess(android.os.Process.myPid())
                             }
                         }
-                        onResult(success)
+                        withContext(Dispatchers.Main) { onResult(success) }
                     } catch (e: com.noslop.app.data.LegacyBackupConfirmationRequiredException) {
-                        onLegacyDetected?.invoke()
+                        withContext(Dispatchers.Main) { onLegacyDetected?.invoke() }
                     }
                 } else {
-                    onResult(false)
+                    withContext(Dispatchers.Main) { onResult(false) }
                 }
             } catch (e: Exception) {
                 Logger.error("VM", "Import failed: ${e.message}")
-                onResult(false)
+                withContext(Dispatchers.Main) { onResult(false) }
             }
         }
     }
@@ -2652,14 +2686,22 @@ fun toggleAggregator() {
     fun togglePeerTrust(peer: Peer) { viewModelScope.launch { repository.togglePeerTrust(peer) } }
     fun removePeer(peerPub: String) { 
         viewModelScope.launch { 
+            val peer = peers.value.find { it.publicKeyB64 == peerPub }
+            val handle = peer?.handle
             repository.deletePeer(peerPub) 
             
-            // Instantly clear all their posts (both public and private) from the active UI and caches
+            // Instantly clear all their posts (by public key AND handle) from the active UI and caches
             val currentFeed = _unifiedFeed.value.toMutableList()
-            currentFeed.removeAll { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub }
+            currentFeed.removeAll { 
+                it is UnifiedItem.Mesh && (it.post.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.post.authorHandle.equals(handle, ignoreCase = true))) 
+            }
             _unifiedFeed.value = currentFeed
-            cachedDefaultFeed = cachedDefaultFeed.filterNot { it is UnifiedItem.Mesh && it.post.authorPublicKeyB64 == peerPub }
-            sessionLoadedIds.removeAll { id -> allMeshes.any { it.id == id && it.authorPublicKeyB64 == peerPub } }
+            cachedDefaultFeed = cachedDefaultFeed.filterNot { 
+                it is UnifiedItem.Mesh && (it.post.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.post.authorHandle.equals(handle, ignoreCase = true))) 
+            }
+            sessionLoadedIds.removeAll { id -> 
+                allMeshes.any { it.id == id && (it.authorPublicKeyB64 == peerPub || (handle != null && handle.isNotBlank() && it.authorHandle.equals(handle, ignoreCase = true))) } 
+            }
             if (_selectedPeerPub.value == peerPub) {
                 _selectedPeerPub.value = null
             }
