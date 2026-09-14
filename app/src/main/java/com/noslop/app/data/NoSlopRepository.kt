@@ -93,6 +93,10 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     val isSendOnEnterEnabled = settingsRepository.isSendOnEnterEnabled
     val meshFilterSettingsFlow = settingsRepository.meshFilterSettingsFlow
     val feedMixSettingsFlow = settingsRepository.feedMixSettingsFlow
+    val breakReminderEnabled: kotlinx.coroutines.flow.StateFlow<Boolean> = settingsRepository.breakReminderEnabled
+    val breakReminderMode: kotlinx.coroutines.flow.StateFlow<String> = settingsRepository.breakReminderMode
+    val breakReminderIntervalSlides: kotlinx.coroutines.flow.StateFlow<Int> = settingsRepository.breakReminderIntervalSlides
+    val breakReminderIntervalMinutes: kotlinx.coroutines.flow.StateFlow<Int> = settingsRepository.breakReminderIntervalMinutes
 
     init {
         com.noslop.app.mesh.GossipService.pushPacketToHub = { packet -> pushPacketToHub(packet) }
@@ -1451,6 +1455,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun setAutoUpdateEnabled(enabled: Boolean) = settingsRepository.setAutoUpdateEnabled(enabled)
     suspend fun setSendOnEnterEnabled(enabled: Boolean) =
         settingsRepository.setSendOnEnterEnabled(enabled)
+
+    suspend fun initBreakReminderSettings() = settingsRepository.initBreakReminderSettings()
+    suspend fun setBreakReminderEnabled(enabled: Boolean) = settingsRepository.setBreakReminderEnabled(enabled)
+    suspend fun setBreakReminderMode(mode: String) = settingsRepository.setBreakReminderMode(mode)
+    suspend fun setBreakReminderIntervalSlides(interval: Int) = settingsRepository.setBreakReminderIntervalSlides(interval)
+    suspend fun setBreakReminderIntervalMinutes(interval: Int) = settingsRepository.setBreakReminderIntervalMinutes(interval)
 
     // --- Feed Methods (delegated to FeedRepository) ---
     suspend fun insertSource(source: FeedSource) = feedRepository.insertSource(source)

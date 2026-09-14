@@ -213,10 +213,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private var lastBreakReminderSlide = 0
     private var lastBreakReminderTimeMs = System.currentTimeMillis()
 
-    val breakReminderEnabled = repository.breakReminderEnabled
-    val breakReminderMode = repository.breakReminderMode
-    val breakReminderIntervalSlides = repository.breakReminderIntervalSlides
-    val breakReminderIntervalMinutes = repository.breakReminderIntervalMinutes
+    val breakReminderEnabled: StateFlow<Boolean> = repository.breakReminderEnabled
+    val breakReminderMode: StateFlow<String> = repository.breakReminderMode
+    val breakReminderIntervalSlides: StateFlow<Int> = repository.breakReminderIntervalSlides
+    val breakReminderIntervalMinutes: StateFlow<Int> = repository.breakReminderIntervalMinutes
 
     fun setBreakReminderEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBreakReminderEnabled(enabled) }
     fun setBreakReminderMode(mode: String) = viewModelScope.launch { repository.setBreakReminderMode(mode) }
@@ -728,6 +728,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             is UnifiedItem.Feed -> feeds.find { it.id == currentItem.id }?.let { UnifiedItem.Feed(it) } ?: currentItem
                             is UnifiedItem.Mesh -> meshes.find { it.id == currentItem.id && !it.isOrphaned }?.let { UnifiedItem.Mesh(it) }
                             is UnifiedItem.Tutorial -> currentItem
+                            is UnifiedItem.CreatorDepletion -> currentItem
+                            is UnifiedItem.BreakReminder -> currentItem
                         }
                     }.toList()
                     
@@ -1190,6 +1192,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
         // Strict non-resurrection: never bring back items the user already saw, swiped, or reacted to.
         val isFeedMode = actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random"
+        val isUsingFallback = false
         if (isFeedMode && unseenFeeds.isEmpty() && !_isRefreshingFeeds.value && !isSearchActive) {
             refreshFeeds()
         }

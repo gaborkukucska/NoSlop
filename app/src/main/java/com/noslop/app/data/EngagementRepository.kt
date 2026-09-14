@@ -100,6 +100,8 @@ fun getCanonicalItemKey(item: com.noslop.app.ui.UnifiedItem): String {
             }
         }
         is com.noslop.app.ui.UnifiedItem.Tutorial -> item.id
+        is com.noslop.app.ui.UnifiedItem.CreatorDepletion -> item.id
+        is com.noslop.app.ui.UnifiedItem.BreakReminder -> item.id
     }
 }
 
