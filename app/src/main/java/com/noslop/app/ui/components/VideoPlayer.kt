@@ -1319,6 +1319,8 @@ private fun ExoVideoPlayer(
     var totalDurationMs by remember { mutableStateOf(0L) }
     var isScrubbing by remember { mutableStateOf(false) }
     var scrubProgress by remember { mutableStateOf(0f) }
+    var showTimeline by remember { mutableStateOf(false) }
+    var lastInteractionTime by remember { mutableStateOf(0L) }
 
     LaunchedEffect(exoPlayer, isVisible, isScrubbing) {
         val player = exoPlayer ?: return@LaunchedEffect
@@ -1329,6 +1331,13 @@ private fun ExoVideoPlayer(
                 totalDurationMs = if (d > 0L) d else 0L
             }
             kotlinx.coroutines.delay(300L)
+        }
+    }
+
+    LaunchedEffect(showTimeline, isPlaying, isScrubbing, lastInteractionTime) {
+        if (showTimeline && isPlaying && !isScrubbing) {
+            kotlinx.coroutines.delay(3500L)
+            showTimeline = false
         }
     }
 
@@ -1374,6 +1383,8 @@ private fun ExoVideoPlayer(
         modifier = Modifier.fillMaxSize().pointerInput(exoPlayer) {
             detectTapGestures(
                 onPress = {
+                    showTimeline = true
+                    lastInteractionTime = System.currentTimeMillis()
                     val player = exoPlayer ?: return@detectTapGestures
                     val holdJob = scope.launch {
                         kotlinx.coroutines.delay(400)
@@ -1392,6 +1403,8 @@ private fun ExoVideoPlayer(
                 },
                 onDoubleTap = { offset ->
                     val player = exoPlayer ?: return@detectTapGestures
+                    showTimeline = true
+                    lastInteractionTime = System.currentTimeMillis()
                     val width = size.width
                     if (offset.x > width / 2) {
                         player.seekTo(player.currentPosition + 10000)
@@ -1406,6 +1419,8 @@ private fun ExoVideoPlayer(
                     if (player != null) {
                         player.playWhenReady = !player.playWhenReady
                         isPlaying = player.playWhenReady
+                        showTimeline = true
+                        lastInteractionTime = System.currentTimeMillis()
                     }
                 }
             )
@@ -1498,8 +1513,13 @@ private fun ExoVideoPlayer(
                 }
             }
 
-            // Interactive Video Scrubber / Playhead Timeline
-            if (totalDurationMs > 0L) {
+            // Interactive Video Scrubber / Playhead Timeline (Auto-hiding with tap-to-reveal)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = (showTimeline || isScrubbing || !isPlaying) && totalDurationMs > 0L,
+                enter = androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter).zIndex(6f)
+            ) {
                 val displayPosition = if (isScrubbing) (scrubProgress * totalDurationMs).toLong() else currentPositionMs
                 val formatTime = { ms: Long ->
                     val totalSec = (ms / 1000).coerceAtLeast(0)
@@ -1509,10 +1529,8 @@ private fun ExoVideoPlayer(
                 }
                 Box(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .zIndex(6f)
                 ) {
                     Row(
                         modifier = Modifier
@@ -1531,6 +1549,7 @@ private fun ExoVideoPlayer(
                             value = if (totalDurationMs > 0L) (displayPosition.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f) else 0f,
                             onValueChange = { frac ->
                                 isScrubbing = true
+                                showTimeline = true
                                 scrubProgress = frac
                             },
                             onValueChangeFinished = {
@@ -1538,6 +1557,7 @@ private fun ExoVideoPlayer(
                                 exoPlayer?.seekTo(seekTarget)
                                 currentPositionMs = seekTarget
                                 isScrubbing = false
+                                lastInteractionTime = System.currentTimeMillis()
                             },
                             modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
                             colors = SliderDefaults.colors(
