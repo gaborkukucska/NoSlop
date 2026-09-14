@@ -122,6 +122,7 @@ same `(repo, db)` pair, method bodies moved verbatim per ADR-004):
 | 25 | `READ_RECEIPT` | `ReadReceiptPayload` | **none — unsigned** | `DmPacketHandler.handleReadReceipt` | `messageDao.markAsReadById(receipt.messageId)` |
 | 26 | `DELETE_MESSAGE` | `DeleteMessagePayload` | `messageId\|authorId\|timestamp` | `DmPacketHandler.handleDeleteMessage` | DM: `messageDao.deleteMessageByIdAndSender`; Group (if `group_id` set): `messageDao.deleteMessageById` after verifying author is message sender or group admin |
 | 27 | `GROUP_MESSAGE` | `GroupMessagePayload` | `groupId|id|content|timestamp|senderId` | `DmPacketHandler.handleGroupMessage` | `messageDao.insertMessage` (Keystore encrypted at rest); legacy receive-only wire support with strict signature and group membership verification |
+| 28 | `PEER_REMOVED` | `PeerRemovedPayload` | `userId|timestamp` (signed, supporting encodeForSigning and pipe) | `HandshakePacketHandler.handlePeerRemoved` | Deletes the peer and purges all of their posts, comments, reactions, and on-disk media files locally without remote re-notification |
 
 Notes:
 
@@ -463,6 +464,17 @@ signer is recovered and what each role is permitted to change.
 Blank `message_id` is rejected. Neither of these two types is signed, so
 neither should be treated as evidence of anything.
 
+### PEER_REMOVED
+**Type:** `PEER_REMOVED` · class `PeerRemovedPayload`
+
+| Field | Type | Description |
+|---|---|---|
+| `user_id` | String | Public key of the peer initiating the removal |
+| `timestamp` | Long | Epoch milliseconds |
+| `signature` | String | Signature over `userId\|timestamp` (supporting both `encodeForSigning` and pipe) |
+
+Directly informs a connected peer that they have been removed from contacts, triggering symmetric peer deletion and complete local content/media purging.
+
 ### DELETE_MESSAGE
 **Type:** `DELETE_MESSAGE` · class `DeleteMessagePayload`
 
@@ -684,6 +696,7 @@ and still accurate.
 | `GROUP_INVITE` | `groupId\|title\|adminPublicKeyB64\|timestamp` |
 | `GROUP_UPDATE` | `groupId\|title\|signerPublicKeyB64\|timestamp` — signer recovered by trial verification, see §2 |
 | `GROUP_DELETE` | `groupId\|delete\|adminPublicKeyB64\|timestamp` |
+| `PEER_REMOVED` | `userId\|timestamp` (supporting encodeForSigning and pipe) |
 | `DELETE_MESSAGE` | `messageId\|authorId\|timestamp` — DM: only message author; Group (if `group_id` set): author or admin |
 | `GROUP_MESSAGE` | `groupId|id|content|timestamp|senderId` (legacy receive-only, verified against sender key) |
 | `TYPING` / `READ_RECEIPT` | *(unsigned by design)* |

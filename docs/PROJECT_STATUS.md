@@ -1,5 +1,30 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-14) — Bi-Directional Peer Disconnect, Media Purging, Total Factory Reset & Sync Unblocking
+
+* **Bi-Directional Peer Disconnect Protocol (`MeshSocialRepository.kt`, `HandshakePacketHandler.kt`, `Packets.kt`)**:
+  * Implemented `PEER_REMOVED` wire packet (`PeerRemovedPayload { userId, timestamp, signature }`). When a user removes a peer from contacts, a signed `PEER_REMOVED` packet is dispatched directly to the remote peer's onion address using the identity paired with that contact (`getIdentityForPeer`).
+  * `HandshakePacketHandler` intercepts `PEER_REMOVED` and targeted `USER_EXIT` packets, verifying Ed25519 signatures (supporting both `encodeForSigning` and legacy pipe formats) and calling `repo.deletePeer(senderId, notifyRemote = false)`. This ensures that when User A removes User B, User A is automatically removed from User B's device.
+  * Added `PEER_REMOVED` and `DELETE_POST` to the `GossipService` firewall bypass whitelist so disconnection and post deletion packets from un-trusted or non-contact nodes are never dropped.
+* **Complete Peer Content & On-Disk Media Purging (`MeshSocialRepository.kt`, `MediaManager.kt`, `NoSlopViewModel.kt`, `Daos.kt`)**:
+  * Added `MediaManager.deleteMediaFiles()`: peer removal scans all posts, DMs, and comments by that author, collects all media identifiers, and deletes `.mp4`, `.jpg`, `.part`, and `.mine` files from disk across all external and internal media directories.
+  * Extended database purges to wipe posts by both author public key and author handle (`postDao.deletePostsByAuthor`, `db.execSQL("DELETE FROM mesh_posts WHERE authorHandle = ?")`), comments, comment reactions, chat reactions, votes, comment votes, and notifications.
+  * Fixed an in-memory feed retention bug in `NoSlopViewModel.kt` where `meshes.find { ... } ?: currentItem` was retaining deleted mesh posts in the UI. Evicted posts immediately from `_unifiedFeed.value`, `cachedDefaultFeed`, and `sessionLoadedIds` across public and private broadcasts.
+* **Total Factory Reset & Clean Process Restart (`NoSlopRepository.kt`, `MediaManager.kt`, `NoSlopViewModel.kt`)**:
+  * Implemented `MediaManager.deleteAllMediaFiles()`, recursively purging all files in `Pictures/NoSlop`, `Movies/NoSlop`, `Music/NoSlop`, `Downloads/NoSlop`, `filesDir/NoSlop`, `filesDir/media`, `cacheDir`, and `externalCacheDir`.
+  * `NoSlopRepository.factoryReset()` clears all SQLite database tables, deletes EncryptedSharedPreferences (`noslop_identity_secure.xml`, `noslop_identity_fallback.xml`), wipes API keys and system preference files, unregisters Tor hidden services, and flushes in-memory outbox queues, gossip rate limiters, and relay states.
+  * `NoSlopViewModel.factoryReset()` clears all UI state flows, wipes debug logs, and triggers a clean process kill and restart (`android.os.Process.killProcess`), landing the user fresh on the Onboarding Welcome screen.
+* **Sync Response Firewall Unblocking & Multi-Format Legacy Signature Support (`GossipService.kt`, `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, `SyncPacketHandler.kt`)**:
+  * Resolved the firewall blocking bug where `GossipService.processIncoming` was dropping `SYNC_RESPONSE` packets from non-contact creator nodes (`isTrusted = false`) with `FIREWALL BLOCKED: Sender ... is not trusted`. Added `isSyncPacket` (`SYNC_RESPONSE`, `INVENTORY_SYNC_REQUEST`, `SYNC_REQUEST`) to the firewall bypass whitelist.
+  * Enhanced `MeshPacketVerifier.kt`, `PostPacketHandler.kt`, and `SyncPacketHandler.kt` with multi-format fallback signature verification for `POST`, `ANNOUNCE_DISCOVERABLE`, `USER_EXIT`, comments, and reactions, accepting length-prefixed `encodeForSigning` alongside pre-overhaul pipe-delimited strings (`"$id|$authorId|$content|$timestamp"`).
+  * Relaxed `handleAnnounceDiscoverable` timestamp drift tolerance to 30 minutes, exempted default `"Anonymous"` handles from collision rejection, and cached authentic announcement packets in `app_settings`.
+  * Implemented `shareDiscoverableNodesWith(peer)`: when a peer completes a handshake with a node, the node automatically relays its known active discoverable creator nodes to the newly connected peer.
+* **Streaming Backup Export Reliability & Connection Latency Tuning (`BackupManager.kt`, `NoSlopViewModel.kt`, `SettingsTab.kt`, `MeshTransport.kt`)**:
+  * Moved temporary export and import archive files from `context.cacheDir` (which hit internal storage quotas on large media backups) to `context.externalCacheDir ?: context.cacheDir`.
+  * Dispatched `exportBackupToUri` and `importBackupFromUri` to `Dispatchers.IO` in `NoSlopViewModel`, preventing main thread UI freezes and ANR watchdog crashes. Shielded individual file reads from I/O errors and excluded incomplete `.part` files from backups.
+  * Added a dedicated Material 3 `AlertDialog` success popup in `SettingsTab.kt` confirming successful backup exports.
+  * Tuned `CONNECTION_REQUEST` and `USER_HANDSHAKE` timeouts to 15–18s with 1 attempt, allowing fresh nodes to fail fast to the background outbox during initial Tor v3 descriptor propagation rather than hanging for 2 minutes, and guarded `flushOutboxForPeer` against concurrent socket races.
+
 ## Completed Changes (2026-09-12) — Release v0.5.3-alpha: AAD Re-Encryption Migration, Word Cloud Restore & Test Harness
 
 * **Room Migration 13 → 14 (`NoSlopDatabase.kt`, `GroupMessageCrypto.kt`)**:
