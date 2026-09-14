@@ -220,14 +220,15 @@ class MeshTransport(
         }
 
         try {
+            val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
             val maxAttempts = when {
-                packet.type == "CONNECTION_REQUEST" -> 1 // Fast-fail to outbox if descriptor is still propagating
+                isHandshake -> 1 // Fast-fail to outbox if remote descriptor is still propagating on Tor
                 isDmHighPriority -> 2
                 else -> 1
             }
             val connectTimeout = when {
-                packet.type == "CONNECTION_REQUEST" -> 18000 // 18s is sufficient to hit live HSDirs
-                isDmHighPriority -> 25000
+                isHandshake -> 15000 // 15s is plenty for an active Tor circuit, avoids multi-minute stalls
+                isDmHighPriority -> 20000
                 isInteractive -> 8000
                 isMediaPacket -> 20000
                 else -> 12000

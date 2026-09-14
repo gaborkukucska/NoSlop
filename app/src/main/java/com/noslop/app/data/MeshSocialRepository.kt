@@ -130,6 +130,12 @@ class MeshSocialRepository(
         }
         savePersistedOutbox()
         Logger.info(TAG, "Enqueued message ${packet.id} for $recipientPub in persistent outbox (pending: ${list.size})")
+
+        // Immediately trigger an outbox flush attempt for this peer rather than waiting 10s
+        val peer = peerDao.getPeerByPublicKey(recipientPub)
+        if (peer != null && peer.onionAddress.isNotBlank()) {
+            flushOutboxForPeer(recipientPub, peer.onionAddress)
+        }
     }
 
     fun flushOutboxForPeer(recipientPub: String, onionAddress: String) {
