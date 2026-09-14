@@ -154,4 +154,44 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
         appSettingDao.insertSetting(AppSetting("send_on_enter_enabled", enabled.toString()))
         _isSendOnEnterEnabled.value = enabled
     }
+
+    // --- Break / Exit Reminder Settings ---
+    private val _breakReminderEnabled = MutableStateFlow(false)
+    val breakReminderEnabled: StateFlow<Boolean> = _breakReminderEnabled.asStateFlow()
+
+    private val _breakReminderMode = MutableStateFlow("slides") // "slides" or "time"
+    val breakReminderMode: StateFlow<String> = _breakReminderMode.asStateFlow()
+
+    private val _breakReminderIntervalSlides = MutableStateFlow(30)
+    val breakReminderIntervalSlides: StateFlow<Int> = _breakReminderIntervalSlides.asStateFlow()
+
+    private val _breakReminderIntervalMinutes = MutableStateFlow(20)
+    val breakReminderIntervalMinutes: StateFlow<Int> = _breakReminderIntervalMinutes.asStateFlow()
+
+    suspend fun initBreakReminderSettings() = withContext(Dispatchers.IO) {
+        _breakReminderEnabled.value = appSettingDao.getSetting("break_reminder_enabled") == "true"
+        _breakReminderMode.value = appSettingDao.getSetting("break_reminder_mode") ?: "slides"
+        _breakReminderIntervalSlides.value = appSettingDao.getSetting("break_reminder_interval_slides")?.toIntOrNull() ?: 30
+        _breakReminderIntervalMinutes.value = appSettingDao.getSetting("break_reminder_interval_minutes")?.toIntOrNull() ?: 20
+    }
+
+    suspend fun setBreakReminderEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_enabled", enabled.toString()))
+        _breakReminderEnabled.value = enabled
+    }
+
+    suspend fun setBreakReminderMode(mode: String) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_mode", mode))
+        _breakReminderMode.value = mode
+    }
+
+    suspend fun setBreakReminderIntervalSlides(interval: Int) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_interval_slides", interval.toString()))
+        _breakReminderIntervalSlides.value = interval
+    }
+
+    suspend fun setBreakReminderIntervalMinutes(interval: Int) = withContext(Dispatchers.IO) {
+        appSettingDao.insertSetting(AppSetting("break_reminder_interval_minutes", interval.toString()))
+        _breakReminderIntervalMinutes.value = interval
+    }
 }

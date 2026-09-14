@@ -1109,6 +1109,110 @@ fun SettingsTab(viewModel: NoSlopViewModel, onNavigateToHubs: () -> Unit = {}) {
                             }
                         }
                     }
+
+                    // --- Break / Exit Reminders Section ---
+                    Text(
+                        text = "WELLBEING & LIMITS".tr,
+                        style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 2.sp),
+                        color = TextMuted,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+                        border = BorderStroke(1.dp, BorderSubtle)
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            val breakEnabled by viewModel.breakReminderEnabled.collectAsState()
+                            val breakMode by viewModel.breakReminderMode.collectAsState()
+                            val breakSlides by viewModel.breakReminderIntervalSlides.collectAsState()
+                            val breakMinutes by viewModel.breakReminderIntervalMinutes.collectAsState()
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+                                    Text("Break & Exit Reminders".tr, fontWeight = FontWeight.Bold, color = TextLight)
+                                    Text(
+                                        "Gentle prompts to step away and exit under your complete control.".tr,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextMuted
+                                    )
+                                }
+                                Switch(
+                                    checked = breakEnabled,
+                                    onCheckedChange = { viewModel.setBreakReminderEnabled(it) },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = PrimaryBlack,
+                                        checkedTrackColor = AccentGreen,
+                                        uncheckedThumbColor = TextMuted,
+                                        uncheckedTrackColor = SurfaceDark
+                                    )
+                                )
+                            }
+
+                            if (breakEnabled) {
+                                HorizontalDivider(color = BorderSubtle, modifier = Modifier.padding(vertical = 8.dp))
+                                Text("Trigger Type".tr, color = TextLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = breakMode == "slides",
+                                        onClick = { viewModel.setBreakReminderMode("slides") },
+                                        label = { Text("By Slides Viewed".tr) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AccentGreen,
+                                            selectedLabelColor = PrimaryBlack,
+                                            labelColor = TextMuted
+                                        )
+                                    )
+                                    FilterChip(
+                                        selected = breakMode == "time",
+                                        onClick = { viewModel.setBreakReminderMode("time") },
+                                        label = { Text("By Time Spent".tr) },
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = AccentGreen,
+                                            selectedLabelColor = PrimaryBlack,
+                                            labelColor = TextMuted
+                                        )
+                                    )
+                                }
+
+                                if (breakMode == "slides") {
+                                    Text(
+                                        text = "Remind every: {count} slides".tr.replace("{count}", breakSlides.toString()),
+                                        color = TextLight,
+                                        fontSize = 13.sp
+                                    )
+                                    Slider(
+                                        value = breakSlides.toFloat(),
+                                        onValueChange = { viewModel.setBreakReminderIntervalSlides(it.toInt()) },
+                                        valueRange = 10f..100f,
+                                        steps = 8,
+                                        colors = SliderDefaults.colors(thumbColor = AccentGreen, activeTrackColor = AccentGreen)
+                                    )
+                                } else {
+                                    Text(
+                                        text = "Remind every: {minutes} minutes".tr.replace("{minutes}", breakMinutes.toString()),
+                                        color = TextLight,
+                                        fontSize = 13.sp
+                                    )
+                                    Slider(
+                                        value = breakMinutes.toFloat(),
+                                        onValueChange = { viewModel.setBreakReminderIntervalMinutes(it.toInt()) },
+                                        valueRange = 5f..60f,
+                                        steps = 10,
+                                        colors = SliderDefaults.colors(thumbColor = AccentGreen, activeTrackColor = AccentGreen)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
 

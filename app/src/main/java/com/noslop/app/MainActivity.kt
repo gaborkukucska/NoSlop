@@ -66,15 +66,19 @@ class MainActivity : ComponentActivity() {
                             var firstPreloadUrl: String? = null
                             var secondPreloadUrl: String? = null
                             
-                            // 2. Brief check for initial feed items (up to 3s)
+                            // 2. Wait for saved feed position and initial feed items to be fully ready
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Loading feed items...")
                             try {
-                                kotlinx.coroutines.withTimeout(3000L) {
+                                kotlinx.coroutines.withTimeout(6000L) {
+                                    // Wait until saved position from Room DB is loaded
+                                    while (!viewModel.isSavedPositionLoaded.value) {
+                                        kotlinx.coroutines.delay(50L)
+                                    }
                                     viewModel.unifiedFeed.collect { items ->
                                         if (items.isNotEmpty()) {
                                             val nonTutItems = items.filter { it !is com.noslop.app.ui.UnifiedItem.Tutorial }
                                             if (nonTutItems.isNotEmpty()) {
-                                                val savedActiveId = com.noslop.app.NoSlopApp.repository.getAppSetting("saved_feed_active_id")
+                                                val savedActiveId = viewModel.savedActiveItemId.value ?: com.noslop.app.NoSlopApp.repository.getAppSetting("saved_feed_active_id")
                                                 val targetItem = nonTutItems.find { it.id == savedActiveId } ?: nonTutItems.firstOrNull()
                                                 val targetIndex = nonTutItems.indexOf(targetItem)
                                                 val secondItem = nonTutItems.getOrNull(if (targetIndex >= 0) targetIndex + 1 else 1)
@@ -112,9 +116,9 @@ class MainActivity : ComponentActivity() {
                                 Logger.debug("MAIN", "Initial feed item check during splash ended: ${e.message}")
                             }
                             
-                            // 3. Pre-warm Slide 1 media in background (never cancel mid-flight on timeout)
+                            // 3. Pre-warm Slide 1 media and hold splash screen until ExoPlayer is READY
                             if (!firstPreloadUrl.isNullOrBlank()) {
-                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Preparing first video...")
+                                splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Buffering initial media...")
                                 val targetUrl = firstPreloadUrl!!
                                 kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                                     try {
@@ -124,20 +128,20 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                                 try {
-                                    kotlinx.coroutines.withTimeoutOrNull(3000L) {
-                                        com.noslop.app.ui.PreloadManager.waitForPreload(targetUrl)
-                                    }
+                                    // Wait up to 8s for the player to reach READY state (buffering first frame)
+                                    val isReady = com.noslop.app.ui.PreloadManager.awaitPlayerReady(targetUrl, timeoutMs = 8000L)
+                                    Logger.info("MAIN", "Slide 1 preload buffer readiness result: $isReady")
                                 } catch (e: Exception) {
-                                    Logger.debug("MAIN", "Slide 1 waitForPreload timed out or failed: ${e.message}")
+                                    Logger.debug("MAIN", "Slide 1 awaitPlayerReady ended: ${e.message}")
                                 }
                             }
                             
                             splashStatusMessage = com.noslop.app.util.LanguageManager.translate("Starting NoSlop...")
                             
-                            // 4. Keep splash smooth and snappy (1.2s min delay)
+                            // 4. Smooth minimum delay (1.5s) so splash feels intentional and seamless
                             val elapsed = System.currentTimeMillis() - startTime
-                            if (elapsed < 1200L) {
-                                kotlinx.coroutines.delay(1200L - elapsed)
+                            if (elapsed < 1500L) {
+                                kotlinx.coroutines.delay(1500L - elapsed)
                             }
                             
                             showSplash = false

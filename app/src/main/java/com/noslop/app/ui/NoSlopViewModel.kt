@@ -60,6 +60,12 @@ sealed class UnifiedItem(val timestamp: Long, val isMesh: Boolean) {
     data class Tutorial(val step: Int) : UnifiedItem(Long.MAX_VALUE - step, false) {
         override val id: String = "tutorial_$step"
     }
+    data class CreatorDepletion(val idOverride: String = "creator_depletion") : UnifiedItem(0L, false) {
+        override val id: String = idOverride
+    }
+    data class BreakReminder(val triggerType: String, val value: Int, val idOverride: String = "break_reminder_${System.currentTimeMillis()}") : UnifiedItem(0L, false) {
+        override val id: String = idOverride
+    }
 }
 
 class NoSlopViewModel(application: Application) : AndroidViewModel(application) {
@@ -199,6 +205,51 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val allSearchResultItemIds = mutableSetOf<String>()
     private var searchExhaustedCount = 0
     private var isLoadingMoreFeedItems = false
+    private var hasShownCreatorDepletionInSession = false
+
+    // Session stats for Break / Exit Reminders
+    private var sessionSlideCount = 0
+    private var sessionStartTimeMs = System.currentTimeMillis()
+    private var lastBreakReminderSlide = 0
+    private var lastBreakReminderTimeMs = System.currentTimeMillis()
+
+    val breakReminderEnabled = repository.breakReminderEnabled
+    val breakReminderMode = repository.breakReminderMode
+    val breakReminderIntervalSlides = repository.breakReminderIntervalSlides
+    val breakReminderIntervalMinutes = repository.breakReminderIntervalMinutes
+
+    fun setBreakReminderEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBreakReminderEnabled(enabled) }
+    fun setBreakReminderMode(mode: String) = viewModelScope.launch { repository.setBreakReminderMode(mode) }
+    fun setBreakReminderIntervalSlides(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalSlides(interval) }
+    fun setBreakReminderIntervalMinutes(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalMinutes(interval) }
+
+    fun checkBreakReminderOnSlide(): UnifiedItem.BreakReminder? {
+        if (!breakReminderEnabled.value) return null
+        val mode = breakReminderMode.value
+        val now = System.currentTimeMillis()
+        sessionSlideCount++
+
+        if (mode == "slides") {
+            val interval = breakReminderIntervalSlides.value
+            if (sessionSlideCount - lastBreakReminderSlide >= interval) {
+                lastBreakReminderSlide = sessionSlideCount
+                return UnifiedItem.BreakReminder("slides", sessionSlideCount)
+            }
+        } else {
+            val intervalMinutes = breakReminderIntervalMinutes.value
+            val elapsedMinutes = ((now - lastBreakReminderTimeMs) / 60000L).toInt()
+            if (elapsedMinutes >= intervalMinutes) {
+                lastBreakReminderTimeMs = now
+                return UnifiedItem.BreakReminder("time", elapsedMinutes)
+            }
+        }
+        return null
+    }
+
+    fun dismissBreakReminder() {
+        lastBreakReminderSlide = sessionSlideCount
+        lastBreakReminderTimeMs = System.currentTimeMillis()
+    }
 
     fun saveFeedPosition(itemId: String) {
         if (currentFilterMode == "Live Feed" && !isSearchModeActive) {
@@ -507,6 +558,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             repository.initSendOnEnterSetting()
             repository.initTorForClearnetSetting()
             repository.initAutoUpdateSetting()
+            repository.initBreakReminderSettings()
         }
 
         viewModelScope.launch {
@@ -799,8 +851,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
      * stop years-old videos resurfacing, not to make the feed strictly
      * news-like. Raise it if the feed starts running dry.
      */
-    private val MAX_FEED_AGE_MS = 400L * 24 * 60 * 60 * 1000L
-    private val UNKNOWN_DATE_ASSUMED_AGE_MS = 30L * 24 * 60 * 60 * 1000L
+    private val MAX_FEED_AGE_MS = 60L * 24 * 60 * 60 * 1000L
+    private val UNKNOWN_DATE_ASSUMED_AGE_MS = 20L * 24 * 60 * 60 * 1000L
 
     /**
      * NOSLOP_SOURCE_AGE_V1
@@ -824,8 +876,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         "nasa", "archive", "internet_archive", "wikimedia", "artic", "openverse", "pexels", "vimeo", "podcast_index", "jamendo"
     )
 
-    /** Age ceiling for sources where a stale upload is genuinely stale. */
-    private val FRESHNESS_MAX_AGE_MS = 400L * 24 * 60 * 60 * 1000L
+    /** Age ceiling for sources where a stale upload is genuinely stale (< 60 days). */
+    private val FRESHNESS_MAX_AGE_MS = 60L * 24 * 60 * 60 * 1000L
 
     private fun <T> Iterable<T>.takeRoundRobin(
         limit: Int,
@@ -1136,23 +1188,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 cKey !in excludedFeedKeys
             }
         }
-        // Fallback: If all local items have been viewed in previous sessions, show un-swiped items rather than an empty feed (feed modes only)
+        // Strict non-resurrection: never bring back items the user already saw, swiped, or reacted to.
         val isFeedMode = actualFilter == null || actualFilter == "Live Feed" || actualFilter == "Random"
-        val isUsingFallback = isFeedMode && unseenFeeds.isEmpty() && !isPersistentList && allFeeds.isNotEmpty() && !isSearchActive
-        if (isUsingFallback) {
-            // Never resurrect items the user already saved, swiped away, or viewed
-            unseenFeeds = allFeeds.filter { 
-                val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
-                val normId = normalizeFeedItemId(it.id, it.url ?: "")
-                it.id !in exclusionIds && 
-                it.id !in cachedExcludedIds && 
-                normId !in cachedExcludedIds && 
-                cKey !in cachedExcludedIds && 
-                !it.isSaved
-            }
-            if (!_isRefreshingFeeds.value) {
-                refreshFeeds()
-            }
+        if (isFeedMode && unseenFeeds.isEmpty() && !_isRefreshingFeeds.value && !isSearchActive) {
+            refreshFeeds()
         }
         var unseenMeshes = allMeshes.filter { 
             if (isPersistentList) {
@@ -1513,25 +1552,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         // Filter based on toggles
         // --- NOSLOP_AGE_FLOOR_V1 ---
         // Age ceiling applied per bucket, with the empty-pool floor.
-        val allVideos = if (mixSettings.videoEnabled) {
-            val fresh = recentFeeds.filter { isVideoFeedItem(it) }
-            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isVideoFeedItem(it) && it.id !in cachedExcludedIds }
-        } else emptyList()
-
-        val allAudios = if (mixSettings.audioEnabled) {
-            val fresh = recentFeeds.filter { isAudioFeedItem(it) }
-            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isAudioFeedItem(it) && it.id !in cachedExcludedIds }
-        } else emptyList()
-
-        val allImages = if (mixSettings.imageEnabled) {
-            val fresh = recentFeeds.filter { isImageFeedItem(it) }
-            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isImageFeedItem(it) && it.id !in cachedExcludedIds }
-        } else emptyList()
-
-        val allArticles = if (mixSettings.articleEnabled) {
-            val fresh = recentFeeds.filter { isArticleFeedItem(it) }
-            if (fresh.isNotEmpty()) fresh else allFeeds.filter { isArticleFeedItem(it) && it.id !in cachedExcludedIds }
-        } else emptyList()
+        val allVideos = if (mixSettings.videoEnabled) recentFeeds.filter { isVideoFeedItem(it) } else emptyList()
+        val allAudios = if (mixSettings.audioEnabled) recentFeeds.filter { isAudioFeedItem(it) } else emptyList()
+        val allImages = if (mixSettings.imageEnabled) recentFeeds.filter { isImageFeedItem(it) } else emptyList()
+        val allArticles = if (mixSettings.articleEnabled) recentFeeds.filter { isArticleFeedItem(it) } else emptyList()
 
         val rawVideos = withAgeFloor(allVideos)
         val rawAudios = withAgeFloor(allAudios)
@@ -1634,6 +1658,16 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val finalBatch = batch.toMutableList()
+
+        // Creator Depletion check: if user has creators and fresh creator content < 60 days is exhausted,
+        // show an encouraging slide to discover/add more creators, then continue with fresh random content.
+        if (creators.isNotEmpty() && actualFilter == "Live Feed" && !hasShownCreatorDepletionInSession) {
+            val hasFreshCreatorVideos = rawVideos.any(isCreatorMatch)
+            if (!hasFreshCreatorVideos && _unifiedFeed.value.none { it is UnifiedItem.CreatorDepletion }) {
+                hasShownCreatorDepletionInSession = true
+                finalBatch.add(0, UnifiedItem.CreatorDepletion())
+            }
+        }
 
         // TikTok Vibe: Guarantee a video is at index 0 on the very first load to trigger instant preload
         if (isInitialLoad && (actualFilter == "Live Feed" || actualFilter == "Random")) {

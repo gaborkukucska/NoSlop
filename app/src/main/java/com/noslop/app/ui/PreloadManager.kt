@@ -109,6 +109,23 @@ object PreloadManager {
     private val shouldPrebufferUrl: (String) -> Boolean = { _ -> true }
 
     private val pendingTasks = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    private val readyTasks = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+
+    suspend fun awaitPlayerReady(rawUrl: String, timeoutMs: Long = 8000L): Boolean {
+        val deferred = readyTasks.getOrPut(rawUrl) { CompletableDeferred() }
+        val cacheKey = cacheKeyFor(rawUrl)
+        val existing = preloadedPlayers[cacheKey]
+        if (existing != null && existing.player.playbackState == androidx.media3.common.Player.STATE_READY) {
+            return true
+        }
+        return try {
+            kotlinx.coroutines.withTimeoutOrNull(timeoutMs) {
+                deferred.await()
+            } != null
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private fun cacheKeyFor(rawUrl: String): String {
         val quality = com.noslop.app.NoSlopApp.repository.mediaSettingsFlow.value.videoQuality
@@ -356,8 +373,10 @@ object PreloadManager {
         player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
-                    androidx.media3.common.Player.STATE_READY ->
+                    androidx.media3.common.Player.STATE_READY -> {
                         Logger.info("PRELOAD", "ExoPlayer reached READY state for $rawUrl")
+                        readyTasks[rawUrl]?.complete(Unit)
+                    }
                     androidx.media3.common.Player.STATE_ENDED ->
                         Logger.info("PRELOAD", "ExoPlayer reached ENDED state for $rawUrl")
                     androidx.media3.common.Player.STATE_IDLE ->

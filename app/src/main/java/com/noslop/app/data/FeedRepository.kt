@@ -267,10 +267,10 @@ class FeedRepository(
             })
         }
 
-        // Fast ramp-up: randomize creators so different channels from the user's 40+ list get refreshed
+        // Fast ramp-up: prioritize creators so initial feed has creator content
         val shuffledCreators = creatorKeywordList.shuffled()
-        val rampUpCreators = shuffledCreators.take(3)
-        val remainingCreators = shuffledCreators.drop(3)
+        val rampUpCreators = shuffledCreators.take(4)
+        val remainingCreators = shuffledCreators.drop(4)
         for (creator in rampUpCreators) {
             rampUpJobs.add(async(dispatcher) {
                 _feedBuildStatus.value = "Preparing your feed..."
@@ -320,17 +320,13 @@ class FeedRepository(
             })
         }
 
-        // --- Phase 3: Creator Specific API searches (staggered to protect Tor bandwidth) ---
-        val sampledCreators = if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-            remainingCreators.take(8)
-        } else {
-            remainingCreators
-        }
-        for (creator in sampledCreators) {
+        // --- Phase 3: Creator Specific API searches for ALL configured creators ---
+        // Ensure every channel added by the user is queried across Tor with non-blocking staggers
+        for (creator in remainingCreators) {
             backgroundJobs.add(async(dispatcher) {
                 try {
                     if (com.noslop.app.net.HttpClientProvider.useTorForClearnet) {
-                        kotlinx.coroutines.delay(1500L) // Stagger requests across Tor
+                        kotlinx.coroutines.delay(1200L) // Stagger requests across Tor
                     }
                     fetchCreatorVideos(creator)
                 } catch (e: Exception) {
@@ -388,6 +384,7 @@ class FeedRepository(
                 items = com.noslop.app.feeds.api.YouTubeInternalClient.searchVideos(creator, maxResults = 15, recentOnly = false)
             }
             if (items.isNotEmpty()) {
+                val sixtyDaysAgo = System.currentTimeMillis() - (60L * 24 * 60 * 60 * 1000L)
                 val bannedChannels = preferencesRepository.getBannedChannels().map { it.trim().lowercase().removePrefix("@") }
                 val userNegative = preferencesRepository.getUserNegativeKeywords()
                 val allNegative = (OFFICIAL_NEGATIVE_KEYWORDS + userNegative).distinct()
@@ -395,7 +392,9 @@ class FeedRepository(
                     val text = "${item.title} ${item.excerpt}".lowercase()
                     val authorClean = item.author?.trim()?.lowercase()?.removePrefix("@") ?: ""
                     val isBanned = authorClean.isNotBlank() && bannedChannels.any { b -> authorClean == b || authorClean.contains(b) || b.contains(authorClean) }
-                    !isBanned && !matchesNegativeKeywords(text, allNegative)
+                    // Enforce < 60 days old content constraint
+                    val isFresh = item.publishedAt <= 0L || item.publishedAt >= sixtyDaysAgo
+                    isFresh && !isBanned && !matchesNegativeKeywords(text, allNegative)
                 }
                 if (filteredItems.isNotEmpty()) {
                     feedDao.insertItems(filteredItems)

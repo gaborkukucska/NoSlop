@@ -72,7 +72,9 @@ class ApiKeyRepository(context: Context) {
             ServiceInfo("nasa", "NASA API", false, "api.nasa.gov (DEMO_KEY works without signup)"),
             ServiceInfo("vimeo", "Vimeo API", true, "developer.vimeo.com"),
             ServiceInfo("podcastindex", "Podcast Index API Key", true, "api.podcastindex.org"),
-            ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org")
+            ServiceInfo("podcastindex_secret", "Podcast Index Secret", true, "api.podcastindex.org"),
+            ServiceInfo("instagram", "Instagram Graph API User Token", true, "developers.facebook.com"),
+            ServiceInfo("tiktok", "TikTok Display API Client Key", true, "developers.tiktok.com")
         )
     }
 

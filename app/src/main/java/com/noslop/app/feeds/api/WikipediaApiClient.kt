@@ -44,7 +44,7 @@ object WikipediaApiClient {
             val url = "https://$language.wikipedia.org/w/api.php?action=query" +
                 "&generator=search&gsrsearch=$q&gsrlimit=$limit&gsrnamespace=0" +
                 "&prop=extracts|pageimages|info&exintro=1&explaintext=1&exlimit=max" +
-                "&piprop=thumbnail&pithumbsize=800&inprop=url&format=json&formatversion=2"
+                "&piprop=thumbnail|original&pithumbsize=800&pilicense=any&inprop=url&format=json&formatversion=2"
 
             val request = Request.Builder()
                 .url(url)
@@ -73,10 +73,32 @@ object WikipediaApiClient {
                     val pageUrl = obj.str("fullurl")
                         ?: "https://$language.wikipedia.org/?curid=$pageId"
 
-                    val thumb = try {
-                        obj.getAsJsonObject("thumbnail")?.get("source")
-                            ?.takeIf { !it.isJsonNull }?.asString
+                    var thumb = try {
+                        obj.getAsJsonObject("thumbnail")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                            ?: obj.getAsJsonObject("original")?.get("source")?.takeIf { !it.isJsonNull }?.asString
                     } catch (_: Exception) { null }
+
+                    // Fallback to Wikipedia REST summary API if thumbnail is still missing
+                    if (thumb.isNullOrBlank()) {
+                        try {
+                            val encTitle = java.net.URLEncoder.encode(title.replace(" ", "_"), "UTF-8")
+                            val summaryUrl = "https://$language.wikipedia.org/api/rest_v1/page/summary/$encTitle"
+                            val sumReq = Request.Builder()
+                                .url(summaryUrl)
+                                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                                .build()
+                            client.newCall(sumReq).execute().use { sumRes ->
+                                if (sumRes.isSuccessful) {
+                                    val sumBody = sumRes.body?.string()
+                                    if (sumBody != null) {
+                                        val sumObj = gson.fromJson(sumBody, JsonObject::class.java)
+                                        thumb = sumObj.getAsJsonObject("thumbnail")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                                            ?: sumObj.getAsJsonObject("originalimage")?.get("source")?.takeIf { !it.isJsonNull }?.asString
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {}
+                    }
 
                     items.add(
                         FeedItem(

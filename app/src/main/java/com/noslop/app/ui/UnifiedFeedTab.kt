@@ -1115,6 +1115,19 @@ fun UnifiedFeedTab(
                             bottomSlideOffset = bottomSlideOffset,
                             rightSlideOffset = rightSlideOffset
                         )
+                        is UnifiedItem.CreatorDepletion -> CreatorDepletionSlide(
+                            onSearchMore = { showSearchModal = true }
+                        )
+                        is UnifiedItem.BreakReminder -> BreakReminderSlide(
+                            triggerType = item.triggerType,
+                            value = item.value,
+                            onContinue = { viewModel.dismissBreakReminder() },
+                            onExit = {
+                                val activity = (context as? android.app.Activity)
+                                    ?: (context as? android.content.ContextWrapper)?.baseContext as? android.app.Activity
+                                activity?.finishAffinity()
+                            }
+                        )
                         is UnifiedItem.Feed -> FullScreenFeedCard(
                             item = item.item,
                             isVisible = isVisibleForPlayback,
@@ -2010,6 +2023,139 @@ private fun getPreloadDataFromItem(item: UnifiedItem, context: android.content.C
             } else null
         }
         is UnifiedItem.Tutorial -> null
+    }
+}
+
+@Composable
+fun CreatorDepletionSlide(onSearchMore: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PrimaryBlack)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(AccentGreen.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.PersonSearch, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(40.dp))
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Caught Up on Creators!".tr,
+                color = TextLight,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = "You've seen all fresh uploads (< 60 days) from your added channels. Discover and add more creators to expand your personal network.".tr,
+                color = TextMuted,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            Button(
+                onClick = onSearchMore,
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp)
+            ) {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Search & Add Creators".tr, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Swipe UP to continue with fresh discovery content".tr,
+                color = TextMuted.copy(alpha = 0.7f),
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+fun BreakReminderSlide(
+    triggerType: String,
+    value: Int,
+    onContinue: () -> Unit,
+    onExit: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(PrimaryBlack)
+            .padding(32.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(72.dp)
+                    .clip(CircleShape)
+                    .background(AccentGreen.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.SelfImprovement, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(40.dp))
+            }
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "Time for a Mindful Break?".tr,
+                color = TextLight,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            val detailMsg = if (triggerType == "slides") {
+                "You've enjoyed {value} slides in this session. No algorithms are keeping you hooked. Step away and reconnect with the real world whenever you're ready.".tr.replace("{value}", value.toString())
+            } else {
+                "You've been browsing for {value} minutes. No algorithms are keeping you hooked. Step away and reconnect with the real world whenever you're ready.".tr.replace("{value}", value.toString())
+            }
+            Text(
+                text = detailMsg,
+                color = TextMuted,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                lineHeight = 20.sp
+            )
+            Spacer(modifier = Modifier.height(28.dp))
+            Button(
+                onClick = onExit,
+                colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp)
+            ) {
+                Icon(Icons.Default.ExitToApp, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Exit App".tr, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onContinue,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                border = BorderStroke(1.dp, AccentGreen),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth(0.85f).height(48.dp)
+            ) {
+                Text("Continue Browsing".tr, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
     }
 }
 

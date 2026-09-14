@@ -27,16 +27,48 @@ object ArticleMetadataResolver {
 
         try {
             val client = com.noslop.app.net.HttpClientProvider.activeClearnetClient
+
+            // Special fast-path for Wikipedia URLs: use Wikipedia REST summary endpoint
+            if (articleUrl.contains("wikipedia.org/wiki/")) {
+                try {
+                    val lang = articleUrl.substringAfter("://").substringBefore(".wikipedia.org")
+                    val pageTitle = articleUrl.substringAfter("/wiki/").substringBefore("?").substringBefore("#")
+                    if (lang.isNotBlank() && pageTitle.isNotBlank()) {
+                        val restUrl = "https://$lang.wikipedia.org/api/rest_v1/page/summary/$pageTitle"
+                        val restReq = okhttp3.Request.Builder()
+                            .url(restUrl)
+                            .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop)")
+                            .build()
+                        client.newCall(restReq).execute().use { restRes ->
+                            if (restRes.isSuccessful) {
+                                val jsonStr = restRes.body?.string() ?: ""
+                                val root = com.google.gson.Gson().fromJson(jsonStr, com.google.gson.JsonObject::class.java)
+                                val img = root.getAsJsonObject("thumbnail")?.get("source")?.asString
+                                    ?: root.getAsJsonObject("originalimage")?.get("source")?.asString
+                                if (!img.isNullOrBlank()) {
+                                    imageCache[key] = img
+                                    Logger.info(TAG, "Resolved Wikipedia lead image for $articleUrl -> $img")
+                                    return@withContext img
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Logger.debug(TAG, "Wikipedia REST lead image check failed: ${e.message}")
+                }
+            }
+
             val request = okhttp3.Request.Builder()
                 .url(articleUrl)
-                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+                .header("User-Agent", "NoSlop-Android/1.0 (https://github.com/gaborkukucska/NoSlop; Mozilla/5.0)")
                 .build()
 
             val response = client.newCall(request).execute()
             if (response.isSuccessful) {
                 val body = response.body?.string() ?: ""
-                val ogPattern = Regex("<meta[^>]+(?:property|name)\\s*=\\s*['\"]?(?:og|twitter):image['\"]?[^>]+content\\s*=\\s*['\"]?([^'\"\\s>]+)", RegexOption.IGNORE_CASE)
-                val ogUrl = ogPattern.find(body)?.groupValues?.get(1)?.trim()
+                val ogPattern1 = Regex("<meta[^>]+(?:property|name)\\s*=\\s*['\"]?(?:og|twitter):image['\"]?[^>]+content\\s*=\\s*['\"]?([^'\"\\s>]+)", RegexOption.IGNORE_CASE)
+                val ogPattern2 = Regex("<meta[^>]+content\\s*=\\s*['\"]?([^'\"\\s>]+)['\"]?[^>]+(?:property|name)\\s*=\\s*['\"]?(?:og|twitter):image", RegexOption.IGNORE_CASE)
+                val ogUrl = (ogPattern1.find(body) ?: ogPattern2.find(body))?.groupValues?.get(1)?.trim()
                 if (!ogUrl.isNullOrBlank() && (ogUrl.startsWith("http") || ogUrl.startsWith("//"))) {
                     var cleanUrl = if (ogUrl.startsWith("//")) "https:$ogUrl" else ogUrl
                     if (cleanUrl.startsWith("http://")) cleanUrl = "https://" + cleanUrl.substring(7)
