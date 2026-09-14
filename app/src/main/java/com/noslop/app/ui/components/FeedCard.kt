@@ -275,10 +275,18 @@ fun FullScreenFeedCard(
                             val isAlreadyIn = currentKeywordsSet.any { it.equals(authorName, ignoreCase = true) }
                             val bannedList = viewModel?.bannedChannels?.collectAsState()?.value ?: emptyList()
                             val isBanned = bannedList.any { it.equals(authorName, ignoreCase = true) }
+                            val allFeedItems by (viewModel?.feedItems ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+                            val creatorFeedItems = remember(authorName, allFeedItems) {
+                                allFeedItems.filter { it.author?.equals(authorName, ignoreCase = true) == true }
+                            }
                             com.noslop.app.ui.components.ChannelPreferenceModal(
                                 channelName = authorName,
                                 isAlreadyInPreferences = isAlreadyIn,
                                 isBanned = isBanned,
+                                creatorItems = creatorFeedItems,
+                                onItemClick = { clickedItem ->
+                                    viewModel?.ensurePostInFeed(clickedItem.id)
+                                },
                                 onAdd = {
                                     val updated = (currentKeywordsSet + authorName).joinToString(", ")
                                     viewModel?.saveCreatorKeywords(updated)

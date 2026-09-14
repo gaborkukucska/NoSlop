@@ -264,40 +264,7 @@ class MeshSocialRepository(
                             )
                             com.noslop.app.mesh.GossipService.broadcast(gossipPacket)
                             
-                            // Also send a USER_HANDSHAKE to heal the identity for future attempts
-                            val myKeys = packet.targetUserId?.let { getIdentityForPeer(it) } ?: getLocalIdentity()
-                            if (myKeys != null) {
-                                val userProfile = getUserProfile()
-                                val avatarB64 = userProfile.avatarB64
-                                val timestamp = System.currentTimeMillis()
-                                val syncReq = com.noslop.app.mesh.PeerHandshakePayload(
-                                    id = UUID.randomUUID().toString(),
-                                    fromUserId = myKeys.publicKeyB64,
-                                    fromUsername = myKeys.displayName,
-                                    fromDisplayName = myKeys.displayName,
-                                    fromHomeNode = myKeys.onionAddress,
-                                    fromEncryptionPublicKey = myKeys.encPublicKeyB64,
-                                    authorAvatarB64 = avatarB64,
-                                    bio = userProfile.bio.takeIf { it.isNotBlank() },
-                                    timestamp = timestamp,
-                                    signature = null
-                                )
-                                val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
-                                    myKeys.publicKeyB64, syncReq.fromUsername, myKeys.onionAddress, timestamp.toString(),
-                                    avatarB64, syncReq.bio.takeIf { !it.isNullOrBlank() }
-                                )
-                                val signature = CryptoService.sign(payloadToSign, myKeys.privateKeyB64)
-                                val syncPacket = com.noslop.app.mesh.NetworkPacket(
-                                    id = UUID.randomUUID().toString(),
-                                    hops = 3,
-                                    senderId = myKeys.publicKeyB64,
-                                    targetUserId = packet.targetUserId,
-                                    type = "USER_HANDSHAKE",
-                                    payload = com.google.gson.Gson().toJsonTree(syncReq),
-                                    signature = signature
-                                )
-                                com.noslop.app.mesh.GossipService.broadcast(syncPacket)
-                            }
+                            // Outbox worker will retry delivery without flooding circuits
                         }
                     }
                 } else {
@@ -405,6 +372,11 @@ class MeshSocialRepository(
                     val timeout = System.currentTimeMillis() - 3 * 60 * 1000
                     val discoverableTimeout = System.currentTimeMillis() - 15 * 60 * 1000
                     val archiveTimeout = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000L
+                    // Rubbish dumping cycle every 30 minutes
+                    if (System.currentTimeMillis() % (30 * 60 * 1000L) < 65_000L) {
+                        purgeOrphanedPeerContent()
+                    }
+
                     val peers = peerDao.getAllPeersList()
                     for (peer in peers) {
                         if (peer.isOnline && peer.lastSeenAt < timeout) {
@@ -712,10 +684,6 @@ class MeshSocialRepository(
                 signature = handshakeSig
             )
             dispatchPacket(peer.onionAddress, packet)
-
-            // Also send INVENTORY_SYNC_REQUEST
-            requestInventorySync(peer)
-            shareDiscoverableNodesWith(peer)
         }
         true
     }
@@ -1543,6 +1511,50 @@ class MeshSocialRepository(
         }
         meshTransport.repository.triggerDmSync()
         true
+    }
+
+    suspend fun purgeOrphanedPeerContent() = withContext(Dispatchers.IO) {
+        try {
+            val myKeys = getLocalIdentity()
+            val burnableKeys = getBurnableIdentity()
+            val connectedPeers = peerDao.getAllPeersList()
+
+            val validPubKeys = mutableSetOf<String>()
+            myKeys?.publicKeyB64?.let { validPubKeys.add(it) }
+            burnableKeys?.publicKeyB64?.let { validPubKeys.add(it) }
+            validPubKeys.add(NoSlopRepository.OFFICIAL_CREATOR_PUBKEY)
+            connectedPeers.forEach { validPubKeys.add(it.publicKeyB64) }
+
+            val validHandles = mutableSetOf<String>()
+            val localH = getLocalHandle()
+            if (localH.isNotBlank()) validHandles.add(localH.lowercase().trim())
+            connectedPeers.forEach {
+                if (it.handle.isNotBlank()) validHandles.add(it.handle.lowercase().trim())
+            }
+
+            val allPosts = postDao.getAllPostsList()
+            val orphanedPosts = allPosts.filter { post ->
+                post.authorPublicKeyB64 !in validPubKeys &&
+                post.authorHandle.lowercase().trim() !in validHandles
+            }
+
+            if (orphanedPosts.isNotEmpty()) {
+                val mediaIdsToDelete = mutableListOf<String>()
+                for (post in orphanedPosts) {
+                    post.mediaUrl?.substringAfterLast("/")?.takeIf { it.isNotBlank() }?.let { mediaIdsToDelete.add(it) }
+                    commentDao.deleteCommentsForPost(post.id)
+                    reactionDao.deleteReactionsForPost(post.id)
+                    voteDao.deleteVotesForPost(post.id)
+                    db.openHelper.writableDatabase.execSQL("DELETE FROM mesh_posts WHERE id = ?", arrayOf(post.id))
+                }
+                if (mediaIdsToDelete.isNotEmpty()) {
+                    com.noslop.app.mesh.MediaManager.deleteMediaFiles(mediaIdsToDelete)
+                }
+                Logger.info(TAG, "Rubbish dump: Purged ${orphanedPosts.size} orphaned mesh posts from disconnected peers")
+            }
+        } catch (e: Exception) {
+            Logger.warn(TAG, "Error in purgeOrphanedPeerContent: ${e.message}")
+        }
     }
 
     suspend fun clearChat(peerPubB64: String) = withContext(Dispatchers.IO) {

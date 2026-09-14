@@ -8,7 +8,8 @@ data class NotificationSettings(
     val mentions: Boolean = true,
     val system: Boolean = true,
     val reactions: Boolean = true,
-    val connectionRequests: Boolean = true
+    val connectionRequests: Boolean = true,
+    val broadcasts: Boolean = true
 ) {
     fun toJson(): String {
         return Gson().toJson(this)
@@ -25,7 +26,8 @@ data class NotificationSettings(
                     mentions = map["mentions"] as? Boolean ?: true,
                     system = map["system"] as? Boolean ?: true,
                     reactions = map["reactions"] as? Boolean ?: true,
-                    connectionRequests = map["connectionRequests"] as? Boolean ?: true
+                    connectionRequests = map["connectionRequests"] as? Boolean ?: true,
+                    broadcasts = map["broadcasts"] as? Boolean ?: true
                 )
             } catch (e: Exception) {
                 NotificationSettings()

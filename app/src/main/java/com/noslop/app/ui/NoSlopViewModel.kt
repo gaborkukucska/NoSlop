@@ -2647,14 +2647,10 @@ fun toggleAggregator() {
     fun acceptHandshake(peer: Peer) { 
         viewModelScope.launch { 
             repository.acceptConnectionRequest(peer) 
-            
-            // Clear associated notifications to prevent ghost actions
-            allNotifications.value.forEach { notif ->
-                val notifStr = notif.toString()
-                if (notifStr.contains(peer.publicKeyB64) || notifStr.contains(peer.handle)) {
-                    repository.deleteNotification(notif.id)
-                }
-            }
+            repository.deleteNotification("conn_req_${peer.publicKeyB64}")
+            repository.deleteNotificationsBySender(peer.publicKeyB64)
+            // Trigger rubbish dump to clean up any orphaned content
+            repository.purgeOrphanedPeerContent()
         } 
     }
     
@@ -2670,14 +2666,8 @@ fun toggleAggregator() {
             val peer = incomingRequest.value
             if (peer != null) {
                 repository.rejectConnectionRequest(peer)
-                
-                // Clear associated notifications
-                allNotifications.value.forEach { notif ->
-                    val notifStr = notif.toString()
-                    if (notifStr.contains(peer.publicKeyB64) || notifStr.contains(peer.handle)) {
-                        repository.deleteNotification(notif.id)
-                    }
-                }
+                repository.deleteNotification("conn_req_${peer.publicKeyB64}")
+                repository.deleteNotificationsBySender(peer.publicKeyB64)
             } else {
                 repository.clearIncomingRequest()
             }

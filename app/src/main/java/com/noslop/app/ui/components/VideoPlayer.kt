@@ -1187,12 +1187,14 @@ private fun ExoVideoPlayer(
                     500,   // buffer for playback (0.5s)
                     2000   // buffer for playback after rebuffer (2s) for snappy recovery
                 )
+                .setBackBuffer(60000, true) // Retain 60s back-buffer in RAM to prevent network stalls on backward seek
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
 
             androidx.media3.exoplayer.ExoPlayer.Builder(context)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setLoadControl(loadControl)
+                .setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
                 .setAudioAttributes(
                     androidx.media3.common.AudioAttributes.Builder()
                         .setUsage(androidx.media3.common.C.USAGE_MEDIA)
@@ -1311,6 +1313,23 @@ private fun ExoVideoPlayer(
     var isPlaying by remember { mutableStateOf(isVisible) }
     var isFastForwarding by remember { mutableStateOf(false) }
     var seekIndicator by remember { mutableStateOf<String?>(null) }
+
+    var currentPositionMs by remember { mutableStateOf(0L) }
+    var totalDurationMs by remember { mutableStateOf(0L) }
+    var isScrubbing by remember { mutableStateOf(false) }
+    var scrubProgress by remember { mutableStateOf(0f) }
+
+    LaunchedEffect(exoPlayer, isVisible, isScrubbing) {
+        val player = exoPlayer ?: return@LaunchedEffect
+        while (isVisible) {
+            if (!isScrubbing) {
+                currentPositionMs = player.currentPosition.coerceAtLeast(0L)
+                val d = player.duration
+                totalDurationMs = if (d > 0L) d else 0L
+            }
+            kotlinx.coroutines.delay(300L)
+        }
+    }
 
     val isActivelyPlaying = isVisible && isPlaying && !hasError
     val activity = remember(context) {
@@ -1475,6 +1494,64 @@ private fun ExoVideoPlayer(
                         tint = TextLight,
                         modifier = Modifier.size(40.dp)
                     )
+                }
+            }
+
+            // Interactive Video Scrubber / Playhead Timeline
+            if (totalDurationMs > 0L) {
+                val displayPosition = if (isScrubbing) (scrubProgress * totalDurationMs).toLong() else currentPositionMs
+                val formatTime = { ms: Long ->
+                    val totalSec = (ms / 1000).coerceAtLeast(0)
+                    val m = totalSec / 60
+                    val s = totalSec % 60
+                    String.format("%02d:%02d", m, s)
+                }
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .zIndex(6f)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(PrimaryBlack.copy(alpha = 0.5f), shape = RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = formatTime(displayPosition),
+                            color = TextLight,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Slider(
+                            value = if (totalDurationMs > 0L) (displayPosition.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f) else 0f,
+                            onValueChange = { frac ->
+                                isScrubbing = true
+                                scrubProgress = frac
+                            },
+                            onValueChangeFinished = {
+                                val seekTarget = (scrubProgress * totalDurationMs).toLong()
+                                exoPlayer?.seekTo(seekTarget)
+                                currentPositionMs = seekTarget
+                                isScrubbing = false
+                            },
+                            modifier = Modifier.weight(1f).padding(horizontal = 6.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = AccentGreen,
+                                activeTrackColor = AccentGreen,
+                                inactiveTrackColor = TextMuted.copy(alpha = 0.3f)
+                            )
+                        )
+                        Text(
+                            text = formatTime(totalDurationMs),
+                            color = TextMuted,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
                 }
             }
         } else {

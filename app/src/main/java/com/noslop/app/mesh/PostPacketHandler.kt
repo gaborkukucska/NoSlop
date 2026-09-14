@@ -91,6 +91,45 @@ class PostPacketHandler(
             mediaSize = postPay.mediaMetadata?.size ?: 0L
         )
         postDao.insertPost(meshPost)
+
+        // New Broadcast Notifications
+        val myKeys = repo.getLocalIdentity()
+        val burnableKeys = repo.getBurnableIdentity()
+        val isFromSelf = postPay.authorId == myKeys?.publicKeyB64 ||
+                         (burnableKeys != null && postPay.authorId == burnableKeys.publicKeyB64)
+
+        if (!isFromSelf && !meshPost.isOrphaned) {
+            val notifSettings = repo.notificationSettingsFlow.value
+            if (notifSettings.broadcasts) {
+                val notifTitle = com.noslop.app.util.LanguageManager.translate("New Broadcast")
+                val authorDisplay = handle.ifBlank { "A peer" }
+                val notifBody = postPay.clearnetTitle?.takeIf { it.isNotBlank() }
+                    ?: postPay.content.takeIf { it.isNotBlank() }
+                    ?: com.noslop.app.util.LanguageManager.translate("{author} shared a new broadcast.").replace("{author}", authorDisplay)
+                val targetRoute = "post/${meshPost.id}"
+
+                db.notificationDao().insertNotification(
+                    NotificationItem(
+                        id = "broadcast_${meshPost.id}",
+                        type = "POST",
+                        title = "$authorDisplay: $notifTitle",
+                        body = notifBody.take(120),
+                        targetRoute = targetRoute,
+                        iconType = "broadcast",
+                        senderPub = postPay.authorId,
+                        timestamp = postPay.timestamp
+                    )
+                )
+
+                com.noslop.app.util.NotificationHelper.showNotification(
+                    context = repo.context,
+                    title = "$authorDisplay: $notifTitle",
+                    message = notifBody.take(120),
+                    deepLinkRoute = targetRoute,
+                    notificationId = meshPost.id.hashCode()
+                )
+            }
+        }
         
         if (postPay.mediaMetadata != null) {
             val peerOnion = postPay.originNode ?: postPay.mediaMetadata.originNode ?: peer?.onionAddress

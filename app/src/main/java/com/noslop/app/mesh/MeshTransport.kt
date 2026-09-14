@@ -222,13 +222,13 @@ class MeshTransport(
         try {
             val isHandshake = packet.type == "CONNECTION_REQUEST" || packet.type == "USER_HANDSHAKE"
             val maxAttempts = when {
-                isHandshake -> 1 // Fast-fail to outbox if remote descriptor is still propagating on Tor
+                isHandshake -> 2 // 2 attempts allows recovery from initial circuit establishment
                 isDmHighPriority -> 2
                 else -> 1
             }
             val connectTimeout = when {
-                isHandshake -> 15000 // 15s is plenty for an active Tor circuit, avoids multi-minute stalls
-                isDmHighPriority -> 20000
+                isHandshake -> 28000 // 28s allows Tor v3 rendezvous circuit setup to complete on mobile
+                isDmHighPriority -> 25000
                 isInteractive -> 8000
                 isMediaPacket -> 20000
                 else -> 12000
@@ -263,7 +263,7 @@ class MeshTransport(
                     // every one ran the full retry sequence. A second 60s
                     // attempt after a 60s timeout rarely succeeds and costs
                     // another slot-minute. Critical packets still retry.
-                    if (!isDmHighPriority && msg.contains("timed out", ignoreCase = true)) {
+                    if (!isDmHighPriority && !isHandshake && msg.contains("timed out", ignoreCase = true)) {
                         Logger.warn(TAG, "Connect timed out to $onionAddress — fast-failing non-critical ${packet.type} to free circuit.")
                         break
                     }
@@ -276,7 +276,9 @@ class MeshTransport(
                 }
             }
             Logger.error(TAG, "All send attempts failed for $onionAddress")
-            GossipService.recordSendFailure(onionAddress)
+            if (!isHandshake) {
+                GossipService.recordSendFailure(onionAddress)
+            }
             return@withContext pushedToHub
         } finally {
             if (acquiredDm) dmSemaphore.release()

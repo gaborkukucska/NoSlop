@@ -23,6 +23,8 @@ fun ChannelPreferenceModal(
     isAlreadyInPreferences: Boolean,
     isBanned: Boolean = false,
     isFollowing: Boolean = false,
+    creatorItems: List<com.noslop.app.data.FeedItem> = emptyList(),
+    onItemClick: ((com.noslop.app.data.FeedItem) -> Unit)? = null,
     onAdd: () -> Unit,
     onRemove: () -> Unit,
     onBan: (() -> Unit)? = null,
@@ -79,6 +81,73 @@ fun ChannelPreferenceModal(
                         color = TextMuted,
                         fontSize = 13.sp
                     )
+                }
+
+                if (creatorItems.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Content ({count})".tr.replace("{count}", creatorItems.size.toString()),
+                        color = TextLight,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    androidx.compose.foundation.lazy.LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(creatorItems, key = { it.id }) { feedItem ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .androidx.compose.ui.draw.clip(RoundedCornerShape(8.dp))
+                                    .background(PrimaryBlack.copy(alpha = 0.6f))
+                                    .clickable {
+                                        onItemClick?.invoke(feedItem)
+                                        onDismiss()
+                                    }
+                                    .padding(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .androidx.compose.ui.draw.clip(RoundedCornerShape(6.dp))
+                                        .background(PrimaryBlack),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (!feedItem.thumbnailUrl.isNullOrBlank()) {
+                                        coil.compose.AsyncImage(
+                                            model = feedItem.thumbnailUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                        )
+                                    } else {
+                                        val icon = if (feedItem.mediaType?.contains("video") == true) Icons.Default.PlayArrow else Icons.Default.Article
+                                        Icon(icon, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = feedItem.title,
+                                        color = TextLight,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    if (feedItem.publishedAt > 0L) {
+                                        val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(feedItem.publishedAt))
+                                        Text(text = dateStr, color = TextMuted, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },

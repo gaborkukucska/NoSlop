@@ -130,6 +130,7 @@ fun NotificationCard(
         "reaction" -> Icons.Default.Favorite
         "handshake" -> Icons.Default.Person
         "group" -> Icons.Default.People
+        "broadcast" -> Icons.Default.Campaign
         else -> Icons.Default.Notifications
     }
 
