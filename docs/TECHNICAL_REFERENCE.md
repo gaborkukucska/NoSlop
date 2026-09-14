@@ -2017,6 +2017,13 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
 
+### 23.8 Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping & Video Timeline (v0.5.5-alpha)
+* **Tor v3 Handshake Pairing Latency**: Handshake connect timeout tuned to 28s with 2 attempts; removed spurious duplicate USER_HANDSHAKE broadcasts on directed delivery failure and decoupled inventory sync from initial handshake dispatch.
+* **Direct Notification Deletion**: Connection request notifications are purged directly from `notifications` table by sender public key and notification ID upon popup resolution.
+* **Broadcast Alerts & Rubbish Dump Cycle**: `PostPacketHandler` dispatches system notifications for verified non-self broadcasts; `purgeOrphanedPeerContent()` sweeps orphaned posts, comments, and media files from removed peers every 30m without affecting burnable identities.
+* **Interactive Playhead & Back-Buffer**: ExoPlayer retains 60s back-buffer in RAM to prevent network rebuffering on backward seek; playhead scrubber features `MM:SS` duration timestamps, keyframe sync, and 3.5s auto-hide fade animations.
+* **Clearnet Creator Modal Content List**: `ChannelPreferenceModal` renders a scrollable list of cached creator items with 52dp thumbnails, excerpts, and date metadata.
+
 ### 23.7 Bi-Directional Peer Disconnect, Media Purging & Sync Hardening (v0.5.4-alpha)
 * **Bi-Directional Disconnect (`PEER_REMOVED`)**: When a contact is deleted, the node dispatches a signed `PEER_REMOVED` packet directly to the remote peer's onion address using the matching identity keypair (`getIdentityForPeer`). Receipt of `PEER_REMOVED` or a targeted `USER_EXIT` triggers local deletion of the peer without remote re-notification, guaranteeing symmetric removal across both accounts.
 * **On-Disk Media Purging**: Peer deletion queries all posts, DMs, and comments by that author, collects all media identifiers, and calls `MediaManager.deleteMediaFiles()`, removing `.mp4`, `.jpg`, `.part`, and `.mine` files across external and internal media folders. Database deletions wipe by author public key and handle (`authorHandle = ?`), and `NoSlopViewModel` evicts deleted mesh items immediately from the active feed.

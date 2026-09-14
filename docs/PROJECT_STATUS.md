@@ -1,5 +1,23 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-14) — Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping, Video Scrubber & Creator Modals
+
+* **Fast Peer Pairing & Handshake De-Contention (`MeshTransport.kt`, `MeshSocialRepository.kt`, `GossipService.kt`)**:
+  * Raised `isHandshake` connect timeout from 15s to 28s with 2 attempts, accommodating Tor v3 rendezvous circuit establishment over mobile connections and eliminating premature "Connect timed out" failures.
+  * Removed redundant `USER_HANDSHAKE` packet synthesis in `dispatchPacket` that was spawning 4+ simultaneous sockets upon transient failures.
+  * Sequenced handshake completion before firing inventory sync and node discovery sharing, and exempt handshake packets from triggering `GossipService` peer failure cooldowns.
+* **Notification Cleanup & New Broadcast Alerts (`NoSlopViewModel.kt`, `PostPacketHandler.kt`, `NotificationSettings.kt`, `NotificationsScreen.kt`)**:
+  * Fixed lingering connection request notifications: accepting or declining requests directly deletes notifications by ID and sender public key from SQLite.
+  * Added `broadcasts` toggle to `NotificationSettings.kt` and wired incoming peer broadcast alerts in `PostPacketHandler.kt` with deep-linking to posts (`NotificationHelper.showNotification`).
+* **Rubbish Dumping Cycle for Disconnected Peer Content (`MeshSocialRepository.kt`, `NoSlopRepository.kt`)**:
+  * Implemented `purgeOrphanedPeerContent()` running every 30 minutes in the presence loop. Purges posts, comments, reactions, votes, and on-disk media files from peers that are no longer in contacts, while strictly whitelisting primary, secondary/burnable, and official creator identities.
+* **Auto-Hiding Video Playhead Timeline & Backward Seek Back-Buffer (`VideoPlayer.kt`)**:
+  * Added `.setBackBuffer(60000, true)` to ExoPlayer's `DefaultLoadControl`, keeping 60 seconds of played video in RAM to eliminate range stalls during backward skips.
+  * Configured `SeekParameters.CLOSEST_SYNC` for instant keyframe seeks.
+  * Added an interactive playhead slider and elapsed/duration timestamps (`MM:SS / MM:SS`) with automatic 3.5s auto-hide and tap-to-reveal animations.
+* **Clearnet Creator Content List in Preferences Modal (`ChannelPreferenceModal.kt`, `FeedCard.kt`)**:
+  * Added `CreatorContentList` in `ChannelPreferenceModal.kt` rendering a scrollable list of thumbnails and excerpts for clearnet creators, with 1-tap jump to content in the feed.
+
 ## Completed Changes (2026-09-14) — Bi-Directional Peer Disconnect, Media Purging, Total Factory Reset & Sync Unblocking
 
 * **Bi-Directional Peer Disconnect Protocol (`MeshSocialRepository.kt`, `HandshakePacketHandler.kt`, `Packets.kt`)**:
