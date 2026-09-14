@@ -1739,6 +1739,8 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     suspend fun togglePeerTrust(peer: Peer) = meshSocialRepository.togglePeerTrust(peer)
 
     suspend fun deletePeer(publicKeyB64: String, notifyRemote: Boolean = true) = meshSocialRepository.deletePeer(publicKeyB64, notifyRemote)
+    suspend fun deleteNotificationsBySender(senderPub: String) = db.notificationDao().deleteNotificationsBySender(senderPub)
+    suspend fun purgeOrphanedPeerContent() = meshSocialRepository.purgeOrphanedPeerContent()
 
     suspend fun shareDiscoverableNodesWith(peer: Peer) = meshSocialRepository.shareDiscoverableNodesWith(peer)
 
