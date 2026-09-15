@@ -187,9 +187,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1, onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
     val scrollToTopEvent: kotlinx.coroutines.flow.SharedFlow<Unit> = _scrollToTopEvent.asSharedFlow()
 
-    // --- Viewed History & Swipe Exclusion Caches ---
+    // --- Viewed History, Swipe, & Reacted Exclusion Caches ---
     private var cachedViewedIds: Set<String> = emptySet()
     private var cachedExcludedIds: Set<String> = emptySet()
+    private var cachedReactedAnchorIds: Set<String> = emptySet()
     
     private var cachedDefaultFeed = listOf<UnifiedItem>()
     private var isSearchModeActive = false
@@ -218,10 +219,37 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     val breakReminderIntervalSlides: StateFlow<Int> = repository.breakReminderIntervalSlides
     val breakReminderIntervalMinutes: StateFlow<Int> = repository.breakReminderIntervalMinutes
 
-    fun setBreakReminderEnabled(enabled: Boolean) = viewModelScope.launch { repository.setBreakReminderEnabled(enabled) }
-    fun setBreakReminderMode(mode: String) = viewModelScope.launch { repository.setBreakReminderMode(mode) }
-    fun setBreakReminderIntervalSlides(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalSlides(interval) }
-    fun setBreakReminderIntervalMinutes(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalMinutes(interval) }
+    fun setBreakReminderEnabled(enabled: Boolean) = viewModelScope.launch { 
+        repository.setBreakReminderEnabled(enabled)
+        if (enabled) {
+            scheduleBreakReminderNow()
+        } else {
+            dismissBreakReminder()
+        }
+    }
+    fun setBreakReminderMode(mode: String) = viewModelScope.launch { 
+        repository.setBreakReminderMode(mode)
+        scheduleBreakReminderNow()
+    }
+    fun setBreakReminderIntervalSlides(interval: Int) = viewModelScope.launch { 
+        repository.setBreakReminderIntervalSlides(interval)
+        scheduleBreakReminderNow()
+    }
+    fun setBreakReminderIntervalMinutes(interval: Int) = viewModelScope.launch { 
+        repository.setBreakReminderIntervalMinutes(interval)
+        scheduleBreakReminderNow()
+    }
+
+    private fun scheduleBreakReminderNow() {
+        val currentList = _unifiedFeed.value.toMutableList()
+        currentList.removeAll { it is UnifiedItem.BreakReminder }
+        val mode = breakReminderMode.value
+        val interval = if (mode == "slides") breakReminderIntervalSlides.value else breakReminderIntervalMinutes.value
+        val targetIdx = interval.coerceIn(1, (currentList.size).coerceAtLeast(1))
+        currentList.add(targetIdx, UnifiedItem.BreakReminder(mode, interval))
+        _unifiedFeed.value = currentList
+        Logger.info("VM", "Proactively scheduled BreakReminder slide at index $targetIdx (mode=$mode, interval=$interval)")
+    }
 
     fun onSlideViewed(currentIndex: Int) {
         if (!breakReminderEnabled.value) return
@@ -699,12 +727,20 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                             // Keep full restored feed so user can scroll both up and down
                             val candidateIds = idList
                             val restoredFeed = candidateIds.mapNotNull { id ->
-                                if (id in cachedExcludedIds && id != savedActiveId) return@mapNotNull null
                                 val feed = feeds.find { it.id == id }
-                                if (feed != null) UnifiedItem.Feed(feed)
-                                else {
+                                if (feed != null) {
+                                    val anchor = getReactionAnchorIdForUrl(feed.url ?: "")
+                                    val isExcluded = id in cachedExcludedIds || id in cachedViewedIds || 
+                                                     feed.isRead || feed.isSaved || anchor in cachedReactedAnchorIds
+                                    if (isExcluded && id != savedActiveId) return@mapNotNull null
+                                    UnifiedItem.Feed(feed)
+                                } else {
                                     val mesh = meshes.find { it.id == id }
-                                    if (mesh != null) UnifiedItem.Mesh(mesh) else null
+                                    if (mesh != null) {
+                                        val isExcluded = id in cachedExcludedIds || id in cachedViewedIds || id in cachedReactedAnchorIds
+                                        if (isExcluded && id != savedActiveId) return@mapNotNull null
+                                        UnifiedItem.Mesh(mesh)
+                                    } else null
                                 }
                             }
                             if (restoredFeed.isNotEmpty()) {
@@ -1196,6 +1232,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
                 val normId = normalizeFeedItemId(it.id, it.url ?: "")
+                val anchor = getReactionAnchorIdForUrl(it.url ?: "")
                 !it.isRead && !it.isSaved &&
                 it.id !in exclusionIds &&
                 it.id !in cachedViewedIds &&
@@ -1204,6 +1241,8 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 normId !in cachedExcludedIds &&
                 cKey !in cachedExcludedIds &&
                 cKey !in cachedViewedIds &&
+                anchor !in cachedReactedAnchorIds &&
+                it.id !in cachedReactedAnchorIds &&
                 it.title.lowercase().trim() !in readTitles && 
                 cKey !in excludedFeedKeys
             }
@@ -1687,6 +1726,17 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             if (!hasFreshCreatorVideos && _unifiedFeed.value.none { it is UnifiedItem.CreatorDepletion }) {
                 hasShownCreatorDepletionInSession = true
                 finalBatch.add(0, UnifiedItem.CreatorDepletion())
+            }
+        }
+
+        // Proactively schedule Break Reminder into Live Feed if enabled
+        if (breakReminderEnabled.value && actualFilter == "Live Feed" && !isSearchActive) {
+            val interval = breakReminderIntervalSlides.value
+            val totalSize = _unifiedFeed.value.size + finalBatch.size
+            if (totalSize >= interval && finalBatch.none { it is UnifiedItem.BreakReminder } && _unifiedFeed.value.none { it is UnifiedItem.BreakReminder }) {
+                val insertIdx = (interval - _unifiedFeed.value.size).coerceIn(0, finalBatch.size)
+                finalBatch.add(insertIdx, UnifiedItem.BreakReminder("slides", interval))
+                Logger.info("VM", "Scheduled BreakReminder slide into batch at index $insertIdx")
             }
         }
 
@@ -2233,6 +2283,9 @@ fun toggleAggregator() {
     private suspend fun refreshExclusionCaches() {
         cachedViewedIds = repository.getViewedItemIds()
         cachedExcludedIds = repository.getSwipeExcludedIds()
+        try {
+            cachedReactedAnchorIds = repository.getReactedAnchorIds()
+        } catch (_: Exception) {}
     }
 
     fun updateActiveSearchQuery(query: String) {

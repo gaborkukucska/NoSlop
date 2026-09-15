@@ -294,6 +294,9 @@ interface ReactionDao {
 
     @Query("SELECT * FROM mesh_reactions WHERE timestamp > :since ORDER BY timestamp ASC")
     suspend fun getReactionsSince(since: Long): List<MeshReaction>
+
+    @Query("SELECT * FROM mesh_reactions")
+    suspend fun getAllReactionsList(): List<MeshReaction>
 }
 
 @Dao
@@ -336,6 +339,9 @@ interface CommentReactionDao {
 interface VoteDao {
     @Query("SELECT * FROM mesh_votes WHERE postId = :postId ORDER BY timestamp ASC")
     fun getVotesForPost(postId: String): Flow<List<MeshVote>>
+
+    @Query("SELECT DISTINCT postId FROM mesh_votes")
+    suspend fun getAllVotedPostIds(): List<String>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVote(vote: MeshVote)

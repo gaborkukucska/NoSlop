@@ -1807,6 +1807,12 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
 
     suspend fun reactToFeedItem(item: FeedItem) = meshSocialRepository.reactToFeedItem(item)
 
+    suspend fun getReactedAnchorIds(): Set<String> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val reactionIds = db.reactionDao().getAllReactionsList().map { it.postId }.toSet()
+        val voteIds = db.voteDao().getAllVotedPostIds().toSet()
+        (reactionIds + voteIds).toSet()
+    }
+
     suspend fun reactToFeedItemWithType(item: FeedItem, reactionType: String): Boolean =
         meshSocialRepository.reactToFeedItemWithType(item, reactionType)
 
