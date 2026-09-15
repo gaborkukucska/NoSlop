@@ -2017,6 +2017,15 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
 
+### 23.9 Media Startup Masking, 60-Day Creator Depletion & Mindful Break Reminders (v0.5.6-alpha)
+* **Splash Screen Media Readiness**: `MainActivity.kt` gates dismissal on `viewModel.isSavedPositionLoaded` and calls `PreloadManager.awaitPlayerReady()`, masking video buffering behind the splash curtain until ExoPlayer is in `STATE_READY`.
+* **Wikipedia Thumbnail Extraction**: `WikipediaApiClient` queries `piprop=thumbnail|original&pilicense=any&pithumbsize=800` with Wikipedia REST summary API fallback; `ArticleMetadataResolver` handles inverted `og:image` meta tags.
+* **Seen & Reacted Content Exclusion**: Room `mesh_reactions` and `mesh_votes` anchor IDs are cached (`cachedReactedAnchorIds`) and excluded alongside `cachedExcludedIds` and `cachedViewedIds` in `NoSlopViewModel`. Stale item resurrection in `unseenFeeds` and `saved_feed_list` is eliminated.
+* **60-Day Freshness & All Creator Sourcing**: `FRESHNESS_MAX_AGE_MS` set to 60 days; `FeedRepository.kt` syncs all configured creators without sampling truncation.
+* **Creator Depletion Milestone Card**: Injects `UnifiedItem.CreatorDepletion` when creator content is depleted, prompting discovery search before delivering fresh random content.
+* **Mindful Break Reminders**: Enabled by default (time-based, 30-minute interval, with slide-counter mode). Scheduled directly into the Live Feed and rendered with 1-tap exit and continue options.
+* **Instagram & TikTok Definitions**: Registered in `SourceLibrary` and `ApiKeyRepository.SERVICES` for key-configured social clearnet ingestion.
+
 ### 23.8 Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping & Video Timeline (v0.5.5-alpha)
 * **Tor v3 Handshake Pairing Latency**: Handshake connect timeout tuned to 28s with 2 attempts; removed spurious duplicate USER_HANDSHAKE broadcasts on directed delivery failure and decoupled inventory sync from initial handshake dispatch.
 * **Direct Notification Deletion**: Connection request notifications are purged directly from `notifications` table by sender public key and notification ID upon popup resolution.

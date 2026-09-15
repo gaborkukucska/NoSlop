@@ -156,23 +156,24 @@ class SettingsRepository(private val appSettingDao: AppSettingDao) {
     }
 
     // --- Break / Exit Reminder Settings ---
-    private val _breakReminderEnabled = MutableStateFlow(false)
+    private val _breakReminderEnabled = MutableStateFlow(true)
     val breakReminderEnabled: StateFlow<Boolean> = _breakReminderEnabled.asStateFlow()
 
-    private val _breakReminderMode = MutableStateFlow("slides") // "slides" or "time"
+    private val _breakReminderMode = MutableStateFlow("time") // "slides" or "time" (default time)
     val breakReminderMode: StateFlow<String> = _breakReminderMode.asStateFlow()
 
     private val _breakReminderIntervalSlides = MutableStateFlow(30)
     val breakReminderIntervalSlides: StateFlow<Int> = _breakReminderIntervalSlides.asStateFlow()
 
-    private val _breakReminderIntervalMinutes = MutableStateFlow(20)
+    private val _breakReminderIntervalMinutes = MutableStateFlow(30)
     val breakReminderIntervalMinutes: StateFlow<Int> = _breakReminderIntervalMinutes.asStateFlow()
 
     suspend fun initBreakReminderSettings() = withContext(Dispatchers.IO) {
-        _breakReminderEnabled.value = appSettingDao.getSetting("break_reminder_enabled") == "true"
-        _breakReminderMode.value = appSettingDao.getSetting("break_reminder_mode") ?: "slides"
+        val enabledSetting = appSettingDao.getSetting("break_reminder_enabled")
+        _breakReminderEnabled.value = enabledSetting == null || enabledSetting == "true" // ON by default
+        _breakReminderMode.value = appSettingDao.getSetting("break_reminder_mode") ?: "time"
         _breakReminderIntervalSlides.value = appSettingDao.getSetting("break_reminder_interval_slides")?.toIntOrNull() ?: 30
-        _breakReminderIntervalMinutes.value = appSettingDao.getSetting("break_reminder_interval_minutes")?.toIntOrNull() ?: 20
+        _breakReminderIntervalMinutes.value = appSettingDao.getSetting("break_reminder_interval_minutes")?.toIntOrNull() ?: 30
     }
 
     suspend fun setBreakReminderEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {

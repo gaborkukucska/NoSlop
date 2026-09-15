@@ -1,5 +1,30 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-15) — Splash Buffer Mask, Wikipedia Thumbnails, 60-Day Freshness, Creator Depletion & Mindful Break Reminders
+
+* **Splash Screen Initial Media Buffer Readiness (`MainActivity.kt`, `PreloadManager.kt`)**:
+  * Coordinated initial slide determination with `_isSavedPositionLoaded` so cold start targets the exact restored slide rather than guessing ahead.
+  * Implemented `awaitPlayerReady(rawUrl, timeoutMs)` in `PreloadManager.kt`, holding the splash curtain with "Buffering initial media..." until ExoPlayer buffers its first frame (reaching `STATE_READY`), eliminating startup buffering stalls on cold launch.
+* **MediaWiki Thumbnail Extraction & Metadata Resolver (`WikipediaApiClient.kt`, `ArticleMetadataResolver.kt`, `MediaComponents.kt`, `FeedCard.kt`)**:
+  * Added `piprop=thumbnail|original&pilicense=any&pithumbsize=800` to Wikipedia Action API queries, unblocking non-CC0, promotional, movie, and fair-use article lead images.
+  * Implemented Wikipedia REST summary API fallback (`/api/rest_v1/page/summary/`) in `WikipediaApiClient` and fast-path resolution in `ArticleMetadataResolver.kt`.
+  * Added flexible regex matching for OpenGraph lead images across any meta attribute order and set standard browser User-Agent header for Coil image requests in `MediaComponents.kt`.
+  * Fixed `FeedCard.kt` image slide resolution falling back to `thumbnailUrl` when `mediaUrl` is null.
+* **Seen & Reacted Content Banishment & 60-Day Freshness (`NoSlopViewModel.kt`, `FeedRepository.kt`, `Daos.kt`)**:
+  * Set `FRESHNESS_MAX_AGE_MS` and `MAX_FEED_AGE_MS` to strictly 60 days for creator and non-archival clearnet feeds.
+  * Eliminated fallback loops that were resurrecting seen/read items.
+  * Extracted and cached all reacted anchor IDs from `reactionDao` and `voteDao` (`cachedReactedAnchorIds`), permanently excluding liked/reacted/voted content from the Live Feed.
+  * Cleaned `saved_feed_list` cold-start restoration to skip previously seen, read, or reacted items.
+  * Updated `FeedRepository.kt` to query all user-added creator channels across Tor without truncation.
+* **Creator Depletion Slide & Search Prompt (`NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Added `UnifiedItem.CreatorDepletion`: when all fresh (< 60 days) creator uploads are exhausted, the app injects an encouraging milestone card ("Caught Up on Creators! 🎉") with a 1-tap "Search & Add Creators" button before continuing with fresh random discovery content.
+* **Mindful Break & Exit Reminders (`SettingsRepository.kt`, `SettingsTab.kt`, `NoSlopViewModel.kt`, `UnifiedFeedTab.kt`)**:
+  * Enabled Break Reminders ON by default, configured to a time-based trigger every 30 minutes (with optional slide-counter mode).
+  * Added dedicated wellbeing settings card in Settings -> Content tab.
+  * Dynamically schedules and renders `UnifiedItem.BreakReminder` in the vertical feed with 1-tap "Exit App" (`finishAffinity()`) and "Continue Browsing" options.
+* **Instagram & TikTok Source Registration (`SourceLibrary.kt`, `ApiKeyRepository.kt`, `PublicApiService.kt`)**:
+  * Added built-in API sources `"api-instagram"` and `"api-tiktok"` in `SourceLibrary.kt` with key storage entries in `ApiKeyRepository.SERVICES`.
+
 ## Completed Changes (2026-09-14) — Fast Peer Pairing, Broadcast Alerts, Rubbish Dumping, Video Scrubber & Creator Modals
 
 * **Fast Peer Pairing & Handshake De-Contention (`MeshTransport.kt`, `MeshSocialRepository.kt`, `GossipService.kt`)**:
