@@ -448,6 +448,30 @@ fun FullScreenMeshCardV2(
         }
     }
 
+    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
+    var newlyDownloaded by remember { mutableStateOf(false) }
+    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, effectiveMediaType ?: "video"))
+
+    // Automatically trigger auto-download if enabled and not already running
+    LaunchedEffect(post.id, isDownloaded) {
+        if (!isDownloaded && rawMediaId != null && !com.noslop.app.mesh.MediaManager.isMediaDownloadingOrRecovering(rawMediaId)) {
+            val accurateMeta = com.noslop.app.mesh.MediaMetadata(
+                id = rawMediaId,
+                type = effectiveMediaType ?: "video",
+                mimeType = if (effectiveMediaType == "audio") "audio/mp4" else "video/mp4",
+                size = post.mediaSize,
+                chunkCount = if (post.mediaSize > 0) (post.mediaSize / (256 * 1024)).toInt() + 1 else 999
+            )
+            val origin = resolveOriginOnion()
+            com.noslop.app.mesh.MediaManager.checkAndAutoDownload(
+                accurateMeta,
+                "friends",
+                post.authorPublicKeyB64,
+                origin
+            )
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -462,15 +486,19 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains("youtube") ||
                 resolvedUrl.contains("vimeo") ||
                 resolvedUrl.contains("archive.org/embed") -> {
-                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
-                    
-                    var newlyDownloaded by remember { mutableStateOf(false) }
-                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, effectiveMediaType ?: "video"))
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
                     val stableKeyForRestore = post.mediaUrl ?: post.clearnetUrl
 
                     if (canPlay) {
-                        VideoPlayer(url = resolvedUrl, isVisible = isVisible, isNextSlide = isNextSlide, thumbnailUrl = post.clearnetThumbnailUrl, thumbnailB64 = if (post.mediaUrl != null) post.thumbnailB64 else null, stableKey = stableKeyForRestore)
+                        VideoPlayer(
+                            url = resolvedUrl,
+                            isVisible = isVisible,
+                            isNextSlide = isNextSlide,
+                            thumbnailUrl = post.clearnetThumbnailUrl,
+                            thumbnailB64 = if (post.mediaUrl != null) post.thumbnailB64 else null,
+                            stableKey = stableKeyForRestore,
+                            onPlaybackStarted = { viewModel?.markMeshMediaPlaybackStarted(post.id) }
+                        )
                     } else {
                         val downloadProgress by (viewModel?.downloadProgress?.collectAsState() ?: androidx.compose.runtime.mutableStateOf(emptyMap()))
                         val progress = rawMediaId?.let { downloadProgress[it] } ?: 0
@@ -532,9 +560,6 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".aac") || 
                 resolvedUrl.contains(".ogg") || 
                 resolvedUrl.contains(".flac") -> {
-                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
-                    var newlyDownloaded by remember { mutableStateOf(false) }
-                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, "audio"))
                     val canPlay = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
 
                     if (canPlay) {
@@ -596,9 +621,6 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".png") || 
                 resolvedUrl.contains(".webp") || 
                 resolvedUrl.contains(".gif") -> {
-                    val rawMediaId = post.mediaUrl?.substringAfterLast("/")
-                    var newlyDownloaded by remember { mutableStateOf(false) }
-                    val isDownloaded = newlyDownloaded || (rawMediaId != null && com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, "image"))
                     val canShow = isDownloaded || post.clearnetUrl != null || post.mediaUrl == null
 
                     if (canShow) {

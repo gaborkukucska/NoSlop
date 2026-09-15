@@ -507,23 +507,11 @@ object MediaManager {
                 }
                 
                 if (recoveryNeeded) {
-                    Logger.warn(TAG, "Media $id: persistent timeouts (${dl.consecutiveTimeouts}). Recovering.")
+                    Logger.warn(TAG, "Media $id: persistent timeouts (${dl.consecutiveTimeouts}). Retrying direct while broadcasting mesh recovery.")
                     scope.launch {
-                        val isTemp = dl.peerOnion?.let { onion -> repository?.peerDao?.getAllPeersList()?.find { it.onionAddress == onion }?.isTemporary } == true
-                        if (isTemp) {
-                            Logger.info(TAG, "Media $id: Not recovering for temporary contact. Retrying direct.")
-                            dl.consecutiveTimeouts = 0
-                            requestNextChunks(dl)
-                        } else {
-                            // Remember original peer for fallback after recovery attempts
-                            val originalPeer = dl.peerOnion
-                            dl.peerOnion = null
-                            dl.status = ActiveDownload.Status.RECOVERING
-                            resetDownloadTracking(dl)
-                            dl.lastAttemptAt = now
-                            dl.savedPeerOnion = originalPeer
-                            attemptMeshRecovery(dl)
-                        }
+                        dl.consecutiveTimeouts = 0
+                        attemptMeshRecovery(dl)
+                        requestNextChunks(dl)
                     }
                     continue
                 }
@@ -559,11 +547,7 @@ object MediaManager {
         val repo = repository ?: return
         val peer = dl.peerOnion ?: return
 
-        // Throttle background mesh sync when user is actively watching or resolving video in foreground
-        if (com.noslop.app.ui.PreloadManager.isVideoActive || com.noslop.app.ui.PreloadManager.currentlyPlayingUrl != null) {
-            Logger.debug(TAG, "Throttling background media chunk download while video is playing")
-            return
-        }
+        // Mesh chunk downloads proceed unthrottled over dedicated media circuits
 
         val now = System.currentTimeMillis()
 

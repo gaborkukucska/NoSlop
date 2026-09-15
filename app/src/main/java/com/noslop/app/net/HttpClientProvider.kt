@@ -237,6 +237,15 @@ object HttpClientProvider {
             .build()
     }
 
+    val loopbackClient: OkHttpClient by lazy {
+        OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+
     private val torGuardInterceptor = okhttp3.Interceptor { chain ->
         if (!useTorForClearnet) return@Interceptor chain.proceed(chain.request())
 

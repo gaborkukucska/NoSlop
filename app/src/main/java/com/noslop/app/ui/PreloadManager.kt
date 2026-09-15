@@ -302,6 +302,8 @@ object PreloadManager {
         val isYouTube = resolvedUrl.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
         val mediaHttpClient = if (isYouTube) {
             com.noslop.app.net.HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+        } else if (resolvedUrl.contains("127.0.0.1") || resolvedUrl.contains("localhost")) {
+            com.noslop.app.net.HttpClientProvider.loopbackClient
         } else {
             com.noslop.app.net.HttpClientProvider.activeClearnetClient
         }

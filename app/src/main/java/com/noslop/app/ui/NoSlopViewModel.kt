@@ -2239,7 +2239,7 @@ fun toggleAggregator() {
             val item = _unifiedFeed.value.find { it.id == itemId }
                 ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
 
-            // Do NOT mark mesh post as viewed if attached media has not finished downloading yet
+            // Do NOT mark mesh post as viewed if attached media has not finished downloading or hasn't started playing
             if (item is UnifiedItem.Mesh) {
                 val post = item.post
                 val hasMedia = !post.mediaUrl.isNullOrBlank() || (!post.mediaType.isNullOrBlank() && post.mediaType != "text")
@@ -2249,7 +2249,8 @@ fun toggleAggregator() {
                         com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
                     } else false
 
-                    if (!isDownloaded) {
+                    val hasPlayed = playedMeshPostIds.contains(post.id)
+                    if (!isDownloaded || !hasPlayed) {
                         return@launch
                     }
                 }
@@ -2269,6 +2270,24 @@ fun toggleAggregator() {
         viewModelScope.launch {
             val item = _unifiedFeed.value.find { it.id == itemId }
                 ?: allMeshes.find { it.id == itemId }?.let { UnifiedItem.Mesh(it) }
+
+            // Do NOT record as swiped away if mesh media is not yet available or hasn't started playing at least once
+            if (item is UnifiedItem.Mesh) {
+                val post = item.post
+                val hasMedia = !post.mediaUrl.isNullOrBlank() || (!post.mediaType.isNullOrBlank() && post.mediaType != "text")
+                if (hasMedia) {
+                    val rawMediaId = post.mediaUrl?.substringAfterLast("/") ?: ""
+                    val isDownloaded = if (rawMediaId.isNotBlank()) {
+                        com.noslop.app.mesh.MediaManager.isMediaDownloaded(rawMediaId, post.mediaType)
+                    } else false
+
+                    val hasPlayed = playedMeshPostIds.contains(post.id)
+                    if (!isDownloaded || !hasPlayed) {
+                        return@launch
+                    }
+                }
+            }
+
             val (url, cKey) = when (item) {
                 is UnifiedItem.Feed -> Pair(item.item.url, com.noslop.app.data.getCanonicalItemKey(item))
                 is UnifiedItem.Mesh -> Pair(item.post.clearnetUrl, com.noslop.app.data.getCanonicalItemKey(item))
@@ -2389,6 +2408,17 @@ fun toggleAggregator() {
                 _scrollToTopEvent.emit(Unit)
             }
         }
+    }
+
+    private val playedMeshPostIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    fun markMeshMediaPlaybackStarted(postId: String) {
+        playedMeshPostIds.add(postId)
+        Logger.info("VM", "Playback started for mesh post: $postId")
+    }
+
+    fun hasMeshMediaStartedPlaying(postId: String): Boolean {
+        return playedMeshPostIds.contains(postId)
     }
 
     fun getPeerHandle(pubKey: String): String? {

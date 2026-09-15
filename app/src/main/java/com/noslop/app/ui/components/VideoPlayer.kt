@@ -89,6 +89,12 @@ private class CachedSource(
 private fun CachedSource.stalenessReason(): String? {
     if (expiresAtMs <= System.currentTimeMillis()) return "URL expired"
 
+    // Mesh media URLs (file:// or local proxy 127.0.0.1) are independent of Tor clearnet routing
+    if (source is VideoSource.Direct &&
+        (source.url.startsWith("file://") || source.url.contains("127.0.0.1") || source.url.contains("localhost"))) {
+        return null
+    }
+
     val overTorNow = HttpClientProvider.useTorForClearnet
     if (overTor != overTorNow) {
         return if (overTorNow) {
@@ -243,7 +249,7 @@ internal suspend fun resolveSource(rawUrl: String, forceRefresh: Boolean = false
 private suspend fun doResolve(rawUrl: String, quality: String, isPreload: Boolean): VideoSource = withContext(Dispatchers.IO) {
     if (rawUrl.isBlank()) return@withContext VideoSource.Unavailable
 
-    if (HttpClientProvider.useTorForClearnet && !HttpClientProvider.isNetworkReady && !rawUrl.startsWith("file://") && !rawUrl.contains("127.0.0.1") && !rawUrl.contains("localhost")) {
+    if (HttpClientProvider.useTorForClearnet && !HttpClientProvider.isNetworkReady && !rawUrl.startsWith("file://") && !rawUrl.contains("127.0.0.1") && !rawUrl.contains("localhost") && !rawUrl.startsWith("noslop://")) {
         Logger.warn("VIDEO_RESOLVE", "Tor is disconnected and Clearnet over Tor is ENABLED. Refusing stream resolution for privacy: $rawUrl")
         return@withContext VideoSource.Unavailable
     }
@@ -592,7 +598,8 @@ fun VideoPlayer(
     isNextSlide: Boolean = false,
     thumbnailUrl: String? = null,
     thumbnailB64: String? = null,
-    stableKey: String? = null
+    stableKey: String? = null,
+    onPlaybackStarted: (() -> Unit)? = null
 ) {
     if (url.isBlank()) return
     val context = LocalContext.current
@@ -711,6 +718,7 @@ fun VideoPlayer(
                                 com.noslop.app.tor.TorService.setTorStatusMessage(null)
                                 isVideoReady = true
                                 directPlaybackFailed = false
+                                onPlaybackStarted?.invoke()
                             },
                             onFailed = { directPlaybackFailed = true }
                         )
@@ -1174,6 +1182,8 @@ private fun ExoVideoPlayer(
             val isYouTube = url.contains("googlevideo") || rawUrl.contains("youtube") || streamId.startsWith("yt_")
             val client = if (isYouTube) {
                 HttpClientProvider.getOrCreateIsolatedMediaClient(streamId)
+            } else if (url.contains("127.0.0.1") || url.contains("localhost")) {
+                HttpClientProvider.loopbackClient
             } else {
                 HttpClientProvider.activeClearnetClient
             }

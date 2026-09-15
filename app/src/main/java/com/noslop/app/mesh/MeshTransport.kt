@@ -28,7 +28,7 @@ class MeshTransport(
     // Dedicated priority concurrency pools: DMs/groups, bulk feed, and media chunks each have isolated pools
     private val dmSemaphore = kotlinx.coroutines.sync.Semaphore(4)
     private val bulkSemaphore = kotlinx.coroutines.sync.Semaphore(4)
-    private val mediaSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+    private val mediaSemaphore = kotlinx.coroutines.sync.Semaphore(3)
     private val activeConnections = java.util.concurrent.atomic.AtomicInteger(0)
     private val MAX_SIMULTANEOUS_CONNECTIONS = 16
 
@@ -187,16 +187,7 @@ class MeshTransport(
                 return@withContext pushedToHub
             }
         } else if (isMediaPacket) {
-            var acquired = false
-            val waitUntilMs = System.currentTimeMillis() + 6000L
-            while (System.currentTimeMillis() < waitUntilMs) {
-                if (mediaSemaphore.tryAcquire()) { acquired = true; break }
-                delay(100)
-            }
-            if (!acquired) {
-                Logger.warn(TAG, "Dropping media ${packet.type} to $onionAddress: media circuits busy")
-                return@withContext pushedToHub
-            }
+            mediaSemaphore.acquire()
             acquiredMedia = true
         } else if (isBackground) {
             if (!bulkSemaphore.tryAcquire()) {
