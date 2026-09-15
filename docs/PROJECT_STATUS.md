@@ -1,5 +1,21 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-15) — Mesh Transfer Stabilization, Loopback Isolation & Playback-Gated Seen Tracking (v0.5.6-alpha)
+
+* **Local Loopback Proxy Client Isolation (`HttpClientProvider.kt`, `VideoPlayer.kt`, `PreloadManager.kt`)**:
+  * Created `HttpClientProvider.loopbackClient` using `Proxy.NO_PROXY` without Tor interceptors.
+  * ExoPlayer and PreloadManager now query `loopbackClient` for `127.0.0.1` and `localhost` addresses, ensuring the local MediaProxyService (`:8080`) is never routed into Tor's SOCKS daemon regardless of whether "Route Clearnet via Tor" is ON or OFF.
+  * Exempted `file://`, `127.0.0.1`, `localhost`, and `noslop://` URLs from route-based staleness invalidation when toggling Tor clearnet routing.
+* **Mesh Video Transfer Unthrottling & Semaphore Capacity (`MediaManager.kt`, `MeshTransport.kt`)**:
+  * Removed the foreground playback/preload throttle from `MediaManager.requestNextChunks`, allowing background auto-downloads and manual tap-to-downloads to progress continuously while users navigate feeds or switch tabs.
+  * Switched `MeshTransport` media traffic to non-dropping `mediaSemaphore.acquire()` and expanded semaphore capacity to 3, eliminating socket timeouts and accidental peer disconnects.
+  * Preserved direct peer addresses during mesh recovery attempts rather than resetting `peerOnion` to null.
+* **Proactive Mesh Auto-Download Activation (`FeedCard.kt`)**:
+  * Added proactive `LaunchedEffect(post.id, isDownloaded)` in `FullScreenMeshCardV2` that calls `MediaManager.checkAndAutoDownload` for undownloaded mesh media, initiating downloads immediately upon card composition when auto-download is enabled.
+* **Playback-Gated Feed Engagement Tracking (`NoSlopViewModel.kt`, `VideoPlayer.kt`, `FeedCard.kt`)**:
+  * Added `playedMeshPostIds` to `NoSlopViewModel` and wired `onPlaybackStarted` from ExoPlayer (`onRenderedFirstFrame` / `onReady`).
+  * Gated both `markItemViewed` and `recordItemSwiped` so mesh posts with media are never marked as viewed or recorded as swiped away until the media file is fully available on disk AND playback has started at least once, keeping unread mesh broadcasts intact in feeds.
+
 ## Completed Changes (2026-09-15) — Broadcast Slide Flicker Resolution, Broadcast Editing & Multi-Hop Propagation, Swipe-Down Modals (v0.5.6-alpha)
 
 * **Broadcast Slide Flicker Resolution (`NoSlopViewModel.kt`, `FeedCard.kt`, `UnifiedFeedTab.kt`)**:

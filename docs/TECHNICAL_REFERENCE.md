@@ -2017,6 +2017,11 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
 
+### 23.11 Mesh Video Transfer Stabilization & Loopback Proxy Isolation (v0.5.6-alpha)
+* **Local Proxy Loopback Isolation**: `HttpClientProvider.loopbackClient` enforces `Proxy.NO_PROXY` for requests targeting `127.0.0.1` and `localhost`. Eliminates `Connection reset` and `Broken pipe` exceptions previously caused by `torClient` routing local ExoPlayer proxy connections through the Tor SOCKS daemon when "Route Clearnet via Tor" was enabled.
+* **Unthrottled Background Chunk Pipeline**: Removed blocking `isVideoActive` checks in `MediaManager.requestNextChunks`. Downloads continue without interruption across background navigation and tab changes. Switched `MeshTransport` to suspending `mediaSemaphore.acquire()` (3 permits), preventing packet loss on high-latency Tor hidden service circuits.
+* **Seen State Playback Gating**: `NoSlopViewModel.markItemViewed` and `recordItemSwiped` strictly verify that attached mesh media exists on disk and has commenced playback (`playedMeshPostIds`) before applying seen timestamps or swipe exclusions.
+
 ### 23.10 Broadcast Slide Stability, Mesh Post Editing & Swipe-Down Bottom Sheets (v0.5.6-alpha)
 * **Broadcast Recomposition Stability**: `NoSlopViewModel.kt` promotes `localKeys` and `burnableKeys` to `SharingStarted.Eagerly`. Eliminates transient `null` evaluation cycles in `UnifiedFeedTab.kt` that caused index-0 pager key oscillation and slide flickering. `allMeshes` filter accommodates both primary and burnable identities.
 * **Mesh Post Editing Wire Protocol**: `EditPostPayload` transmits updated content, `media_id`, `media_metadata`, and `privacy`. `MeshSocialRepository.editMeshPost` signs with the corresponding identity and broadcasts with `hops = 6` (or 1 for friends-only). `PostPacketHandler.handleEditPost` validates Ed25519 signatures and applies SQLite updates via `postDao.updatePostDetails`.
