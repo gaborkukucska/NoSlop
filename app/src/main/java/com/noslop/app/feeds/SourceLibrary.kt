@@ -165,6 +165,8 @@ object SourceLibrary {
         // api-invidious-search was called from two places in PublicApiService and
         // was never registered either — the YouTube fallback has never once run.
         BuiltInSource("api-invidious-search", "Invidious", "invidious:search", "api", "Video Platforms"),
+        BuiltInSource("api-tiktok", "TikTok Trending", "tiktok:trending", "api", "Video Platforms"),
+        BuiltInSource("api-instagram", "Instagram Feed", "instagram:recent", "api", "Social Clearnet"),
         BuiltInSource("api-podcast-trending", "Trending Podcasts", "podcastindex:trending", "api", "Music"),
         BuiltInSource("api-newsapi-headlines", "Top Headlines", "newsapi:headlines", "api", "World News"),
         BuiltInSource("api-guardian", "The Guardian", "guardian:search", "api", "World News"),

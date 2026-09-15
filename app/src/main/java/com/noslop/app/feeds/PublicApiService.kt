@@ -116,6 +116,10 @@ object PublicApiService {
                         fetchAsync("api-invidious-search") { InvidiousApiClient.getTrendingVideos() }
                         fetchAsync("api-vimeo-featured") { VimeoApiClient.fetchFeatured(apiKeyRepo) }
                         fetchAsync("api-archive-video") { InternetArchiveClient.getPopularVideos() }
+                        val tiktokKey = apiKeyRepo.getKey("tiktok")
+                        if (!tiktokKey.isNullOrBlank()) {
+                            Logger.info(TAG, "TikTok API source configured")
+                        }
                     }
                 }
                 "Music" -> {
@@ -160,6 +164,10 @@ object PublicApiService {
                 }
                 "Social Clearnet" -> {
                     fetchAsync("api-reddit-hot") { RedditApiClient.fetchSubreddit("technology", "new") }
+                    val igKey = apiKeyRepo.getKey("instagram")
+                    if (!igKey.isNullOrBlank()) {
+                        Logger.info(TAG, "Instagram API source configured")
+                    }
                 }
                 "Search Videos" -> {
                     addLocal(mediaType = "video")  // NOSLOP_LOCAL_SEARCH_V1

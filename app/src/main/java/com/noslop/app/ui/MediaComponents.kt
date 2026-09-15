@@ -107,6 +107,7 @@ fun BlurredImageBackground(url: String, modifier: Modifier = Modifier, thumbnail
         
         val request = coil.request.ImageRequest.Builder(context)
             .data(actualModel)
+            .setHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36")
             .crossfade(true)
             .memoryCachePolicy(if (actualModel is java.io.File) coil.request.CachePolicy.DISABLED else coil.request.CachePolicy.ENABLED)
             .apply {

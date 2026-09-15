@@ -223,32 +223,49 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
     fun setBreakReminderIntervalSlides(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalSlides(interval) }
     fun setBreakReminderIntervalMinutes(interval: Int) = viewModelScope.launch { repository.setBreakReminderIntervalMinutes(interval) }
 
-    fun checkBreakReminderOnSlide(): UnifiedItem.BreakReminder? {
-        if (!breakReminderEnabled.value) return null
+    fun onSlideViewed(currentIndex: Int) {
+        if (!breakReminderEnabled.value) return
         val mode = breakReminderMode.value
         val now = System.currentTimeMillis()
         sessionSlideCount++
+
+        var shouldTrigger = false
+        var triggerValue = 0
 
         if (mode == "slides") {
             val interval = breakReminderIntervalSlides.value
             if (sessionSlideCount - lastBreakReminderSlide >= interval) {
                 lastBreakReminderSlide = sessionSlideCount
-                return UnifiedItem.BreakReminder("slides", sessionSlideCount)
+                shouldTrigger = true
+                triggerValue = interval
             }
         } else {
             val intervalMinutes = breakReminderIntervalMinutes.value
             val elapsedMinutes = ((now - lastBreakReminderTimeMs) / 60000L).toInt()
             if (elapsedMinutes >= intervalMinutes) {
                 lastBreakReminderTimeMs = now
-                return UnifiedItem.BreakReminder("time", elapsedMinutes)
+                shouldTrigger = true
+                triggerValue = elapsedMinutes
             }
         }
-        return null
+
+        if (shouldTrigger) {
+            val currentList = _unifiedFeed.value.toMutableList()
+            if (currentList.none { it is UnifiedItem.BreakReminder }) {
+                val insertAt = (currentIndex + 1).coerceAtMost(currentList.size)
+                currentList.add(insertAt, UnifiedItem.BreakReminder(mode, triggerValue))
+                _unifiedFeed.value = currentList
+                Logger.info("VM", "Injected BreakReminder slide at index $insertAt (mode=$mode, value=$triggerValue)")
+            }
+        }
     }
 
     fun dismissBreakReminder() {
         lastBreakReminderSlide = sessionSlideCount
         lastBreakReminderTimeMs = System.currentTimeMillis()
+        val currentList = _unifiedFeed.value.toMutableList()
+        currentList.removeAll { it is UnifiedItem.BreakReminder }
+        _unifiedFeed.value = currentList
     }
 
     fun saveFeedPosition(itemId: String) {
@@ -1179,6 +1196,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
             } else {
                 val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(it))
                 val normId = normalizeFeedItemId(it.id, it.url ?: "")
+                !it.isRead && !it.isSaved &&
                 it.id !in exclusionIds &&
                 it.id !in cachedViewedIds &&
                 it.id !in cachedExcludedIds &&
@@ -2755,6 +2773,10 @@ fun toggleAggregator() {
             markItemViewed(item.id, isMesh = false)
             markItemReadState(item.id, true)
             recordItemSwiped(item.id)
+            val cKey = com.noslop.app.data.getCanonicalItemKey(UnifiedItem.Feed(item))
+            val normId = normalizeFeedItemId(item.id, item.url ?: "")
+            cachedExcludedIds = cachedExcludedIds + setOf(item.id, normId, cKey)
+            cachedViewedIds = cachedViewedIds + setOf(item.id, normId, cKey)
             repository.reactToFeedItemWithType(item, reactionType)
             if (reactionType == "like") {
                 val now = System.currentTimeMillis()

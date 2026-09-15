@@ -869,7 +869,10 @@ fun UnifiedFeedTab(
                 viewModel.completeFeedTutorial()
             }
 
-            if (currentItem !is UnifiedItem.Tutorial) {
+            if (currentItem !is UnifiedItem.Tutorial && currentItem !is UnifiedItem.BreakReminder) {
+                // Check and dynamically inject break reminder if interval is reached
+                viewModel.onSlideViewed(pagerState.settledPage)
+
                 // Only save position AFTER initial restore has completed so startup page 0 never clobbers saved state
                 if (hasRestoredInitialPosition && filterMode == "Live Feed" && !searchResultsActive) {
                     viewModel.saveFeedPosition(currentItem.id)

@@ -104,9 +104,10 @@ fun FullScreenFeedCard(
     val context = LocalContext.current
     val resolvedUrl = resolveMediaUrl(item.mediaUrl, context)
 
-    val isVisualCategory = item.apiSource in listOf("pexels", "nasa") || item.sourceId in listOf("hi-fructose", "juxtapoz", "colossal", "500px-popular", "flickr-explore", "petapixel")
-    val hasVisualMedia = item.mediaType == "image" || (resolvedUrl?.let { url -> 
-        url.contains(".jpg") || url.contains(".jpeg") || url.contains(".png") || url.contains(".webp")
+    val displayImageUrl = resolvedUrl ?: item.thumbnailUrl
+    val isVisualCategory = item.apiSource in listOf("pexels", "nasa", "wikimedia", "artic", "openverse") || item.sourceId in listOf("hi-fructose", "juxtapoz", "colossal", "500px-popular", "flickr-explore", "petapixel")
+    val hasVisualMedia = item.mediaType == "image" || (displayImageUrl?.let { url -> 
+        url.contains(".jpg") || url.contains(".jpeg") || url.contains(".png") || url.contains(".webp") || url.contains(".gif")
     } ?: false)
 
     Box(
@@ -188,7 +189,15 @@ fun FullScreenFeedCard(
                     AudioPlayer(url = resolvedUrl, isVisible = isVisible, stableKey = stableKeyForRestore)
                 }
                 isVisualCategory && hasVisualMedia -> {
-                    BlurredImageBackground(url = resolvedUrl, fallbackUrl = item.thumbnailUrl)
+                    BlurredImageBackground(url = displayImageUrl ?: resolvedUrl ?: "", fallbackUrl = item.thumbnailUrl)
+                }
+                item.mediaType == "image" || 
+                (displayImageUrl != null && (displayImageUrl.contains(".jpg") || 
+                displayImageUrl.contains(".jpeg") || 
+                displayImageUrl.contains(".png") || 
+                displayImageUrl.contains(".webp") || 
+                displayImageUrl.contains(".gif"))) -> {
+                    BlurredImageBackground(url = displayImageUrl ?: "", fallbackUrl = item.thumbnailUrl)
                 }
                 item.mediaType == "image" || 
                 resolvedUrl.contains(".jpg") || 
