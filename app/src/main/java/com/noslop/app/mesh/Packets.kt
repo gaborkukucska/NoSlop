@@ -230,7 +230,10 @@ data class EditPostPayload(
     @SerializedName("author_avatar_b64") val authorAvatarB64: String? = null,
     val content: String,
     val timestamp: Long,
-    val signature: String
+    val signature: String,
+    @SerializedName("media_id") val mediaId: String? = null,
+    @SerializedName("media_metadata") val mediaMetadata: MediaMetadata? = null,
+    val privacy: String? = null
 )
 
 data class EditCommentPayload(

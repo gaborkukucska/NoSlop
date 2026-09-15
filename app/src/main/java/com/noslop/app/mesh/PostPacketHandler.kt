@@ -157,7 +157,9 @@ class PostPacketHandler(
         val payloadToVerify = com.noslop.app.crypto.CryptoService.encodeForSigning(
             editPay.postId, editPay.authorId, editPay.content, editPay.timestamp.toString(), editPay.authorAvatarB64
         )
-        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId)
+        val legacyPipePayload = "${editPay.postId}|${editPay.authorId}|${editPay.content}|${editPay.timestamp}"
+        val isValid = CryptoService.verify(payloadToVerify, editPay.signature, editPay.authorId) ||
+            CryptoService.verify(legacyPipePayload, editPay.signature, editPay.authorId)
         if (!isValid) return false
 
         val existingPost = postDao.getPostById(editPay.postId)
@@ -167,8 +169,36 @@ class PostPacketHandler(
                 return false
             }
             if (!existingPost.isOrphaned && editPay.timestamp >= existingPost.timestamp) {
-                postDao.updatePostContent(editPay.postId, editPay.content, editPay.timestamp, editPay.signature)
+                val peer = peerDao.getPeerByPublicKey(editPay.authorId)
+                val resolvedOnion = editPay.mediaMetadata?.originNode ?: peer?.onionAddress ?: packet.senderId
+                val newMediaUrl = editPay.mediaId?.let { "noslop://$resolvedOnion/$it" } ?: existingPost.mediaUrl
+                val newMediaType = editPay.mediaMetadata?.type ?: existingPost.mediaType
+                val newThumb = editPay.mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
+                val newSize = editPay.mediaMetadata?.size ?: existingPost.mediaSize
+                val newPrivacy = editPay.privacy ?: existingPost.privacy
+
+                postDao.updatePostDetails(
+                    id = editPay.postId,
+                    newContent = editPay.content,
+                    newTimestamp = editPay.timestamp,
+                    newSignature = editPay.signature,
+                    mediaUrl = newMediaUrl,
+                    mediaType = newMediaType,
+                    thumbnailB64 = newThumb,
+                    mediaSize = newSize,
+                    privacy = newPrivacy
+                )
                 Logger.info(TAG, "Applied EDIT_POST for ${editPay.postId}")
+
+                if (editPay.mediaMetadata != null) {
+                    val peerOnion = editPay.mediaMetadata.originNode ?: peer?.onionAddress
+                    MediaManager.checkAndAutoDownload(
+                        editPay.mediaMetadata,
+                        "friends",
+                        editPay.authorId,
+                        peerOnion
+                    )
+                }
             }
         }
         return true

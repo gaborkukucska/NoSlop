@@ -1696,6 +1696,13 @@ class NoSlopRepository(val context: Context, private val db: NoSlopDatabase) {
     // --- Social Mesh & Direct Messages Routing ---
     suspend fun deleteMeshPost(postId: String): Boolean = meshSocialRepository.deleteMeshPost(postId)
 
+    suspend fun editMeshPost(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public"
+    ): Boolean = meshSocialRepository.editMeshPost(postId, newContent, mediaMetadata, privacy)
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,

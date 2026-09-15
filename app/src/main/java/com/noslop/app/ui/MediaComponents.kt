@@ -760,6 +760,7 @@ fun OverlayInteractions(
     onReaction: (String) -> Unit = {},
     onShare: (() -> Unit)? = null,
     onComment: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
     onDelete: (() -> Unit)? = null,
     reactionSummary: Map<String, Int> = emptyMap(),
     isSaved: Boolean = false,
@@ -878,6 +879,15 @@ fun OverlayInteractions(
                         icon = Icons.Default.Chat,
                         label = if (commentCount > 0) commentCount.toString() else "Chat".tr,
                         onClick = onComment
+                    )
+                }
+
+                if (onEdit != null) {
+                    InteractionButton(
+                        icon = Icons.Default.Edit,
+                        label = "Edit".tr,
+                        onClick = onEdit,
+                        tint = AccentGreen
                     )
                 }
 

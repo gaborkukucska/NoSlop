@@ -1,5 +1,7 @@
+// app/src/main/java/com/noslop/app/ui/components/ChannelPreferenceModal.kt
 package com.noslop.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import com.noslop.app.ui.theme.*
 import com.noslop.app.util.tr
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChannelPreferenceModal(
     channelName: String,
@@ -39,10 +42,20 @@ fun ChannelPreferenceModal(
     onToggleFollow: (() -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = SurfaceDark,
-        title = {
+        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Default.Person,
@@ -58,107 +71,107 @@ fun ChannelPreferenceModal(
                     fontSize = 18.sp
                 )
             }
-        },
-        text = {
-            Column {
-                Text(
-                    text = channelName,
-                    color = if (isBanned) DestructiveRed else AccentGreen,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                if (isBanned) {
-                    Text(
-                        text = "This channel/creator is currently Banned 🚫. All content from this channel is blacklisted and excluded from feeds and search results.".tr,
-                        color = DestructiveRed,
-                        fontSize = 13.sp
-                    )
-                } else if (isAlreadyInPreferences) {
-                    Text(
-                        text = "This channel/creator is currently in your preferences list. Removing it will stop prioritizing their content in your feed.".tr,
-                        color = TextMuted,
-                        fontSize = 13.sp
-                    )
-                } else {
-                    Text(
-                        text = "Add this channel/creator to your preferences to surface and prioritize their content across your feeds.".tr,
-                        color = TextMuted,
-                        fontSize = 13.sp
-                    )
-                }
 
-                if (creatorItems.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Content ({count})".tr.replace("{count}", creatorItems.size.toString()),
-                        color = TextLight,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 200.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        items(creatorItems, key = { it.id }) { feedItem ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(PrimaryBlack.copy(alpha = 0.6f))
-                                    .clickable {
-                                        onItemClick?.invoke(feedItem)
-                                        onDismiss()
-                                    }
-                                    .padding(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(48.dp)
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(PrimaryBlack),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (!feedItem.thumbnailUrl.isNullOrBlank()) {
-                                        coil.compose.AsyncImage(
-                                            model = feedItem.thumbnailUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier.fillMaxSize(),
-                                            contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                                        )
-                                    } else {
-                                        val icon = if (feedItem.mediaType?.contains("video") == true) Icons.Default.PlayArrow else Icons.Default.Info
-                                        Icon(icon, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
-                                    }
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Text(
+                text = channelName,
+                color = if (isBanned) DestructiveRed else AccentGreen,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            if (isBanned) {
+                Text(
+                    text = "This channel/creator is currently Banned 🚫. All content from this channel is blacklisted and excluded from feeds and search results.".tr,
+                    color = DestructiveRed,
+                    fontSize = 13.sp
+                )
+            } else if (isAlreadyInPreferences) {
+                Text(
+                    text = "This channel/creator is currently in your preferences list. Removing it will stop prioritizing their content in your feed.".tr,
+                    color = TextMuted,
+                    fontSize = 13.sp
+                )
+            } else {
+                Text(
+                    text = "Add this channel/creator to your preferences to surface and prioritize their content across your feeds.".tr,
+                    color = TextMuted,
+                    fontSize = 13.sp
+                )
+            }
+
+            if (creatorItems.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Text(
+                    text = "Content ({count})".tr.replace("{count}", creatorItems.size.toString()),
+                    color = TextLight,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 200.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(creatorItems, key = { it.id }) { feedItem ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(PrimaryBlack.copy(alpha = 0.6f))
+                                .clickable {
+                                    onItemClick?.invoke(feedItem)
+                                    onDismiss()
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = feedItem.title,
-                                        color = TextLight,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
+                                .padding(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(PrimaryBlack),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (!feedItem.thumbnailUrl.isNullOrBlank()) {
+                                    coil.compose.AsyncImage(
+                                        model = feedItem.thumbnailUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = androidx.compose.ui.layout.ContentScale.Crop
                                     )
-                                    if (feedItem.publishedAt > 0L) {
-                                        val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(feedItem.publishedAt))
-                                        Text(text = dateStr, color = TextMuted, fontSize = 10.sp)
-                                    }
+                                } else {
+                                    val icon = if (feedItem.mediaType?.contains("video") == true) Icons.Default.PlayArrow else Icons.Default.Info
+                                    Icon(icon, contentDescription = null, tint = AccentGreen, modifier = Modifier.size(24.dp))
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = feedItem.title,
+                                    color = TextLight,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (feedItem.publishedAt > 0L) {
+                                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.getDefault()).format(java.util.Date(feedItem.publishedAt))
+                                    Text(text = dateStr, color = TextMuted, fontSize = 10.sp)
                                 }
                             }
                         }
                     }
                 }
             }
-        },
-        confirmButton = {
+
+            Spacer(modifier = Modifier.height(20.dp))
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (isBanned) {
                     if (onUnban != null) {
@@ -188,7 +201,7 @@ fun ChannelPreferenceModal(
                                 containerColor = SurfaceDark,
                                 contentColor = TextLight
                             ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, BorderSubtle),
+                            border = BorderStroke(1.dp, BorderSubtle),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -224,7 +237,7 @@ fun ChannelPreferenceModal(
                                 containerColor = SurfaceDark,
                                 contentColor = AccentGreen
                             ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentGreen),
+                            border = BorderStroke(1.dp, AccentGreen),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -248,12 +261,17 @@ fun ChannelPreferenceModal(
                         }
                     }
                 }
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel".tr, color = TextMuted)
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    border = BorderStroke(1.dp, BorderSubtle),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextLight),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Close".tr, fontWeight = FontWeight.Bold)
+                }
             }
         }
-    )
+    }
 }

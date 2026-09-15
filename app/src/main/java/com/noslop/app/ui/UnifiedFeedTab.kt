@@ -662,13 +662,15 @@ fun UnifiedFeedTab(
     var lastSettledPage by remember { mutableStateOf(-1) }
     var searchQuery by remember { mutableStateOf("") }
     var sharedItem by remember { mutableStateOf<UnifiedItem?>(null) }
+    var editingPost by remember { mutableStateOf<MeshPost?>(null) }
     var showSearchModal by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var isResettingFeed by remember { mutableStateOf(false) }
-    val isComposing = showComposeDialog || sharedItem != null
+    val isComposing = showComposeDialog || sharedItem != null || editingPost != null
     val handleDismiss = {
         onComposeDismiss()
         sharedItem = null
+        editingPost = null
     }
 
     var searchResultsActive by remember { mutableStateOf(false) }
@@ -1145,6 +1147,7 @@ fun UnifiedFeedTab(
                             isVisible = isVisibleForPlayback,
                             isNextSlide = isNextSlide,
                             onShareToMesh = { sharedItem = item },
+                            onEditPost = { postToEdit -> editingPost = postToEdit },
                             viewModel = viewModel,
                             bottomSlideOffset = bottomSlideOffset,
                             rightSlideOffset = rightSlideOffset,
@@ -1602,8 +1605,8 @@ fun UnifiedFeedTab(
     }
 
     if (isComposing) {
-        var postContent by remember { mutableStateOf("") }
-        var selectedPrivacy by remember { mutableStateOf("friends") }
+        var postContent by remember(editingPost) { mutableStateOf(editingPost?.content ?: "") }
+        var selectedPrivacy by remember(editingPost) { mutableStateOf(editingPost?.privacy ?: "friends") }
         var showPublicWarning by remember { mutableStateOf(false) }
         val coroutineScope = rememberCoroutineScope()
         var isProcessingAttachment by remember { mutableStateOf(false) }
@@ -1759,7 +1762,7 @@ fun UnifiedFeedTab(
                     dismissOnBackPress = !isBusy
                 ),
                 containerColor = SurfaceDark,
-                title = { Text("Broadcast to Mesh".tr, color = TextLight, fontWeight = FontWeight.Bold) },
+                title = { Text(if (editingPost != null) "Edit Broadcast".tr else "Broadcast to Mesh".tr, color = TextLight, fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
                         OutlinedTextField(
@@ -1900,15 +1903,24 @@ fun UnifiedFeedTab(
                                 
                                 val finalContent = if (postContent.isBlank() && sharedItem != null) "🔥 Shared Post" else postContent
                                 
-                                viewModel.composeAndBroadcastPost(
-                                    content = finalContent, 
-                                    mediaMetadata = mediaMetadata, 
-                                    privacy = selectedPrivacy,
-                                    clearnetUrl = url,
-                                    clearnetTitle = cTitle,
-                                    clearnetThumbnailUrl = cThumb,
-                                    clearnetMediaType = cType
-                                )
+                                if (editingPost != null) {
+                                    viewModel.editMeshPost(
+                                        postId = editingPost!!.id,
+                                        newContent = finalContent,
+                                        mediaMetadata = mediaMetadata,
+                                        privacy = selectedPrivacy
+                                    )
+                                } else {
+                                    viewModel.composeAndBroadcastPost(
+                                        content = finalContent, 
+                                        mediaMetadata = mediaMetadata, 
+                                        privacy = selectedPrivacy,
+                                        clearnetUrl = url,
+                                        clearnetTitle = cTitle,
+                                        clearnetThumbnailUrl = cThumb,
+                                        clearnetMediaType = cType
+                                    )
+                                }
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                     isProcessingAttachment = false
                                     handleDismiss()
@@ -1919,6 +1931,8 @@ fun UnifiedFeedTab(
                     ) { 
                         val processingText = if (isProcessingAttachment) {
                             if (compressionProgress != null) "Compressing... {progress}%".tr.replace("{progress}", compressionProgress.toString()) else "Processing...".tr
+                        } else if (editingPost != null) {
+                            "Update & Gossip".tr
                         } else {
                             "Sign & Gossip".tr
                         }

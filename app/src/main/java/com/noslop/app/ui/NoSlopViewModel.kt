@@ -89,7 +89,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 emit(repository.getLocalIdentity())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val burnableKeys: StateFlow<CryptoService.IdentityKeys?> = repository.identityUpdateFlow
         .flatMapLatest {
@@ -97,7 +97,7 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 emit(repository.getBurnableIdentity())
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     val localHandle: StateFlow<String> = localKeys
         .flatMapLatest {
@@ -706,9 +706,10 @@ class NoSlopViewModel(application: Application) : AndroidViewModel(application) 
                 if (_isOnboardingComplete.value && keys == null) return@collect
 
                 allFeeds = feeds
+                val burnablePub = burnableKeys.value?.publicKeyB64
                 allMeshes = meshes.filter { mesh ->
                     if (mesh.isOrphaned) return@filter false
-                    if (mesh.authorPublicKeyB64 == keys?.publicKeyB64) return@filter true
+                    if (mesh.authorPublicKeyB64 == keys?.publicKeyB64 || (burnablePub != null && mesh.authorPublicKeyB64 == burnablePub)) return@filter true
                     if (mesh.clearnetUrl != null && !filters.allowIncomingClearnetShares) return@filter false
                     if (mesh.mediaType == "image" && !filters.allowIncomingImagePosts) return@filter false
                     if (mesh.mediaType == "video" && !filters.allowIncomingVideoPosts) return@filter false
@@ -2540,6 +2541,37 @@ fun toggleAggregator() {
                 val currentFeed = _unifiedFeed.value.toMutableList()
                 currentFeed.removeAll { it.id == postId }
                 _unifiedFeed.value = currentFeed
+            }
+        }
+    }
+
+    fun editMeshPost(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public"
+    ) {
+        viewModelScope.launch {
+            val success = repository.editMeshPost(postId, newContent, mediaMetadata, privacy)
+            if (success) {
+                val currentFeed = _unifiedFeed.value.toMutableList()
+                val idx = currentFeed.indexOfFirst { it.id == postId }
+                if (idx >= 0) {
+                    val oldItem = currentFeed[idx]
+                    if (oldItem is UnifiedItem.Mesh) {
+                        val authorOnion = oldItem.post.mediaUrl?.substringAfter("noslop://")?.substringBefore("/")
+                        val updatedPost = oldItem.post.copy(
+                            content = newContent,
+                            timestamp = System.currentTimeMillis(),
+                            mediaUrl = mediaMetadata?.id?.let { "noslop://${authorOnion ?: "local"}/$it" } ?: oldItem.post.mediaUrl,
+                            mediaType = mediaMetadata?.type ?: oldItem.post.mediaType,
+                            thumbnailB64 = mediaMetadata?.thumbnailB64 ?: oldItem.post.thumbnailB64,
+                            privacy = privacy
+                        )
+                        currentFeed[idx] = UnifiedItem.Mesh(updatedPost)
+                        _unifiedFeed.value = currentFeed
+                    }
+                }
             }
         }
     }

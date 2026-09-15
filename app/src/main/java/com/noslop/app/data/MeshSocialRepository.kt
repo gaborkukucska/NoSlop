@@ -479,6 +479,74 @@ class MeshSocialRepository(
         true
     }
 
+    suspend fun editMeshPost(
+        postId: String,
+        newContent: String,
+        mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,
+        privacy: String = "public"
+    ): Boolean = withContext(Dispatchers.IO) {
+        val myKeys = getLocalIdentity() ?: return@withContext false
+        val burnableKeys = getBurnableIdentity()
+        val existingPost = postDao.getPostById(postId) ?: return@withContext false
+
+        val signingKey = when (existingPost.authorPublicKeyB64) {
+            myKeys.publicKeyB64 -> myKeys
+            burnableKeys?.publicKeyB64 -> burnableKeys
+            else -> return@withContext false
+        }
+
+        val userProfile = getUserProfile()
+        val avatarB64 = userProfile.avatarB64
+        val timestamp = System.currentTimeMillis()
+
+        val payloadToSign = com.noslop.app.crypto.CryptoService.encodeForSigning(
+            postId, signingKey.publicKeyB64, newContent, timestamp.toString(), avatarB64
+        )
+        val signature = CryptoService.sign(payloadToSign, signingKey.privateKeyB64)
+
+        val editPay = com.noslop.app.mesh.EditPostPayload(
+            postId = postId,
+            authorId = signingKey.publicKeyB64,
+            authorAvatarB64 = avatarB64,
+            content = newContent,
+            timestamp = timestamp,
+            signature = signature,
+            mediaId = mediaMetadata?.id,
+            mediaMetadata = mediaMetadata,
+            privacy = privacy
+        )
+
+        val newMediaUrl = mediaMetadata?.id?.let { "noslop://${signingKey.onionAddress}/$it" } ?: existingPost.mediaUrl
+        val newMediaType = mediaMetadata?.type ?: existingPost.mediaType
+        val newThumb = mediaMetadata?.thumbnailB64 ?: existingPost.thumbnailB64
+        val newSize = mediaMetadata?.size ?: existingPost.mediaSize
+
+        postDao.updatePostDetails(
+            id = postId,
+            newContent = newContent,
+            newTimestamp = timestamp,
+            newSignature = signature,
+            mediaUrl = newMediaUrl,
+            mediaType = newMediaType,
+            thumbnailB64 = newThumb,
+            mediaSize = newSize,
+            privacy = privacy
+        )
+
+        val packet = com.noslop.app.mesh.NetworkPacket(
+            id = UUID.randomUUID().toString(),
+            hops = if (privacy == "friends") 1 else 6,
+            senderId = signingKey.publicKeyB64,
+            type = "EDIT_POST",
+            payload = com.google.gson.Gson().toJsonTree(editPay),
+            signature = signature
+        )
+
+        com.noslop.app.mesh.GossipService.broadcast(packet)
+        Logger.info(TAG, "Edited post $postId and broadcasted EDIT_POST")
+        true
+    }
+
     suspend fun composeAndBroadcastPost(
         content: String,
         mediaMetadata: com.noslop.app.mesh.MediaMetadata? = null,

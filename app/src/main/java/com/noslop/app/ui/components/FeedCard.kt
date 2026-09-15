@@ -87,6 +87,7 @@ private fun getSourceLabel(item: FeedItem): String {
 
 private fun <T> emptyFlow(): kotlinx.coroutines.flow.Flow<List<T>> = kotlinx.coroutines.flow.flowOf(emptyList())
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenFeedCard(
     item: FeedItem, 
@@ -203,7 +204,7 @@ fun FullScreenFeedCard(
                 resolvedUrl.contains(".jpg") || 
                 resolvedUrl.contains(".jpeg") || 
                 resolvedUrl.contains(".png") || 
-                resolvedUrl.contains(".webp") ||
+                resolvedUrl.contains(".webp") || 
                 resolvedUrl.contains(".gif") -> {
                     BlurredImageBackground(url = resolvedUrl, fallbackUrl = item.thumbnailUrl)
                 }
@@ -407,12 +408,14 @@ fun FullScreenFeedCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FullScreenMeshCardV2(
     post: MeshPost,
     isVisible: Boolean = true,
     isNextSlide: Boolean = false,
     onShareToMesh: () -> Unit,
+    onEditPost: ((MeshPost) -> Unit)? = null,
     viewModel: NoSlopViewModel? = null,
     bottomSlideOffset: Float = 0f,
     rightSlideOffset: Float = 0f,
@@ -524,10 +527,10 @@ fun FullScreenMeshCardV2(
                 }
                 effectiveMediaType == "audio" || 
                 resolvedUrl.contains(".mp3") || 
-                resolvedUrl.contains(".wav") ||
-                resolvedUrl.contains(".m4a") ||
-                resolvedUrl.contains(".aac") ||
-                resolvedUrl.contains(".ogg") ||
+                resolvedUrl.contains(".wav") || 
+                resolvedUrl.contains(".m4a") || 
+                resolvedUrl.contains(".aac") || 
+                resolvedUrl.contains(".ogg") || 
                 resolvedUrl.contains(".flac") -> {
                     val rawMediaId = post.mediaUrl?.substringAfterLast("/")
                     var newlyDownloaded by remember { mutableStateOf(false) }
@@ -591,7 +594,7 @@ fun FullScreenMeshCardV2(
                 resolvedUrl.contains(".jpg") || 
                 resolvedUrl.contains(".jpeg") || 
                 resolvedUrl.contains(".png") || 
-                resolvedUrl.contains(".webp") ||
+                resolvedUrl.contains(".webp") || 
                 resolvedUrl.contains(".gif") -> {
                     val rawMediaId = post.mediaUrl?.substringAfterLast("/")
                     var newlyDownloaded by remember { mutableStateOf(false) }
@@ -732,319 +735,331 @@ fun FullScreenMeshCardV2(
             )
         }
 
-        val isArticle = post.mediaType.isNullOrEmpty() && post.clearnetMediaType.isNullOrEmpty() && post.clearnetUrl == null
-        if (true) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomStart)
-                    .graphicsLayer { 
-                        translationY = bottomSlideOffset 
-                        alpha = if (bottomSlideOffset > 0f) (1f - (bottomSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
-                    }
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
-                        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomStart)
+                .graphicsLayer { 
+                    translationY = bottomSlideOffset 
+                    alpha = if (bottomSlideOffset > 0f) (1f - (bottomSlideOffset / 300f)).coerceIn(0f, 1f) else 1f
+                }
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, PrimaryBlack.copy(alpha = 0.85f))
                     )
-                    .padding(horizontal = 24.dp, vertical = 32.dp)
+                )
+                .padding(horizontal = 24.dp, vertical = 32.dp)
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(0.8f)
             ) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(0.8f)
+                var showUserInfoDialog by remember { mutableStateOf(false) }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { showUserInfoDialog = true }
                 ) {
-                    var showUserInfoDialog by remember { mutableStateOf(false) }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable { showUserInfoDialog = true }
-                    ) {
-                        if (post.authorAvatarB64 != null) {
-                            val bitmap = remember(post.authorAvatarB64) {
-                                try {
-                                    val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
-                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                } catch (e: Exception) { null }
-                            }
-                            if (bitmap != null) {
-                                androidx.compose.foundation.Image(
-                                    bitmap = bitmap,
-                                    contentDescription = "Avatar".tr,
-                                    modifier = Modifier.size(24.dp).clip(CircleShape),
-                                    contentScale = ContentScale.Crop
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
+                    if (post.authorAvatarB64 != null) {
+                        val bitmap = remember(post.authorAvatarB64) {
+                            try {
+                                val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                            } catch (e: Exception) { null }
                         }
-                        Text(displayHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                        if (bitmap != null) {
+                            androidx.compose.foundation.Image(
+                                bitmap = bitmap,
+                                contentDescription = "Avatar".tr,
+                                modifier = Modifier.size(24.dp).clip(CircleShape),
+                                contentScale = ContentScale.Crop
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
                     }
+                    Text(displayHandle, color = AccentGreen, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
+                }
 
-                    if (showUserInfoDialog) {
-                        val allPeers by (viewModel?.peers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
-                        val discPeers by (viewModel?.discoverablePeers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
-                        val peer = allPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
-                        val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
-                        val isTrusted = peer?.isTrusted == true
-                        val isSelf = isMyPost
-                        val isCreator = peer?.isCreator == true || discPeer?.isCreator == true || post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY
-                        val effectiveDonationUrl = if (post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
-                            peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
-                        } else {
-                            peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() }
-                        }
-                        var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+                if (showUserInfoDialog) {
+                    val allPeers by (viewModel?.peers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+                    val discPeers by (viewModel?.discoverablePeers ?: kotlinx.coroutines.flow.flowOf(emptyList())).collectAsState(initial = emptyList())
+                    val peer = allPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
+                    val discPeer = discPeers.find { it.publicKeyB64 == post.authorPublicKeyB64 }
+                    val isTrusted = peer?.isTrusted == true
+                    val isSelf = isMyPost
+                    val isCreator = peer?.isCreator == true || discPeer?.isCreator == true || post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY
+                    val effectiveDonationUrl = if (post.authorPublicKeyB64 == com.noslop.app.data.NoSlopRepository.OFFICIAL_CREATOR_PUBKEY) {
+                        peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() } ?: "https://donate.stripe.com/dRmfZae1F0jNfPNfFC9fW00"
+                    } else {
+                        peer?.fundMeLink?.takeIf { it.isNotBlank() } ?: discPeer?.fundMeLink?.takeIf { it.isNotBlank() }
+                    }
+                    var activeDonationUrl by remember { mutableStateOf<String?>(null) }
+                    var showConnectWarning by remember { mutableStateOf(false) }
+                    
+                    val targetOnion = discPeer?.onionAddress ?: peer?.onionAddress
+                    val targetEncPub = discPeer?.encPublicKeyB64 ?: peer?.encPublicKeyB64 ?: ""
 
-                        var showConnectWarning by remember { mutableStateOf(false) }
-                        
-                        val targetOnion = discPeer?.onionAddress ?: peer?.onionAddress
-                        val targetEncPub = discPeer?.encPublicKeyB64 ?: peer?.encPublicKeyB64 ?: ""
-
-                        AlertDialog(
-                            onDismissRequest = { showUserInfoDialog = false },
-                            title = { Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold) },
-                            text = {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                                    Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
-                                        if (post.authorAvatarB64 != null) {
-                                            val bitmap = remember(post.authorAvatarB64) {
-                                                try {
-                                                    val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
-                                                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                                                } catch (e: Exception) { null }
-                                            }
-                                            if (bitmap != null) {
-                                                androidx.compose.foundation.Image(
-                                                    bitmap = bitmap,
-                                                    contentDescription = "Avatar".tr,
-                                                    modifier = Modifier.size(80.dp).clip(CircleShape),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            } else {
-                                                Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
-                                                    Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
-                                                }
-                                            }
-                                        } else {
-                                            Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
-                                                Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
-                                            }
-                                        }
-
-                                        if (isCreator && effectiveDonationUrl != null) {
-                                            Surface(
-                                                shape = CircleShape,
-                                                color = AccentGreen,
-                                                border = BorderStroke(2.dp, SurfaceDark),
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .offset(x = 4.dp, y = (-4).dp)
-                                                    .size(26.dp)
-                                                    .clickable { activeDonationUrl = effectiveDonationUrl }
-                                            ) {
-                                                Box(contentAlignment = Alignment.Center) {
-                                                    Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                                }
-                                            }
-                                        }
+                    val userSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                    ModalBottomSheet(
+                        onDismissRequest = { showUserInfoDialog = false },
+                        sheetState = userSheetState,
+                        containerColor = SurfaceDark,
+                        dragHandle = { BottomSheetDefaults.DragHandle(color = TextMuted) }
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 20.dp)
+                                .padding(bottom = 32.dp)
+                        ) {
+                            Text("User Profile".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 18.sp, modifier = Modifier.padding(bottom = 12.dp))
+                            Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
+                                if (post.authorAvatarB64 != null) {
+                                    val bitmap = remember(post.authorAvatarB64) {
+                                        try {
+                                            val bytes = android.util.Base64.decode(post.authorAvatarB64, android.util.Base64.DEFAULT)
+                                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                        } catch (e: Exception) { null }
                                     }
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    
-                                    val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: post.authorTripcode
-                                    val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
-                                    Text(if (isTrusted || isSelf) fullName else displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-                                    
-                                    val bio = peer?.bio ?: discPeer?.bio
-                                    if (!bio.isNullOrBlank()) {
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                        Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                                    }
-
-                                    if (isCreator) {
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                            if (effectiveDonationUrl != null) {
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = AccentGreen.copy(alpha = 0.2f),
-                                                    border = BorderStroke(1.dp, AccentGreen),
-                                                    modifier = Modifier
-                                                        .size(20.dp)
-                                                        .clickable { activeDonationUrl = effectiveDonationUrl }
-                                                ) {
-                                                    Box(contentAlignment = Alignment.Center) {
-                                                        Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (activeDonationUrl != null) {
-                                        com.noslop.app.ui.ArticleWebViewDialog(
-                                            url = activeDonationUrl!!,
-                                            title = "${"Support".tr} $displayHandle",
-                                            onDismiss = { activeDonationUrl = null }
+                                    if (bitmap != null) {
+                                        androidx.compose.foundation.Image(
+                                            bitmap = bitmap,
+                                            contentDescription = "Avatar".tr,
+                                            modifier = Modifier.size(80.dp).clip(CircleShape),
+                                            contentScale = ContentScale.Crop
                                         )
-                                    }
-
-                                    if (isTrusted && peer?.isTemporary == true) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Box(
-                                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    } else if (isTrusted) {
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Box(
-                                            modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
-                                        ) {
-                                            Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    } else {
+                                        Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                            Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                                         }
                                     }
-
-                                    // Onion address excerpt (shown on non-connected authors)
-                                    if (!isTrusted && !isSelf && targetOnion != null && targetOnion.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(PrimaryBlack)
-                                                .padding(12.dp)
-                                        ) {
-                                            Text(
-                                                text = "ONION ADDRESS".tr,
-                                                color = TextMuted,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                letterSpacing = 1.sp
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = if (targetOnion.length > 8) targetOnion.take(8) + "..." else targetOnion,
-                                                color = TextLight.copy(alpha = 0.7f),
-                                                fontFamily = FontFamily.Monospace,
-                                                fontSize = 11.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                        }
+                                } else {
+                                    Box(modifier = Modifier.size(80.dp).clip(CircleShape).background(PrimaryBlack), contentAlignment = Alignment.Center) {
+                                        Text(displayHandle.take(1).uppercase(), color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                                     }
+                                }
 
-                                    val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
-                                    val userPosts = remember(authorPosts, post.authorPublicKeyB64) {
-                                        authorPosts.filter { it.authorPublicKeyB64 == post.authorPublicKeyB64 && !it.isOrphaned }
-                                    }
-                                    if (userPosts.isNotEmpty()) {
-                                        Spacer(modifier = Modifier.height(16.dp))
-                                        PeerMeshContentList(
-                                            posts = userPosts,
-                                            onPostClick = { clickedPost ->
-                                                showUserInfoDialog = false
-                                                viewModel?.viewAuthorPosts(post.authorPublicKeyB64, clickedPost.id)
-                                            }
-                                        )
-                                    }
-
-                                    if (!isSelf && !isTrusted && targetOnion != null) {
-                                        Spacer(modifier = Modifier.height(24.dp))
-                                        Button(
-                                            onClick = { showConnectWarning = true },
-                                            colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
-                                        ) {
-                                            Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                if (isCreator && effectiveDonationUrl != null) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = AccentGreen,
+                                        border = BorderStroke(2.dp, SurfaceDark),
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 4.dp, y = (-4).dp)
+                                            .size(26.dp)
+                                            .clickable { activeDonationUrl = effectiveDonationUrl }
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text("$", color = PrimaryBlack, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                         }
                                     }
                                 }
-                            },
+                            }
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            val tripcode = peer?.tripcode ?: discPeer?.tripcode ?: post.authorTripcode
+                            val fullName = if (tripcode.isNotBlank()) "${displayHandle}.${tripcode}" else displayHandle
+                            Text(if (isTrusted || isSelf) fullName else displayHandle, color = TextLight, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                            
+                            val bio = peer?.bio ?: discPeer?.bio
+                            if (!bio.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(bio, color = TextMuted, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+
+                            if (isCreator) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Creator Node".tr, color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    if (effectiveDonationUrl != null) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = AccentGreen.copy(alpha = 0.2f),
+                                            border = BorderStroke(1.dp, AccentGreen),
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .clickable { activeDonationUrl = effectiveDonationUrl }
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Text("$", color = AccentGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (activeDonationUrl != null) {
+                                com.noslop.app.ui.ArticleWebViewDialog(
+                                    url = activeDonationUrl!!,
+                                    title = "${"Support".tr} $displayHandle",
+                                    onDismiss = { activeDonationUrl = null }
+                                )
+                            }
+
+                            if (isTrusted && peer?.isTemporary == true) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(TemporaryAmber.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Temporary Contact".tr, color = TemporaryAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (isTrusted) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(AccentGreen.copy(alpha = 0.2f)).padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("Connected Peer".tr, color = AccentGreen, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            if (!isTrusted && !isSelf && targetOnion != null && targetOnion.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(PrimaryBlack)
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        text = "ONION ADDRESS".tr,
+                                        color = TextMuted,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = if (targetOnion.length > 8) targetOnion.take(8) + "..." else targetOnion,
+                                        color = TextLight.copy(alpha = 0.7f),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            val authorPosts by (viewModel?.meshPosts?.collectAsState(initial = emptyList()) ?: mutableStateOf(emptyList()))
+                            val userPosts = remember(authorPosts, post.authorPublicKeyB64) {
+                                authorPosts.filter { it.authorPublicKeyB64 == post.authorPublicKeyB64 && !it.isOrphaned }
+                            }
+                            if (userPosts.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                PeerMeshContentList(
+                                    posts = userPosts,
+                                    onPostClick = { clickedPost ->
+                                        showUserInfoDialog = false
+                                        viewModel?.viewAuthorPosts(post.authorPublicKeyB64, clickedPost.id)
+                                    }
+                                )
+                            }
+
+                            if (!isSelf && !isTrusted && targetOnion != null) {
+                                Spacer(modifier = Modifier.height(24.dp))
+                                Button(
+                                    onClick = { showConnectWarning = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AccentGreen, contentColor = PrimaryBlack)
+                                ) {
+                                    Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { showUserInfoDialog = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark, contentColor = TextLight),
+                                border = BorderStroke(1.dp, BorderSubtle),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Close".tr, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    if (showConnectWarning && targetOnion != null) {
+                        AlertDialog(
+                            onDismissRequest = { showConnectWarning = false },
+                            title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
+                            text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
                             confirmButton = {
-                                TextButton(onClick = { showUserInfoDialog = false }) { Text("Close".tr, color = AccentGreen) }
+                                Button(
+                                    onClick = {
+                                        viewModel?.requestConnection(
+                                            handle = displayHandle,
+                                            publicKeyB64 = post.authorPublicKeyB64,
+                                            onionAddress = targetOnion,
+                                            encPublicKeyB64 = targetEncPub,
+                                            useBurnableIdentity = true
+                                        )
+                                        showConnectWarning = false
+                                        showUserInfoDialog = false
+                                        Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), Toast.LENGTH_SHORT).show()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
+                                ) {
+                                    Text("Connect".tr, fontWeight = FontWeight.Bold)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
                             },
                             containerColor = SurfaceDark
                         )
-
-                        if (showConnectWarning && targetOnion != null) {
-                            AlertDialog(
-                                onDismissRequest = { showConnectWarning = false },
-                                title = { Text("Connect to Unknown Node".tr, color = DestructiveRed, fontWeight = FontWeight.Bold) },
-                                text = { Text("You are about to request a connection with an unknown node on the mesh. This will expose your burnable onion address to them. Proceed with caution.".tr, color = TextLight) },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            viewModel?.requestConnection(
-                                                handle = displayHandle,
-                                                publicKeyB64 = post.authorPublicKeyB64,
-                                                onionAddress = targetOnion,
-                                                encPublicKeyB64 = targetEncPub,
-                                                useBurnableIdentity = true
-                                            )
-                                            showConnectWarning = false
-                                            showUserInfoDialog = false
-                                            Toast.makeText(context, com.noslop.app.util.LanguageManager.translate("Connection request sent via burnable identity"), Toast.LENGTH_SHORT).show()
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = DestructiveRed, contentColor = Color.White)
-                                    ) {
-                                        Text("Connect".tr, fontWeight = FontWeight.Bold)
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(onClick = { showConnectWarning = false }) { Text("Cancel".tr, color = TextMuted) }
-                                },
-                                containerColor = SurfaceDark
-                            )
-                        }
                     }
-                    
-                    if (post.content.isNotBlank() && !isArticle) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        var isExpanded by remember(post.id) { mutableStateOf(false) }
-                        val annotatedContent = remember(post.content) { com.noslop.app.util.MarkdownUtils.parseMarkdown(post.content) }
-                        val isLongText = post.content.lines().size > 2 || post.content.length > 120
-                        val textScrollState = androidx.compose.foundation.rememberScrollState()
+                }
+                
+                if (post.content.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    var isExpanded by remember(post.id) { mutableStateOf(false) }
+                    val annotatedContent = remember(post.content) { com.noslop.app.util.MarkdownUtils.parseMarkdown(post.content) }
+                    val isLongText = post.content.lines().size > 2 || post.content.length > 120
+                    val textScrollState = androidx.compose.foundation.rememberScrollState()
 
-                        Column(
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isExpanded) {
+                                    Modifier
+                                        .heightIn(max = 240.dp)
+                                        .background(Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(8.dp))
+                                        .padding(8.dp)
+                                        .clickable { isExpanded = false }
+                                } else {
+                                    Modifier
+                                }
+                            )
+                    ) {
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .then(
-                                    if (isExpanded) {
-                                        Modifier
-                                            .heightIn(max = 240.dp)
-                                            .background(Color.Black.copy(alpha = 0.65f), shape = RoundedCornerShape(8.dp))
-                                            .padding(8.dp)
-                                            .clickable { isExpanded = false }
-                                    } else {
-                                        Modifier
-                                    }
-                                )
+                                .weight(1f, fill = false)
+                                .then(if (isExpanded) Modifier.verticalScroll(textScrollState) else Modifier)
                         ) {
-                            Box(
+                            Text(
+                                text = annotatedContent,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = TextLight,
+                                maxLines = if (isExpanded) Int.MAX_VALUE else 2,
+                                overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        if (isLongText) {
+                            Text(
+                                text = if (isExpanded) "show less ▲".tr else "read more... ▼".tr,
+                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                                color = AccentGreen,
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f, fill = false)
-                                    .then(if (isExpanded) Modifier.verticalScroll(textScrollState) else Modifier)
-                            ) {
-                                Text(
-                                    text = annotatedContent,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = TextLight,
-                                    maxLines = if (isExpanded) Int.MAX_VALUE else 2,
-                                    overflow = if (isExpanded) androidx.compose.ui.text.style.TextOverflow.Clip else androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                            if (isLongText) {
-                                Text(
-                                    text = if (isExpanded) "show less ▲".tr else "read more... ▼".tr,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
-                                    color = AccentGreen,
-                                    modifier = Modifier
-                                        .clickable { isExpanded = !isExpanded }
-                                        .padding(top = 4.dp, bottom = 4.dp)
-                                )
-                            }
+                                    .clickable { isExpanded = !isExpanded }
+                                    .padding(top = 4.dp, bottom = 4.dp)
+                            )
                         }
                     }
                 }
@@ -1089,6 +1104,7 @@ fun FullScreenMeshCardV2(
                 netScore = upvotes - downvotes,
                 isBlocked = isHardBlocked,
                 isFlagged = isSoftBlocked,
+                onEdit = if (isMyPost && onEditPost != null) { { onEditPost(post) } } else null,
                 onDelete = if (isMyPost) { { showDeleteConfirm = true } } else null,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
