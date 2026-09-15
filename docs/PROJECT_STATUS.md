@@ -1,5 +1,23 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-15) — Broadcast Slide Flicker Resolution, Broadcast Editing & Multi-Hop Propagation, Swipe-Down Modals (v0.5.6-alpha)
+
+* **Broadcast Slide Flicker Resolution (`NoSlopViewModel.kt`, `FeedCard.kt`, `UnifiedFeedTab.kt`)**:
+  * Fixed rapid flipping between delete button / text body states by promoting `localKeys` and `burnableKeys` StateFlows in `NoSlopViewModel.kt` to `SharingStarted.Eagerly`. This prevents transient `null` emissions upon recomposition that caused `isOwnPost` in `UnifiedFeedTab.kt` to oscillate and drop/restore the slide at index 0.
+  * Corrected `allMeshes` filter in `NoSlopViewModel.kt` to include `burnableKeys` identity alongside `keys?.publicKeyB64`, ensuring creator-authored broadcasts are never filtered out by incoming text toggles.
+  * In `FeedCard.kt` (`FullScreenMeshCardV2`), removed the `!isArticle` restriction on `post.content.isNotBlank()`, ensuring mesh broadcast text bodies render cleanly on cards.
+* **Mesh Broadcast Editing & Multi-Hop Gossip Propagation (`Packets.kt`, `Daos.kt`, `PostPacketHandler.kt`, `MeshSocialRepository.kt`, `NoSlopRepository.kt`, `NoSlopViewModel.kt`, `MediaComponents.kt`, `UnifiedFeedTab.kt`)**:
+  * Extended `EditPostPayload` in `Packets.kt` with `media_id`, `media_metadata`, and `privacy`.
+  * Added `updatePostDetails` to `PostDao` in `Daos.kt` to update content, timestamp, signature, and media fields in Room SQLite.
+  * Implemented `editMeshPost(...)` in `MeshSocialRepository.kt` and `NoSlopRepository.kt`, signing updates with the matching author keypair (main or creator/burnable) and gossiping via `NetworkPacket("EDIT_POST", hops = 6)` (or 1 for friends-only) across Tor to peers and peers-of-peers.
+  * Enhanced `PostPacketHandler.handleEditPost` to verify dual-mode signatures (length-prefixed and legacy pipe), update post details in SQLite, and auto-download updated media.
+  * Added `onEdit` action button with `Icons.Default.Edit` in `OverlayInteractions` (`MediaComponents.kt`), visible only to the broadcast author (`isMyPost`).
+  * Wired `onEditPost` in `UnifiedFeedTab.kt` to open the broadcast composer modal in edit mode pre-populated with content, privacy, and media, updating the feed immediately upon submission.
+* **Swipe-Down-to-Close for Creator & User Profile Modals (`ChannelPreferenceModal.kt`, `FeedCard.kt`)**:
+  * Converted `ChannelPreferenceModal.kt` from an `AlertDialog` to Material 3 `ModalBottomSheet` with `rememberModalBottomSheetState(skipPartiallyExpanded = true)` and `BottomSheetDefaults.DragHandle`.
+  * Converted `showUserInfoDialog` in `FeedCard.kt` to Material 3 `ModalBottomSheet`.
+  * Nested scrolling in both modals seamlessly coordinates with `LazyColumn` (`creatorItems` and `PeerMeshContentList`): dragging within the list scrolls the items, while swiping down from the header, handle, or list-top dismisses the sheet.
+
 ## Completed Changes (2026-09-15) — Splash Buffer Mask, Wikipedia Thumbnails, 60-Day Freshness, Creator Depletion & Mindful Break Reminders
 
 * **Splash Screen Initial Media Buffer Readiness (`MainActivity.kt`, `PreloadManager.kt`)**:

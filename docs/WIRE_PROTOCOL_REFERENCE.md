@@ -307,9 +307,13 @@ at render time.
 |---|---|---|
 | `post_id` | String | ID of the post being edited |
 | `author_id` | String | Claimed author's public key (verifying key; cross-checked against the stored post's author) |
+| `author_avatar_b64`? | String | Author's avatar Base64, if set |
 | `content` | String | New content |
 | `timestamp` | Long | Epoch timestamp (must be ≥ stored post's timestamp to apply) |
 | `signature` | String | Signature over `postId\|authorId\|content\|timestamp` |
+| `media_id`? | String | ID of updated media attachment, if present |
+| `media_metadata`? | Object | Media descriptor object, if present |
+| `privacy`? | String | `"public"` (hops=6) or `"friends"` (hops=1) |
 
 ### DELETE_POST
 **Type:** `DELETE_POST` · class `DeletePostPayload`

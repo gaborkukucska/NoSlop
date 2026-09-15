@@ -2017,6 +2017,12 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
 
+### 23.10 Broadcast Slide Stability, Mesh Post Editing & Swipe-Down Bottom Sheets (v0.5.6-alpha)
+* **Broadcast Recomposition Stability**: `NoSlopViewModel.kt` promotes `localKeys` and `burnableKeys` to `SharingStarted.Eagerly`. Eliminates transient `null` evaluation cycles in `UnifiedFeedTab.kt` that caused index-0 pager key oscillation and slide flickering. `allMeshes` filter accommodates both primary and burnable identities.
+* **Mesh Post Editing Wire Protocol**: `EditPostPayload` transmits updated content, `media_id`, `media_metadata`, and `privacy`. `MeshSocialRepository.editMeshPost` signs with the corresponding identity and broadcasts with `hops = 6` (or 1 for friends-only). `PostPacketHandler.handleEditPost` validates Ed25519 signatures and applies SQLite updates via `postDao.updatePostDetails`.
+* **Broadcast Editing UI**: `OverlayInteractions` renders an `Edit` action button for post authors. `UnifiedFeedTab` opens the broadcast modal in edit mode pre-filled with post content and media.
+* **Bottom Sheet Gesture Navigation**: `ChannelPreferenceModal` and the feed User Profile modal migrate from `AlertDialog` to Material 3 `ModalBottomSheet` with nested scroll coordination for content lists.
+
 ### 23.9 Media Startup Masking, 60-Day Creator Depletion & Mindful Break Reminders (v0.5.6-alpha)
 * **Splash Screen Media Readiness**: `MainActivity.kt` gates dismissal on `viewModel.isSavedPositionLoaded` and calls `PreloadManager.awaitPlayerReady()`, masking video buffering behind the splash curtain until ExoPlayer is in `STATE_READY`.
 * **Wikipedia Thumbnail Extraction**: `WikipediaApiClient` queries `piprop=thumbnail|original&pilicense=any&pithumbsize=800` with Wikipedia REST summary API fallback; `ArticleMetadataResolver` handles inverted `og:image` meta tags.
