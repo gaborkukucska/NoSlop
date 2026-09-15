@@ -32,6 +32,7 @@ There are **no accounts**, **no emails**, **no phone numbers**, and **zero algor
 * 🕸️ **Decentralized Social Mesh** — Direct peer-to-peer communication across Tor hidden services with multi-hop gossip relay.
 * 🔒 **Mathematical Privacy** — E2EE Direct Messages (X25519 + ChaCha20-Poly1305) and multi-member mesh group chats.
 * 🧅 **Strict Tor-Routed Anonymity** — All network traffic routes through an embedded Tor SOCKS5 daemon with dedicated per-stream circuit isolation.
+* 🧘 **Mindful Exit & Break Reminders** — Gentle, scheduled prompts to step away from your device under complete user control with zero engagement-trap dark patterns.
 
 ---
 
@@ -49,6 +50,7 @@ A vertically snapping feed purpose-built for clean signal-to-noise ratio:
 * 🚫 **1-Tap Channel Banning** — React with 🚫 to immediately blacklist content creators and purge their slides from your feed.
 * 📅 **Content Farm Cut-Off Filter** — Exclude automated channels created after a set date (e.g. drop post-2022 AI content farms).
 * 🔖 **Saved & History Feeds** — Bookmark items with 1 tap; browse your full chronological history with instant full-text search.
+* 🧘 **Mindful Exit & Break Reminders** — User-controlled wellbeing prompts injected at customizable intervals (time spent or slide count) with 1-tap exit and continue controls.
 
 ---
 
