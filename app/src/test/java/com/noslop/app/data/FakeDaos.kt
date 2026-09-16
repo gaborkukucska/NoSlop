@@ -110,6 +110,7 @@ class FakeReactionDao : ReactionDao {
     override suspend fun deleteReactionsByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteReactionsForPost(postId: String) { store.values.removeAll { it.postId == postId } }
     override suspend fun getReactionsSince(since: Long): List<MeshReaction> = store.values.filter { it.timestamp > since }
+    override suspend fun getAllReactionsList(): List<MeshReaction> = store.values.toList()
 }
 
 /** Fake [VoteDao] with get-by-id / insert / delete semantics for the vote toggle logic. */
@@ -122,6 +123,7 @@ class FakeVoteDao : VoteDao {
         flowOf(store.values.filter { it.postId == postId })
     override suspend fun deleteVotesByAuthor(authorId: String) { store.values.removeAll { it.authorPublicKeyB64 == authorId } }
     override suspend fun deleteVotesForPost(postId: String) { store.values.removeAll { it.postId == postId } }
+    override suspend fun getAllVotedPostIds(): List<String> = store.values.map { it.postId }.distinct()
 }
 
 /** Fake [PeerDao] keyed by public key (REPLACE on insert). */
@@ -163,7 +165,30 @@ class FakePostDao : PostDao {
             .forEach { posts[it.id] = it.copy(deletionBroadcasts = 0) }
     }
     override suspend fun markPostOrphaned(id: String) {}
-    override suspend fun updatePostContent(id: String, newContent: String, newTimestamp: Long, newSignature: String) {}
+    override suspend fun updatePostDetails(
+        id: String,
+        newContent: String,
+        newTimestamp: Long,
+        newSignature: String,
+        mediaUrl: String?,
+        mediaType: String?,
+        thumbnailB64: String?,
+        mediaSize: Long,
+        privacy: String
+    ) {
+        posts[id]?.let {
+            posts[id] = it.copy(
+                content = newContent,
+                timestamp = newTimestamp,
+                signature = newSignature,
+                mediaUrl = mediaUrl,
+                mediaType = mediaType,
+                thumbnailB64 = thumbnailB64,
+                mediaSize = mediaSize,
+                privacy = privacy
+            )
+        }
+    }
 }
 
 /** Fake [MessageDao] collecting stored messages. */
