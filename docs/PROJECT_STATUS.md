@@ -1,5 +1,23 @@
 # Project Status - NoSlop
 
+## Completed Changes (2026-09-16) — Tiered Sovereign Backups, Identity Lifecycle Advisory Prompts & Dead Code Pruning (v0.5.7-alpha)
+
+* **Tiered Encrypted Sovereign Backups (`BackupManager.kt`, `NoSlopViewModel.kt`, `SettingsTab.kt`)**:
+  * Implemented `BackupMediaOption` enum (`NONE`, `OWNED_ONLY`, `ALL`) in `BackupManager.kt`.
+  * "IDs & Keys Only" option exports a lightweight (~100 KB) encrypted archive containing the complete Room database (`mesh.db`), sovereign identity JSON (primary and creator/burnable keypairs), API keys, and preferences, bypassing media storage entirely. Allows instant backup and recovery of all contacts, groups, and settings.
+  * "Full Backup (Owned Media Included)" filters disk media to include only files authored by the local node's primary or creator identities and `.mine` files, excluding heavy multi-gigabyte peer media caches.
+  * Added 1-tap backup export using the active session Word Cloud mnemonic from secure storage.
+* **Proactive Identity Lifecycle Advisory Prompts (`NoSlopViewModel.kt`, `SettingsTab.kt`)**:
+  * Added `BackupPromptReason` (`ONBOARDING_COMPLETED`, `DISCOVERABILITY_CHANGED`, `CREATOR_MODE_CHANGED`, `CREATOR_IDENTITY_BURNED`) to `NoSlopViewModel`.
+  * Automatically prompts users with an advisory modal after onboarding and whenever secondary/creator hidden services or keys are created or burned, educating users on the serverless nature of NoSlop and the necessity of storing encrypted backups in multiple safe locations.
+* **Dead Code Pruning & Test Alignment (`PreloadManager.kt`, `Daos.kt`, `NoSlopViewModel.kt`, `FakeDaos.kt`, `GroupMessageCrypto.kt`)**:
+  * Deleted dead `waitForPreload` in `PreloadManager.kt` (superseded by `awaitPlayerReady`).
+  * Deleted dead `updatePostContent` in `Daos.kt` (superseded by `updatePostDetails`).
+  * Deleted dead `hasMeshMediaStartedPlaying` in `NoSlopViewModel.kt` (inlined `playedMeshPostIds.contains()`).
+  * Deleted dead `restoreIdentityFromWordCloud` in `NoSlopViewModel.kt` (aligning recovery strictly with authenticated backup archives).
+  * Aligned `FakeDaos.kt` with `getAllReactionsList()`, `getAllVotedPostIds()`, and `updatePostDetails(...)`.
+  * Updated `GroupMessageCrypto.kt` legacy `ENC:GCM:` branch retirement timeline comment targeting Room migration 14→15 (v0.6.0).
+
 ## Completed Changes (2026-09-15) — Mesh Transfer Stabilization, Loopback Isolation & Playback-Gated Seen Tracking (v0.5.6-alpha)
 
 * **Local Loopback Proxy Client Isolation (`HttpClientProvider.kt`, `VideoPlayer.kt`, `PreloadManager.kt`)**:

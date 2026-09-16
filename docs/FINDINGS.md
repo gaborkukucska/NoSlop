@@ -35,3 +35,10 @@ This document tracks active architectural enhancements and audit items for the N
   1. Migrate Cloudflare Worker endpoints to server-side rate limiting or Proof-of-Work headers, completely deprecating client-side HMAC secret signing.
   2. Support user-configurable custom API keys in `ApiKeysScreen` for Jamendo and custom proxy endpoints, consistent with the existing Guardian/NewsAPI/Pexels/Vimeo pattern.
 
+## 8. Sovereign Identity Recovery & Tiered Backup Architecture (Finding #2 / D-1)
+- **Current State**: Restoring only from a 12-word mnemonic phrase cannot reconstruct a serverless node's peer connections, group chat states, secondary/burnable creator keys, or local preferences. Recovery is anchored on AES-256-GCM authenticated ZIP archives (`BackupManager.kt`).
+- **Resolution**:
+  1. Implemented tiered backup export (`BackupMediaOption.NONE` for lightweight ~100 KB IDs/keys/database archive vs. `BackupMediaOption.OWNED_ONLY` for owned media).
+  2. Proactive advisory modals prompt users to back up their node upon onboarding completion and whenever secondary/creator hidden services or keys change (`NoSlopViewModel.BackupPromptReason`).
+  3. Pruned dead derivation pathways and aligned test fakes.
+

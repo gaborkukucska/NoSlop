@@ -2017,6 +2017,12 @@ Previously, users experienced Live Feeds that quickly degraded into 100% video, 
 ## 23. Security & Cryptographic Audit Remediation (2026-09-11)
 
 
+### 23.12 Tiered Sovereign Backups, Media Exclusion & Identity Lifecycle Advisory Prompts (v0.5.7-alpha)
+* **Tiered Backup Architecture**: `BackupManager.exportData` accepts `BackupMediaOption`:
+  * `BackupMediaOption.NONE`: Restricts archive contents to `database.db`, `identity_backup.json`, `api_keys_backup.json`, and preference XMLs, generating a ~100 KB payload that transfers instantly.
+  * `BackupMediaOption.OWNED_ONLY`: Queries `mesh_posts` and `chat_messages` for media IDs authored by local public keys (`myPubKeys`) and bundles only those files (plus `.mine` attachments) from `Pictures/NoSlop`, `Movies/NoSlop`, `Music/NoSlop`, and `Downloads/NoSlop`.
+* **Identity Lifecycle Advisory Prompts**: `NoSlopViewModel.backupPromptReason` triggers a Material 3 advisory modal explaining serverless recovery and prompting for an immediate export when identity or creator keypairs change (`ONBOARDING_COMPLETED`, `DISCOVERABILITY_CHANGED`, `CREATOR_MODE_CHANGED`, `CREATOR_IDENTITY_BURNED`).
+
 ### 23.11 Mesh Video Transfer Stabilization & Loopback Proxy Isolation (v0.5.6-alpha)
 * **Local Proxy Loopback Isolation**: `HttpClientProvider.loopbackClient` enforces `Proxy.NO_PROXY` for requests targeting `127.0.0.1` and `localhost`. Eliminates `Connection reset` and `Broken pipe` exceptions previously caused by `torClient` routing local ExoPlayer proxy connections through the Tor SOCKS daemon when "Route Clearnet via Tor" was enabled.
 * **Unthrottled Background Chunk Pipeline**: Removed blocking `isVideoActive` checks in `MediaManager.requestNextChunks`. Downloads continue without interruption across background navigation and tab changes. Switched `MeshTransport` to suspending `mediaSemaphore.acquire()` (3 permits), preventing packet loss on high-latency Tor hidden service circuits.
