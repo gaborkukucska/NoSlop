@@ -1904,7 +1904,11 @@ fun toggleAggregator() {
     }
 
     suspend fun getActiveMnemonic(): String? {
-        return repository.getMnemonic()
+        val idRepo = com.noslop.app.data.IdentityRepository(
+            getApplication(),
+            com.noslop.app.data.NoSlopDatabase.getDatabase(getApplication()).appSettingDao()
+        )
+        return idRepo.getMnemonic()
     }
 
     fun completeOnboarding(handle: String, selectedSources: List<BuiltInSource>, selectedCategories: List<String>, selectedMusicGenres: List<String>, selectedVideoGenres: List<String>, mnemonic: String, creatorKeywords: String = "") {
@@ -2660,7 +2664,7 @@ fun toggleAggregator() {
                 if (_isDiscoverableEnabled.value) {
                     broadcastDiscoverable()
                 }
-                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_ENABLED
+                _backupPromptReason.value = BackupPromptReason.CREATOR_MODE_CHANGED
             } else {
                 repository.clearBurnableIdentity()
             }
