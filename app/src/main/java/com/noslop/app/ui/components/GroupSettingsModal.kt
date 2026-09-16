@@ -469,7 +469,11 @@ fun GroupSettingsModal(
     }
 
     if (showAddMemberDialog) {
-        val availablePeers = allPeers.filter { it.isTrusted && !membersList.contains(it.publicKeyB64) }
+        val availablePeers = allPeers.filter { 
+            (it.isTrusted || it.isTemporary || it.isCreator || it.isDiscoverable) && 
+            it.onionAddress.isNotBlank() && 
+            !membersList.contains(it.publicKeyB64) 
+        }
         AlertDialog(
             onDismissRequest = { showAddMemberDialog = false },
             containerColor = SurfaceDark,
@@ -478,19 +482,30 @@ fun GroupSettingsModal(
                 if (availablePeers.isEmpty()) {
                     Text("No additional contacts to invite.".tr, color = TextMuted)
                 } else {
-                    LazyColumn(modifier = Modifier.heightIn(max = 200.dp)) {
+                    LazyColumn(modifier = Modifier.heightIn(max = 240.dp)) {
                         items(availablePeers) { p ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
                                     .clickable {
                                         membersList = membersList + p.publicKeyB64
                                         showAddMemberDialog = false
                                     }
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(p.handle, color = TextLight, fontWeight = FontWeight.Bold)
+                                if (p.isCreator) {
+                                    Box(modifier = Modifier.background(AccentGreen.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                        Text("Creator".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else if (p.isTemporary) {
+                                    Box(modifier = Modifier.background(TemporaryAmber.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                        Text("Temporary".tr, color = TemporaryAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }

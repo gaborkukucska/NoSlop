@@ -238,9 +238,14 @@ fun DMsTab(viewModel: NoSlopViewModel) {
             val rawContacts = peers.filter { it.isTrusted && !it.isTemporary }
             val temporaryContacts = peers.filter { it.isTrusted && it.isTemporary }
 
+            val eligibleGroupMembers = remember(rawContacts, temporaryContacts, discoverablePeers) {
+                (rawContacts + temporaryContacts + discoverablePeers.filter { it.onionAddress.isNotBlank() })
+                    .distinctBy { it.publicKeyB64 }
+            }
+
             if (showCreateGroupDialog) {
                 CreateGroupDialog(
-                    peers = rawContacts,
+                    peers = eligibleGroupMembers,
                     onDismiss = { showCreateGroupDialog = false },
                     onCreate = { title, desc, avatarB64, allowInvites, allowSelfRemove, selectedMembers ->
                         viewModel.createGroupChat(title, selectedMembers, avatarB64, desc, allowInvites, allowSelfRemove)
@@ -1087,32 +1092,48 @@ fun CreateGroupDialog(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 if (peers.isEmpty()) {
-                    Text("No trusted peers available to invite yet. Connect with peers to add them to groups.".tr, color = TextMuted, fontSize = 12.sp)
+                    Text("No contacts or discoverable nodes available to invite yet.".tr, color = TextMuted, fontSize = 12.sp)
                 } else {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         peers.forEach { peer ->
+                            val isChecked = selectedPubs.contains(peer.publicKeyB64)
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isChecked) AccentGreen.copy(alpha = 0.12f) else PrimaryBlack.copy(alpha = 0.4f))
                                     .clickable {
-                                        selectedPubs = if (selectedPubs.contains(peer.publicKeyB64)) {
-                                            selectedPubs - peer.publicKeyB64
-                                        } else {
-                                            selectedPubs + peer.publicKeyB64
-                                        }
+                                        selectedPubs = if (isChecked) selectedPubs - peer.publicKeyB64 else selectedPubs + peer.publicKeyB64
                                     }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Checkbox(
-                                    checked = selectedPubs.contains(peer.publicKeyB64),
-                                    onCheckedChange = { checked ->
-                                        selectedPubs = if (checked) selectedPubs + peer.publicKeyB64 else selectedPubs - peer.publicKeyB64
-                                    },
-                                    colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(peer.handle, color = TextLight, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Checkbox(
+                                        checked = isChecked,
+                                        onCheckedChange = { checked ->
+                                            selectedPubs = if (checked) selectedPubs + peer.publicKeyB64 else selectedPubs - peer.publicKeyB64
+                                        },
+                                        colors = CheckboxDefaults.colors(checkedColor = AccentGreen, checkmarkColor = PrimaryBlack)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(peer.handle, color = TextLight, fontWeight = FontWeight.Medium, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                if (peer.isCreator) {
+                                    Box(modifier = Modifier.background(AccentGreen.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                        Text("Creator".tr, color = AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                } else if (peer.isTemporary) {
+                                    Box(modifier = Modifier.background(TemporaryAmber.copy(alpha = 0.2f), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                                        Text("Temporary".tr, color = TemporaryAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
                             }
                         }
                     }
